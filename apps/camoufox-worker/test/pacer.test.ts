@@ -248,6 +248,31 @@ describe('Pacer.reclaim (the holder’s further document load)', () => {
     expect(p.isBusy()).toBe(true);
     d.clear();
   });
+  // why: CodeRabbit on PR #49: pages at once: a page that starts while this one waits moves the last start
+  it('reads the last start again after its wait, and waits again for a page that started meanwhile', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock, capacity: 2 });
+    expect(p.claim()).toEqual({ ok: true });
+    timers.clock.advance(5000);
+    let other = false;
+    const waits = {
+      ...timers,
+      sleep: async (ms: number, signal?: AbortSignal): Promise<void> => {
+        await timers.sleep(ms, signal);
+        // why: the other page session's page starts as this wait ends (28 s after T0: its own claim passes)
+        if (!other) {
+          other = true;
+          expect(p.claim()).toEqual({ ok: true });
+        }
+      },
+    };
+    const d = timers.deadline(120_000);
+    await p.reclaim(d, waits);
+    expect(timers.sleeps).toEqual([23_000, 28_000]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:56.000Z');
+    d.clear();
+  });
   it('does not wait once the spacing has passed, and records the start', async () => {
     const timers = fakeTimers(fixedClock(T0));
     const dir = tmpDir();
@@ -312,5 +337,45 @@ describe('Pacer.reclaim (the holder’s further document load)', () => {
   it('exposes its spacing, read-only, for the page’s budget (preflight P6)', () => {
     const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 45, clock: fixedClock(T0) });
     expect(p.spacingMs).toBe(45_000);
+  });
+});
+
+// why: CAMOUFOX_PAGES_AT_ONCE: the worker's one pacer serves that many pages at once, its spacing still start to start
+// across all of them
+describe('Pacer with a capacity', () => {
+  it('with spacing 0, passes up to its capacity at once and refuses the next until one is released', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity: 3 });
+    for (let i = 0; i < 3; i++) {
+      expect(p.isBusy()).toBe(false);
+      expect(p.claim()).toEqual({ ok: true });
+    }
+    expect(p.isBusy()).toBe(true);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 1 });
+    p.release();
+    expect(p.isBusy()).toBe(false);
+    expect(p.claim()).toEqual({ ok: true });
+  });
+  it('with a spacing, a second page may start only once the spacing has passed since the first one’s start', () => {
+    const clock = fixedClock(T0);
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 30, clock, capacity: 2 });
+    expect(p.claim()).toEqual({ ok: true });
+    clock.advance(10_000);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 18 });
+    clock.advance(18_000);
+    expect(p.claim()).toEqual({ ok: true });
+    // why: both pages are in flight: the capacity refuses, with the spacing as its wait
+    clock.advance(60_000);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 30 });
+  });
+  it('a release with nothing claimed never frees more than the capacity', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity: 1 });
+    p.release();
+    expect(p.claim()).toEqual({ ok: true });
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 1 });
+  });
+  it.each([0, -1, 1.5])('refuses a capacity of %s', (capacity) => {
+    expect(() => new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity })).toThrow(
+      /capacity/,
+    );
   });
 });

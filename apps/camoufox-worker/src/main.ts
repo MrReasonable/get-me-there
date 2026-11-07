@@ -22,12 +22,13 @@ import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
-import { profileDir } from './paths.js';
+import { slotProfileDir } from './paths.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE } from './run.js';
 import { flagsOf, type Selectors, selectorsFor } from './selectors.js';
 import { BIND_HOST, createWorkerServer, portOf } from './server.js';
 import { PageSession } from './session.js';
+import { PageSlots } from './slots.js';
 import { consentStatusOf } from './socs.js';
 import {
   clearStartRefusal,
@@ -47,8 +48,9 @@ const STATUS_CHECK_MS = 8000;
  * and its build, the consent record), each refusal exiting 78 after writing `start-refusal.json`; then the launch and
  * the account-cookie check (a signed-in profile refuses the same way). A successful start removes the refusal file. The
  * flags are the running entry's (`selectorsFor(osArch, build)`). A standing signed-in refusal starts the server
- * answering `cooling-down` only, without launching. SIGTERM stops accepting, lets the page in flight answer, closes
- * the browser, releases the lock and exits 0; a cool-down store failure answers its page, then exits 70.
+ * answering `cooling-down` only, without launching. CAMOUFOX_PAGES_AT_ONCE page sessions serve the pages (slots.ts).
+ * SIGTERM stops accepting, lets every page in flight answer, closes the browsers, releases the lock and exits 0; a
+ * cool-down store failure answers its page, then exits 70.
  */
 export interface MainDeps {
   platform: string;
@@ -168,36 +170,55 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     clock: deps.clock,
   });
   const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
-  const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: deps.clock });
+  // why: CAMOUFOX_PAGES_AT_ONCE: one pacer for every page session, its capacity the pages at once and its spacing
+  // start to start across all of them
+  const pacer = new Pacer({
+    dir: ctx.dataDir,
+    minSpacingSeconds: cfg.minSpacingSeconds,
+    clock: deps.clock,
+    capacity: cfg.pagesAtOnce,
+  });
   const instances = new AppInstances({ dir: ctx.dataDir, clock: deps.clock });
-  const profile = profileDir(ctx.dataDir);
-  mkdirSync(profile, { recursive: true, mode: 0o700 });
   const versions: Versions = {
     selectors: selectors.version,
     grammar: GRAMMAR_VERSION,
     camoufoxJs: CAMOUFOX_JS_VERSION,
     binary: ready.install.build,
   };
-  const session = new PageSession({
-    launch: () => deps.launch(ready.options, profile),
-    profileDir: profile,
-    socs,
-    cooldown,
-    pacer,
-    refusal,
-    clock: deps.clock,
-    timers: deps.timers,
-    selectors,
-    pageTimeoutMs: cfg.pageTimeoutSeconds * 1000,
-    log: deps.log,
-    versions,
-    grid: {
-      mode: cfg.mode,
-      spacingMs: cfg.gridScrollSpacingSeconds * 1000,
-      scrollCap: cfg.gridScrollCap,
-      stepDays: GRID_STEP_DAYS,
-    },
-  });
+  // why: the last grid page's end is the worker's, whichever session read it (a second not-drawn page in a row)
+  const gridRow = { notDrawn: false };
+  const slots = new PageSlots(
+    Array.from({ length: cfg.pagesAtOnce }, (_v, i) => {
+      const profile = slotProfileDir(ctx.dataDir, i);
+      return new PageSession({
+        // why: each session's own profile, made 0700 before each launch (a wipe removes it); the first session's launch
+        // is the start's, every other one launches on its first page
+        launch: async () => {
+          mkdirSync(profile, { recursive: true, mode: 0o700 });
+          return deps.launch(ready.options, profile);
+        },
+        profileDir: profile,
+        socs,
+        cooldown,
+        pacer,
+        refusal,
+        clock: deps.clock,
+        timers: deps.timers,
+        selectors,
+        pageTimeoutMs: cfg.pageTimeoutSeconds * 1000,
+        log: deps.log,
+        versions,
+        grid: {
+          mode: cfg.mode,
+          spacingMs: cfg.gridScrollSpacingSeconds * 1000,
+          scrollCap: cfg.gridScrollCap,
+          stepDays: GRID_STEP_DAYS,
+        },
+        gridRow,
+      });
+    }),
+  );
+  const session = slots.first;
   let standingRefusal: boolean;
   try {
     standingRefusal = refusal.active() !== null;
@@ -246,7 +267,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       cooldownCause: active?.cause ?? null,
       signedInRefusal: refusal.active() !== null,
       lastPageAt: pacer.lastPageAt(),
-      busySince: session.busy(),
+      // why: pages at once: the earliest start among the pages in flight, null only when none is
+      busySince: slots.busySince(),
       versions,
       // why: decision 75: the running entry's flags, for the build it runs
       flags: flagsOf(selectors),
@@ -271,15 +293,14 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     };
   };
   let server: Server;
-  let inFlight: Promise<unknown> = Promise.resolve();
   const stop = (code: number): Promise<number> => {
     stopping ??= (async () => {
       exitCode = code;
       // why: spec §2 "The keep-awake lease": the hold never outlives the worker
       deps.keepAwake.stop();
       await new Promise<void>((r) => server.close(() => r()));
-      await inFlight.catch(() => undefined);
-      await session.discard(false);
+      await slots.settled();
+      await slots.discardAll();
       held.release();
       resolveDone(exitCode);
       return exitCode;
@@ -290,11 +311,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     key: cfg.key,
     log: deps.log,
     now: () => deps.timers.now(),
-    page: (req) => {
-      const p = session.page(req);
-      inFlight = p;
-      return p;
-    },
+    page: (req) => slots.page(req),
     status,
     awake: (seconds) => deps.keepAwake.hold(seconds),
     seen: (id) => {
@@ -312,7 +329,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     server.once('error', reject);
     server.listen(deps.port ?? cfg.port, BIND_HOST, () => resolve());
   }).catch(async (e: unknown) => {
-    await session.discard(false);
+    await slots.discardAll();
     held.release();
     throw e;
   });

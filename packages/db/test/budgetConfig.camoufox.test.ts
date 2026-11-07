@@ -10,15 +10,17 @@ beforeEach(() => {
 });
 
 describe('budgetConfigFromConfig: camoufox (cost-005)', () => {
-  it('has a never-billable entry with the execution cap, pages-only counting and no cap on its month', () => {
-    expect(budgetConfigFromConfig(configFrom(camoufoxEnv())).providers.camoufox).toMatchObject({
+  it('has a never-billable entry with pages-only counting and no cap on its pages or its month', () => {
+    const entry = budgetConfigFromConfig(configFrom(camoufoxEnv())).providers.camoufox;
+    expect(entry).toMatchObject({
       billable: false,
       trialUsed: 0,
-      executionCallCap: 100,
       pagesOnly: true,
       monthlyCallCap: null,
       costPerCallMicroGbp: 0,
     });
+    expect(entry).not.toHaveProperty('executionCallCap');
+    expect(entry).not.toHaveProperty('executionScrollCap');
   });
   it('a reserve through that config succeeds and counts under provider-month, which has no cap', () => {
     const g = new SqliteBudgetGuard(

@@ -28,6 +28,16 @@ describe('clear-signed-in (devops-011)', () => {
     expect(existsSync(join(dir, 'profile'))).toBe(false);
     expect(new Refusal({ dir, clock: fakeTimers().clock }).active()).toBeNull();
   });
+  // why: CAMOUFOX_PAGES_AT_ONCE: each page session has its own profile, and any of them may hold the account
+  it('wipes every page session’s profile, and nothing else in the directory', () => {
+    const dir = tmpDir();
+    for (const p of ['profile', 'profile-1', 'profile-7']) mkdirSync(join(dir, p, 'x'), { recursive: true });
+    mkdirSync(join(dir, 'profile-old'));
+    expect(clearSignedIn(ctx(dir), 4242)).toBe(0);
+    expect(['profile', 'profile-1', 'profile-7', 'profile-old'].map((p) => existsSync(join(dir, p)))).toEqual(
+      [false, false, false, true],
+    );
+  });
   it('refuses while the worker holds the lock', () => {
     const dir = tmpDir();
     acquireLock(dir, { pid: process.pid });

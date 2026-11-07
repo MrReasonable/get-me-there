@@ -68,9 +68,9 @@ export function budgetScopes(
           { kind: 'execution-calls', executionId },
           { kind: 'execution-free-calls', executionId },
           { kind: 'execution-cost', executionId },
-          // WP14: a provider's own page cap for this execution (camoufox), read from the snapshot by the guard.
+          // WP14: a pages-only provider's pages in this execution (camoufox): no cap on them, its flight-list allowance beside
           ...ports.providers
-            .filter((p) => providerBudget(ports.config, p.id).executionCallCap !== undefined)
+            .filter((p) => providerBudget(ports.config, p.id).pagesOnly === true)
             .map((p): BudgetScope => ({ kind: 'provider-execution', executionId, providerId: p.id })),
         ];
   return [
@@ -91,7 +91,7 @@ export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
     cap: u.cap,
     windowStart: u.windowStart,
     windowEnd: u.windowEnd,
-    // why: spec rev 55 §8.1 (the 20.8 ruling): a provider-execution scope states the flight pages beside the page cap
+    // why: spec rev 55 §8.1 (the 20.8 ruling): a provider-execution scope states the flight pages beside the pages
     ...(u.flightLists === undefined
       ? {}
       : { flightLists: { calls: u.flightLists.calls, cap: u.flightLists.cap } }),

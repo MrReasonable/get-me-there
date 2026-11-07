@@ -486,6 +486,117 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect((await pending).status).toBe(200);
     expect(await w.done).toBe(0);
   });
+  // why: CAMOUFOX_PAGES_AT_ONCE: N page sessions, each over its own browser and profile, behind the one pacer
+  describe('pages at once', () => {
+    /** A launch per profile whose pages hold at their load until `open`; `loading` resolves once `n` pages wait there. */
+    const gated = (n: number) => {
+      let open: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        open = r;
+      });
+      let reached: () => void = () => undefined;
+      const loading = new Promise<void>((r) => {
+        reached = r;
+      });
+      let waiting = 0;
+      const profiles: string[] = [];
+      const contexts: FakeContext[] = [];
+      const launch: MainDeps['launch'] = async (_options, profile) => {
+        profiles.push(profile);
+        const c = new FakeContext();
+        c.navigations = [
+          { hops: [URL0, 'https://www.google.com/travel/flights/search'], tree: resultsTree() },
+        ];
+        c.onNewPage = (p) => {
+          const g = p.goto.bind(p);
+          p.goto = async (u, o) => {
+            waiting += 1;
+            if (waiting === n) reached();
+            await gate;
+            return g(u, o);
+          };
+        };
+        contexts.push(c);
+        return c;
+      };
+      return { launch, profiles, contexts, loading, open: () => open() };
+    };
+    it('two pages load at once, each in its own browser and profile; a third request then is answered spacing', async () => {
+      const g = gated(2);
+      const t = setup({
+        env: { CAMOUFOX_PAGES_AT_ONCE: '2', CAMOUFOX_MIN_SPACING_SECONDS: '0' },
+        deps: { launch: g.launch },
+      });
+      const w = await running(t);
+      // why: the first session launches at the start (the account-cookie check); the second on its first page
+      expect(g.profiles).toEqual([join(t.dataDir, 'profile')]);
+      const a = post(w);
+      const b = post(w);
+      await g.loading;
+      expect(g.profiles).toEqual([join(t.dataDir, 'profile'), join(t.dataDir, 'profile-1')]);
+      expect(statSync(join(t.dataDir, 'profile-1')).mode & 0o777).toBe(0o700);
+      const c = await post(w);
+      expect(c.status).toBe(429);
+      const body: unknown = await c.json();
+      // why: the wait is the rest of the soonest page's overall cap (twice the 90 s page timeout) and its close
+      expect(body).toMatchObject({ kind: 'spacing', retryAfterSeconds: 190 });
+      expect(c.headers.get('retry-after')).toBe('190');
+      const s: unknown = await (
+        await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } })
+      ).json();
+      expect(s).toMatchObject({ busySince: AT, sharedSettings: { CAMOUFOX_PAGES_AT_ONCE: '2' } });
+      g.open();
+      expect([(await a).status, (await b).status]).toEqual([200, 200]);
+      expect(g.contexts.map((x) => x.pages.length)).toEqual([1, 1]);
+      t.shutdown();
+      expect(await w.done).toBe(0);
+    });
+    it('by default one page at a time: a second request while the first loads is answered spacing, nothing more launched', async () => {
+      const g = gated(1);
+      const t = setup({ env: { CAMOUFOX_MIN_SPACING_SECONDS: '0' }, deps: { launch: g.launch } });
+      const w = await running(t);
+      const a = post(w);
+      await g.loading;
+      expect((await post(w)).status).toBe(429);
+      expect(g.profiles).toEqual([join(t.dataDir, 'profile')]);
+      expect(existsSync(join(t.dataDir, 'profile-1'))).toBe(false);
+      g.open();
+      expect((await a).status).toBe(200);
+      t.shutdown();
+      await w.done;
+    });
+    it('SIGTERM with two pages in flight answers both, then closes both browsers and exits 0', async () => {
+      const g = gated(2);
+      const t = setup({
+        env: { CAMOUFOX_PAGES_AT_ONCE: '2', CAMOUFOX_MIN_SPACING_SECONDS: '0' },
+        deps: { launch: g.launch },
+      });
+      const w = await running(t);
+      const a = post(w);
+      const b = post(w);
+      await g.loading;
+      t.shutdown();
+      g.open();
+      expect([(await a).status, (await b).status]).toEqual([200, 200]);
+      expect(await w.done).toBe(0);
+      expect(g.contexts.map((x) => x.closed)).toEqual([1, 1]);
+    });
+    it('with a page spacing, the second page waits for it from the first one’s start, whichever session is free', async () => {
+      const g = gated(1);
+      const t = setup({ env: { CAMOUFOX_PAGES_AT_ONCE: '2' }, deps: { launch: g.launch } });
+      const w = await running(t);
+      const a = post(w);
+      await g.loading;
+      const r = await post(w);
+      expect(r.status).toBe(429);
+      expect(await r.json()).toMatchObject({ kind: 'spacing', retryAfterSeconds: 28 });
+      expect(g.profiles).toHaveLength(1);
+      g.open();
+      expect((await a).status).toBe(200);
+      t.shutdown();
+      await w.done;
+    });
+  });
   it('a cool-down store read error answers its page, then exits 70', async () => {
     const t = setup();
     const w = await running(t);

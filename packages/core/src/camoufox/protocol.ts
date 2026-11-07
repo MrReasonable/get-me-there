@@ -118,8 +118,8 @@ export type GridMove = z.infer<typeof gridMoveSchema>;
 
 /**
  * One grid page request (spec §2 rev 34; WP15 §5): the first block's centre as the page's query, the moves, which views
- * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`), and how many scrolls the run's
- * scroll cap leaves (the worker never scrolls past it).
+ * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`), and how many scrolls the page may
+ * make (the app sends its moves' count; the worker never scrolls past it).
  */
 export const gridRequestSchema = z
   .strictObject({

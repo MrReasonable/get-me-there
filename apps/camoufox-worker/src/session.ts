@@ -34,6 +34,7 @@ import { readGrid } from './gridSession.js';
 import { type GuardState, installGuard } from './guard.js';
 import { logSkippedOptions, readList } from './list.js';
 import type { Pacer } from './pacer.js';
+import { POLL_MS } from './ready.js';
 import type { Refusal } from './refusal.js';
 import { returnPhase, unverifiedReturns } from './returnPhase.js';
 import { SELECTORS, type Selectors } from './selectors.js';
@@ -87,6 +88,11 @@ export interface SessionDeps {
   /** Test seam: builds the driver over a page (createDriver by default). */
   driverFor?: typeof createDriver;
   grid?: GridSettings;
+  /**
+   * Whether the worker's last grid page ended `first-not-drawn`, shared by every page session of the worker (pages at
+   * once), so "a second such page in a row" is the worker's row, not one browser's; a session of its own by default.
+   */
+  gridRow?: { notDrawn: boolean };
 }
 
 type Stage = 'launch' | 'navigate' | 'read';
@@ -179,14 +185,19 @@ export class PageSession {
   private readonly pollMs: number;
   private busySince: IsoDateTime | null = null;
   /** The last grid page ended `first-not-drawn` (gridSession.ts: a second one in a row is refused). */
-  private gridNotDrawn = false;
+  private readonly gridRow: { notDrawn: boolean };
   /** timers.now() at which the page in flight reaches its overall cap (final review A-I1), null when none is. */
   private busyUntil: number | null = null;
+  /** This session's page holds a pacer claim (from the claim until the `finally` that releases it). */
+  private claimed = false;
+  /** A wipe of the profile failed: the next launch removes it first, and fails while it cannot. */
+  private wipePending = false;
 
   constructor(private readonly d: SessionDeps) {
     this.S = d.selectors ?? SELECTORS;
     this.finallyMs = d.finallyTimeoutMs ?? 5000;
-    this.pollMs = d.pollMs ?? 2000;
+    this.pollMs = d.pollMs ?? POLL_MS;
+    this.gridRow = d.gridRow ?? { notDrawn: false };
   }
 
   /** The start of the page in flight, for `/v1/status`. */
@@ -198,6 +209,14 @@ export class PageSession {
   currentContext(): Promise<ContextLike> {
     if (this.context !== null) return Promise.resolve(this.context);
     if (this.launching === null) {
+      // why: CodeRabbit on PR #49: a profile whose wipe failed is never launched again until the wipe succeeds
+      if (this.wipePending) {
+        try {
+          this.wipeProfile();
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      }
       const p = this.d.launch();
       this.launching = p;
       p.then(
@@ -220,7 +239,16 @@ export class PageSession {
     this.context = null;
     this.launching = null;
     if (c !== null) await bounded(() => c.close(), this.finallyMs, this.d.timers);
-    if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
+    if (wipe) {
+      this.wipePending = true;
+      this.wipeProfile();
+    }
+  }
+
+  /** Removes the profile; `wipePending` stays set until a removal succeeds. */
+  private wipeProfile(): void {
+    rmSync(this.d.profileDir, { recursive: true, force: true });
+    this.wipePending = false;
   }
 
   /**
@@ -232,6 +260,29 @@ export class PageSession {
     const phase = asksForReturns(asked) && this.S.RETURN_SELECT_VERIFIED;
     const counts = { loads: 0, reclaimed: false };
     const r = await this.run(asked, phase, counts);
+    return this.counted(phase, counts, r);
+  }
+
+  /**
+   * Pages at once: the answer for a request that finds every page session busy, given by the one that can end soonest
+   * (slots.ts picks it by `waitSeconds`): what `page` answers before it claims anything (grid refused, a refusal or a
+   * cool-down), else `spacing` with this session's wait. It opens nothing and claims nothing.
+   */
+  async refuseBusy(asked: PageRequest | FlightsRequest): Promise<PageResult> {
+    const phase = asksForReturns(asked) && this.S.RETURN_SELECT_VERIFIED;
+    const r = this.gate(asked) ?? {
+      answer: { kind: 'spacing', retryAfterSeconds: this.waitSeconds() },
+      googleContacted: false,
+    };
+    return this.counted(phase, { loads: 0, reclaimed: false }, r);
+  }
+
+  /** The wait a busy answer from this session states (`busyWait` over the pacer's own wait while it is full). */
+  waitSeconds(): number {
+    return this.busyWait(Math.max(1, Math.ceil(this.d.pacer.spacingMs / 1000)));
+  }
+
+  private counted(phase: boolean, counts: { loads: number; reclaimed: boolean }, r: PageResult): PageResult {
     if (!phase) return r;
     // why: review M5: the pacer's last start moves when the reload re-claims it, whether or not that document then
     // loaded (held, or its load failed), so the next start is stated from the re-claim, not only from a second load
@@ -246,9 +297,9 @@ export class PageSession {
    * spending its attempts while the browser is still busy; otherwise the pacer's wait as it stands.
    */
   private busyWait(pacerSeconds: number): number {
-    // why: the page's close runs after the pacer is released; a refusal then is the spacing's alone
-    if (this.busyUntil === null || !this.d.pacer.isBusy()) return pacerSeconds;
-    const left = this.busyUntil + 2 * this.finallyMs - this.d.timers.now();
+    if (this.busyUntil === null) return pacerSeconds;
+    // why: while claimed busyUntil is the page's cap (its close follows); once released it is the close's own end
+    const left = this.busyUntil + (this.claimed ? 2 * this.finallyMs : 0) - this.d.timers.now();
     return Math.max(pacerSeconds, Math.ceil(left / 1000));
   }
 
@@ -264,11 +315,8 @@ export class PageSession {
     }
   }
 
-  private async run(
-    req: PageRequest | FlightsRequest,
-    phase: boolean,
-    counts: { loads: number; reclaimed: boolean },
-  ): Promise<PageResult> {
+  /** What a request is answered before anything is claimed or opened, or null when it may go on to the pacer. */
+  private gate(req: PageRequest | FlightsRequest): PageResult | null {
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
     if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
       return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
@@ -308,12 +356,23 @@ export class PageSession {
         answer: { kind: 'cooling-down', cause: active.cause, cooldownUntil: active.until },
         googleContacted: false,
       };
+    return null;
+  }
+
+  private async run(
+    req: PageRequest | FlightsRequest,
+    phase: boolean,
+    counts: { loads: number; reclaimed: boolean },
+  ): Promise<PageResult> {
+    const gated = this.gate(req);
+    if (gated !== null) return gated;
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {
         answer: { kind: 'spacing', retryAfterSeconds: this.busyWait(claim.retryAfterSeconds) },
         googleContacted: false,
       };
+    this.claimed = true;
 
     this.busySince = this.d.clock.now();
     const started = this.d.timers.now();
@@ -408,18 +467,20 @@ export class PageSession {
                     counter,
                     S: this.S,
                     pollMs: this.pollMs,
-                    notDrawnBefore: this.gridNotDrawn,
+                    row: this.gridRow,
                     reload: { url, guard, pacer: this.d.pacer, pageTimeoutMs: this.d.pageTimeoutMs },
                   },
                   this.d,
                 ).then((x) => {
-                  this.gridNotDrawn = x.answer.kind === 'grid' && x.answer.ended === 'first-not-drawn';
+                  // why: a page that ended not drawn set the row itself (gridSession.ts); any other end breaks it
+                  if (x.answer.kind !== 'grid' || x.answer.ended !== 'first-not-drawn')
+                    this.gridRow.notDrawn = false;
                   return x;
                 })
               : await this.read(driver, req, budget, started).then((x) => {
                   ob = x.outbound;
                   // why: CodeRabbit on PR #39: a list or flights page read between two grid pages breaks the row
-                  this.gridNotDrawn = false;
+                  this.gridRow.notDrawn = false;
                   return x;
                 });
           answer = r.answer;
@@ -478,9 +539,22 @@ export class PageSession {
           ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started), ...scrolls() }
           : { kind: 'browser-error', stage, detail: detailOf(e), ...scrolls() };
     } finally {
+      this.claimed = false;
       this.d.pacer.release();
+      // why: CodeRabbit on PR #49: the close that follows (SOCS read-back, page close, a discard), each under finallyMs,
+      // still holds this session, so a busy answer meanwhile waits for it rather than the spacing alone
+      this.busyUntil = this.d.timers.now() + 3 * this.finallyMs;
     }
     budget.d.clear();
+    // why: CodeRabbit on PR #49: with pages at once, a stop is recorded before this page's close, so no other session
+    // starts a page meanwhile; the stop handling below records it again with its final hours and reports a failed write
+    if (stop !== null) {
+      try {
+        this.d.cooldown.start(stop);
+      } catch {
+        // the stop handling below writes the same record and answers fatal when it cannot
+      }
+    }
 
     // Rule 5: after goto, on every path, the SOCS read-back by value, then the page closed, each under its own bound.
     let discard = preGotoFailed;
@@ -511,9 +585,16 @@ export class PageSession {
       }
     }
     if (stop === 'consent-unhandled') wipe = true;
-    if (wipe || discard) await this.discard(wipe);
-    this.busySince = null;
-    this.busyUntil = null;
+    try {
+      if (wipe || discard) await this.discard(wipe);
+    } catch (e) {
+      // why: CodeRabbit on PR #49: a wipe comes only with a stop, whose answer this page keeps; the session is free
+      // again and its next launch retries the wipe first (wipePending), answering a launch error while it fails
+      this.d.log.warn({ error: detailOf(e) }, 'profile wipe failed');
+    } finally {
+      this.busySince = null;
+      this.busyUntil = null;
+    }
     counts.loads = guardState?.documentLoads ?? 0;
 
     if (stop !== null) {

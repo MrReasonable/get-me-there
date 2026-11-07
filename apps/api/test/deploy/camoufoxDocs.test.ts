@@ -112,7 +112,10 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
   it('states every cost, the operator’s responsibility and the coverage arithmetic', () => {
     for (const c of COSTS) expect(section, c).toContain(c);
     expect(flat(section)).toContain(TERMS);
-    expect(flat(section)).toContain('100 a run, against 2,184 day pairs');
+    // why: spec rev 65: no page cap a run, so a list-mode run loads a page for every day pair it reads
+    expect(flat(section)).toContain(
+      'loads a page for each day pair it has to read: 2,184 for one worked-example airport pair',
+    );
   });
 });
 

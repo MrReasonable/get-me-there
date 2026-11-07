@@ -27,8 +27,11 @@ export interface GridRead {
   counter: { scrolls: number };
   S: Selectors;
   pollMs: number;
-  /** The worker's previous grid page ended `first-not-drawn` (Ian's ruling of 2026-11-03: a second one in a row stops). */
-  notDrawnBefore: boolean;
+  /**
+   * The worker's grid row (Ian's ruling of 2026-11-03: a second page in a row that ends `first-not-drawn` stops), read
+   * and set when this page's reload ends not drawn, shared by every page session.
+   */
+  row: { notDrawn: boolean };
   /** The page's one reload after a first view that never drew a price: its URL (the first load's), guard and pacer. */
   reload: {
     url: string;
@@ -87,7 +90,12 @@ export async function readGrid(o: GridRead, d0: ReadDeps): Promise<GridEnd> {
   const again = await readOnce(o, reloaded(o.budget, pageTimeoutMs), d0, ['grid-reloaded']);
   // why: Ian's ruling of 2026-11-03: one grid whose prices never arrived, even after its reload, loses its page; two
   // such pages in a row may be prices withheld, so the second is refused as unrecognised, with its cool-down
-  if (notDrawn(again) && o.notDrawnBefore)
+  if (!notDrawn(again)) return again;
+  // why: CodeRabbit on PR #49: with pages at once the row is read and set in one step here, when the page ends, so two
+  // pages that end not drawn together still make a row
+  const before = o.row.notDrawn;
+  o.row.notDrawn = true;
+  if (before)
     return {
       answer: placeholder(d0)('unrecognised'),
       stop: 'unrecognised',

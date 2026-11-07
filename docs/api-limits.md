@@ -105,25 +105,25 @@ window's start and end with calls and cost so far.
 - Off by default (`CAMOUFOX_ENABLED=false`); once it is enabled a new search names it by default (a search saved
   before then names it only if you add it in its Edit page, More options). Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
-- Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run; there is no monthly page or scroll cap (the
-  Providers page shows the calendar month's pages, with no cap on them). The run's cap is frozen into the execution's snapshot when it is
-  created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
-  rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
-  providers continue, or stops the run when none remains; that stop is never resumed: Search again starts a fresh run
-  that reuses the prices already found.
+- Caps: none of its own on pages or scrolls, a run's or a month's: a run loads a page for every day pair (list) or block
+  (grid) it has to read, and the Providers page shows the calendar month's pages, with no cap on them. Its pages count
+  against no per-run call cap (neither `EXECUTION_MAX_FREE_CALLS` nor a search's own limit of free calls); its
+  flight-list pages have their own allowance of 20 a run. A run stopped at the per-run page cap an earlier version had is never resumed: Search again starts a
+  fresh run that reuses the prices already found.
 - Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600) from the start of one page to the start of the
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and
-  120 at the default). A page spacing of 0 means no pause: pages go back to back, from your own address, the limiter applies no rate limit and the page caps alone bound a run. Scrolls run back to back only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0. The worker and the app must hold the same `CAMOUFOX_MIN_SPACING_SECONDS`; a difference skips the provider like any other shared setting. Concurrency is 1.
+  120 at the default). A page spacing of 0 means no pause: pages go back to back, from your own address, and the limiter applies no rate limit. Scrolls run back to back only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0. The worker and the app must hold the same `CAMOUFOX_MIN_SPACING_SECONDS`; a difference skips the provider like any other shared setting.
+- Pages at once: `CAMOUFOX_PAGES_AT_ONCE` (default 1, 1 to 8) is the app's concurrency for camoufox and the pages the worker loads at once, each in its own browser and profile; the spacing above still runs from one page's start to the next, across every page in flight. A shared setting: a difference between the worker and the app skips the provider.
 - Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, 24 to 100,000) after a challenge, sign-in or consent page or a
   signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
-- Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
-  free provider shares.
-- Coverage: with the defaults, 100 day pairs a run, against 2,184 day pairs for one worked-example airport pair (8,736
-  for its four pairs), so a full pass of one pair takes 22 runs.
+- Never billable, cost 0, never cached. Camoufox pages never draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap the
+  free API providers share.
+- Coverage: a run reads every day pair it has to, a page each in list mode (2,184 for one worked-example airport pair,
+  8,736 for its four pairs) or a page a 7 × 7 block in grid mode (312 pages for the four pairs).
 - Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling
   it; the operator is responsible for how it is used), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
-  page and 1½–2½ hours a run at the default 30 s page spacing), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
+  page at the default 30 s page spacing), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
 
 ## Reconciling with the vendor dashboard
 
@@ -143,7 +143,7 @@ Once a week (or before raising a cap), compare the app with SearchApi's dashboar
 6. Camoufox has no vendor dashboard; the ledger's camoufox rows are the only record of what it did. Rows of class
    `page` loaded a Google page (`200`, `423` blocked, `504`, and `502` after launch); rows of class `no-page` did not
    (`423` cooling-down, `429`, `409`, `400`, `401`, `502` at launch, and a refused connection). A `423` blocked row is a
-   block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count toward its page cap.
+   block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count as its pages.
 
 ## One app per key
 

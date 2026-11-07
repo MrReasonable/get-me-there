@@ -152,11 +152,7 @@ export function planTiles(
     for (const destination of snapshot.resolved.destinations) {
       const pairCells = byPair.get(`${origin}|${destination}`);
       if (pairCells === undefined) continue;
-      // why: spec §2 rev 34: a provider whose caps are per run (camoufox grid) gives each pair its share
-      const query = {
-        ...discoveryQuery(snapshot, origin, destination, pairCells, names),
-        share: { pairs: byPair.size },
-      };
+      const query = discoveryQuery(snapshot, origin, destination, pairCells, names);
       const plans = cap.plan(query);
       if (
         !sameCells(
@@ -171,7 +167,8 @@ export function planTiles(
     }
   }
   // why: fix round 2 (ruling 1): a provider that asks for it (camoufox grid) has its pairs' tiles taken in turn, so a
-  // run capped in pages spreads them across every pair; every other provider keeps each pair's tiles together
+  // run cut short (a stop, its browser window) has read every pair alike; every other provider keeps each pair's tiles
+  // together
   const ordered = cap.interleavePairs === true ? roundRobin(perPair) : perPair.flat();
   // why: plan() numbers tiles from 0 per pair; the ledger's tile_index must be unique within one pass of one provider
   // so parity can count distinct tiles (spec §8.1 "Parity"): they are renumbered in the order they run

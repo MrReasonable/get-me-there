@@ -1,6 +1,7 @@
 // WP15 Task 15.3: the grid planner (spec §2 rev 34; decision 70), pure: the 7 × 7 block lattice from the window and the
-// stay range, the path, and the choice per move between a new page and the measured one-day scrolls within the page
-// and scroll allowances. Synthetic queries; the worked example's figures.
+// stay range, the path, and the choice per move between a new page and the measured one-day scrolls (a scroll only when
+// it is quicker, within the per-page cap; spec rev 65: no page or scroll cap a run). Synthetic queries; the worked
+// example's figures.
 import {
   addDays,
   asIata,
@@ -37,13 +38,13 @@ const STEP = { departures: 1, returns: 1 };
 const opts = (o: Partial<Parameters<typeof planGridTiles>[1]> = {}) => ({
   stepDays: STEP,
   scrollCap: 30,
-  pageAllowance: 100,
-  scrollAllowance: 600,
   today: TODAY,
   horizonDays: 400,
   times: GRID_TIMES,
   ...o,
 });
+/** Times at which a scroll is far quicker than a page, so the planner joins every block it may by scrolling. */
+const SCROLL_QUICK = { pageSeconds: 1000, scrollSeconds: 1 };
 
 describe('gridBlocks', () => {
   it('the worked example: 26 columns × 3 blocks, every one of the 2,184 cells in exactly one block', () => {
@@ -71,7 +72,7 @@ describe('gridBlocks', () => {
     expect(blocks.every((b) => b.cells.every((c) => c.departureDate <= last && c.returnDate <= last))).toBe(
       true,
     );
-    const tiles = planGridTiles(WORKED, opts({ horizonDays: 300, pageAllowance: 400 }));
+    const tiles = planGridTiles(WORKED, opts({ horizonDays: 300 }));
     const probe = tiles.at(-1);
     expect(probe?.coveredCells.every((c) => c.departureDate > last || c.returnDate > last)).toBe(true);
     expect(probe?.request).toMatchObject({ kind: 'grid-path', moves: [], reads: [true] });
@@ -86,8 +87,8 @@ describe('gridBlocks', () => {
 });
 
 describe('planGridTiles', () => {
-  it('pages are quicker than seven scrolls, so with room every block is its own page (no scroll)', () => {
-    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 400 }));
+  it('pages are quicker than seven scrolls, so every block is its own page (no scroll), however many pages', () => {
+    const tiles = planGridTiles(WORKED, opts());
     expect(tiles).toHaveLength(78);
     expect(tiles.every((t) => t.request.kind === 'grid-path' && t.request.moves.length === 0)).toBe(true);
     const [t0] = tiles;
@@ -98,22 +99,22 @@ describe('planGridTiles', () => {
       reads: [true],
     });
   });
-  it('under the page allowance the planner scrolls, seven a block, within the scroll and per-page caps', () => {
-    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 25, scrollAllowance: 150 }));
+  it('where scrolling is quicker the planner scrolls, seven a block, within the per-page cap', () => {
+    const tiles = planGridTiles(WORKED, opts({ times: SCROLL_QUICK }));
     const moves = tiles.flatMap((t) => (t.request.kind === 'grid-path' ? t.request.moves : []));
-    expect(moves.length).toBeLessThanOrEqual(150);
     expect(moves.length % 7).toBe(0);
     for (const t of tiles)
       expect(t.request.kind === 'grid-path' && t.request.moves.length).toBeLessThanOrEqual(30);
-    // why: 21 block moves fit in 150 scrolls, so 78 − 21 = 57 pages; the engine's page cap stops the rest
-    expect(tiles).toHaveLength(57);
+    // why: every move the per-page cap of 30 admits is made, so far fewer pages than the 78 blocks remain
+    expect(tiles.length).toBeLessThan(78);
+    expect(moves.length).toBe((78 - tiles.length) * 7);
     const reads = tiles.flatMap((t) =>
       t.request.kind === 'grid-path' ? t.request.reads.filter((x) => x) : [],
     );
     expect(reads).toHaveLength(78);
   });
   it('a block move is scrolls on its axis: down the returns in a column, right the departures between columns', () => {
-    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 1, scrollAllowance: 600 }));
+    const tiles = planGridTiles(WORKED, opts({ times: SCROLL_QUICK }));
     const [t0] = tiles;
     if (t0?.request.kind !== 'grid-path') throw new Error('grid-path');
     expect(t0.request.moves.slice(0, 14)).toEqual(Array(14).fill('down'));
@@ -127,21 +128,22 @@ describe('planGridTiles', () => {
     expect(t0.request.moves.length).toBeLessThanOrEqual(30);
   });
   it('the tiles’ covered cells partition the cells, and a tile’s first view is its first block’s centre', () => {
-    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 25, scrollAllowance: 150 }));
+    const tiles = planGridTiles(WORKED, opts({ times: SCROLL_QUICK }));
     const keys = tiles.flatMap((t) => t.coveredCells.map(cellKeyString));
     expect(keys).toHaveLength(2184);
     expect(new Set(keys).size).toBe(2184);
     expect(tiles.map((t) => t.index)).toEqual(tiles.map((_t, i) => i));
   });
   it('a step other than one: a block move is ⌈7 / step⌉ scrolls', () => {
-    const tiles = planGridTiles(WORKED, opts({ stepDays: { departures: 7, returns: 7 }, pageAllowance: 1 }));
+    const tiles = planGridTiles(
+      WORKED,
+      opts({ stepDays: { departures: 7, returns: 7 }, times: SCROLL_QUICK }),
+    );
     const [t0] = tiles;
     expect(t0?.request.kind === 'grid-path' && t0.request.moves.slice(0, 2)).toEqual(['down', 'down']);
   });
   it('is deterministic', () => {
-    expect(planGridTiles(WORKED, opts({ pageAllowance: 30 }))).toEqual(
-      planGridTiles(WORKED, opts({ pageAllowance: 30 })),
-    );
+    expect(planGridTiles(WORKED, opts())).toEqual(planGridTiles(WORKED, opts()));
   });
 });
 
@@ -174,7 +176,7 @@ const asRequest = (t: TilePlan) =>
 
 describe('planGridTiles: fix round 1', () => {
   it('the probe opens at the least departure and the least return past the horizon, so no flights there implies no flights for every cell it covers (PA I1, M4)', () => {
-    const tiles = planGridTiles(WORKED, opts({ horizonDays: 300, pageAllowance: 400 }));
+    const tiles = planGridTiles(WORKED, opts({ horizonDays: 300 }));
     const probe = tiles.at(-1);
     if (probe?.request.kind !== 'grid-path') throw new Error('probe');
     const deps = probe.coveredCells.map((c) => c.departureDate).sort();
@@ -184,7 +186,7 @@ describe('planGridTiles: fix round 1', () => {
   });
   it('a stay of 0 nights: a block on the diagonal opens a day later and scrolls up once before it is read (PIE I1)', () => {
     const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 0, maxNights: 3 };
-    const tiles = planGridTiles(q, opts({ pageAllowance: 400 }));
+    const tiles = planGridTiles(q, opts());
     expect(tiles.every(asRequest)).toBe(true);
     expect(tiles[0]?.request).toEqual({
       kind: 'grid-path',
@@ -195,9 +197,9 @@ describe('planGridTiles: fix round 1', () => {
     const keys = tiles.flatMap((t) => t.coveredCells.map(cellKeyString));
     expect(new Set(keys)).toEqual(new Set(cellsOfQuery(q).map(cellKeyString)));
   });
-  it('a stay of 0 nights under the page allowance keeps every page within the scroll cap and every view holding a pair (PIE I1, M1)', () => {
+  it('a stay of 0 nights where scrolling is quicker keeps every page within the scroll cap and every view holding a pair (PIE I1, M1)', () => {
     const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 27), minNights: 0, maxNights: 3 };
-    const tiles = planGridTiles(q, opts({ pageAllowance: 1, scrollCap: 30 }));
+    const tiles = planGridTiles(q, opts({ times: SCROLL_QUICK, scrollCap: 30 }));
     expect(tiles.every(asRequest)).toBe(true);
     for (const t of tiles) {
       expect(t.request.kind === 'grid-path' && t.request.moves.length).toBeLessThanOrEqual(30);
@@ -210,7 +212,7 @@ describe('planGridTiles: fix round 1', () => {
   });
   it('with a per-page scroll cap of 0 a 0-night diagonal page opens a day later with no scroll (re-review N4)', () => {
     const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 0, maxNights: 3 };
-    const tiles = planGridTiles(q, opts({ pageAllowance: 400, scrollCap: 0 }));
+    const tiles = planGridTiles(q, opts({ scrollCap: 0 }));
     expect(tiles.every(asRequest)).toBe(true);
     expect(tiles.every((t) => t.request.kind === 'grid-path' && t.request.moves.length === 0)).toBe(true);
     expect(tiles[0]?.request).toEqual({
@@ -223,7 +225,7 @@ describe('planGridTiles: fix round 1', () => {
   it('between blocks the returns move first when they go later, and the departures first when they go earlier (PIE M1)', () => {
     // why: one stay, two columns: the move between them is 7 days later on both axes
     const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 10, maxNights: 10 };
-    const [t0] = planGridTiles(q, opts({ pageAllowance: 1 }));
+    const [t0] = planGridTiles(q, opts({ times: SCROLL_QUICK }));
     if (t0?.request.kind !== 'grid-path') throw new Error('grid-path');
     // why: each block move is the moves up to the next read view; within one, no widening move follows a narrowing one
     const { moves, reads } = t0.request;
@@ -254,22 +256,14 @@ describe('planGridTiles: fix round 1', () => {
   });
 });
 
-describe('planGridTiles: joined pages first (fix round 2)', () => {
-  it('a pair’s pages that join blocks by scrolls come first, single-block pages after, the probe last', () => {
-    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 25, scrollAllowance: 150, horizonDays: 300 }));
-    const blocks = (t: TilePlan) =>
-      t.request.kind === 'grid-path' ? t.request.reads.filter((x) => x).length : 0;
-    const counts = tiles.slice(0, -1).map(blocks);
-    // why: 21 joined moves; the pages that hold them are the pair's first pages, so its share of 25 pages reaches them
-    const joined = counts.filter((n) => n > 1).length;
-    expect(joined).toBeGreaterThan(0);
-    expect(counts.slice(0, joined).every((n) => n > 1)).toBe(true);
-    expect(counts.slice(joined).every((n) => n === 1)).toBe(true);
-    const first25 = tiles
-      .slice(0, 25)
-      .flatMap((t) => (t.request.kind === 'grid-path' ? t.request.moves : []));
-    expect(first25).toHaveLength(147);
+describe('planGridTiles: the order', () => {
+  it('pages follow the path, numbered in order, and the probe comes last', () => {
+    const tiles = planGridTiles(WORKED, opts({ times: SCROLL_QUICK, horizonDays: 300 }));
     expect(tiles.map((t) => t.index)).toEqual(tiles.map((_t, i) => i));
+    const starts = tiles
+      .slice(0, -1)
+      .map((t) => (t.request.kind === 'grid-path' ? t.request.start.departureDate : ''));
+    expect(starts).toEqual([...starts].sort());
     const probe = tiles.at(-1);
     expect(
       probe?.coveredCells.every(
@@ -281,7 +275,7 @@ describe('planGridTiles: joined pages first (fix round 2)', () => {
 
 describe('gridTileEstimate', () => {
   it('a page is the page time plus each scroll’s time', () => {
-    const [t] = planGridTiles(WORKED, opts({ pageAllowance: 1 }));
+    const [t] = planGridTiles(WORKED, opts({ times: SCROLL_QUICK }));
     if (t === undefined) throw new Error('tile');
     const e = gridTileEstimate(t, GRID_TIMES);
     expect(e.scrolls).toBe(t.request.kind === 'grid-path' ? t.request.moves.length : -1);

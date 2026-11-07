@@ -1,6 +1,6 @@
 /**
  * camoufox HTTP limits for http-kit (spec §2, §5.3, §12 rev 32; decision 69): the worker's own scheme, host and explicit
- * port; never billable, cost 0, concurrency 1; the start-to-start spacing as the limiter's minimum interval; the
+ * port; never billable, cost 0, concurrency CAMOUFOX_PAGES_AT_ONCE; the start-to-start spacing as the limiter's minimum interval; the
  * request timeout is the worker's page timeout plus 15 s; transport failures are never retried; a refused connection is
  * `provider-unavailable`; each attempt's page class comes from `x-gmt-google-contacted` (absent → `page`, the
  * conservative reading); a flights answer's `pagesLoaded` is the attempt's page count (spec rev 56 §5.3), and any
@@ -87,7 +87,8 @@ export function camoufoxHttpLimits(
     workerScheme: w.scheme,
     ratePerMinute: c.limits.ratePerMinute,
     ratePerHour: c.limits.ratePerHour,
-    concurrency: 1,
+    // why: as many requests in flight as the worker loads pages at once; the spacing below still spaces their starts
+    concurrency: c.limits.concurrency,
     billable: 'never',
     costPerCallMicroGbp: 0,
     maxWaitSeconds: cfg.maxWaitSeconds,

@@ -68,11 +68,6 @@ export interface DiscoveryQuery {
    * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
    */
   airportNames?: CellAirportNames;
-  /**
-   * Spec §2 rev 34: how many pairs the stage plans for this provider, set by the engine, so a provider whose caps are
-   * per run (camoufox grid pages and scrolls) gives each pair its share. Absent: one pair.
-   */
-  share?: { pairs: number };
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =

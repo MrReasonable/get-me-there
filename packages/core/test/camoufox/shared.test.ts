@@ -44,11 +44,12 @@ const full = (): Record<string, unknown> => {
 };
 
 describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => {
-  it('names the seven settings the two sides must share, the grid-only two, and the app’s defaults', () => {
+  it('names the eight settings the two sides must share, the grid-only two, and the app’s defaults', () => {
     expect(SHARED_WORKER_SETTINGS).toEqual([
       'CAMOUFOX_COOLDOWN_HOURS',
       'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
       'CAMOUFOX_MIN_SPACING_SECONDS',
+      'CAMOUFOX_PAGES_AT_ONCE',
       'CAMOUFOX_MODE',
       'CAMOUFOX_GRID_SCROLL_CAP',
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
@@ -59,6 +60,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
       CAMOUFOX_COOLDOWN_HOURS: '48',
       CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
       CAMOUFOX_MIN_SPACING_SECONDS: '30',
+      CAMOUFOX_PAGES_AT_ONCE: '1',
       CAMOUFOX_MODE: 'list',
       CAMOUFOX_GRID_SCROLL_CAP: '30',
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
@@ -83,6 +85,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
         CAMOUFOX_MODE: 'grid',
         CAMOUFOX_GRID_SCROLL_CAP: '0',
         CAMOUFOX_MIN_SPACING_SECONDS: '0600',
+        CAMOUFOX_PAGES_AT_ONCE: '08',
         POINT_OF_SALE: 'US',
         UNRELATED: 'x',
       }),
@@ -92,6 +95,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_CAP: '0',
       CAMOUFOX_MIN_SPACING_SECONDS: '600',
+      CAMOUFOX_PAGES_AT_ONCE: '8',
       POINT_OF_SALE: 'US',
     });
   });
@@ -110,6 +114,9 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '  '],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_GRID_SCROLL_CAP', 'lots'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '0'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '9'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '1.5'],
     ['POINT_OF_SALE', 'gb'],
   ])('refuses %s=%s naming the setting, never its value', (name, value) => {
     const sentinel = `${value}`;
@@ -145,6 +152,7 @@ describe('sharedSettingDiffs (names only; grid-only names in grid mode)', () => 
       CAMOUFOX_COOLDOWN_HOURS: '98765',
       CAMOUFOX_PAGE_TIMEOUT_SECONDS: '99',
       CAMOUFOX_MIN_SPACING_SECONDS: '599',
+      CAMOUFOX_PAGES_AT_ONCE: '7',
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_CAP: '59',
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '29',
@@ -174,6 +182,14 @@ describe('sharedSettingDiffs (names only; grid-only names in grid mode)', () => 
         sharedSettingDiffs(zero, effectiveSharedSettings({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }), mode),
       ).toEqual([]);
     }
+  });
+  it('the pages at once are compared in both modes: 2 against the default 1 differs', () => {
+    const two = effectiveSharedSettings({ CAMOUFOX_PAGES_AT_ONCE: '2' });
+    for (const mode of ['list', 'grid'] as const)
+      expect(sharedSettingDiffs(two, app, mode)).toEqual(['CAMOUFOX_PAGES_AT_ONCE']);
+    expect(sharedSettingMessage('CAMOUFOX_PAGES_AT_ONCE')).toBe(
+      'CAMOUFOX_PAGES_AT_ONCE must be a whole number from 1 to 8',
+    );
   });
   it('compares the two grid-only settings only in grid mode', () => {
     const worker = { ...app, CAMOUFOX_GRID_SCROLL_CAP: '12', CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '9' };
@@ -368,6 +384,7 @@ describe('one rule set for both sides (R27)', () => {
       'CAMOUFOX_COOLDOWN_HOURS must be a whole number from 24 to 100000',
       'CAMOUFOX_PAGE_TIMEOUT_SECONDS must be a whole number from 30 to 240',
       'CAMOUFOX_MIN_SPACING_SECONDS must be a whole number from 0 to 600',
+      'CAMOUFOX_PAGES_AT_ONCE must be a whole number from 1 to 8',
       'CAMOUFOX_MODE must be list or grid',
       'CAMOUFOX_GRID_SCROLL_CAP must be a whole number from 0 to 60',
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS must be a whole number from 0 to 30',

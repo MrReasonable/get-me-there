@@ -58,12 +58,12 @@ export const ESTIMATE_COPY = {
   withTag: (verb: string, tag: string) => `${verb} · ${tag}`,
   notUsed: (source: string, why: string, cost: string | null) =>
     `${source} is not used: ${why}${cost === null ? '' : ` (about ${cost} not included)`}`,
-  // why: a blocked line names the budget scope that blocked it (engine checkBudget); a browser page cap is pages
+  // why: a blocked line names the budget scope that blocked it (engine checkBudget); the browser's run scope is pages
   blockedWhy: {
     'execution-calls': "over this search's limit of paid calls a run",
     'execution-free-calls': "over this search's limit of free calls a run",
     'execution-cost': "over this search's spending limit a run",
-    'provider-execution': 'over its page limit for one run',
+    'provider-execution': 'over its page allowance for one run',
     'provider-month': 'no calls left this month',
     'provider-lifetime': 'no trial searches left',
     'global-month': "this month's spending limit is reached",

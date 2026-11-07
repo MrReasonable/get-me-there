@@ -57,7 +57,6 @@ function world(
     camoufoxFails?: number;
     travelpayoutsFails?: number;
     env?: Record<string, string>;
-    pageCap?: number;
     systemClock?: boolean;
     hold?: Promise<void>;
   } = {},
@@ -78,7 +77,6 @@ function world(
     window: WINDOW,
     createdAt: CREATED,
     ...(o.env === undefined ? {} : { env: o.env }),
-    ...(o.pageCap === undefined ? {} : { camoufoxConfigCap: o.pageCap }),
     ...(o.systemClock === true ? { systemClock: true } : {}),
   });
   return { e, camoufox, travelpayouts };
@@ -209,8 +207,8 @@ describe('the stored window (decision 83)', () => {
     expect(v.camoufox.calls).toHaveLength(8);
   });
 
-  it('past the window a resume leaves camoufox out before estimateRemainingFor: its run page cap does not refuse a resume Travelpayouts can run, and the pass adds no camoufox line', async () => {
-    const w = world({ camoufoxFails: 4, travelpayoutsFails: 4, pageCap: 4 });
+  it('past the window a resume leaves camoufox out before estimateRemainingFor: Travelpayouts runs, and the pass adds no camoufox line', async () => {
+    const w = world({ camoufoxFails: 4, travelpayoutsFails: 4 });
     const run = await failedRun(w);
     const stored = run.estimate?.perProvider.find((p) => p.providerId === 'camoufox');
     w.e.clock.set(plus(endOf(w, run.id), 1));
@@ -220,16 +218,13 @@ describe('the stored window (decision 83)', () => {
     expect(outcomes(w.e, run.id, 'travelpayouts').every((o) => o.status === 'priced')).toBe(true);
     expect(done.estimate?.perProvider.find((p) => p.providerId === 'camoufox')).toEqual(stored);
 
-    // positive control: inside the window the cap check sees camoufox and blocks it: no page, its cells keep their
-    // errors for a later pass, never scheduled_only
-    const v = world({ camoufoxFails: 4, travelpayoutsFails: 4, pageCap: 4 });
+    // positive control: inside the window the resume loads camoufox's pages again (no page cap a run, spec rev 65)
+    const v = world({ camoufoxFails: 4, travelpayoutsFails: 4 });
     const inside = await failedRun(v);
     v.e.clock.set(plus(MANUAL_AT, 60_000));
     await v.e.resume(inside.id, { manual: true });
-    expect(v.camoufox.calls).toHaveLength(4);
-    expect(outcomes(v.e, inside.id, 'camoufox').map((o) => [o.status, o.reason])).toEqual(
-      Array(4).fill(['error', 'upstream']),
-    );
+    expect(v.camoufox.calls).toHaveLength(8);
+    expect(outcomes(v.e, inside.id, 'camoufox').map((o) => o.status)).toEqual(Array(4).fill('priced'));
   });
 });
 

@@ -358,10 +358,11 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(10);
   });
 
-  it("names the run's free-call limit when maxFreeCalls 105 binds after 100 grid pages", () => {
-    const { est } = flightEstimate(100, { maxFreeCalls: 105 });
-    expect(est.flightLists?.pages).toBe(5);
-    expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
+  // why: spec rev 65: the browser's pages, its flight pages too, count against no free-call cap
+  it("the run's free-call limit never cuts the flight pairs: maxFreeCalls 15 after 100 grid pages still plans 10", () => {
+    const { est } = flightEstimate(100, { maxFreeCalls: 15 });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
   });
 
   it('names no cap when the pairs wanted all fit the free calls left', () => {
@@ -436,16 +437,9 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(10);
   });
 
-  it('never says "+ flights for up to 0 date pairs"; a cap that leaves none is still named', () => {
-    const { est } = flightEstimate(15, { maxFreeCalls: 15 });
-    expect(est.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
-    expect(est.assumptions.some((a) => a.startsWith('+ flights'))).toBe(false);
-    expect(est.assumptions).toContain("flights for 0 date pairs: the run's free-call limit");
-  });
-
   it('withBlocked drops the flight notes when it zeroes the flight pages', () => {
-    const { est } = flightEstimate(120, { maxFreeCalls: 104 });
-    expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(2);
+    const { est } = flightEstimate(120);
+    expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(1);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights for'))).toEqual([]);
   });
@@ -565,22 +559,23 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 3000, returns: true });
   });
 
-  it('the free-call bound counts requests: maxFreeCalls 105 after 100 grid pages plans 5 pairs out and back', () => {
-    const { est } = returnsEstimate(100, BOTH, { maxFreeCalls: 105 });
+  // why: spec rev 65: the browser's pages, its flight pages too, count against no free-call cap
+  it('the free-call limit never cuts the out-and-back pairs: maxFreeCalls 15 after 100 grid pages plans all 10', () => {
+    const { est } = returnsEstimate(100, BOTH, { maxFreeCalls: 15 });
     expect(est.flightLists).toEqual({
-      pairs: 5,
-      pages: 8,
-      seconds: 1225,
-      pagesMax: 10,
-      secondsMax: 1500,
+      pairs: 10,
+      pages: 15,
+      seconds: 2450,
+      pagesMax: 20,
+      secondsMax: 3000,
       returns: true,
     });
-    expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
+    expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
   });
 
-  it('a blocked browser line drops the out-and-back clause and the cap note', () => {
-    const { est } = returnsEstimate(15, BOTH, { maxFreeCalls: 18 });
-    expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(2);
+  it('a blocked browser line drops the out-and-back clause', () => {
+    const { est } = returnsEstimate(15, BOTH);
+    expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(1);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
     // why: 21.7 code I1: a blocked line reads no pair, so none goes out and back; its bound is kept (the plan's)
@@ -595,8 +590,11 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
   });
 
   it('21.7 code I1: summing a pass with no pair out and back keeps its bound and states no return leg', () => {
-    // why: no free call left after the 15 grid pages: no pair is read, so none goes out and back
-    const none = returnsEstimate(15, BOTH, { maxFreeCalls: 15 }).est;
+    // why: a blocked browser line reads no pair, so none goes out and back
+    const none = withBlocked(
+      returnsEstimate(15, BOTH).est,
+      new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]),
+    );
     expect(addPass(none, none).flightLists).toEqual({
       pairs: 0,
       pages: 0,
@@ -630,8 +628,12 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     // why: final review B-M3: with the flags unread the margin is the bound's, the booking read included
     const unread = returnsEstimate(15, null);
     expect(flightWindowMarginSeconds(unread.e.ctx, unread.est, null)).toBe(780);
-    const none = returnsEstimate(15, BOTH, { maxFreeCalls: 15 });
-    expect(flightWindowMarginSeconds(none.e.ctx, none.est, null)).toBe(0);
+    const none = returnsEstimate(15, BOTH);
+    const blocked = withBlocked(
+      none.est,
+      new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]),
+    );
+    expect(flightWindowMarginSeconds(none.e.ctx, blocked, null)).toBe(0);
   });
 
   it("21.6 review M2: a resume's margin follows the stored plan's booking read, not the flags (none read after a restart)", () => {

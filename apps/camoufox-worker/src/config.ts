@@ -18,6 +18,8 @@ export interface WorkerConfig {
   key: Secret;
   port: number;
   minSpacingSeconds: number;
+  /** CAMOUFOX_PAGES_AT_ONCE: the pages the worker loads at once, each in its own browser and profile. */
+  pagesAtOnce: number;
   cooldownHours: number;
   pageTimeoutSeconds: number;
   /** The minimal browser environment's values (never the worker's own variables). */
@@ -84,12 +86,13 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   if (key.length < 32) bad.push('CAMOUFOX_WORKER_KEY');
   const port = workerPortOf(env.CAMOUFOX_WORKER_PORT) ?? WORKER_PORT.default;
   if (workerPortOf(env.CAMOUFOX_WORKER_PORT) === null) bad.push('CAMOUFOX_WORKER_PORT');
-  // why: spec §12, review R27 — the seven shared settings through core's one rule set, with its bounds and defaults; every
+  // why: spec §12, review R27 — the shared settings through core's one rule set, with its bounds and defaults; every
   // typed field below comes from that one effective record
   const shared = readSharedSettings(env);
   bad.push(...shared.invalid);
   const s = shared.settings;
   const minSpacingSeconds = sharedInt(s, 'CAMOUFOX_MIN_SPACING_SECONDS');
+  const pagesAtOnce = sharedInt(s, 'CAMOUFOX_PAGES_AT_ONCE');
   const cooldownHours = sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS');
   const pageTimeoutSeconds = sharedInt(s, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
   // why: decision 73: the pin is CAMOUFOX_BUILDS[osArch].build; there is no separate build setting any more
@@ -105,6 +108,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
     key: new Secret(key),
     port,
     minSpacingSeconds,
+    pagesAtOnce,
     cooldownHours,
     pageTimeoutSeconds,
     home,

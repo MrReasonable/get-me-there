@@ -47,7 +47,7 @@ import { debugLogging, stderrLog } from './log.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
-import type { View } from './ready.js';
+import { POLL_MS, type View } from './ready.js';
 import {
   type GridDirection,
   parseRecordArgs,
@@ -959,7 +959,8 @@ export function realRecordDeps(
     launchOptions: launchOptionsForMeta(prepared.options),
     binary: prepared.install.build,
     root: DEFAULT_ROOT,
-    pollMs: 2000,
+    // why: the server path's poll interval, so a recording waits as the worker does
+    pollMs: POLL_MS,
     // why: pie-b1-006: the running entry's flags for its build, as the server path's (the recorder's own reading
     // override is applied per kind)
     selectors: selectorsFor(osArch, prepared.install.build),

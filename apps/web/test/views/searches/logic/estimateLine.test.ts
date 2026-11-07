@@ -393,7 +393,7 @@ describe('estimateSentence: the notes under it', () => {
       'searchapi',
       "Google Flights via SearchApi is not used: over this search's spending limit a run",
     ],
-    ['provider-execution', 'camoufox', 'The browser worker is not used: over its page limit for one run'],
+    ['provider-execution', 'camoufox', 'The browser worker is not used: over its page allowance for one run'],
     ['provider-month', 'searchapi', 'Google Flights via SearchApi is not used: no calls left this month'],
     ['provider-lifetime', 'searchapi', 'Google Flights via SearchApi is not used: no trial searches left'],
     [

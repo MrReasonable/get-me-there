@@ -862,9 +862,11 @@ describe("the Status read sets the worker's flags (spec rev 56 §8.1)", () => {
       ),
     );
     const x = await harness(WORKER_ENV);
+    // why: spec rev 65: with no browser page cap the example's 8,736 list pages need free calls to spare for its flights
     const def = x.ports.repos.definitions.create(
       exampleDefinitionInput({
         providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+        budget: { ...exampleDefinitionInput().budget, maxFreeCalls: 20_000 },
       }),
     );
     expect(x.engine.flightPagesPlanned()).toBe(2);

@@ -159,7 +159,7 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(limits).toContain('once it is enabled a new search names it by default');
     expect(limits).not.toContain('pauses the run for a manual resume');
     expect(limits).toContain(
-      'that stop is never resumed: Search again starts a fresh run that reuses the prices already found',
+      'is never resumed: Search again starts a fresh run that reuses the prices already found',
     );
   });
 

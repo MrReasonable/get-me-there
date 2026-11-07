@@ -51,28 +51,21 @@ export function withoutDiscovery(s: DefinitionSnapshot, out: readonly ProviderId
 }
 
 /**
- * The execution's budget: the definition's, plus each discovery provider's own per-execution cap from config
- * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007) and, with camoufox in discovery, the flight-list
- * step's own allowance (`flightListPages` = FLIGHT_LIST_COUNT × FLIGHT_LIST_PAGES_PER_PAIR_MAX, 20: spec revision 56 §2,
- * §8.1, 10 requests at up to 2 pages each). Frozen at creation, and
- * refreshed only where a manual resume refreshes the rest of the budget; the guard reads both from the snapshot, never
- * from config, so a value the definition itself carries is stripped (the 20.8 note: the guard trusts the snapshot).
+ * The execution's budget: the definition's, plus, with camoufox in discovery, the flight-list step's own allowance
+ * (`flightListPages` = FLIGHT_LIST_COUNT × FLIGHT_LIST_PAGES_PER_PAIR_MAX, 20: spec revision 56 §2, §8.1, 10 requests
+ * at up to 2 pages each). Frozen at creation, and refreshed only where a manual resume refreshes the rest of the
+ * budget; the guard reads it from the snapshot, never from config, so a value the definition itself carries is stripped
+ * (the 20.8 note: the guard trusts the snapshot).
  */
 export function snapshotBudget(
-  ctx: EngineContext,
   budget: SearchDefinition['budget'],
   discovery: readonly ProviderId[],
 ): SearchDefinition['budget'] {
-  const caps: Partial<Record<ProviderId, number>> = {};
-  for (const id of discovery) {
-    const cap = ctx.limitsOf(id).executionCallCap;
-    if (cap !== null) caps[id] = cap;
-  }
-  const { providerMaxCalls: _ignored, flightListPages: _own, ...rest } = budget;
-  const withCaps = Object.keys(caps).length === 0 ? rest : { ...rest, providerMaxCalls: caps };
+  // why: spec rev 65: the browser has no page cap, so no snapshot carries `providerMaxCalls` (an older one is ignored)
+  const { providerMaxCalls: _withdrawn, flightListPages: _own, ...rest } = budget;
   return discovery.some(loadsBrowserPages)
-    ? { ...withCaps, flightListPages: FLIGHT_LIST_COUNT * FLIGHT_LIST_PAGES_PER_PAIR_MAX }
-    : withCaps;
+    ? { ...rest, flightListPages: FLIGHT_LIST_COUNT * FLIGHT_LIST_PAGES_PER_PAIR_MAX }
+    : rest;
 }
 
 /** Who started the run; the same union as `StartOptions['trigger']`, never restated (code-architect review 17). */
@@ -110,7 +103,7 @@ export function buildSnapshot(
   const { discovery } = providers;
   const snapshot: DefinitionSnapshot = {
     ...def,
-    budget: snapshotBudget(ctx, def.budget, discovery),
+    budget: snapshotBudget(def.budget, discovery),
     verification: { ...def.verification, alwaysInclude: kept },
     providers: {
       ...def.providers,

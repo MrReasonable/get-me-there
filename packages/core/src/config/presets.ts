@@ -3,8 +3,8 @@ export type PlanId = 'trial' | '40usd';
 
 export interface ProviderLimits {
   /**
-   * The calls the provider may make in its window, or null for none (camoufox: its pages are bounded by the per-run page
-   * cap and the page spacing, never by a month's count; spec §2).
+   * The calls the provider may make in its window, or null for none (camoufox: its pages are bounded by the page
+   * spacing, never by a count; spec §2).
    */
   monthlyCallCap: number | null;
   window: 'month' | 'lifetime';
@@ -16,17 +16,10 @@ export interface ProviderLimits {
   costPerCallMicroGbp: number;
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
-  /**
-   * A provider's own per-execution call cap (camoufox's CAMOUFOX_EXECUTION_PAGE_CAP, decision 69); the engine freezes it
-   * into the execution's snapshot (`budget.providerMaxCalls`), and the guard reads it from there. Absent: none.
-   */
-  executionCallCap?: number;
   /** camoufox (fix round 1, arch M7): the least seconds between page starts; the engine's estimate reads it. */
   minSpacingSeconds?: number;
-  /** Pages-only counting (camoufox): ledger rows of class `no-page` count toward neither page cap (spec §5.3 rev 32). */
+  /** Pages-only counting (camoufox): ledger rows of class `no-page` count as no page (spec §5.3 rev 32). */
   pagesOnly?: true;
-  /** camoufox grid (spec §2 rev 34): the scroll clicks a run may make; the guard sums them. */
-  executionScrollCap?: number;
 }
 
 /** A provider's limits with a call cap on its window (SearchApi, Travelpayouts and the fixture). */

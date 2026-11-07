@@ -206,8 +206,8 @@ function stub(
     preflight?: PreflightResult;
     /** One preflight answer per run, in order (fix round 1, arch M3); the last repeats. */
     preflights?: PreflightResult[];
-    /** Spec §2 rev 34: plan grid pages with the run's allowances (the real planner), not one page per cell. */
-    grid?: { pageAllowance: number; scrollAllowance: number; scrollSeconds?: number };
+    /** Spec §2 rev 34: plan grid pages with the real planner at these times (the measured ones by default). */
+    grid?: { scrollSeconds?: number; pageSeconds?: number };
     /** Spec rev 55 §5.1 (Task 20.9): a flight-list capability (camoufox only); absent: the provider has none. */
     flights?: FlightStubOptions;
     /** Task 20.9: called as the n-th grid or list page starts (before the engine's gate), to record the order of pages. */
@@ -383,29 +383,20 @@ function stub(
       plan:
         o.grid === undefined
           ? planSingleCells
-          : (q: DiscoveryQuery) => {
-              const g = o.grid ?? { pageAllowance: 0, scrollAllowance: 0 };
-              const pairs = Math.max(1, q.share?.pairs ?? 1);
-              return planGridTiles(q, {
+          : (q: DiscoveryQuery) =>
+              planGridTiles(q, {
                 stepDays: GRID_STEP_DAYS,
                 scrollCap: 30,
-                pageAllowance: Math.floor(g.pageAllowance / pairs),
-                scrollAllowance: Math.floor(g.scrollAllowance / pairs),
                 today: asIsoDate(T0.slice(0, 10)),
                 horizonDays: GRID_HORIZON_DAYS,
-                times: GRID_TIMES,
-              });
-            },
+                times: { ...GRID_TIMES, ...o.grid },
+              }),
       fetchTile,
       ...(o.grid === undefined
         ? {}
         : {
             interleavePairs: true as const,
-            estimateTile: (t: TilePlan) =>
-              gridTileEstimate(t, {
-                ...GRID_TIMES,
-                scrollSeconds: o.grid?.scrollSeconds ?? GRID_TIMES.scrollSeconds,
-              }),
+            estimateTile: (t: TilePlan) => gridTileEstimate(t, { ...GRID_TIMES, ...o.grid }),
           }),
       ...(preflight === undefined ? {} : { preflight }),
     },
@@ -451,10 +442,8 @@ export const stubTravelpayouts = (o: Parameters<typeof stub>[2]): Stub =>
 export function realCamoufox(
   answers: Array<{ status: number; body: unknown }>,
   cells: number,
-  /** WP15 fix round 1 (TS 4): the real adapter in grid mode, with the run's page and scroll caps. */
+  /** WP15 fix round 1 (TS 4): the real adapter in grid mode. */
   grid?: {
-    executionPageCap: number;
-    executionScrollCap: number;
     scrollCap?: number;
     scrollSpacingSeconds?: number;
     pageTimeoutSeconds?: number;
@@ -532,7 +521,6 @@ export function realCamoufox(
             pageTimeoutSeconds: 90,
             ...grid,
           },
-          scrollsLeft: (executionId: string | null) => ctxOf().budget.scrollsLeft('camoufox', executionId),
         }),
   });
   const discovery = real.discovery;
@@ -587,14 +575,14 @@ export interface CamoufoxEngine {
 export function engineWith(
   stubs: Stub[],
   o: {
-    camoufoxConfigCap?: number;
+    /** A page cap frozen into each snapshot, as a run stored before spec revision 65 carries one (never read). */
     snapshotCap?: number;
     scheduleCron?: string;
     /** Every operator notice fails to send (fix round 1, arch M4). */
     notifierFails?: boolean;
     /** The definition's free-call cap (fix round 2: a pause for another cap while camoufox has pages left). */
     maxFreeCalls?: number;
-    /** More of the app's environment (WP15 fix round 1: STUCK_AFTER_HOURS, the scroll caps). */
+    /** More of the app's environment (WP15 fix round 1: STUCK_AFTER_HOURS). */
     env?: Record<string, string>;
     /** WP16a: the engine reads the faked system time (vi.useFakeTimers must be on), so croner and the engine agree. */
     systemClock?: boolean;
@@ -626,7 +614,6 @@ export function engineWith(
       CAMOUFOX_ENABLED: 'true',
       CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
       CAMOUFOX_WORKER_KEY: KEY,
-      CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
       ...o.env,
     },
     { realpath: (p) => p },
@@ -651,7 +638,7 @@ export function engineWith(
   if (o.snapshotCap !== undefined) {
     const cap = o.snapshotCap;
     const create = repos.executions.create.bind(repos.executions);
-    // why: the guard must read the page cap from the snapshot, never from config: freeze a different one than config's
+    // why: a run stored before spec revision 65 carries the withdrawn page cap; nothing may read it
     repos.executions.create = (input) =>
       create({
         ...input,
@@ -810,6 +797,26 @@ export function rankedPairs(
       };
     });
   };
+}
+
+/**
+ * Stores an execution as a run before spec revision 65 left it: paused at the browser's withdrawn per-run page cap, with
+ * that cause (the row a resume must still refuse).
+ */
+export function storeStoppedAtPageCap(e: CamoufoxEngine, executionId: string): void {
+  const cause = {
+    kind: 'budget',
+    scope: 'provider-execution',
+    providerId: 'camoufox',
+    unit: 'pages',
+    cap: 100,
+    resumeAfter: null,
+    resetsAt: null,
+    flights: null,
+  };
+  e.ctx.db.raw
+    .prepare("UPDATE search_executions SET status = 'paused_budget', stop_cause_json = ? WHERE id = ?")
+    .run(JSON.stringify(cause), executionId);
 }
 
 /** A promise with its settlers, for holding a page or a read in flight (event-driven tests: never a timer). */

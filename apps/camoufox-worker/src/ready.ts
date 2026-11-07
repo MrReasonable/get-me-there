@@ -37,8 +37,14 @@ export function isSettled(
   return common && (view === 'best' ? settle.resultsReturned : settle.cheapestSelected);
 }
 
+/**
+ * The wait between one poll's end and the next poll (the session's default; the recorder uses the same). why: a poll's
+ * own read takes most of a second on a live page, so the polls already run about a second and a half apart.
+ */
+export const POLL_MS = 500;
+
 /** The least time between the two polls whose links must agree. */
-export const STABLE_MS = 2000;
+export const STABLE_MS = 1000;
 
 /** One poll's links, as the next poll compares them. */
 export interface Previous {

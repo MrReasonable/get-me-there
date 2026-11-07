@@ -4,7 +4,6 @@
 // notice except where the table says so. Stub providers through the real engine, guard and database
 // (test/support/camoufox.ts); concurrency is held with deferred promises, never with timers.
 import {
-  apiContract,
   asIsoDateTime,
   type BookingRead,
   BudgetExceeded,
@@ -172,35 +171,25 @@ describe('the flight-list step after discovery', () => {
     });
   });
 
-  it('a camoufox + Travelpayouts run whose browser lane hit its page cap still reads 10 and ends completed', async () => {
+  // why: spec rev 65: no page cap a run, so a browser run reads every cell before its flight lists
+  it('a camoufox + Travelpayouts run reads all 120 cells, then its 10 flight pages, and ends completed', async () => {
     const cam = stubCamoufox({ cells: 120, flights: {} });
     const tp = stubTravelpayouts({ cells: 120 });
     const e = engineWith([cam, tp], { rankedDatePairs: rankedPairs(15) });
     const done = await e.settled(await start(e));
-    // why: the stub records the 101st tile too, which the guard's reservation refused at provider-execution
-    expect(cam.calls).toHaveLength(101);
+    expect(cam.calls).toHaveLength(120);
     expect(done.status).toBe('completed');
     expect(done.stopCause).toBeNull();
     expect(cam.flightCalls).toHaveLength(10);
   });
 
-  it('Review Focus 3: a camoufox-only run stopped at its 100-page cap reads its 10 flight pages and stays paused_budget', async () => {
+  it('a camoufox-only run reads all 120 cells, then its 10 flight pages on an unaborted signal, and completes', async () => {
     const { e, cam } = camoufoxOnly({ cells: 120 });
     const done = await e.settled(await start(e));
-    // why: 100 grid pages, then the 101st refused by the guard at provider-execution (the stub records the attempt)
-    expect(cam.calls).toHaveLength(101);
-    expect(done.status).toBe('paused_budget');
+    expect(cam.calls).toHaveLength(120);
+    expect(done.status).toBe('completed');
     expect(cam.flightCalls).toHaveLength(10);
-    // why: after the budget stop the run's intake and the lane's are aborted; the step's pages carry the run's
-    // controller signal only, which a budget stop never aborts
     expect(cam.flightCalls.every((c) => !c.signalAborted)).toBe(true);
-    expect(done.stopCause).toMatchObject({
-      kind: 'budget',
-      scope: 'provider-execution',
-      providerId: 'camoufox',
-      flights: { read: 10, planned: 10 },
-    });
-    expect(apiContract.stopCauseSchema.parse(done.stopCause)).toBeTruthy();
     expect(flightLedger(e, done.id)).toBe(10);
   });
 
@@ -233,10 +222,10 @@ describe('the flight-list step after discovery', () => {
     expect(rows).toHaveLength(10);
     expect(rows.every((r) => r.status === 'failed' && r.reason === 'execution-cap')).toBe(true);
     expect(done.flightLists?.ended).toBe('stopped');
-    expect(done.status).toBe('paused_budget');
+    expect(done.status).toBe('completed');
   });
 
-  it('a Cancel during the step after the grid-cap stop ends the run cancelled', async () => {
+  it('a Cancel during the step ends the run cancelled', async () => {
     const inFlight = deferred();
     const { e } = camoufoxOnly({
       cells: 120,
@@ -255,7 +244,7 @@ describe('the flight-list step after discovery', () => {
     expect(flightRows(e, id)).toHaveLength(2);
   });
 
-  it('a SIGTERM during the step after the grid-cap stop ends the run interrupted', async () => {
+  it('a SIGTERM during the step ends the run interrupted', async () => {
     const inFlight = deferred();
     const { e } = camoufoxOnly({
       cells: 120,
@@ -273,16 +262,16 @@ describe('the flight-list step after discovery', () => {
     expect(flightRows(e, id)).toHaveLength(1);
   });
 
-  it('counts its pages toward execution-free-calls: 105 after 100 grid pages lets 5 through, then free-call-cap', async () => {
-    const { e, cam } = camoufoxOnly({ cells: 100, maxFreeCalls: 105 });
+  // why: spec rev 65: the browser's pages count against no per-run call cap; only the flight allowance bounds the step
+  it('counts no page toward execution-free-calls: maxFreeCalls 5 after 100 grid pages still reads all 10', async () => {
+    const { e, cam } = camoufoxOnly({ cells: 100, maxFreeCalls: 5 });
     const done = await e.settled(await start(e));
     expect(cam.calls).toHaveLength(100);
-    expect(cam.flightRequests()).toBe(5);
-    const rows = flightRows(e, done.id);
-    expect(rows.filter((r) => r.status === 'read')).toHaveLength(5);
-    expect(rows.filter((r) => r.reason === 'free-call-cap')).toHaveLength(5);
-    expect(done.flightLists?.ended).toBe('stopped');
+    expect(cam.flightRequests()).toBe(10);
+    expect(flightRows(e, done.id).filter((r) => r.status === 'read')).toHaveLength(10);
+    expect(done.flightLists?.ended).toBeNull();
     expect(done.status).toBe('completed');
+    expect(e.ctx.budget.usage({ kind: 'execution-free-calls', executionId: done.id }).calls).toBe(0);
   });
 
   it('a run whose preflight disabled camoufox stores no plan and reads no flights', async () => {
@@ -478,69 +467,20 @@ describe('the step after the review (Task 20.9 fix round 1)', () => {
     expect(notices[0]?.body).not.toContain('remaining cells are skipped');
     expect(done.status).toBe('completed');
   });
-
-  it.each([
-    ['a SIGTERM', 'interrupted', { kind: 'interrupted' }],
-    ['a Cancel', 'cancelled', { kind: 'cancelled' }],
-  ] as const)(
-    '%s after the grid-cap stop and before the step starts ends the run %s and the step writes no plan',
-    async (_name, status, cause) => {
-      const { e, cam } = camoufoxOnly({ cells: 120 });
-      const write = e.ctx.repos.cells.setOutcomesForProvider.bind(e.ctx.repos.cells);
-      let fired = false;
-      // why: the lane's settle marks its remaining cells skipped:budget once its pool drains, after the budget stop and
-      // before the flight-list step: the stop arrives there
-      e.ctx.repos.cells.setOutcomesForProvider = (executionId, stage, providerId, from, to) => {
-        const n = write(executionId, stage, providerId, from, to);
-        if (!fired && providerId === 'camoufox' && to.status === 'skipped' && to.reason === 'budget') {
-          fired = true;
-          if (status === 'interrupted') void e.orch.shutdown();
-          else void e.orch.cancel(executionId, { kind: 'cancelled' });
-        }
-        return n;
-      };
-      const id = await start(e);
-      const done = await e.settled(id);
-      expect(fired).toBe(true);
-      expect(done.status).toBe(status);
-      expect(done.stopCause).toEqual(cause);
-      expect(done.flightLists).toBeNull();
-      expect(cam.flightCalls).toHaveLength(0);
-    },
-  );
-  it('a fatal after the grid-cap stop and before the step starts is not taken as the flight stop: the run keeps the budget stop (final review ruling)', async () => {
-    const { e, cam } = camoufoxOnly({ cells: 120 });
-    const write = e.ctx.repos.cells.setOutcomesForProvider.bind(e.ctx.repos.cells);
-    let fired = false;
-    // why: the same point as above (the lane's settle, after the budget stop and before the step), where the database
-    // now fails: the error escapes discovery and execute stops the pass fatal
-    e.ctx.repos.cells.setOutcomesForProvider = (executionId, stage, providerId, from, to) => {
-      const n = write(executionId, stage, providerId, from, to);
-      if (!fired && providerId === 'camoufox' && to.status === 'skipped' && to.reason === 'budget') {
-        fired = true;
-        throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
-      }
-      return n;
-    };
-    const done = await e.settled(await start(e));
-    expect(fired).toBe(true);
-    expect(done.status).toBe('paused_budget');
-    expect(done.stopCause).toMatchObject({
-      kind: 'budget',
-      scope: 'provider-execution',
-      providerId: 'camoufox',
-    });
-    expect(done.flightLists).toBeNull();
-    expect(cam.flightCalls).toHaveLength(0);
-  });
 });
 
 describe('snapshotBudget and the flight allowance (spec rev 56 §2, §8.1, the 20.8 note)', () => {
   it('strips a definition-supplied flightListPages and sets 20 (10 pairs × 2 pages) with camoufox; none without', () => {
     const e = engineWith([stubCamoufox({ cells: 3, flights: {} }), stubTravelpayouts({ cells: 3 })]);
     const own = { ...e.definition.budget, flightListPages: 500 };
-    expect(snapshotBudget(e.ctx, own, ['camoufox', 'travelpayouts']).flightListPages).toBe(20);
-    expect('flightListPages' in snapshotBudget(e.ctx, own, ['travelpayouts'])).toBe(false);
+    expect(snapshotBudget(own, ['camoufox', 'travelpayouts']).flightListPages).toBe(20);
+    expect('flightListPages' in snapshotBudget(own, ['travelpayouts'])).toBe(false);
+  });
+  // why: spec rev 65: the browser's page cap is withdrawn, so no snapshot carries one, even from a stored budget
+  it('carries no providerMaxCalls, dropping one a stored budget holds', () => {
+    const e = engineWith([stubCamoufox({ cells: 3 })]);
+    const own = { ...e.definition.budget, providerMaxCalls: { camoufox: 4 } };
+    expect(snapshotBudget(own, ['camoufox'])).not.toHaveProperty('providerMaxCalls');
   });
 });
 
@@ -563,10 +503,10 @@ describe('flightStepEntry (the entry predicate)', () => {
     resetsAt: null,
   });
 
-  it('runs when the run has not stopped, or its only stop is camoufox own page cap', async () => {
+  it('runs only when the run has not stopped (spec rev 65: no browser page cap to run after)', async () => {
     const { e, run } = await base();
     expect(flightStepEntry(e.ctx, run)).toBe(true);
-    expect(flightStepEntry(e.ctx, { ...run, stop: budgetStop('provider-execution') })).toBe(true);
+    expect(flightStepEntry(e.ctx, { ...run, stop: budgetStop('provider-execution') })).toBe(false);
     expect(flightStepEntry(e.ctx, { ...run, stop: budgetStop('execution-calls') })).toBe(false);
     expect(flightStepEntry(e.ctx, { ...run, stop: { kind: 'cancel', cause: { kind: 'cancelled' } } })).toBe(
       false,
@@ -583,7 +523,7 @@ describe('flightStepEntry (the entry predicate)', () => {
     expect(flightStepEntry(e.ctx, { ...run, snapshot: { ...run.snapshot, budget } })).toBe(false);
   });
 
-  it('never after the browser lane left its window; a lane stopped at its own run cap still reads', async () => {
+  it('never after the browser lane left its window; a lane out for its own allowance still reads', async () => {
     const { e, run } = await base();
     laneFor(run, 'discovery', 'camoufox').budgetOutScope = 'provider-execution';
     expect(flightStepEntry(e.ctx, run)).toBe(true);

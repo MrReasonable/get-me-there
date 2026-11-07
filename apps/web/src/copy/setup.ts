@@ -55,7 +55,7 @@ export const SETUP_COPY = {
       '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
     maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
     maxFreeCallsHint:
-      "Requests to free sources (the Aviasales cache, the browser worker's pages) a run may make before it stops.",
+      "Requests to free sources (the Aviasales cache) a run may make before it stops. The browser worker's pages never count.",
     maxCostHint: 'A run stops before it would spend more than this. 0 means it spends nothing.',
     constraintsHint:
       'Limits on the flights a fare check keeps. A calendar price is never checked against them, and says so.',
@@ -133,7 +133,7 @@ export const SETUP_COPY = {
         id: 'camoufox',
         name: 'Camoufox (Google Flights in a browser on your machine)',
         what: 'Reads Google Flights prices one date pair a page, while this machine is on. Discovery only; off by default.',
-        cost: 'Free; capped in pages a run (100 by default).',
+        cost: 'Free; paced by its page spacing (30 s by default).',
         command: 'pnpm gmt setup --reconfigure browser',
         doc: 'after reading docs/setup.md section 14.',
       },

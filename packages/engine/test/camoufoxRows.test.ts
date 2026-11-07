@@ -1,8 +1,9 @@
-import { asIsoDateTime } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   authError,
   blockedError,
+  deferred,
   engineWith,
   outcomes,
   stubCamoufox,
@@ -124,33 +125,55 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     await e.resume(ex.id, { manual: true });
     expect(s.calls.length).toBeGreaterThan(calls);
   });
-  it('the snapshot page cap stops camoufox at 2 pages though config says 100, and travelpayouts continues', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 }), stubTravelpayouts({ cells: 6 })], {
-      camoufoxConfigCap: 100,
-      snapshotCap: 2,
+  // why: CAMOUFOX_PAGES_AT_ONCE: the engine runs that many camoufox tiles at once, each cell read once
+  it('two pages at once: a second tile starts while the first is in flight, and each cell is read exactly once', async () => {
+    const second = deferred();
+    let inFlight = 0;
+    let most = 0;
+    const s = stubCamoufox({
+      cells: 6,
+      holdCall: { call: 1, until: second.promise },
+      onTile: (n) => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        if (n === 2) second.resolve();
+      },
+    });
+    const fetch = s.discovery?.fetchTile;
+    if (fetch === undefined || s.discovery === undefined) throw new Error('discovery');
+    s.discovery.fetchTile = async (plan, q, pctx) => {
+      try {
+        return await fetch(plan, q, pctx);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const e = engineWith([s], { env: { CAMOUFOX_PAGES_AT_ONCE: '2' } });
+    expect(e.ctx.limitsOf('camoufox').concurrency).toBe(2);
+    const ex = await e.runToEnd();
+    expect(most).toBe(2);
+    expect(ex.status).toBe('completed');
+    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(6);
+    expect(new Set(s.calls.map((t) => t.coveredCells.map((c) => c.departureDate).join())).size).toBe(6);
+    expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(6);
+  });
+  // why: spec rev 65: the browser's pages count against no per-run call cap: the operator's search (maxFreeCalls 150)
+  // must start its 156 grid pages (two airport pairs, 182 days of 10–21 nights) and read every one
+  it('a grid plan of 156 pages starts under a search whose maxFreeCalls is 150, and every page loads', async () => {
+    const cam = stubCamoufox({ cells: 1, grid: {} });
+    const e = engineWith([cam], { maxFreeCalls: 150 });
+    e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-09'), to: asIsoDate('2027-05-09') },
+      minNights: 10,
+      maxNights: 21,
+      origins: [asIata('LHR'), asIata('LGW')],
+      destinations: [asIata('JFK')],
     });
     const ex = await e.runToEnd();
-    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(2);
-    expect(
-      outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'skipped' && o.reason === 'budget'),
-    ).toHaveLength(4);
-    expect(outcomes(e, ex.id, 'travelpayouts').filter((o) => o.status === 'priced')).toHaveLength(6);
-  });
-  it('the page cap is frozen into the snapshot from config at start', async () => {
-    const e = engineWith([stubCamoufox({ cells: 1 })], { camoufoxConfigCap: 7 });
-    const ex = await e.runToEnd();
-    expect(ex.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 7 });
-  });
-  it('alone, the page cap pauses paused_budget and the tick does not resume it', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 })], {
-      camoufoxConfigCap: 100,
-      snapshotCap: 2,
-      scheduleCron: '0 5 * * 1',
-    });
-    const ex = await e.runToEnd();
-    expect(ex.status).toBe('paused_budget');
-    expect(ex.resumeAfter).toBeNull();
-    expect(await e.tick()).toEqual({ resumed: false });
+    expect(ex.snapshot.budget.maxFreeCalls).toBe(150);
+    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(156);
+    expect(ex.status).toBe('completed');
+    expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(156);
   });
   it('the engine fills airportNames from the airports repository', async () => {
     const s = stubCamoufox({ cells: 1 });

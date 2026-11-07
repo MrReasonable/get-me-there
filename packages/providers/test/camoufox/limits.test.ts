@@ -56,6 +56,11 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
     );
     expect(grid.requestTimeoutSeconds).toBe(4 * 90 + 45 + 30 * 60 + 15);
   });
+  it('CAMOUFOX_PAGES_AT_ONCE is the limiter’s concurrency, its starts still spaced by the page spacing', () => {
+    expect(
+      camoufoxHttpLimits(camoufox({ CAMOUFOX_PAGES_AT_ONCE: '3' }), { maxWaitSeconds: 3900 }),
+    ).toMatchObject({ concurrency: 3, minIntervalMs: 45_000 });
+  });
   it('the worker’s origin, never billable, concurrency 1, spacing as minIntervalMs, page timeout + 15 s, no transport retries', () => {
     const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });
     expect(l).toMatchObject({

@@ -2,7 +2,6 @@ import {
   type BudgetScope,
   budgetScopeLabel,
   type DefinitionSnapshot,
-  FLIGHT_LIST_COUNT,
   isScheduled,
   type ProviderId,
   type SearchDefinition,
@@ -56,14 +55,6 @@ export function scheduleLoad(
     });
   }
   return load;
-}
-
-/**
- * Spec rev 56 §8.1: the flight-list requests a run of `perRun` makes, which count toward its free calls (one a pair,
- * whatever pages each loads): FLIGHT_LIST_COUNT (10) whenever its estimate carries a flight line.
- */
-export function flightRequestsOf(perRun: Pick<Estimate, 'flightLists'>): number {
-  return perRun.flightLists === undefined ? 0 : FLIGHT_LIST_COUNT;
 }
 
 /** Spec §8.2 monthly load of a schedule: scheduleLoad over runsPerMonth firings in an average month (730 h). */
@@ -137,7 +128,8 @@ export function budgetFitFor(
   const own = monthlyLoad(ctx, def);
   const others = otherSchedules(ctx, definitionId).map((d) => storedScheduleLoad(ctx, d));
   const billed = own.perRun.perProvider.filter((p) => ctx.limitsOf(p.providerId).billed);
-  const free = own.perRun.perProvider.filter((p) => !ctx.limitsOf(p.providerId).billed);
+  // why: the browser's pages, its flight-list pages too, count against no per-run call cap (spec rev 65)
+  const free = own.perRun.perProvider.filter((p) => ctx.limitsOf(p.providerId).countsFreeCalls);
   const sum = (xs: Estimate['perProvider'], f: (p: Estimate['perProvider'][number]) => number) =>
     xs.reduce((a, p) => a + f(p), 0);
   const perScope: BudgetFit['perScope'] = [];
@@ -154,13 +146,7 @@ export function budgetFitFor(
   );
   scope(
     { kind: 'execution-free-calls', executionId: NO_EXECUTION },
-    // why: spec rev 56 §8.1 — the flight-list requests (one a pair, never its pages) count toward the run's free calls
-    // why: the step stops at the run's free-call limit itself, so its requests count up to what the lines leave
-    sum(free, (p) => p.calls) +
-      Math.min(
-        flightRequestsOf(own.perRun),
-        Math.max(0, def.budget.maxFreeCalls - sum(free, (p) => p.calls)),
-      ),
+    sum(free, (p) => p.calls),
     def.budget.maxFreeCalls,
   );
   scope(

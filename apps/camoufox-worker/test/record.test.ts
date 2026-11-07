@@ -18,6 +18,7 @@ import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/
 import { acquireLock } from '../src/lock.js';
 import { debugLogging } from '../src/log.js';
 import { profileDir } from '../src/paths.js';
+import { POLL_MS } from '../src/ready.js';
 import {
   assertClean,
   parseRecordArgs,
@@ -1954,7 +1955,7 @@ describe('parseRecordArgs', () => {
 });
 
 describe('the real recorder dependencies (no launch)', () => {
-  it('use the system clock, two-second polls, the prepared entry’s selectors and stderr JSON lines', () => {
+  it('use the system clock, the server path’s poll interval, the prepared entry’s selectors and stderr JSON lines', () => {
     const f = fakeInstall('darwin-arm64');
     const prepared = prepareLaunch({
       platform: 'darwin',
@@ -1968,7 +1969,7 @@ describe('the real recorder dependencies (no launch)', () => {
     const lines: string[] = [];
     const d = realRecordDeps(prepared, (l) => lines.push(l));
     expect(d).toMatchObject({
-      pollMs: 2000,
+      pollMs: POLL_MS,
       selectors: SELECTORS,
       binary: '152.0.4-beta.28',
       pid: process.pid,

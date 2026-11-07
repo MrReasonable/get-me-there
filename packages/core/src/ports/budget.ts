@@ -5,7 +5,10 @@ import type { ProviderId } from '../types/provenance.js';
 /** Spec §5.3 cap scopes. */
 export type BudgetScope =
   | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
-  /** A provider's own cap within one execution (camoufox pages, spec §2); labelled `provider-execution:<provider>`. */
+  /**
+   * A provider's own pages within one execution (camoufox: its pages, and its flight-list pages against the run's
+   * flight allowance, spec §8.1); labelled `provider-execution:<provider>`.
+   */
   | { kind: 'provider-execution'; executionId: string; providerId: ProviderId }
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
   | { kind: 'global-month' };
@@ -33,15 +36,15 @@ export interface Usage {
   windowEnd: IsoDateTime | null;
   /**
    * Spec rev 55 §8.1 (ruling A32): on a `provider-execution` scope, the flight-list pages spent against the run's own
-   * flight allowance (`ExecutionBudget.flightListPages`; `cap` 0 when the snapshot sets none). `calls` and `cap` above
-   * count the grid or list pages only. Absent on every other scope.
+   * flight allowance (`ExecutionBudget.flightListPages`; `cap` 0 when the snapshot sets none). `calls` above counts the
+   * grid or list pages only, with no cap on them (`cap` null). Absent on every other scope.
    */
   flightLists?: { calls: number; cap: number };
 }
 
 /**
  * `pageClass` (spec §5.3 rev 32, decision 69): for a pages-only provider (camoufox), whether the attempt loaded a
- * Google page; a `no-page` row stays in the ledger but counts toward neither page cap. Absent for every other provider.
+ * Google page; a `no-page` row stays in the ledger and counts as no page. Absent for every other provider.
  */
 export interface Reservation {
   id: string;
@@ -74,13 +77,13 @@ export interface ReserveParams {
   httpAttempt: number;
   endpointPath: string;
   /**
-   * Spec §2 rev 34: a camoufox grid page's planned scrolls; they must fit what the provider's run scroll cap leaves,
-   * and the pending row holds them until it finalises.
+   * Spec §2 rev 34: a camoufox grid page's planned scrolls; the pending row holds them until it finalises.
    */
   scrolls?: number;
   /**
    * Spec rev 56 §5.1: the planned page count (default 1; `FLIGHT_LIST_PAGES_PER_PAIR_MAX` for a flights request with a
-   * return phase), checked against the page caps; a camoufox page scope's `calls` in `usage()` is the page sum.
+   * return phase), checked against the run's flight allowance; a camoufox page scope's `calls` in `usage()` is the
+   * page sum.
    */
   pages?: number;
 }
@@ -101,9 +104,4 @@ export interface BudgetGuard {
   usage(scope: BudgetScope): Usage;
   /** Upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart. */
   recentCalls(providerId: ProviderId, since: IsoDateTime): number;
-  /**
-   * Spec §2 rev 34 (fix round 1, CA 1): the scrolls a provider's run scroll cap leaves (never below 0), or null when no
-   * scroll cap applies (no run scroll cap, or no execution); a camoufox grid page asks for no more.
-   */
-  scrollsLeft(providerId: ProviderId, executionId: string | null): number | null;
 }

@@ -24,29 +24,14 @@ export function toStopDetail(word: string | null, fallback: StopDetail): StopDet
 }
 
 /**
- * Revision 55 §8.1: whether a budget stop is never resumed by a timer, a tick or boot whatever the schedule: the browser
- * worker's per-run page limit (a resume past the run's browser window reads no browser pages; its stop offers Search
- * again). The browser has no monthly limit (spec §2).
- */
-export function isBrowserPageLimit(
-  c: Pick<Extract<StopCause, { kind: 'budget' }>, 'scope' | 'providerId'>,
-): boolean {
-  return c.providerId === 'camoufox' && c.scope === 'provider-execution';
-}
-
-/**
  * The cause a stop stores (spec revision 55 §8.1). `scheduled` is `isScheduled` over the live definition, read at finish:
- * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2), and neither does the browser worker's per-run
- * page limit on any search; a budget cause keeps its window's end as `resetsAt` either way. A cancel's cause
- * is its own; `all-disabled` names every disabled source of its stage with its class word, at least one; a SIGTERM
+ * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2); a budget cause keeps its window's end as
+ * `resetsAt` either way. A cancel's cause is its own; `all-disabled` names every disabled source of its stage with its class word, at least one; a SIGTERM
  * marks `browserWindowLeft` when a lane of the pass had left its browser window.
  */
 export function stopCauseOf(
   stop: StopReason,
-  run: Pick<
-    RunState,
-    'disabledDetail' | 'disabled' | 'disabledReason' | 'searchedDatePairs' | 'flightLists'
-  > & {
+  run: Pick<RunState, 'disabledDetail' | 'disabled' | 'disabledReason' | 'searchedDatePairs'> & {
     snapshot: Pick<RunState['snapshot'], 'providers'>;
     lanes: ReadonlyMap<string, Pick<Lane, 'windowOut'>>;
   },
@@ -70,9 +55,7 @@ export function stopCauseOf(
     case 'budget': {
       const e = stop.error;
       const providerId = e.providerId ?? null;
-      const units = apiContract.budgetUnitsFor(e.scope, providerId);
-      const unit = e.unit === 'scrolls' && units.includes('scrolls') ? 'scrolls' : units[0];
-      const pageLimit = isBrowserPageLimit({ scope: e.scope, providerId });
+      const [unit] = apiContract.budgetUnitsFor(e.scope, providerId);
       return {
         kind: 'budget',
         scope: e.scope,
@@ -80,10 +63,10 @@ export function stopCauseOf(
         unit,
         // why: ruling A2 — a spending cap is stated in pence; the guard counts µGBP
         cap: unit === 'pence' ? microGbpToPence(e.cap) : e.cap,
-        resumeAfter: scheduled && !pageLimit ? stop.resumeAfter : null,
+        resumeAfter: scheduled ? stop.resumeAfter : null,
         resetsAt: stop.resetsAt,
-        // why: the flight-list step runs after the browser worker's per-run page cap only (Review Focus 3)
-        flights: e.scope === 'provider-execution' && providerId === 'camoufox' ? run.flightLists : null,
+        // why: spec rev 65: a run stopped at the browser's withdrawn page cap was the only one that carried its flights
+        flights: null,
       };
     }
     case 'all-disabled': {

@@ -23,6 +23,8 @@
 # and monthly.json read wider than 0600 there). WP21's return-phase, session and rules tests share that setup too, and
 # two more source-guard tests share the listed one's backslash paths; recorded from
 # https://github.com/MrReasonable/get-me-there/actions/runs/41487718973, less four renamed recorder tests.
+# Pages at once (spec rev 65) adds main, session and grid-page tests that share those files' POSIX-mode setup, and the
+# quicker settle renames four; not yet confirmed by a Windows run.
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -86,14 +88,14 @@ apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves,
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a second "Scroll down" in the dialog, outside the panel: unrecognised (grid:no-scroll-button), never clicked
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a shifted first view at the end of the planning horizon is `sale-window-end` (PA M3)
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a shifted first view far from both ends of the sale window is `shifted` (PA M3)
-apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a view settles only once two polls 2 s apart match, however short the poll interval (ruling 9)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a view settles only once two polls STABLE_MS apart match, however short the poll interval (ruling 9)
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) no Price graph button: unrecognised (grid:no-price-graph-button), nothing clicked
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) the pacer is released after a grid page, and the next page waits 30 s from this page’s start
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) two "Price insights" dialogs: not the dates-grid view (PIE M3)
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating GRID_VERIFIED false, or CAMOUFOX_MODE=list, answers mode-unavailable without opening anything
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating more moves than the worker’s scroll cap is rejected before any page
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price a view whose unpriced cells are drawn but whose new column still prints "0000" is waited on, then read whole
-apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price each view is read whole on its two stable polls: priced, no-flights and price-unknown cells as named
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price each view is read whole once its polls hold still: priced, no-flights and price-unknown cells as named
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price without GRID_UNPRICED_VERIFIED the same views are refused whole (structural), and the page goes on
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow Google’s no-flights page (past the sale window) is a grid answer with no views
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a challenge after a scroll is that stop with its cool-down and the scrolls made; no view is returned
@@ -186,7 +188,7 @@ apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) a read t
 apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) a view the landing rule never recognises is what appeared: unrecorded, no pause, the flag stays off
 apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) loads the landing page with SOCS set, clicks nothing and records the view, the flag still off
 apps/camoufox-worker/test/record.test.ts > stderrLog debug lines the real recorder dependencies take the switch
-apps/camoufox-worker/test/record.test.ts > the real recorder dependencies (no launch) use the system clock, two-second polls, the prepared entry’s selectors and stderr JSON lines
+apps/camoufox-worker/test/record.test.ts > the real recorder dependencies (no launch) use the system clock, the server path’s poll interval, the prepared entry’s selectors and stderr JSON lines
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest whose tab cannot be clicked refuses plainly, with no cool-down
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a Cheapest view that never settles ends at the cap, nothing written, no cool-down
@@ -437,7 +439,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS changed after a settled page → consent-unhandled, profile wiped (SOCS_STABLE false)
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS changed after a settled page → consent-unhandled, profile wiped (SOCS_STABLE true)
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS missing after a settled page → consent-unhandled
-apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Best view settles at a short poll interval, on two matching polls at least 2 s apart (fix round 1, TS 8)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Best view settles at a short poll interval, on two matching polls at least STABLE_MS apart (fix round 1, TS 8)
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a CAPTCHA frame, and SOCS changed on the same page → captcha kept, cool-down cause captcha, profile wiped
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Cheapest click that lands on a challenge page stops with its cool-down, never a fallback
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Cheapest click that never resolves falls back to the Best view with the tab price, within seconds
@@ -601,9 +603,15 @@ apps/api/test/bootstrap/tool.test.ts > runTool refusals (spec §5.5, §7, plan d
 apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) a read error other than ENOENT is thrown, never read as "no cool-down"
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with an allowance of 0, the page loads, reads its first block and makes no scroll
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a page that ends early states the scrolls it made
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a second such page in a row is refused when another page session read the first
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells of two such pages read at once in two page sessions, the second to end is refused
 apps/camoufox-worker/test/instances.test.ts > app instances (decision 82: a second one is reported, never refused) an instances file of another shape starts the month’s list afresh; the file is 0600
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) starts beside an earlier worker’s pacer and counts files, and leaves the counts file as it is
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) the status reports the calendar month’s app instances; a second one is reported, not refused
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) pages at once two pages load at once, each in its own browser and profile; a third request then is answered spacing
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) pages at once by default one page at a time: a second request while the first loads is answered spacing, nothing more launched
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) pages at once SIGTERM with two pages in flight answers both, then closes both browsers and exits 0
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) pages at once with a page spacing, the second page waits for it from the first one’s start, whichever session is free
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) waits out the spacing from the persisted last page time before its page
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded loads the documents it loaded, at most 2; the gate holds every activation’s document
 apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends RETURN_SELECT_VERIFIED false: nothing activated, not-verified both, no page counts, the list page’s budget
@@ -613,5 +621,11 @@ apps/camoufox-worker/test/returnPhase.test.ts > the reservation (cost-r3-002) an
 apps/camoufox-worker/test/returnPhase.test.ts > budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only) the reservation is the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a page loads beside an earlier worker’s counts file, which it never reads or writes
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, pacer
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a request goes to an idle session; with every session busy it is answered spacing for the soonest end
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a block in one session stops every later page, while the page in flight in another finishes
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with the only session closing its page, the busy answer waits for the close, not the spacing alone
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a stop is recorded before its page closes, so no other session starts a page meanwhile
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a profile wipe that fails frees the session; the next launch retries the wipe and fails while it cannot
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) sets only the last-page time, 0600, under the lock; the cool-down is not touched
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) an error taking the lock other than a held lock is thrown as it is, never reported as a refusal

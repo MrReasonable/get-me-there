@@ -193,8 +193,6 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
       appInstance: 'a'.repeat(64),
       grid: {
         mode,
-        executionPageCap: 100,
-        executionScrollCap: 600,
         scrollCap: 30,
         scrollSpacingSeconds: 5,
         pageTimeoutSeconds: 90,

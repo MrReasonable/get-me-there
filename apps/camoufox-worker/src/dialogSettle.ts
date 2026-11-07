@@ -160,7 +160,7 @@ export async function settle<T>(
     const key = `${poll.id}:${createHash('sha256').update(poll.snapshot).digest('hex')}`;
     const at = o.timers.now();
     const moved = differsFrom === undefined || poll.changeKey !== differsFrom;
-    // why: settled means stable content: the same container and the same printed snapshot across two polls 2 s apart,
+    // why: settled means stable content: the same container and the same printed snapshot across two polls STABLE_MS apart,
     // and, after a scroll, a view that is no longer the one before it
     const stable =
       moved &&

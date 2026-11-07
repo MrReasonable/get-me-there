@@ -11,8 +11,8 @@ beforeEach(() => {
 });
 
 /** The worked example in list mode: one pair, a 182-day window, 10–21 nights (2,184 cells). */
-function workedExample() {
-  const e = engineWith([stubCamoufox({ cells: 1 })]);
+function workedExample(env: Record<string, string> = {}) {
+  const e = engineWith([stubCamoufox({ cells: 1 })], { env });
   const def = e.ctx.repos.definitions.update(e.definition.id, {
     window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
     minNights: 10,
@@ -21,49 +21,57 @@ function workedExample() {
   });
   return { e, def };
 }
+const lineOf = (env: Record<string, string> = {}) => {
+  const { e, def } = workedExample(env);
+  const built = buildSnapshot(e.ctx, def);
+  const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
+  return { est, built, line: est.perProvider.find((p) => p.providerId === 'camoufox') };
+};
 
+// why: spec rev 65: the browser has no page cap a run, so a run plans a page for every cell it has to read
 describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () => {
-  it('estimates 100 pages, clamped after the retry factor, at spacing + 40 s a page, with the coverage note', () => {
-    const { e, def } = workedExample();
-    const built = buildSnapshot(e.ctx, def);
+  it('estimates a page a cell, every cell of the run, at spacing + 40 s a page, with no retry factor', () => {
+    const { est, built, line } = lineOf();
     expect(built.cells).toHaveLength(2184);
+    expect(line).toMatchObject({ planCalls: 2184, calls: 2184, costMicroGbp: 0 });
+    expect(line?.seconds).toBe(2184 * 70);
+    expect(est.assumptions.join('\n')).not.toMatch(/full pass takes|this run;/);
+  });
+  it('with page spacing 0 a page is estimated at 40 s (operator, 2026-10-25)', () => {
+    expect(lineOf({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }).line?.seconds).toBe(2184 * 40);
+  });
+  // why: CAMOUFOX_PAGES_AT_ONCE: pages run that many at a time, their starts still spaced by the page spacing
+  it('two pages at once halve the time, but never below the spacing between their starts', () => {
+    const at = (env: Record<string, string>) => lineOf(env).line?.seconds;
+    // why: 2,184 pages at 30 + 40 s are 152,880 s one at a time, 76,440 s two at a time (above 2,184 starts × 30 s)
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '2' })).toBe(76_440);
+    // why: four at a time would be 38,220 s, but 2,184 starts 30 s apart take 65,520 s
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '4' })).toBe(65_520);
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '4', CAMOUFOX_MIN_SPACING_SECONDS: '0' })).toBe(21_840);
+  });
+  it('is not blocked at start by its month, which has no cap; a run that fits the shared free-call cap fits', () => {
+    const e = engineWith([stubCamoufox({ cells: 100 })]);
+    const built = buildSnapshot(e.ctx, e.definition);
     const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
-    expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
-    expect(line?.seconds).toBe(7000);
-    expect(est.assumptions).toContain(
-      'camoufox list mode prices 100 of 2184 cells this run; a full pass takes 22 runs',
+    expect(checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, e.definition.id).breaches).toEqual(
+      [],
     );
   });
-  it('with page spacing 0 a page is estimated at 40 s, so 100 pages take 4000 s (operator, 2026-10-25)', () => {
-    const e = engineWith([stubCamoufox({ cells: 1 })], { env: { CAMOUFOX_MIN_SPACING_SECONDS: '0' } });
-    const def = e.ctx.repos.definitions.update(e.definition.id, {
-      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
-      minNights: 10,
-      maxNights: 21,
-      scheduleCron: '0 5 * * 1',
-    });
-    const built = buildSnapshot(e.ctx, def);
-    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
-    expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
-    expect(line?.seconds).toBe(4000);
-  });
-  it('is not blocked at start by its month, which has no cap, or by the shared free-calls cap', () => {
+  // why: spec rev 65: the browser's pages count against no per-run call cap, the free-call cap included
+  it('a run of more pages than the free-call cap is never blocked by it', () => {
     const { e, def } = workedExample();
     const built = buildSnapshot(e.ctx, def);
     const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const check = checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, def.id);
-    expect(check.breaches).toEqual([]);
+    expect(built.snapshot.budget.maxFreeCalls).toBeLessThan(2184);
+    expect(checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, def.id).breaches).toEqual([]);
   });
   // why: spec rev 64: the browser worker has no monthly cap, so the fit has no month row and no coverage warning for it
-  it('budgetFit lists no month or coverage scope for camoufox, and fits', () => {
+  it('budgetFit lists no month, run or coverage scope for camoufox', () => {
     const { e, def } = workedExample();
     const fit = budgetFitFor(e.ctx, def, def.id);
     expect(fit.perScope.map((s) => s.scope).filter((x) => x.includes('camoufox'))).toEqual([]);
-    expect(fit.fits).toBe(true);
   });
-  it('below the page cap the pages carry no retry factor: 5 cells are 5 pages, never 6 (ruling 13, TS 9)', () => {
+  it('the pages carry no retry factor: 5 cells are 5 pages, never 6 (ruling 13, TS 9)', () => {
     const e = engineWith([stubCamoufox({ cells: 5 })]);
     const built = buildSnapshot(e.ctx, e.definition);
     const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
@@ -83,7 +91,7 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
 // times, with no retry factor, since camoufox never retries.
 describe('the camoufox grid estimate', () => {
   function workedGrid(
-    grid: { pageAllowance: number; scrollAllowance: number; scrollSeconds?: number },
+    grid: { pageSeconds?: number; scrollSeconds?: number } = {},
     env: Record<string, string> = {},
   ) {
     const e = engineWith([stubCamoufox({ cells: 1, grid })], { env });
@@ -93,46 +101,37 @@ describe('the camoufox grid estimate', () => {
       maxNights: 21,
       scheduleCron: '0 5 * * 1',
     });
-    return { e, def };
+    const built = buildSnapshot(e.ctx, def);
+    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
+    return { est, line: est.perProvider.find((p) => p.providerId === 'camoufox') };
   }
-  it('a run that would pass STUCK_AFTER_HOURS says so (CB-7): at a 30 s scroll spacing, 57 pages and 147 scrolls', () => {
-    const { e, def } = workedGrid(
-      { pageAllowance: 25, scrollAllowance: 150, scrollSeconds: 30 },
-      { STUCK_AFTER_HOURS: '1' },
+  it('a run that would pass STUCK_AFTER_HOURS says so (CB-7): 78 pages at 50 s a page', () => {
+    const slow = workedGrid({ pageSeconds: 50 }, { STUCK_AFTER_HOURS: '1' });
+    expect(slow.line?.seconds).toBe(78 * 50);
+    expect(slow.est.assumptions).toContain(
+      'camoufox: this run takes about 1.1 h, past STUCK_AFTER_HOURS (1 h), so /health reports it stuck while it runs',
     );
-    const built = buildSnapshot(e.ctx, def);
-    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    expect(est.perProvider.find((p) => p.providerId === 'camoufox')?.seconds).toBe(57 * 30 + 147 * 30);
-    expect(est.assumptions).toContain(
-      'camoufox: this run takes about 1.7 h, past STUCK_AFTER_HOURS (1 h), so /health reports it stuck while it runs',
-    );
-    const quick = workedGrid({ pageAllowance: 25, scrollAllowance: 150 });
-    const b = buildSnapshot(quick.e.ctx, quick.def);
-    expect(estimateStart(quick.e.ctx, b.snapshot, b.cells, null).assumptions.join('\n')).not.toMatch(
-      /STUCK_AFTER/,
-    );
+    expect(workedGrid().est.assumptions.join('\n')).not.toMatch(/STUCK_AFTER/);
   });
-  it('with room for a page a block: 78 pages, no scroll, 30 s a page, and the retry factor 1.0', () => {
-    const { e, def } = workedGrid({ pageAllowance: 100, scrollAllowance: 600 });
-    const built = buildSnapshot(e.ctx, def);
-    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
+  it('a page a block: 78 pages, no scroll, 30 s a page, every cell in one run, and the retry factor 1.0', () => {
+    const { est, line } = workedGrid();
     expect(line).toMatchObject({ planCalls: 78, calls: 78, seconds: 78 * 30, scrolls: 0 });
-    expect(est.assumptions).toContain(
-      'camoufox grid mode reads 2184 of 2184 cells this run in 78 pages and 0 scrolls; a full pass takes 1 run',
-    );
+    expect(est.assumptions).toContain('camoufox grid mode reads 2184 cells in 78 pages and 0 scrolls');
     expect(est.assumptions).toContain(
       'camoufox never retries: its pages, scrolls and seconds carry no retry factor',
     );
   });
-  it('under a tight page allowance: pages up to the cap and scrolls within theirs, at 9.3 s a scroll', () => {
-    const { e, def } = workedGrid({ pageAllowance: 25, scrollAllowance: 150 });
-    const built = buildSnapshot(e.ctx, def);
-    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
-    // why: fix round 1 (TS 9): 21 in-column moves of 7 scrolls fit the 150 allowed (78 − 21 = 57 pages)
-    expect(line?.scrolls).toBe(147);
-    expect(line?.calls).toBe(57);
-    expect(line?.seconds).toBe(Math.ceil(57 * 30 + (line?.scrolls ?? 0) * 9.3));
+  it('grid pages at once share the time, never below the spacing between their starts', () => {
+    // why: 78 pages of 30 s are 2,340 s one at a time; a third is 780 s, under 78 starts × 30 s
+    expect(workedGrid({}, { CAMOUFOX_PAGES_AT_ONCE: '3' }).line?.seconds).toBe(78 * 30);
+    expect(
+      workedGrid({}, { CAMOUFOX_PAGES_AT_ONCE: '3', CAMOUFOX_MIN_SPACING_SECONDS: '5' }).line?.seconds,
+    ).toBe((78 * 30) / 3);
+  });
+  it('where a scroll is quicker than a page, blocks are joined by scrolls, each at its own time', () => {
+    const { line } = workedGrid({ scrollSeconds: 1 });
+    expect(line?.scrolls ?? 0).toBeGreaterThan(0);
+    expect(line?.calls ?? 78).toBeLessThan(78);
+    expect(line?.seconds).toBe(Math.ceil((line?.calls ?? 0) * 30 + (line?.scrolls ?? 0) * 1));
   });
 });

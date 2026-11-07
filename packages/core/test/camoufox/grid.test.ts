@@ -229,7 +229,6 @@ describe('the grid config (spec §12 rev 34)', () => {
       mode: 'list',
       gridScrollSpacingSeconds: 5,
       gridScrollCap: 30,
-      executionScrollCap: 600,
     });
   });
   it('accepts grid and the bounds', () => {
@@ -238,20 +237,17 @@ describe('the grid config (spec §12 rev 34)', () => {
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '30',
       CAMOUFOX_GRID_SCROLL_CAP: '0',
-      CAMOUFOX_EXECUTION_SCROLL_CAP: '6000',
     });
     expect(r.ok && r.config.providers.camoufox).toMatchObject({
       mode: 'grid',
       gridScrollSpacingSeconds: 30,
       gridScrollCap: 0,
-      executionScrollCap: 6000,
     });
   });
   it.each([
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_GRID_SCROLL_CAP', '61'],
-    ['CAMOUFOX_EXECUTION_SCROLL_CAP', '6001'],
     ['CAMOUFOX_MODE', 'calendar'],
   ])('%s=%s fails boot naming the field', (name, value) => {
     const r = cfg({ ...ON, [name]: value });

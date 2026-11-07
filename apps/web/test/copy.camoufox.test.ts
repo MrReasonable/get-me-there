@@ -3,11 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { COPY } from '../src/copy.js';
 
 describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
-  it('the Providers note says signed-out profile, own IP address and the per-run page cap', () => {
+  it('the Providers note says signed-out profile, own IP address and its pace, with no page cap a run', () => {
+    expect(COPY.camoufox.note).not.toMatch(/page cap/);
     for (const w of [
       'signed-out profile',
       'own IP address',
-      'page cap of day pairs a run (100 by default',
+      'at most one page every 30 seconds, so a run takes hours',
       'Off by default',
       'not a recognised results page',
     ])

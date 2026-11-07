@@ -6,10 +6,11 @@ import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
 /**
  * The start-to-start pacer (spec §2 "at least CAMOUFOX_MIN_SPACING_SECONDS from the start of one page load to the start
- * of the next"; decision 69 ruling 7; PIE-R2-07). One page at a time; a claim passes at least `spacing − 2 s` after the
- * last start (a fixed tolerance for arrival jitter, never randomised; with spacing 0 a claim always passes); the last start is persisted in
- * `<data>/pacer.json` so a restart keeps the spacing, and the recorder shares it. An unreadable record fails closed: the
- * last page is treated as now.
+ * of the next"; decision 69 ruling 7; PIE-R2-07). At most `capacity` pages at once (CAMOUFOX_PAGES_AT_ONCE for the
+ * worker, 1 for every other caller); a claim passes at least `spacing − 2 s` after the last start, whichever page made
+ * it (a fixed tolerance for arrival jitter, never randomised; with spacing 0 only the capacity refuses); the last start
+ * is persisted in `<data>/pacer.json` so a restart keeps the spacing, and the recorder shares it. An unreadable record
+ * fails closed: the last page is treated as now.
  */
 export const TOLERANCE_MS = 2000;
 const FILE = 'pacer.json';
@@ -24,14 +25,20 @@ export class Pacer {
    */
   readonly spacingMs: number;
   private readonly clock: Clock;
-  private busy = false;
+  private readonly capacity: number;
+  /** Pages holding a claim now. */
+  private claimed = 0;
 
-  constructor(o: { dir: string; minSpacingSeconds: number; clock: Clock }) {
+  constructor(o: { dir: string; minSpacingSeconds: number; clock: Clock; capacity?: number }) {
     if (!Number.isInteger(o.minSpacingSeconds) || o.minSpacingSeconds < 0 || o.minSpacingSeconds > 600)
       throw new Error('CAMOUFOX_MIN_SPACING_SECONDS must be a whole number from 0 to 600');
+    const capacity = o.capacity ?? 1;
+    if (!Number.isInteger(capacity) || capacity < 1)
+      throw new Error('the pacer’s capacity must be a whole number of at least 1');
     this.path = join(o.dir, FILE);
     this.spacingMs = o.minSpacingSeconds * 1000;
     this.clock = o.clock;
+    this.capacity = capacity;
   }
 
   /** The last page start, or null when none was recorded; an unreadable record reads as now (fail closed). */
@@ -59,17 +66,17 @@ export class Pacer {
   /** Claims the next page start, or says how long to wait (whole seconds, at least 1). */
   claim(): Claim {
     const now = Date.parse(this.clock.now());
-    if (this.busy) return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(this.spacingMs / 1000)) };
+    if (this.isBusy()) return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(this.spacingMs / 1000)) };
     const last = this.lastPageAt();
-    // why: spacing 0 (operator, 2026-10-25) is no pause at all: a claim passes, still one page at a time, and the
+    // why: spacing 0 (operator, 2026-10-25) is no pause at all: a claim passes while the capacity allows, and the
     // record below is still written so the last-page time stays right
     if (last !== null && this.spacingMs > 0) {
       const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - now;
       if (wait > 0) return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(wait / 1000)) };
     }
     writePrivateFile(this.path, JSON.stringify({ lastPageAt: this.clock.now() }));
-    // why: busy only once the record is written, so a failed write never wedges the pacer (CodeRabbit, fix round 1)
-    this.busy = true;
+    // why: claimed only once the record is written, so a failed write never wedges the pacer (CodeRabbit, fix round 1)
+    this.claimed += 1;
     return { ok: true };
   }
 
@@ -81,24 +88,29 @@ export class Pacer {
    * nothing, so the caller ends that step as the spacing's, with the page's own deadline untouched.
    */
   async reclaim(d: Deadline, timers: Timers): Promise<void> {
-    const last = this.lastPageAt();
-    if (last !== null && this.spacingMs > 0) {
+    // why: CodeRabbit on PR #49: another page may start while this one waits, so the last start is read again after
+    // every wait until no wait is left
+    for (;;) {
+      const last = this.lastPageAt();
+      if (last === null || this.spacingMs === 0) break;
       const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - Date.parse(this.clock.now());
+      if (wait <= 0) break;
       // why: a wait the step's budget cannot cover would only idle the open page; it ends the step now instead (a wait of
       // exactly what is left would end with the deadline, so it is refused too)
       if (wait >= d.remaining()) throw new DeadlineExceeded('the spacing outlasts the step budget');
-      if (wait > 0) await d.race(timers.sleep(wait, d.signal));
+      await d.race(timers.sleep(wait, d.signal));
     }
     writePrivateFile(this.path, JSON.stringify({ lastPageAt: this.clock.now() }));
   }
 
-  /** Ends the page in flight; the spacing still runs from its start. */
+  /** Ends one page in flight; the spacing still runs from the last start. */
   release(): void {
-    this.busy = false;
+    this.claimed = Math.max(0, this.claimed - 1);
   }
 
+  /** True while `capacity` pages hold a claim, so the next claim is refused whatever the spacing. */
   isBusy(): boolean {
-    return this.busy;
+    return this.claimed >= this.capacity;
   }
 }
 

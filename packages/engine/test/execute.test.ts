@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { autoResume } from '../src/scheduler/catchUp.js';
-import { engineWith, realTime, stubCamoufox } from './support/camoufox.js';
+import { engineWith, realTime, storeStoppedAtPageCap, stubCamoufox } from './support/camoufox.js';
 import { createHarness, FIXTURE_COST_MICRO_GBP, JFK, LGW, LHR } from './support/harness.js';
 
 afterEach(() => {
@@ -135,15 +135,11 @@ describe("no automatic resume for an unscheduled search (Ian's ruling 2)", () =>
     expect(resume).toHaveBeenCalledWith(e.id, { manual: false });
   });
 
-  it("a manual resume of the browser worker's per-run page limit is refused cap (Search again is the only path)", async () => {
+  it("a manual resume of a run stored at the browser worker's withdrawn per-run page limit is refused cap", async () => {
     realTime();
-    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 2 });
+    const e = engineWith([stubCamoufox({ cells: 2 })]);
     const ex = await e.runToEnd();
-    expect(ex.stopCause).toMatchObject({
-      kind: 'budget',
-      scope: 'provider-execution',
-      providerId: 'camoufox',
-    });
+    storeStoppedAtPageCap(e, ex.id);
     expect(await e.resumeResult(ex.id, { manual: true })).toMatchObject({ ok: false, code: 'cap' });
     expect(e.ctx.repos.executions.get(ex.id)?.status).toBe('paused_budget');
   });

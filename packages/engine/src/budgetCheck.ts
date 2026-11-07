@@ -121,7 +121,8 @@ export function checkBudget(
   const blockedBy = new Map<LineKey, string>();
   const breaches: Breach[] = [];
   const billed = spend.filter((s) => ctx.limitsOf(s.providerId).billed);
-  const free = spend.filter((s) => !ctx.limitsOf(s.providerId).billed);
+  // why: the browser's pages count against no per-run call cap (spec rev 65), so a free line is a free API provider's
+  const free = spend.filter((s) => ctx.limitsOf(s.providerId).countsFreeCalls);
   const ids = (xs: readonly PlannedSpend[]) => [...new Set(xs.map((s) => s.providerId))];
   const total = (xs: readonly PlannedSpend[], f: (s: PlannedSpend) => number) =>
     xs.reduce((a, s) => a + f(s), 0);
@@ -173,26 +174,6 @@ export function checkBudget(
     total(billed, (s) => s.costMicroGbp),
     billed,
   );
-  // why: fix round 1 (CodeRabbit): a provider's own page cap within the execution (camoufox, decision 69), so a resume
-  // that has none left is refused before it is claimed, not on its first reservation
-  for (const id of ids(spend)) {
-    const cap = budget.providerMaxCalls?.[id];
-    if (cap === undefined) continue;
-    const used =
-      executionId === null
-        ? 0
-        : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId: id }).calls;
-    const lines = spend.filter((s) => s.providerId === id);
-    check(
-      'provider-execution',
-      id,
-      cap,
-      used,
-      0,
-      total(lines, (s) => s.calls),
-      lines,
-    );
-  }
   // why: one read of each other schedule's load for every provider window of this check (storedScheduleLoad's memo)
   withScheduleLoads(ctx, new Map(), () => {
     for (const id of ids(spend)) {

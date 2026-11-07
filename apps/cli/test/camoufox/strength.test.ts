@@ -459,11 +459,9 @@ describe('browserSetup’s outcomes and words', () => {
   });
   it('app.env that would fail the app’s settings check is not turned on', async () => {
     const m = await world();
-    m.fs.file(ENV, `${m.fs.read(ENV) ?? ''}CAMOUFOX_EXECUTION_PAGE_CAP="0"\n`, 0o600);
+    m.fs.file(ENV, `${m.fs.read(ENV) ?? ''}CAMOUFOX_BROWSER_WINDOW="sometimes"\n`, 0o600);
     expect(await run(m)).toBe('not-set-up');
-    expect(m.io.stderr).toContain(
-      'app.env would not pass the app’s settings check: CAMOUFOX_EXECUTION_PAGE_CAP',
-    );
+    expect(m.io.stderr).toContain('app.env would not pass the app’s settings check: CAMOUFOX_BROWSER_WINDOW');
   });
   it('a failed turn-on is failed, saying what stopped', async () => {
     const m = await world();
@@ -633,6 +631,7 @@ describe('the install helpers’ edges', () => {
         CAMOUFOX_COOLDOWN_HOURS: '48',
         CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
         CAMOUFOX_MIN_SPACING_SECONDS: '30',
+        CAMOUFOX_PAGES_AT_ONCE: '1',
         CAMOUFOX_MODE: 'list',
         CAMOUFOX_GRID_SCROLL_CAP: '30',
         CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',

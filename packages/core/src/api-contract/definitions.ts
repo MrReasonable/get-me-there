@@ -69,7 +69,7 @@ export const executionBudgetSchema = z.object({
   maxCalls: positiveInt,
   maxFreeCalls: positiveInt,
   maxCostMicroGbp: microGbpSchema,
-  /** Set by the engine at creation (camoufox's page cap, decision 69); a definition's own budget never carries it. */
+  /** A run stored before spec revision 65 may carry the browser's withdrawn page cap; parsed, never read. */
   providerMaxCalls: z.partialRecord(providerIdSchema, z.number().int().min(1)).exactOptional(),
   /** Spec rev 55 §8.1 (ruling A5): set by the engine at creation; a definition's own budget never carries it; never 0 (the guard still reads an absent or invalid one as 0, fail closed). */
   flightListPages: z.number().int().min(1).exactOptional(),

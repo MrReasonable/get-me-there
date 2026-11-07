@@ -14,9 +14,8 @@
  *   block-to-block move is 7 scrolls), its intermediate views passed unread; the returns move first when they go later
  *   and the departures first when they go earlier, so every view on the way holds round trips.
  * - **Pages or scrolls.** Every block starts as its own page (about the 30 s page spacing, against about 9.3 s a scroll,
- *   so a page is the quicker way to a new block). A move is made by scrolling instead when that is quicker, or when the
- *   page allowance would otherwise be passed, cheapest moves first, within the scroll allowance and the per-page cap.
- *   Pages past the allowance stay in the plan: the engine's page cap stops them (`skipped:budget`).
+ *   so a page is the quicker way to a new block). A move is made by scrolling instead only when that is quicker,
+ *   cheapest moves first, within the per-page cap. There is no page or scroll cap a run (spec §2).
  */
 import {
   addDays,
@@ -40,9 +39,6 @@ export interface GridPlanOptions {
   stepDays: { departures: number; returns: number };
   /** The scrolls one page may make (CAMOUFOX_GRID_SCROLL_CAP). */
   scrollCap: number;
-  /** This pair's share of the run's pages and scrolls. */
-  pageAllowance: number;
-  scrollAllowance: number;
   today: IsoDate;
   horizonDays: number;
   times: { pageSeconds: number; scrollSeconds: number };
@@ -142,8 +138,6 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
   const joined = moves.map(() => false);
   // why: re-review N4: with a per-page cap of 0 there is no lead scroll; the diagonal page still opens a day later
   const lead = path.map((b) => (o.scrollCap >= 1 ? leadOf(b) : 0));
-  let pages = path.length;
-  let scrolls = lead.reduce((a, b) => a + b, 0);
   const pageScrolls = (i: number): number => {
     // the scrolls of the page that would hold the move from block i to i + 1, were it joined
     let total = moves[i]?.length ?? 0;
@@ -159,13 +153,10 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
     .map((m, i) => ({ i, n: m.length }))
     .sort((a, b) => (a.n === b.n ? a.i - b.i : a.n - b.n));
   for (const { i, n } of order) {
-    const quicker = n * o.times.scrollSeconds < o.times.pageSeconds;
-    if (!quicker && pages <= o.pageAllowance) break;
-    const added = n - (lead[i + 1] ?? 0);
-    if (scrolls + added > o.scrollAllowance || pageScrolls(i) > o.scrollCap) continue;
+    // why: the moves are cheapest first, so once one is no quicker than a new page, none after it is
+    if (n * o.times.scrollSeconds >= o.times.pageSeconds) break;
+    if (pageScrolls(i) > o.scrollCap) continue;
     joined[i] = true;
-    pages--;
-    scrolls += added;
   }
   const tiles: TilePlan[] = [];
   let current: { blocks: Block[]; moves: GridMove[]; reads: boolean[] } | null = null;
@@ -200,15 +191,6 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
     }
   }
   close();
-  // why: fix round 2 (ruling 1): the pages that join blocks by scrolls come first, so a pair's share of the run's pages
-  // reaches its scrolls before the page cap binds; the order is otherwise the path's (a stable sort)
-  const blocksOf = (t: TilePlan): number =>
-    t.request.kind === 'grid-path' ? t.request.reads.filter((x) => x).length : 0;
-  const ordered = tiles
-    .map((t, i) => ({ t, i }))
-    .sort((a, b) => (blocksOf(a.t) > 1 === blocksOf(b.t) > 1 ? a.i - b.i : blocksOf(a.t) > 1 ? -1 : 1))
-    .map(({ t }, index) => ({ ...t, index }));
-  tiles.splice(0, tiles.length, ...ordered);
   // why: the engine's tiles partition a pair's cells; the cells past the horizon go to one probe page, opened at their
   // least departure and least return (PA I1, M4): Google's no-flights page there is evidence of no data only for the
   // cells on or after it on both axes (gridTile), and a page that shows prices leaves the cells it did not show as

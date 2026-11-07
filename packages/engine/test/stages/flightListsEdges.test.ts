@@ -20,7 +20,7 @@ import {
 } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { errorText } from '../../src/errors.js';
-import { laneFor, newRun, type RunState, stopRun } from '../../src/run.js';
+import { laneFor, newRun, type RunState } from '../../src/run.js';
 import { flightStepEntry, returnsStopOf, runFlightLists } from '../../src/stages/flightLists.js';
 import type { RankedDatePair, RankedDatePairsReader } from '../../src/types.js';
 import {
@@ -124,7 +124,6 @@ function guardWith(
     recordCacheHit: (p) => g.recordCacheHit(p),
     usage: (s) => over(s, g.usage(s)),
     recentCalls: (id, since) => g.recentCalls(id, since),
-    scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
   };
 }
 
@@ -142,24 +141,26 @@ const budgetStop = (providerId: 'camoufox' | 'travelpayouts'): RunState['stop'] 
 });
 
 describe('flightStepEntry: the refusals before the plan', () => {
-  it('an install with no camoufox registered, a stop recorded for the step, or a snapshot without camoufox: no step', async () => {
+  it('an install with no camoufox registered, a stopped run, or a snapshot without camoufox: no step', async () => {
     const { e, pass } = await discovered();
     const run = pass();
     expect(flightStepEntry(e.ctx, run)).toBe(true);
     expect(flightStepEntry({ ...e.ctx, providers: new Map() }, run)).toBe(false);
-    expect(
-      flightStepEntry(e.ctx, { ...run, flightStop: { kind: 'cancel', cause: { kind: 'cancelled' } } }),
-    ).toBe(false);
+    expect(flightStepEntry(e.ctx, { ...run, stop: { kind: 'cancel', cause: { kind: 'cancelled' } } })).toBe(
+      false,
+    );
     const providers = { ...run.snapshot.providers, discovery: ['travelpayouts' as const] };
     expect(flightStepEntry(e.ctx, { ...run, snapshot: { ...run.snapshot, providers } })).toBe(false);
   });
 
-  it('an allowance of one page is an allowance; a page cap stop of another provider is not the browser’s', async () => {
+  // why: spec rev 65: the browser has no page cap, so no budget stop leaves the step to run after it
+  it('an allowance of one page is an allowance; a run stopped at any budget cap runs no step', async () => {
     const { e, pass } = await discovered();
     const run = pass();
     const budget = { ...run.snapshot.budget, flightListPages: 1 };
     expect(flightStepEntry(e.ctx, { ...run, snapshot: { ...run.snapshot, budget } })).toBe(true);
-    expect(flightStepEntry(e.ctx, { ...run, stop: budgetStop('travelpayouts') })).toBe(false);
+    for (const id of ['travelpayouts', 'camoufox'] as const)
+      expect(flightStepEntry(e.ctx, { ...run, stop: budgetStop(id) })).toBe(false);
   });
 });
 
@@ -244,7 +245,10 @@ describe('one pass of the step, its plan and its pages', () => {
     const run = newRun(e.ctx, second, { manual: false, fresh: false, blocked: new Set() });
     await runFlightLists(e.ctx, run);
     expect(row(e, second.id).flightLists).toMatchObject({ planned: 10, reused: 5 });
-    expect(run.flightLists).toEqual({ read: 10, planned: 10 });
+    const plan = row(e, second.id).flightLists;
+    if (plan === null) throw new Error('no plan');
+    // why: what the step counts as read: the pairs it read and the ones it reused
+    expect(e.ctx.repos.flightLists.forExecution(second.id, plan.cells).read + plan.reused).toBe(10);
   });
 
   it('a guard that states no flight allowance gives none: every pair failed execution-cap before any call', async () => {
@@ -364,8 +368,8 @@ describe('what a page that throws or is blocked leaves', () => {
   });
 });
 
-describe('the stops recorded during and after the step (revision 55 §8.1)', () => {
-  it('a database failure during the step after the page-cap stop is the run’s flight stop: fatal', async () => {
+describe('a stop during the step (revision 55 §8.1, R-dberror)', () => {
+  it('a database failure during the step is the run’s fatal stop', async () => {
     const { e, pass } = await discovered();
     const insert = e.ctx.repos.flightLists.insert.bind(e.ctx.repos.flightLists);
     let n = 0;
@@ -374,20 +378,9 @@ describe('the stops recorded during and after the step (revision 55 §8.1)', () 
       if (n === 3) throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
       return insert(r);
     };
-    const run = { ...pass(), stop: budgetStop('camoufox') };
+    const run = pass();
     await runFlightLists(e.ctx, run);
-    expect(run.flightStop).toEqual({ kind: 'fatal', message: 'SQLITE_IOERR: disk I/O error (synthetic)' });
-    expect(run.stop).toEqual(budgetStop('camoufox'));
-  });
-
-  it('a fatal stop after the step has ended is not the flight stop: the run keeps the page-cap stop', async () => {
-    const { e, pass } = await discovered();
-    const run = { ...pass(), stop: budgetStop('camoufox') };
-    await runFlightLists(e.ctx, run);
-    expect(flightRows(e, run.executionId)).toHaveLength(10);
-    stopRun(run, { kind: 'fatal', message: 'a later failure (synthetic)' });
-    expect(run.flightStop).toBeNull();
-    expect(run.stop).toEqual(budgetStop('camoufox'));
+    expect(run.stop).toEqual({ kind: 'fatal', message: 'SQLITE_IOERR: disk I/O error (synthetic)' });
   });
 });
 
@@ -397,7 +390,7 @@ describe('the early end a pass leaves on, or clears from, its stored plan', () =
     s.unreadLast();
     const run = {
       ...s.pass(),
-      flightStop: { kind: 'cancel' as const, cause: { kind: 'cancelled' as const } },
+      stop: { kind: 'cancel' as const, cause: { kind: 'cancelled' as const } },
     };
     laneFor(run, 'discovery', 'camoufox');
     await runFlightLists(s.e.ctx, run);
