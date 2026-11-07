@@ -190,6 +190,8 @@ export class PageSession {
   private busyUntil: number | null = null;
   /** This session's page holds a pacer claim (from the claim until the `finally` that releases it). */
   private claimed = false;
+  /** A wipe of the profile failed: the next launch removes it first, and fails while it cannot. */
+  private wipePending = false;
 
   constructor(private readonly d: SessionDeps) {
     this.S = d.selectors ?? SELECTORS;
@@ -207,6 +209,14 @@ export class PageSession {
   currentContext(): Promise<ContextLike> {
     if (this.context !== null) return Promise.resolve(this.context);
     if (this.launching === null) {
+      // why: CodeRabbit on PR #49: a profile whose wipe failed is never launched again until the wipe succeeds
+      if (this.wipePending) {
+        try {
+          this.wipeProfile();
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      }
       const p = this.d.launch();
       this.launching = p;
       p.then(
@@ -229,7 +239,16 @@ export class PageSession {
     this.context = null;
     this.launching = null;
     if (c !== null) await bounded(() => c.close(), this.finallyMs, this.d.timers);
-    if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
+    if (wipe) {
+      this.wipePending = true;
+      this.wipeProfile();
+    }
+  }
+
+  /** Removes the profile; `wipePending` stays set until a removal succeeds. */
+  private wipeProfile(): void {
+    rmSync(this.d.profileDir, { recursive: true, force: true });
+    this.wipePending = false;
   }
 
   /**
@@ -527,6 +546,15 @@ export class PageSession {
       this.busyUntil = this.d.timers.now() + 3 * this.finallyMs;
     }
     budget.d.clear();
+    // why: CodeRabbit on PR #49: with pages at once, a stop is recorded before this page's close, so no other session
+    // starts a page meanwhile; the stop handling below records it again with its final hours and reports a failed write
+    if (stop !== null) {
+      try {
+        this.d.cooldown.start(stop);
+      } catch {
+        // the stop handling below writes the same record and answers fatal when it cannot
+      }
+    }
 
     // Rule 5: after goto, on every path, the SOCS read-back by value, then the page closed, each under its own bound.
     let discard = preGotoFailed;
@@ -557,9 +585,16 @@ export class PageSession {
       }
     }
     if (stop === 'consent-unhandled') wipe = true;
-    if (wipe || discard) await this.discard(wipe);
-    this.busySince = null;
-    this.busyUntil = null;
+    try {
+      if (wipe || discard) await this.discard(wipe);
+    } catch (e) {
+      // why: CodeRabbit on PR #49: a wipe comes only with a stop, whose answer this page keeps; the session is free
+      // again and its next launch retries the wipe first (wipePending), answering a launch error while it fails
+      this.d.log.warn({ error: detailOf(e) }, 'profile wipe failed');
+    } finally {
+      this.busySince = null;
+      this.busyUntil = null;
+    }
     counts.loads = guardState?.documentLoads ?? 0;
 
     if (stop !== null) {

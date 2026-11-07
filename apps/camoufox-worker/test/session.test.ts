@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ANSWER_STATUS,
@@ -1377,6 +1377,78 @@ describe('PageSlots (pages at once)', () => {
     expect(busy.answer).toEqual({ kind: 'spacing', retryAfterSeconds: 15 });
     release();
     expect((await a).answer.kind).toBe('cells');
+  });
+  // why: CodeRabbit on PR #49: the stop is visible to every session before its page closes
+  it('a stop is recorded before its page closes, so no other session starts a page meanwhile', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let closing: () => void = () => undefined;
+    const reachedClose = new Promise<void>((r) => {
+      closing = r;
+    });
+    const t = setup({
+      spacing: 0,
+      capacity: 2,
+      shape: (c) => {
+        c.navigations = [
+          {
+            hops: [URL0, LANDED],
+            tree: resultsTree(),
+            frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+          },
+        ];
+        c.onNewPage = (p) => {
+          const close = p.close.bind(p);
+          p.close = async () => {
+            closing();
+            await gate;
+            return close();
+          };
+        };
+      },
+    });
+    const slots = new PageSlots([t.session, t.make()]);
+    const a = slots.page(REQ);
+    await reachedClose;
+    expect(t.cooldown.active()?.cause).toBe('captcha');
+    expect((await slots.page(REQ)).answer).toMatchObject({ kind: 'cooling-down', cause: 'captcha' });
+    expect(t.contexts).toHaveLength(1);
+    release();
+    expect((await a).answer).toMatchObject({ kind: 'blocked', page: 'captcha' });
+  });
+  // why: CodeRabbit on PR #49: a failed wipe never leaves the session busy, and the profile is not launched again
+  // until its removal succeeds
+  it('a profile wipe that fails frees the session; the next launch retries the wipe and fails while it cannot', async () => {
+    let launched = 0;
+    const t = setup({
+      shape: (c) => {
+        launched += 1;
+        if (launched === 1) changeSocs(c);
+      },
+    });
+    writeFileSync(join(t.profileDir, 'prefs.js'), '');
+    chmodSync(t.profileDir, 0o500);
+    try {
+      expect((await t.session.page(REQ)).answer).toMatchObject({
+        kind: 'blocked',
+        page: 'consent-unhandled',
+      });
+      expect(t.session.busy()).toBeNull();
+      expect(existsSync(t.profileDir)).toBe(true);
+      // why: past the consent cool-down (48 h)
+      t.clock.advance(49 * 3_600_000);
+      expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'browser-error', stage: 'launch' });
+      expect(t.launches.count).toBe(1);
+      expect(t.session.busy()).toBeNull();
+      chmodSync(t.profileDir, 0o700);
+      t.clock.advance(60_000);
+      expect((await t.session.page(REQ)).answer.kind).toBe('cells');
+      expect(t.launches.count).toBe(2);
+    } finally {
+      if (existsSync(t.profileDir)) chmodSync(t.profileDir, 0o700);
+    }
   });
   it('with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing', async () => {
     const h = held({ capacity: 1 });

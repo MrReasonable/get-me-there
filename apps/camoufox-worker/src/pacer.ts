@@ -88,13 +88,17 @@ export class Pacer {
    * nothing, so the caller ends that step as the spacing's, with the page's own deadline untouched.
    */
   async reclaim(d: Deadline, timers: Timers): Promise<void> {
-    const last = this.lastPageAt();
-    if (last !== null && this.spacingMs > 0) {
+    // why: CodeRabbit on PR #49: another page may start while this one waits, so the last start is read again after
+    // every wait until no wait is left
+    for (;;) {
+      const last = this.lastPageAt();
+      if (last === null || this.spacingMs === 0) break;
       const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - Date.parse(this.clock.now());
+      if (wait <= 0) break;
       // why: a wait the step's budget cannot cover would only idle the open page; it ends the step now instead (a wait of
       // exactly what is left would end with the deadline, so it is refused too)
       if (wait >= d.remaining()) throw new DeadlineExceeded('the spacing outlasts the step budget');
-      if (wait > 0) await d.race(timers.sleep(wait, d.signal));
+      await d.race(timers.sleep(wait, d.signal));
     }
     writePrivateFile(this.path, JSON.stringify({ lastPageAt: this.clock.now() }));
   }

@@ -248,6 +248,31 @@ describe('Pacer.reclaim (the holder’s further document load)', () => {
     expect(p.isBusy()).toBe(true);
     d.clear();
   });
+  // why: CodeRabbit on PR #49: pages at once: a page that starts while this one waits moves the last start
+  it('reads the last start again after its wait, and waits again for a page that started meanwhile', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock, capacity: 2 });
+    expect(p.claim()).toEqual({ ok: true });
+    timers.clock.advance(5000);
+    let other = false;
+    const waits = {
+      ...timers,
+      sleep: async (ms: number, signal?: AbortSignal): Promise<void> => {
+        await timers.sleep(ms, signal);
+        // why: the other page session's page starts as this wait ends (28 s after T0: its own claim passes)
+        if (!other) {
+          other = true;
+          expect(p.claim()).toEqual({ ok: true });
+        }
+      },
+    };
+    const d = timers.deadline(120_000);
+    await p.reclaim(d, waits);
+    expect(timers.sleeps).toEqual([23_000, 28_000]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:56.000Z');
+    d.clear();
+  });
   it('does not wait once the spacing has passed, and records the start', async () => {
     const timers = fakeTimers(fixedClock(T0));
     const dir = tmpDir();

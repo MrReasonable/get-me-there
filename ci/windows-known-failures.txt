@@ -624,6 +624,8 @@ apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec re
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a request goes to an idle session; with every session busy it is answered spacing for the soonest end
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a block in one session stops every later page, while the page in flight in another finishes
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with the only session closing its page, the busy answer waits for the close, not the spacing alone
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a stop is recorded before its page closes, so no other session starts a page meanwhile
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a profile wipe that fails frees the session; the next launch retries the wipe and fails while it cannot
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) sets only the last-page time, 0600, under the lock; the cool-down is not touched
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) an error taking the lock other than a held lock is thrown as it is, never reported as a refusal
