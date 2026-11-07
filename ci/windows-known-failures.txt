@@ -604,6 +604,7 @@ apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down 
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with an allowance of 0, the page loads, reads its first block and makes no scroll
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a page that ends early states the scrolls it made
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a second such page in a row is refused when another page session read the first
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells of two such pages read at once in two page sessions, the second to end is refused
 apps/camoufox-worker/test/instances.test.ts > app instances (decision 82: a second one is reported, never refused) an instances file of another shape starts the month’s list afresh; the file is 0600
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) starts beside an earlier worker’s pacer and counts files, and leaves the counts file as it is
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) the status reports the calendar month’s app instances; a second one is reported, not refused
@@ -622,6 +623,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, pacer
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a request goes to an idle session; with every session busy it is answered spacing for the soonest end
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a block in one session stops every later page, while the page in flight in another finishes
+apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with the only session closing its page, the busy answer waits for the close, not the spacing alone
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) sets only the last-page time, 0600, under the lock; the cool-down is not touched
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) an error taking the lock other than a held lock is thrown as it is, never reported as a refusal
