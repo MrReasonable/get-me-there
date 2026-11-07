@@ -1,14 +1,12 @@
-// A guard over a fresh database, the real budgetConfigFromConfig and real executions whose snapshots carry
-// `budget.providerMaxCalls` (WP14 Task 14.7): what the engine builds, so the snapshot rule is tested end to end.
+// A guard over a fresh database, the real budgetConfigFromConfig and real executions whose snapshots may carry the
+// withdrawn `budget.providerMaxCalls` (as a run stored before spec revision 65 does), so its being ignored is tested.
 import { fixedClock, parseConfig } from '@gmt/core';
 import { budgetConfigFromConfig } from '../../src/budgetConfig.js';
 import { SqliteBudgetGuard } from '../../src/budgetGuard.js';
 import { freshDb, T0 } from './db.js';
 
 /** The app's env with camoufox on (synthetic key) and the caps the test names. */
-export function camoufoxEnv(
-  o: { camoufoxConfigCap?: number; maxFreeCalls?: number; executionScrollCap?: number } = {},
-): Record<string, string> {
+export function camoufoxEnv(o: { maxFreeCalls?: number } = {}): Record<string, string> {
   return {
     NODE_ENV: 'production',
     DATABASE_PATH: '/data/get-me-there.db',
@@ -18,9 +16,7 @@ export function camoufoxEnv(
     CAMOUFOX_ENABLED: 'true',
     CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
     CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
-    CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
     EXECUTION_MAX_FREE_CALLS: String(o.maxFreeCalls ?? 2000),
-    CAMOUFOX_EXECUTION_SCROLL_CAP: String(o.executionScrollCap ?? 600),
   };
 }
 
@@ -31,9 +27,8 @@ export function configFrom(env: Record<string, string>) {
 }
 
 function build(o: {
-  camoufoxConfigCap?: number;
   maxFreeCalls?: number;
-  executionScrollCap?: number;
+  /** Per execution, the withdrawn page cap its snapshot carries (a run stored before spec revision 65); never read. */
   snapshotCaps: Record<string, Partial<Record<'camoufox', number>>>;
   /** Spec rev 55 §8.1: per execution, the snapshot's `budget.flightListPages`; an execution not named has none. */
   snapshotFlightPages?: Record<string, number>;

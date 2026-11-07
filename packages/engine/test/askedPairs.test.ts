@@ -58,38 +58,27 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
     });
   });
 
-  it('camoufox list mode alone under a 100-page cap plans the first 100 cells, all on the first airport pair: 0 covered, 100 partly', () => {
-    // why: planSingleCells yields cells in generation order (origin, destination, day, nights); the first 100 are
-    // LHR-JFK's first 100 (departure, stay) cells, so each of their date pairs has 1 of its 4 airport pairs planned
+  // why: spec rev 65: no page cap a run, so list mode plans every cell, a page each, on all four airport pairs
+  it('camoufox list mode alone plans every cell: all 2,184 date pairs covered, none partly', () => {
     const w = worked([stubCamoufox({ cells: 1 })]);
     expect(asked(w)).toEqual({
       datePairs: 2184,
-      datePairsCovered: 0,
-      datePairsPartly: 100,
+      datePairsCovered: 2184,
+      datePairsPartly: 0,
       datePairsReused: 0,
     });
   });
 
   /**
-   * Grid mode at the defaults, derived by hand from the planner (packages/providers/src/camoufox/grid.ts):
-   * - blocks are 7 × 7 views; 182 days of departures are 26 columns of 7, and a column's returns (offsets 0–17 from its
-   *   first return) fall in 3 blocks holding 28, 46 and 10 cells (column total 7 × 12 = 84); so 78 blocks and 2,184
-   *   cells an airport pair, 57 pages an airport pair in all;
-   * - the run has 100 pages and 588 scrolls; 4 pairs share them, so each pair has 25 pages and 147 scrolls;
-   * - a move between a column's blocks is 7 scrolls; joining 2 moves makes a 3-block page of 84 cells for 14 scrolls.
-   *   147 scrolls allow 10 such pages (140) and 1 more move (7): an 11th page of 2 blocks (28 + 46 = 74 cells). Pages
-   *   joining blocks are planned first;
-   * - the other 14 of the 25 pages are single blocks in path order: 4 whole columns of 84 and 38 more (10 + 28);
-   * - an airport pair therefore has 10 × 84 + 74 + 4 × 84 + 38 = 1,288 of its 2,184 cells planned, and 4 × 1,288 = 5,152
-   *   of 8,736 over the four; the page cap of 100 is exactly the 4 × 25.
-   * All four airport pairs plan the same date pairs, so every planned date pair has all 4 cells planned: 1,288 covered,
-   * 0 partly.
+   * Grid mode at the defaults (packages/providers/src/camoufox/grid.ts): 182 days of departures are 26 columns of 7,
+   * and a column's returns fall in 3 blocks, so 78 blocks and 2,184 cells an airport pair, a page each (a new page is
+   * quicker than a block's 7 scrolls) and no page cap a run (spec rev 65): every date pair has all 4 cells planned.
    */
-  it('camoufox grid mode at the defaults: 1,288 date pairs covered (5,152 of 8,736 cells), none partly', () => {
-    const w = worked([stubCamoufox({ cells: 1, grid: { pageAllowance: 100, scrollAllowance: 588 } })]);
+  it('camoufox grid mode at the defaults: all 2,184 date pairs covered (8,736 cells), none partly', () => {
+    const w = worked([stubCamoufox({ cells: 1, grid: {} })]);
     expect(asked(w)).toEqual({
       datePairs: 2184,
-      datePairsCovered: 1288,
+      datePairsCovered: 2184,
       datePairsPartly: 0,
       datePairsReused: 0,
     });
@@ -105,12 +94,12 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
     });
   });
 
-  it('a camoufox line is cut at its 100-page run cap, never by a month', () => {
+  it('a camoufox line is never cut, neither by a run nor by a month', () => {
     const w = worked([stubCamoufox({ cells: 1 })]);
     expect(asked(w, w.def.id)).toEqual({
       datePairs: 2184,
-      datePairsCovered: 0,
-      datePairsPartly: 100,
+      datePairsCovered: 2184,
+      datePairsPartly: 0,
       datePairsReused: 0,
     });
   });
@@ -168,7 +157,6 @@ function guardWith(
     recordCacheHit: (p) => g.recordCacheHit(p),
     usage: (s) => over(g.usage(s)),
     recentCalls: (id, since) => g.recentCalls(id, since),
-    scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
   };
 }
 

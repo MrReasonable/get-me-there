@@ -15,18 +15,9 @@ export function isCostScope(scope: BudgetScopeKind): boolean {
   return scope === 'execution-cost' || scope === 'global-month';
 }
 
-/** The unit a cap counts: calls (or money) by default; a camoufox grid page's scrolls (spec §2 rev 34). */
-export type CapUnit = 'calls' | 'scrolls';
-
-/** Plain-English name of a cap scope (po-012); a scroll cap is named as one (fix round 1, CA 2). */
-export function scopeName(
-  scope: BudgetScopeKind,
-  providerId: ProviderId | null,
-  unit: CapUnit = 'calls',
-): string {
+/** Plain-English name of a cap scope (po-012). */
+export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null): string {
   const p = providerId ?? 'the provider';
-  // why: a run's own scroll cap is the only one (spec §2)
-  if (unit === 'scrolls') return `${p}'s scroll cap for this run`;
   switch (scope) {
     case 'execution-calls':
       return "this run's billed-call cap";
@@ -35,7 +26,7 @@ export function scopeName(
     case 'execution-cost':
       return "this run's spend cap";
     case 'provider-execution':
-      return `${p}'s page cap for this run`;
+      return `${p}'s flight-list pages for this run`;
     case 'provider-month':
       return `${p}'s monthly call cap`;
     case 'provider-lifetime':
@@ -46,23 +37,14 @@ export function scopeName(
 }
 
 /** A cap figure with its unit: pounds for cost scopes (micro-GBP rounded up to the penny), "N calls" otherwise (arch-018). */
-export function scopeAmount(scope: BudgetScopeKind, n: number, unit: CapUnit = 'calls'): string {
-  if (unit === 'scrolls') return `${n} ${n === 1 ? 'scroll' : 'scrolls'}`;
+export function scopeAmount(scope: BudgetScopeKind, n: number): string {
   if (isCostScope(scope)) return formatPence(microGbpToPence(n));
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
 }
 
 /** A BudgetExceeded in one sentence (breachText over its own figures). */
 export function budgetText(e: BudgetExceeded, needsLabel: string): string {
-  return breachText(
-    e.scope,
-    e.providerId ?? null,
-    e.cap,
-    e.current,
-    e.requested,
-    needsLabel,
-    e.unit ?? 'calls',
-  );
+  return breachText(e.scope, e.providerId ?? null, e.cap, e.current, e.requested, needsLabel);
 }
 
 /** "this run's billed-call cap is 50 calls; 50 calls used; the next call needs 1 call" in one sentence. */
@@ -73,11 +55,8 @@ export function breachText(
   used: number,
   needs: number,
   needsLabel: string,
-  unit: CapUnit = 'calls',
 ): string {
-  // why: a scroll cap is reached by a page's planned scrolls, so the figure that did not fit is the next page's
-  const label = unit === 'scrolls' ? needsLabel.replace(/\bcall\b/, 'page') : needsLabel;
-  return `${scopeName(scope, providerId, unit)} is ${scopeAmount(scope, cap, unit)}; ${scopeAmount(scope, used, unit)} used; ${label} ${scopeAmount(scope, needs, unit)}`;
+  return `${scopeName(scope, providerId)} is ${scopeAmount(scope, cap)}; ${scopeAmount(scope, used)} used; ${needsLabel} ${scopeAmount(scope, needs)}`;
 }
 
 /**

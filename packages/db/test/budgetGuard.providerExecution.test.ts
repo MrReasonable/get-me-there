@@ -22,19 +22,19 @@ beforeEach(() => {
   expect.hasAssertions();
 });
 
-describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', () => {
-  it('the cap comes from the execution snapshot: the 3rd page with a snapshot cap of 2 is refused, whatever config says', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 2 } } });
-    g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    g.reserve(r('e1', 1)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(scopeOf(() => g.reserve(r('e1', 2)))).toBe('provider-execution');
+describe('provider-execution and no-page rows (spec §2, §5.3; decision 69; no page cap a run, rev 65)', () => {
+  // why: spec rev 65: a run stored earlier may carry the withdrawn page cap in its snapshot; the guard never reads it
+  it('a snapshot’s withdrawn page cap is ignored: the 3rd page with a stored cap of 2 is reserved, counted with no cap', () => {
+    const g = guardFor({ snapshotCaps: { e1: { camoufox: 2 } } });
+    for (let i = 0; i < 3; i++)
+      g.reserve(r('e1', i)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' })).toMatchObject({
-      calls: 2,
-      cap: 2,
+      calls: 3,
+      cap: null,
     });
   });
-  it('no-page rows count toward neither page cap', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 1 } } });
+  it('no-page rows count as no page', () => {
+    const g = guardFor({ snapshotCaps: { e1: { camoufox: 1 } } });
     for (let i = 0; i < 5; i++)
       g.reserve(r('e1', i)).finalise({
         outcome: 'error',
@@ -44,11 +44,12 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', (
       });
     expect(() => g.reserve(r('e1', 9))).not.toThrow();
     expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(1);
+    expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).calls).toBe(1);
   });
-  it('provider-execution is checked before execution-free-calls: one reserve that breaches both names provider-execution', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, maxFreeCalls: 1, snapshotCaps: { e1: { camoufox: 1 } } });
+  it('a page still counts as a free call: past EXECUTION_MAX_FREE_CALLS it is refused as execution-free-calls', () => {
+    const g = guardFor({ maxFreeCalls: 1, snapshotCaps: { e1: { camoufox: 100 } } });
     g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(scopeOf(() => g.reserve(r('e1', 1)))).toBe('provider-execution');
+    expect(scopeOf(() => g.reserve(r('e1', 1)))).toBe('execution-free-calls');
   });
   // why: spec rev 64: no monthly page cap; pages outside any run are never refused however many the month holds
   it('the month never refuses a page: 2,000 pages outside any run all pass, counted with no cap', () => {
@@ -61,20 +62,11 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', (
     });
   });
   it('camoufox rows are never billable and cost 0', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 10 } } });
+    const g = guardFor({ snapshotCaps: { e1: { camoufox: 10 } } });
     g.reserve(r('e1', 0)).finalise({ outcome: 'error', httpStatus: 423, durationMs: 1, pageClass: 'page' });
     expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' })).toMatchObject({
       calls: 1,
       costMicroGbp: 0,
-    });
-  });
-  it('an execution whose snapshot sets no cap for the provider has no provider-execution scope (arch-007)', () => {
-    const g = guardFor({ snapshotCaps: { e1: {} } });
-    for (let i = 0; i < 3; i++)
-      g.reserve(r('e1', i)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' })).toMatchObject({
-      calls: 3,
-      cap: null,
     });
   });
   it('a reserve outside any execution checks no execution scope; a missing execution is refused', () => {
@@ -86,8 +78,8 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', (
     ).toThrow(/does not exist/);
   });
   it('rows of another execution do not count toward this one', () => {
-    const g = guardFor({ snapshotCaps: { e1: { camoufox: 1 }, e2: { camoufox: 1 } } });
+    const g = guardFor({ snapshotCaps: { e1: {}, e2: {} } });
     g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(() => g.reserve(r('e2', 0))).not.toThrow();
+    expect(g.usage({ kind: 'provider-execution', executionId: 'e2', providerId: 'camoufox' }).calls).toBe(0);
   });
 });

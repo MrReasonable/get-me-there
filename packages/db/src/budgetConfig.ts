@@ -56,8 +56,7 @@ export function budgetConfigFromConfig(c: Config): BudgetConfig {
       billable: true,
       trialUsed: sa.limits.window === 'lifetime' ? sa.trialUsed : 0,
     };
-  // why: cost-005: camoufox is free and never billable; its per-run page cap comes from the snapshot, and it has no cap
-  // on its window (spec §2).
+  // why: cost-005: camoufox is free and never billable, with no cap on its pages or its window (spec §2).
   const cf = c.providers.camoufox;
   if (cf !== null) providers.camoufox = { ...cf.limits, billable: false, trialUsed: 0 };
   const fixture = c.providers.fixture;

@@ -444,7 +444,7 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   });
 
   it('withBlocked drops the flight notes when it zeroes the flight pages', () => {
-    const { est } = flightEstimate(120, { maxFreeCalls: 104 });
+    const { est } = flightEstimate(120, { maxFreeCalls: 124 });
     expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(2);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights for'))).toEqual([]);

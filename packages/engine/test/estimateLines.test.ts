@@ -218,7 +218,6 @@ describe('an estimate over several providers', () => {
         RETRY_NOTE,
         NO_RETRY_NOTE,
         'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-        'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs',
         'travelpayouts: 15 discovery tiles planned; a tile that pages spends one call a page',
         'searchapi: verification of up to 2 cells at 5 calls each',
         WORST_CASE_NOTE,
@@ -308,33 +307,30 @@ describe('an estimate over several providers', () => {
     expect(askedPairs(e.ctx, capped, b.cells, null, new Set()).datePairsCovered).toBe(3);
   });
 
-  it('a camoufox snapshot frozen without a page cap plans every cell as a paced line with the retry factor', () => {
+  // why: spec rev 65: a run stored earlier may carry the withdrawn page cap; it neither cuts the line nor its date pairs
+  it('a camoufox snapshot carrying the withdrawn page cap plans as one without: every cell, a paced line, no retry factor', () => {
     const e = engineWith([stubCamoufox({ cells: 15 })]);
     const b = buildSnapshot(e.ctx, e.definition);
-    const uncapped: DefinitionSnapshot = {
+    const capped: DefinitionSnapshot = {
       ...b.snapshot,
-      budget: { ...b.snapshot.budget, providerMaxCalls: {} },
+      budget: { ...b.snapshot.budget, providerMaxCalls: { camoufox: 1 } },
     };
-    const est = estimateStart(e.ctx, uncapped, b.cells, null);
-    // why: no page cap, so no per-run cut: 15 tiles at camoufox's 2 a minute (30 s spacing) wait 450 s, × 1.2
+    const est = estimateStart(e.ctx, capped, b.cells, null);
+    expect(est).toEqual(estimateStart(e.ctx, b.snapshot, b.cells, null));
+    // why: 15 pages at the 30 s spacing + 40 s, never multiplied by the retry factor (ruling 13)
     expect(est.perProvider).toEqual([
       {
         providerId: 'camoufox',
         stage: 'discovery',
-        calls: 18,
+        calls: 15,
         planCalls: 15,
         costMicroGbp: 0,
         costPence: 0,
-        seconds: 540,
+        seconds: 1050,
         blocked: null,
       },
     ]);
-    expect(est.assumptions).toEqual([
-      RETRY_NOTE,
-      'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-      WORST_CASE_NOTE,
-    ]);
-    expect(askedPairs(e.ctx, uncapped, b.cells, null, new Set()).datePairsCovered).toBe(15);
+    expect(askedPairs(e.ctx, capped, b.cells, null, new Set()).datePairsCovered).toBe(15);
   });
 
   it('a clamped window and a saved search are said so: no worst-case note, the clamp named', () => {
@@ -405,7 +401,7 @@ describe('the camoufox grid line (spec §2 rev 34)', () => {
         RETRY_NOTE,
         NO_RETRY_NOTE,
         'camoufox: 60 discovery tiles planned; a tile that pages spends one call a page',
-        'camoufox grid mode reads 60 of 60 cells this run in 60 pages and 60 scrolls; a full pass takes 1 run',
+        'camoufox grid mode reads 60 cells in 60 pages and 60 scrolls',
         WORST_CASE_NOTE,
       ],
       windowClamped: false,
@@ -413,91 +409,35 @@ describe('the camoufox grid line (spec §2 rev 34)', () => {
     });
   });
 
-  it('120 pages under a 100-page cap: the first 100 run (6,000 s, past 1 h), a full pass takes 2 runs', () => {
+  it('120 pages: every one runs, no page cap a run (7,200 s, past 1 h)', () => {
     const est = startOf(gridEngine(120));
     expect(est.perProvider).toEqual([
       {
         providerId: 'camoufox',
         stage: 'discovery',
-        calls: 100,
-        planCalls: 100,
+        calls: 120,
+        planCalls: 120,
         costMicroGbp: 0,
         costPence: 0,
-        seconds: 6000,
+        seconds: 7200,
         blocked: null,
-        scrolls: 100,
+        scrolls: 120,
       },
     ]);
     expect(est.assumptions).toEqual([
       RETRY_NOTE,
       NO_RETRY_NOTE,
       'camoufox: 120 discovery tiles planned; a tile that pages spends one call a page',
-      'camoufox grid mode reads 100 of 120 cells this run in 100 pages and 100 scrolls; a full pass takes 2 runs',
-      'camoufox: this run takes about 1.7 h, past STUCK_AFTER_HOURS (1 h), so /health reports it stuck while it runs',
+      'camoufox grid mode reads 120 cells in 120 pages and 120 scrolls',
+      'camoufox: this run takes about 2.0 h, past STUCK_AFTER_HOURS (1 h), so /health reports it stuck while it runs',
       WORST_CASE_NOTE,
     ]);
   });
 });
 
-describe('the camoufox list line on a resume (its pages already loaded count against the cap)', () => {
-  it('a run stopped at its 10-page cap asks one page more, which the resume check refuses', async () => {
-    const e = engineWith([stubCamoufox({ cells: 15 })], { snapshotCap: 10 });
-    const done = await e.runToEnd();
-    expect(done.status).toBe('paused_budget');
-    expect(estimateRemainingFor(e.ctx, done, true)).toEqual({
-      cells: 15,
-      perProvider: [
-        {
-          providerId: 'camoufox',
-          stage: 'discovery',
-          calls: 1,
-          planCalls: 1,
-          costMicroGbp: 0,
-          costPence: 0,
-          seconds: 70,
-          blocked: null,
-        },
-      ],
-      totalCalls: 1,
-      totalPlanCalls: 1,
-      totalCostMicroGbp: 0,
-      totalCostPence: 0,
-      seconds: 70,
-      assumptions: [
-        RETRY_NOTE,
-        NO_RETRY_NOTE,
-        'camoufox: 5 discovery tiles planned; a tile that pages spends one call a page',
-        'camoufox list mode prices 1 of 5 cells this run; a full pass takes 1 runs',
-      ],
-      windowClamped: false,
-      retryFactor: 1.2,
-    });
-  });
-
-  it("the pages counted are this execution's own, never the month's: a raised cap of 12 leaves 2 of the 5 cells", async () => {
-    const e = engineWith([stubCamoufox({ cells: 15 })], { snapshotCap: 10 });
-    const done = await e.runToEnd();
-    // why: 5 more pages this month outside the run, which the run's own cap never counts
-    const at = e.clock.now();
-    const insert = e.ctx.db.raw.prepare(
-      `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at,
-         duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt, page_class)
-       VALUES ('camoufox', NULL, '/v1/page', NULL, ?, ?, 1, 200, 'ok', 0, 0, 1, 'page')`,
-    );
-    for (let i = 0; i < 5; i++) insert.run(at, at);
-    const raised = {
-      ...done,
-      snapshot: { ...done.snapshot, budget: { ...done.snapshot.budget, providerMaxCalls: { camoufox: 12 } } },
-    };
-    const est = estimateRemainingFor(e.ctx, raised, true);
-    expect(est.perProvider.map((p) => [p.providerId, p.calls, p.seconds])).toEqual([['camoufox', 2, 140]]);
-    expect(est.assumptions).toContain(
-      'camoufox list mode prices 2 of 5 cells this run; a full pass takes 1 runs',
-    );
-  });
-
-  it('a run that read every cell at its cap has nothing left: no page, no tile, no list note', async () => {
-    const e = engineWith([stubCamoufox({ cells: 15 })], { snapshotCap: 15 });
+describe('the camoufox list line on a resume', () => {
+  it('a run that read every cell has nothing left: no page, no tile', async () => {
+    const e = engineWith([stubCamoufox({ cells: 15 })]);
     const done = await e.runToEnd();
     expect(done.status).toBe('completed');
     const est = estimateRemainingFor(e.ctx, done, true);
@@ -677,7 +617,6 @@ describe("the flight line's caps and their words", () => {
       RETRY_NOTE,
       NO_RETRY_NOTE,
       'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-      'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs',
       WORST_CASE_NOTE,
       "flights for 0 date pairs: the run's free-call limit",
     ]);

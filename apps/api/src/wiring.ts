@@ -188,8 +188,6 @@ export function providersFor(
     http: HttpKit;
     log: Logger;
     clock: Clock;
-    /** Fix round 1 (CA 1): the scrolls the caps leave (the budget guard's), for camoufox's grid pages. */
-    scrollsLeft?: BudgetGuard['scrollsLeft'];
     /**
      * Decision 82: this database's app-instance id (`repos.meta.appInstanceId()`, a random id stored with the ledger and its path),
      * sent to the camoufox worker so it can report a second app, that is a second ledger, in a month.
@@ -249,21 +247,13 @@ export function providersFor(
         // why: spec §12 — the preflight compares these effective values with the worker's own, by name
         sharedSettings: cf.sharedSettings,
         appInstance: deps.appInstance,
-        // why: spec §2 rev 34: grid mode plans pages and scrolls within the run's caps, split across the pairs
+        // why: spec §2 rev 34: grid mode plans each page's scrolls within CAMOUFOX_GRID_SCROLL_CAP
         grid: {
           mode: cf.mode,
-          executionPageCap: cf.executionPageCap,
-          executionScrollCap: cf.executionScrollCap,
           scrollCap: cf.gridScrollCap,
           scrollSpacingSeconds: cf.gridScrollSpacingSeconds,
           pageTimeoutSeconds: cf.pageTimeoutSeconds,
         },
-        ...(deps.scrollsLeft === undefined
-          ? {}
-          : {
-              scrollsLeft: (executionId: string | null) =>
-                deps.scrollsLeft?.('camoufox', executionId) ?? null,
-            }),
         // why: spec rev 56 §2, §12 (ruling A6): a flights request with a return phase carries its own timeout, core's one
         // computation from the shared page timeout and spacing (780 s with the booking read, 600 s without, at the
         // defaults); discovery keeps camoufoxHttpLimits' own
@@ -320,7 +310,6 @@ export function buildPorts(
       http,
       log: opts.log,
       clock,
-      scrollsLeft: (providerId, executionId) => budget.scrollsLeft(providerId, executionId),
       appInstance: repos.meta.appInstanceId(),
     });
     return {

@@ -78,7 +78,7 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
     expect(input.providers.discovery).toContain('camoufox');
     expect(input.providers.verification).not.toContain('camoufox');
   });
-  it('an execution’s budget rows include camoufox’s own page cap scope', () => {
+  it('an execution’s budget rows include camoufox’s own page scope (its pages, uncapped, and its flight allowance)', () => {
     const c = config(ON);
     expect(budgetScopes({ config: c, providers: providersFor(c, deps) }, 'e1')).toContainEqual({
       kind: 'provider-execution',
@@ -93,9 +93,14 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
   });
 });
 
-describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
-  it('a grid page asks for, and reserves, no more scrolls than the guard says the caps leave', async () => {
-    const c = config({ ...ON, CAMOUFOX_MODE: 'grid', CAMOUFOX_EXECUTION_PAGE_CAP: '1' });
+describe('apps/api wiring: camoufox grid mode and pages at once (spec rev 65)', () => {
+  it('CAMOUFOX_PAGES_AT_ONCE is the http limiter’s concurrency for the worker', () => {
+    expect(httpLimitsFor(config({ ...ON, CAMOUFOX_PAGES_AT_ONCE: '2' })).camoufox).toMatchObject({
+      concurrency: 2,
+    });
+  });
+  it('a grid page a block, each asking for and reserving its path’s scrolls (no page or scroll cap a run)', async () => {
+    const c = config({ ...ON, CAMOUFOX_MODE: 'grid' });
     const sent: Array<{ body: unknown; scrolls: number | undefined }> = [];
     const capture: HttpKit = {
       request: (r) => {
@@ -105,15 +110,7 @@ describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
       stats: () => ({ inFlight: 0 }),
       holdUntil: () => undefined,
     };
-    const asked: Array<[string, string | null]> = [];
-    const p = providersFor(c, {
-      ...deps,
-      http: capture,
-      scrollsLeft: (providerId, executionId) => {
-        asked.push([providerId, executionId]);
-        return 3;
-      },
-    }).find((x) => x.id === 'camoufox');
+    const p = providersFor(c, { ...deps, http: capture }).find((x) => x.id === 'camoufox');
     const d = p?.discovery;
     if (d === undefined) throw new Error('camoufox discovery');
     const q = {
@@ -132,7 +129,10 @@ describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
         otherDestinations: [],
       },
     };
-    const [tile] = d.plan(q);
+    const tiles = d.plan(q);
+    // why: 14 departures of one stay are two blocks; a new page is quicker than the 14 scrolls between them
+    expect(tiles).toHaveLength(2);
+    const [tile] = tiles;
     if (tile === undefined) throw new Error('tile');
     await expect(
       d.fetchTile(tile, q, {
@@ -141,8 +141,7 @@ describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
         recordFixtures: false,
       }),
     ).rejects.toThrow('captured');
-    expect(asked).toEqual([['camoufox', 'e1']]);
-    expect(sent).toEqual([{ body: expect.objectContaining({ scrollAllowance: 3 }), scrolls: 3 }]);
+    expect(sent).toEqual([{ body: expect.objectContaining({ moves: [], scrollAllowance: 0 }), scrolls: 0 }]);
   });
 });
 

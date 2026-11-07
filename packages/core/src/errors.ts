@@ -88,7 +88,8 @@ export const BUDGET_SCOPE_KINDS = [
   'execution-calls',
   'execution-free-calls',
   'execution-cost',
-  // why: a provider's own per-execution cap (camoufox pages), read from the execution's snapshot (decision 69).
+  // why: a provider's own pages within one execution: camoufox's flight-list pages against the run's allowance (a run
+  // stored before spec revision 65 may name its withdrawn page or scroll cap)
   'provider-execution',
   'provider-month',
   'provider-lifetime',
@@ -103,22 +104,18 @@ export class BudgetExceeded extends Error {
   readonly current: number;
   readonly requested: number;
   readonly providerId: ProviderId | undefined;
-  /** What the cap counts when it is not calls: `scrolls` for the camoufox grid's scroll caps (spec §2 rev 34). */
-  readonly unit: 'scrolls' | undefined;
   constructor(p: {
     scope: BudgetScopeKind;
     cap: number;
     current: number;
     requested: number;
     providerId?: ProviderId;
-    unit?: 'scrolls';
   }) {
     super(
-      `budget exceeded: ${p.scope}${p.unit === undefined ? '' : ` ${p.unit}`} cap ${p.cap}, current ${p.current}, requested ${p.requested}${
+      `budget exceeded: ${p.scope} cap ${p.cap}, current ${p.current}, requested ${p.requested}${
         p.providerId ? ` (${p.providerId})` : ''
       }`,
     );
-    this.unit = p.unit;
     this.name = 'BudgetExceeded';
     this.scope = p.scope;
     this.cap = p.cap;

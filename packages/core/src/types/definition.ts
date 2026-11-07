@@ -89,13 +89,13 @@ export interface ExecutionBudget {
   maxFreeCalls: number;
   maxCostMicroGbp: number;
   /**
-   * A provider's own page cap for this execution (camoufox, decision 69), set by the engine when the execution is
-   * created and read by the budget guard from the snapshot, never from config at reserve time. Absent: no such cap.
+   * The browser's per-run page cap that runs stored before spec revision 65 carry in their snapshot; still parsed, never
+   * read: the browser has no page cap (spec §2), and no new snapshot holds it.
    */
   providerMaxCalls?: Partial<Record<ProviderId, number>>;
   /**
-   * Spec revision 55 §8.1 (ruling A5): the browser pages one run may spend on flight lists, outside `providerMaxCalls`
-   * (CAMOUFOX_EXECUTION_PAGE_CAP). Set by the engine when the execution is created (Task 20.9); optional so a run stored
+   * Spec revision 55 §8.1 (ruling A5): the browser pages one run may spend on flight lists, the top dates' read. Set by
+   * the engine when the execution is created (Task 20.9); optional so a run stored
    * before WP20 still parses, and a snapshot without it allows no flight page (the guard fails closed).
    */
   flightListPages?: number;

@@ -12,13 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import type { StopReason } from '../src/run.js';
 import { buildSnapshot } from '../src/snapshot.js';
-import {
-  disabledDetailBefore,
-  isBrowserPageLimit,
-  searchedDatePairsOf,
-  stopCauseOf,
-  toStopDetail,
-} from '../src/stopCause.js';
+import { disabledDetailBefore, searchedDatePairsOf, stopCauseOf, toStopDetail } from '../src/stopCause.js';
 import { causeRun } from './support/causeRun.js';
 import { createHarness, EWR, JFK, LGW, LHR } from './support/harness.js';
 
@@ -26,7 +20,7 @@ const RESUME = asIsoDateTime('2026-11-01T00:00:00.000Z');
 const budget = (
   scope: BudgetScopeKind,
   providerId: ProviderId | undefined,
-  over: { unit?: 'scrolls'; cap?: number } = {},
+  over: { cap?: number } = {},
 ): StopReason => ({
   kind: 'budget',
   error: new BudgetExceeded({
@@ -35,7 +29,6 @@ const budget = (
     current: 40,
     requested: 1,
     ...(providerId === undefined ? {} : { providerId }),
-    ...(over.unit === undefined ? {} : { unit: over.unit }),
   }),
   resumeAfter: RESUME,
   resetsAt: RESUME,
@@ -86,14 +79,8 @@ describe('stopCauseOf (revision 55 §8.1)', () => {
   });
 
   it.each<[string, StopReason, string, number, boolean]>([
-    ['camoufox per-run pages', budget('provider-execution', 'camoufox'), 'pages', 40, false],
-    [
-      'camoufox per-run scrolls',
-      budget('provider-execution', 'camoufox', { unit: 'scrolls' }),
-      'scrolls',
-      40,
-      false,
-    ],
+    // why: camoufox's run scope is its flight-list allowance (spec rev 65: no page or scroll cap); it has no window
+    ['camoufox flight pages', budget('provider-execution', 'camoufox'), 'pages', 40, true],
     ['a monthly call cap', budget('provider-month', 'searchapi'), 'calls', 40, true],
     ['a lifetime call cap', budget('provider-lifetime', 'searchapi'), 'calls', 40, true],
     ['the run calls', budget('execution-calls', 'searchapi'), 'calls', 40, true],
@@ -129,16 +116,10 @@ describe('stopCauseOf (revision 55 §8.1)', () => {
     expect(stopCauseOf(stop, causeRun(), false)).toMatchObject({ resumeAfter: null, resetsAt: RESUME });
   });
 
-  it('flights: the step counts on the browser per-run page cap only, null when the step did not run', () => {
-    const run = causeRun({ flightLists: { read: 8, planned: 10 } });
-    expect(stopCauseOf(budget('provider-execution', 'camoufox'), run, true)).toMatchObject({
-      flights: { read: 8, planned: 10 },
-    });
-    expect(stopCauseOf(budget('provider-month', 'searchapi'), run, true)).toMatchObject({ flights: null });
-    expect(stopCauseOf(budget('provider-execution', 'camoufox'), causeRun(), true)).toMatchObject({
-      flights: null,
-    });
-    expect(isBrowserPageLimit({ scope: 'provider-month', providerId: 'searchapi' })).toBe(false);
+  // why: spec rev 65: only a stop at the browser's withdrawn page cap carried the flight step's counts
+  it('flights: a new budget cause never carries the flight step’s counts', () => {
+    for (const stop of [budget('provider-execution', 'camoufox'), budget('provider-month', 'searchapi')])
+      expect(stopCauseOf(stop, causeRun(), true)).toMatchObject({ flights: null });
   });
 
   it('all-disabled: every disabled source with its class word, the date pairs searched and the stage', () => {
@@ -376,20 +357,6 @@ describe('the readers a pass seeds itself with (revision 55 §8.1, §6.6)', () =
 });
 
 describe('stopCauseOf edges (mutation pins)', () => {
-  it("isBrowserPageLimit: the browser worker's run cap only", () => {
-    expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'camoufox' })).toBe(true);
-    expect(isBrowserPageLimit({ scope: 'provider-month', providerId: 'camoufox' })).toBe(false);
-    expect(isBrowserPageLimit({ scope: 'execution-calls', providerId: 'camoufox' })).toBe(false);
-    expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'searchapi' })).toBe(false);
-  });
-
-  it("flights never ride on another provider's per-run cap", () => {
-    const run = causeRun({ flightLists: { read: 1, planned: 2 } });
-    expect(stopCauseOf(budget('provider-execution', 'searchapi'), run, true)).toMatchObject({
-      flights: null,
-    });
-  });
-
   it('all-disabled names only the disabled sources of its own stage (R4), and words a disabled source with no detail', () => {
     const run = causeRun({
       // why: camoufox is discovery-only here, so a verification stop must never name it

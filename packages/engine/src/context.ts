@@ -49,15 +49,8 @@ export interface ProviderRunLimits {
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
   billed: boolean;
-  /**
-   * The provider's own per-execution call cap (camoufox's CAMOUFOX_EXECUTION_PAGE_CAP, decision 69), frozen into each
-   * new execution's snapshot as `budget.providerMaxCalls`; null when the provider has none.
-   */
-  executionCallCap: number | null;
   /** The provider's own fixed spacing between call starts in seconds (camoufox), or null. */
   minSpacingSeconds: number | null;
-  /** Spec §2 rev 34: camoufox grid's scroll cap for a run, or null for a provider without one. */
-  executionScrollCap: number | null;
   /**
    * Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): camoufox's flights request seconds, core's `flightRequestSeconds`
    * over the shared page timeout and spacing: with a return phase and the booking read (780 s at the defaults), with a
@@ -172,9 +165,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       planFixedMicroGbp: b.planFixedMicroGbp,
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,
-      executionCallCap: b.executionCallCap ?? null,
       minSpacingSeconds: b.minSpacingSeconds ?? null,
-      executionScrollCap: b.executionScrollCap ?? null,
       flightRequestSeconds: id === 'camoufox' ? camoufoxRequestSeconds(config) : null,
     };
   };

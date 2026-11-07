@@ -1,5 +1,6 @@
 // WP15 Task 15.10 (fix round 1, TS 11): the grid figures the operator docs state are the estimate's own, for the worked
-// example's four airport pairs (8,736 day pairs, 10–21 nights) at the defaults and at a page cap of 312.
+// example's four airport pairs (8,736 day pairs, 10–21 nights) at the defaults (spec rev 65: no page or scroll cap a
+// run, so one run reads them all).
 import { readFileSync } from 'node:fs';
 import { asIata, asIsoDate, parseConfig } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -12,8 +13,8 @@ const doc = (path: string) =>
 const setup = doc('docs/setup.md');
 const providers = doc('docs/providers.md');
 
-/** The worked example's run estimate at a page cap (the default scroll caps and spacing). */
-function estimate(pageCap: number) {
+/** The worked example's run estimate at the defaults (the scroll cap and spacing). */
+function estimate() {
   // why: re-review N3: the real adapter, with the grid settings as the app's config gives them (wiring.ts's mapping)
   const parsed = parseConfig(
     {
@@ -24,20 +25,17 @@ function estimate(pageCap: number) {
       CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
       CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
       CAMOUFOX_MODE: 'grid',
-      CAMOUFOX_EXECUTION_PAGE_CAP: String(pageCap),
     },
     { realpath: (p) => p },
   );
   const cf = parsed.ok ? parsed.config.providers.camoufox : null;
   if (cf === null) throw new Error('config');
   const real = realCamoufox([], 1, {
-    executionPageCap: cf.executionPageCap,
-    executionScrollCap: cf.executionScrollCap,
     scrollCap: cf.gridScrollCap,
     scrollSpacingSeconds: cf.gridScrollSpacingSeconds,
     pageTimeoutSeconds: cf.pageTimeoutSeconds,
   });
-  const e = engineWith([real], { camoufoxConfigCap: pageCap });
+  const e = engineWith([real]);
   const def = e.ctx.repos.definitions.update(e.definition.id, {
     window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
     minNights: 10,
@@ -49,10 +47,7 @@ function estimate(pageCap: number) {
   const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
   const line = est.perProvider.find((p) => p.providerId === 'camoufox');
   const note = est.assumptions.find((a) => a.startsWith('camoufox grid mode reads')) ?? '';
-  const m =
-    /reads (\d+) of (\d+) cells this run in (\d+) pages and (\d+) scrolls; a full pass takes (\d+) run/.exec(
-      note,
-    );
+  const m = /reads (\d+) cells in (\d+) pages and (\d+) scrolls/.exec(note);
   if (line === undefined || m === null) throw new Error('no camoufox grid line');
   return {
     cells: built.cells.length,
@@ -60,7 +55,6 @@ function estimate(pageCap: number) {
     pages: line.calls,
     scrolls: line.scrolls ?? -1,
     hours: (line.seconds / 3600).toFixed(1),
-    runs: Number(m[5]),
   };
 }
 const n = (x: number) => x.toLocaleString('en-GB');
@@ -70,17 +64,11 @@ beforeEach(() => {
 });
 
 describe('the grid figures in setup.md §14 and providers.md are the estimate’s', () => {
-  it('with the defaults: the pages, scrolls, hours, day pairs read and runs for a full pass', () => {
-    const f = estimate(100);
-    expect(f.cells).toBe(8736);
-    const words = `${f.pages} pages and ${f.scrolls} scrolls, about ${f.hours} hours, reading ${n(f.read)} of the ${n(f.cells)} day pairs, and a full pass takes ${f.runs} runs`;
+  it('with the defaults: one run reads every day pair, a page a block and no scroll', () => {
+    const f = estimate();
+    expect([f.cells, f.read, f.pages, f.scrolls]).toEqual([8736, 8736, 312, 0]);
+    const words = `one run of ${f.pages} pages and no scrolls, about ${f.hours} hours, reading all ${n(f.cells)} day pairs`;
     expect(setup).toContain(words);
     expect(providers).toContain(words);
-  });
-  it('with a page cap of 312: one run of 312 pages and no scrolls', () => {
-    const f = estimate(312);
-    expect([f.pages, f.scrolls, f.runs]).toEqual([312, 0, 1]);
-    expect(setup).toContain(`one run of ${f.pages} pages and no scrolls, about ${f.hours} hours`);
-    expect(providers).toContain(`one run of ${f.pages} pages, about ${f.hours} hours`);
   });
 });

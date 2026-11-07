@@ -42,8 +42,6 @@ export async function execute(ctx: EngineContext, run: RunState): Promise<void> 
  * never repeats one. A failing hook is logged and never pauses a finished search. Returns whether the step ran.
  */
 export async function alertsStep(ctx: EngineContext, run: RunState): Promise<boolean> {
-  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop ends the run as that
-  if (run.flightStop !== null) return false;
   if (run.stop !== null && run.stop.kind !== 'budget') return false;
   try {
     const r = await ctx.alertsStep(ctx.deps, run.executionId, {
@@ -89,8 +87,7 @@ export type CauseRun = Parameters<typeof stopCauseOf>[1];
  * Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants.
  * Revision 55 §8.1: every non-null stop stores its cause (`stopCauseOf`) with its sentence as `error_text` (a fatal
  * stop's own message stays in the log), and its `resumeAfter` is the cause's: null when the search is not scheduled
- * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2) or the stop is the browser worker's per-run page
- * limit, so no one-shot job is registered for either.
+ * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2), so no one-shot job is registered for it.
  */
 export function finalStatus(
   stop: StopReason | null,
@@ -211,8 +208,7 @@ const CARRY_ON = 'Search again carries on with the prices already found.';
  * final status also observes every write and notification of the pass.
  */
 export async function finish(ctx: EngineContext, run: RunState, alertsRan: boolean): Promise<void> {
-  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop wins over that stop
-  const stop = run.flightStop ?? run.stop;
+  const stop = run.stop;
   const scheduled = scheduledNow(ctx, run.definitionId);
   const { status, patch, notice } = finalStatus(
     stop,

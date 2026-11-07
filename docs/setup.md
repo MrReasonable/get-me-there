@@ -943,11 +943,11 @@ x86_64 Linux, about 1.25 GB unpacked) and the worker's dependencies stay on the 
 Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every container) is stopped only by
 `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
 
-Coverage, stated plainly: in `list` mode a page prices one day pair, so a run prices at most
-`CAMOUFOX_EXECUTION_PAGE_CAP` day pairs: with the default, 100 a run, against 2,184 day pairs for one worked-example
-airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs. The estimate says
-how many cells a run will price and how many runs a full pass takes; the rest of the cells read skipped or not searched
-in the Dates view's coverage section. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
+Coverage, stated plainly: in `list` mode a page prices one day pair, and a run has no page cap, so it loads a page for
+each day pair it has to read: 2,184 for one worked-example airport pair (8,736 for its four pairs). Its pages count as
+free calls, so a list-mode run larger than the search's `EXECUTION_MAX_FREE_CALLS` (2,000 by default) is refused at
+its start; grid mode (below) reads the same day pairs in far fewer pages. The estimate says how many pages a run
+loads and how long it takes. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
 with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
 sets the flag back, and empty routes then read as not searched again.
 
@@ -1176,8 +1176,8 @@ loopback, so the Docker path on Linux leaves the provider off; the native app re
 ### Every caller shares one worker
 
 Every app and recorder that calls the worker waits on its one page spacing and stops at its one cool-down. There is no
-monthly page or scroll cap: a run's pages are bounded by `CAMOUFOX_EXECUTION_PAGE_CAP` and the flight-list allowance, a
-grid page's scrolls by what `CAMOUFOX_EXECUTION_SCROLL_CAP` leaves, and every page by the spacing. The Providers page
+page or scroll cap, a run's or a month's: every page waits for the spacing, a run's flight lists have their own
+allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. The Providers page
 shows the browser's pages this calendar month, with no cap on them. A second app calling the same worker in one
 calendar month is reported in the status, not refused.
 
@@ -1245,19 +1245,17 @@ verified on the worker").
   view is priced as usual. On other machines such a cell is not read until that machine's own recordings show one:
   it ends as an error you can resume, and a view in which a whole departure or return day has no price is not read
   at all.
-- **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP`. Scrolls have their own cap,
-  `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) a run, at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
-  `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, 0 to 30, never randomised; 0 means no pause, scrolls go back to back) between scroll clicks. Keep the grid settings
+- **Scrolls.** At most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
+  `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, 0 to 30, never randomised; 0 means no pause, scrolls go back to back) between scroll clicks; there is no page or scroll cap a run. Keep the grid settings
   equal in `worker.env` and the app's settings: the worker reports its scroll cap, spacing and page timeout, and the app
-  skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's scroll cap
-  leaves; with none left it still reads its first block, and the blocks it did not reach stay for the next
-  run.
+  skips the provider, naming the setting, while any of them differs. A page the worker stopped short of its scrolls
+  leaves the blocks it did not reach for the next run.
 - **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so
-  a new page is the quicker way to a new block, and the planner opens pages until the page cap binds, then scrolls.
-  For the worked example's four airport pairs (312 blocks of 7 × 7, of which the 8,736 day pairs in the 10–21-night
-  band are stored), the run's estimate with the defaults is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of
-  the 8,736 day pairs, and a full pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages
-  and no scrolls, about 2.6 hours. A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls,
+  a new page is the quicker way to a new block, and the planner opens a page for every block, scrolling only where that
+  is quicker. For the worked example's four airport pairs (312 blocks of 7 × 7, of which the 8,736 day pairs in the
+  10–21-night band are stored), the run's estimate with the defaults is one run of 312 pages and no scrolls, about 2.6
+  hours, reading all 8,736 day pairs (with `CAMOUFOX_PAGES_AT_ONCE` above 1, never less than its page starts spaced
+  apart). A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls,
   30 s spacing) about 30 minutes, and the estimate says when a run would pass `STUCK_AFTER_HOURS`.
 - **What a page does when something is off.** A challenge, sign-in, consent or account page on any poll stops it with
   its cool-down, and nothing from that page is kept. A scroll whose view never changes ends the page with the views
@@ -1266,8 +1264,8 @@ verified on the worker").
   for an hour. Google's no-flights page says nothing of day pairs it did not show: on the probe page past the planning
   horizon (the end of the sale window) its day pairs read as no data; on any other page only the pair it asked for
   does, and the rest stay not searched yet (resumable). Day pairs the grid could not show read as issues on the cell
-  (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it (with no
-  scroll left, or a per-page cap of 0, it reads the view it opens on instead).
+  (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it (with a
+  per-page cap of 0, it reads the view it opens on instead).
 
 ### Choose it
 

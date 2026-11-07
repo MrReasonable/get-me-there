@@ -2,8 +2,7 @@
  * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
  * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
  * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, on an allowance of its
- * own (the snapshot's `flightListPages`, 20 pages, outside CAMOUFOX_EXECUTION_PAGE_CAP, inside
- * EXECUTION_MAX_FREE_CALLS). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
+ * own (the snapshot's `flightListPages`, 20 pages, inside EXECUTION_MAX_FREE_CALLS). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
  * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
  * limits sent with it, an outbound-only request instead when the window cannot hold that, and no further
  * return phase (or booking read) after one ends transient.
@@ -11,9 +10,7 @@
  * The step has its own error table (below), its own gate (`flightPageGate`) and its own intake; it never routes a page
  * through discovery's `onFailure`, `pageGate`'s `leaveLane` or the shared budget handler, so no flight page changes a
  * cell outcome, the run's status, its stop or a notice, except the once-per-cool-down notice a blocked answer sends. Its
- * pages carry `run.controller.signal` only (cancel, SIGTERM, fatal), never `run.intake` or a lane's intake signal, which
- * a budget stop has already aborted. A cancel or SIGTERM that arrives during the step after a budget stop is recorded in
- * `run.flightStop` (run.ts `stopRun`), which `finish` prefers.
+ * pages carry `run.controller.signal` only (cancel, SIGTERM, fatal), never `run.intake` or a lane's intake signal.
  */
 import {
   AbortedError,
@@ -57,9 +54,8 @@ function capabilityOf(ctx: EngineContext): FlightListCapability | undefined {
 }
 
 /**
- * Spec revision 55 §8.1 "Entry": whether the step runs for this pass. It runs when the run has not stopped, or when
- * its only stop is camoufox's own `provider-execution` budget stop (the per-run page cap: the run then stays stopped and
- * its cause carries the flights read); never on a catch-up or a child; never when camoufox's discovery lane left past
+ * Spec revision 55 §8.1 "Entry": whether the step runs for this pass. It runs when the run has not stopped; never on a
+ * catch-up or a child; never when camoufox's discovery lane left past
  * its browser window (a pass's gate, or a resume's check b, sets `windowOut`) or stopped at a monthly, lifetime or
  * global cap; never when camoufox is disabled for the run or its discovery line was blocked for budget before the pass;
  * never on a snapshot without `flightListPages`, a cabin the capability does not read (economy only), without a
@@ -67,9 +63,7 @@ function capabilityOf(ctx: EngineContext): FlightListCapability | undefined {
  */
 export function flightStepEntry(ctx: EngineContext, run: RunState): boolean {
   if (run.isChild || run.isCatchUp) return false;
-  // why: the 20.9 review's ruling — a cancel or SIGTERM that arrived after the budget stop, before the step, ends the
-  // run as that (`flightStop`), so the step writes no plan
-  if (run.flightStop !== null || run.controller.signal.aborted) return false;
+  if (run.stop !== null || run.controller.signal.aborted) return false;
   if (!run.snapshot.providers.discovery.includes(FLIGHT_LIST_PROVIDER)) return false;
   const cap = capabilityOf(ctx);
   if (cap === undefined || ctx.rankedDatePairs === undefined) return false;
@@ -78,20 +72,9 @@ export function flightStepEntry(ctx: EngineContext, run: RunState): boolean {
   if (run.disabled.has(FLIGHT_LIST_PROVIDER)) return false;
   // why: a line the pre-start or resume check blocked made no page this pass; its cap would refuse the flight pages too
   if (run.blocked.has(lineKey('discovery', FLIGHT_LIST_PROVIDER))) return false;
-  const stop = run.stop;
-  if (
-    stop !== null &&
-    !(
-      stop.kind === 'budget' &&
-      stop.error.scope === 'provider-execution' &&
-      stop.error.providerId === FLIGHT_LIST_PROVIDER
-    )
-  )
-    return false;
   const lane = run.lanes.get(`discovery|${FLIGHT_LIST_PROVIDER}`);
   if (lane === undefined) return true;
-  // why: the browser lane can stop only at its own run caps (pages, scrolls, free calls), which the step's own allowance
-  // stands apart from; it has no cap on a window (spec §2)
+  // why: the browser lane has no page cap and no cap on a window (spec §2); only its browser window ends it early
   return lane.windowOut === null;
 }
 
@@ -462,8 +445,8 @@ export function bookingStopOf(r: ReturnRead | null): string | null {
 /**
  * Spec revision 56 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs one at a time
  * (concurrency 1) under the error table, each request shaped by `requestOf`, stops the pass's return phases (or booking
- * reads) after a transient end, and records its counts on the run (`run.flightLists`, which the budget cause it runs
- * after carries). A failure outside the error table (the database itself) stops the run fatal (R-dberror).
+ * reads) after a transient end. A failure outside the error table (the database itself) stops the run fatal
+ * (R-dberror).
  */
 export async function runFlightLists(ctx: EngineContext, run: RunState): Promise<void> {
   if (!flightStepEntry(ctx, run)) {
@@ -473,7 +456,6 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
   const cap = capabilityOf(ctx);
   if (cap === undefined) return;
   const log = run.log.child({ providerId: FLIGHT_LIST_PROVIDER, step: 'flight-lists' });
-  run.flightStepActive = true;
   try {
     const p = planOf(ctx, run);
     if (p === null) return;
@@ -534,14 +516,11 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     }
     if (ended !== null) ctx.repos.executions.patch(run.executionId, { flightLists: { ...plan, ended } });
     const counts = ctx.repos.flightLists.forExecution(run.executionId, plan.cells);
-    run.flightLists = { read: counts.read + plan.reused, planned: plan.planned };
     log.info({ ...counts, reused: plan.reused, ended }, 'flight lists: step done');
   } catch (err) {
     // why: ruling R-dberror (20.9 review) — a failure of the step's own writes is the run's fatal stop, with its cause,
     // as a failure anywhere else in the pass is; it is never logged and completed
     log.error({ err: errorText(err) }, 'flight lists: step failed; the run stops');
     stopRun(run, { kind: 'fatal', message: errorText(err) });
-  } finally {
-    run.flightStepActive = false;
   }
 }

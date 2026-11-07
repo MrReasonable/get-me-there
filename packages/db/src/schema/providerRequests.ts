@@ -23,12 +23,12 @@ export const providerRequests = sqliteTable(
     httpAttempt: integer('http_attempt').notNull(),
     /**
      * Spec §5.3 rev 32 (decision 69): for camoufox, whether the attempt loaded a Google page (the worker's
-     * `x-gmt-google-contacted`); `no-page` rows count toward neither page cap. NULL for every other provider.
+     * `x-gmt-google-contacted`); a `no-page` row counts as no page. NULL for every other provider.
      */
     pageClass: text('page_class'),
     /**
      * Spec §7 rev 34 (migration 0006): the scroll clicks a camoufox grid page made; NULL on every other row (camoufox
-     * list included) and on a grid call that ended with no answer. The scroll caps sum it.
+     * list included) and on a grid call that ended with no answer.
      */
     scrollCount: integer('scroll_count'),
     /**

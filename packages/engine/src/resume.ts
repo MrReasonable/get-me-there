@@ -96,8 +96,8 @@ export async function resumeExecution(
     });
     return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
   }
-  // why: revision 55 §8.1 — a stop at the browser worker's per-run page limit offers Search again, which reuses the
-  // prices already found, never Resume (a resume past the run's browser window reads no browser pages)
+  // why: revision 55 §8.1 — a run stopped (before revision 65) at the browser worker's withdrawn per-run page limit
+  // offers Search again, which reuses the prices already found, never Resume
   const c = exec.stopCause;
   if (
     exec.status === 'paused_budget' &&
@@ -120,7 +120,7 @@ export async function resumeExecution(
         ...exec,
         snapshot: {
           ...exec.snapshot,
-          budget: snapshotBudget(ctx, def.budget, exec.snapshot.providers.discovery),
+          budget: snapshotBudget(def.budget, exec.snapshot.providers.discovery),
         },
       }
     : exec;

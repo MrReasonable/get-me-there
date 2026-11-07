@@ -8,12 +8,15 @@ import {
   asIsoDate,
   asIsoDateTime,
   cellKeyString,
+  type DiscoveryQuery,
+  GRID_HORIZON_DAYS,
+  GRID_STEP_DAYS,
   type GridView,
   type IsoDate,
 } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { camoufoxProvider } from '../../src/camoufox/index.js';
+import { camoufoxProvider, planGridTiles } from '../../src/camoufox/index.js';
 import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { server } from '../support/msw.js';
 
@@ -101,17 +104,8 @@ const status = (
   gridScrollSpacingSeconds: grid.gridScrollSpacingSeconds ?? 5,
 });
 function setup(
-  grid: {
-    executionPageCap: number;
-    executionScrollCap: number;
-    scrollCap: number;
-    scrollSpacingSeconds?: number;
-  } = {
-    executionPageCap: 100,
-    executionScrollCap: 600,
-    scrollCap: 30,
-  },
-  o: { scrollsLeft?: (executionId: string | null) => number | null; now?: string } = {},
+  grid: { scrollCap: number; scrollSpacingSeconds?: number } = { scrollCap: 30 },
+  o: { now?: string } = {},
 ) {
   const { kit, budget, log, clock } = makeKit({ limits: testLimits() });
   const at = clock;
@@ -125,13 +119,24 @@ function setup(
     pointOfSale: 'GB',
     flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
     grid: { mode: 'grid', scrollSpacingSeconds: 5, pageTimeoutSeconds: 90, ...grid },
-    ...(o.scrollsLeft === undefined ? {} : { scrollsLeft: o.scrollsLeft }),
   });
   const d = p.discovery;
   if (d === undefined) throw new Error('discovery');
   return { p, d, budget, clock: at };
 }
 const body = async (req: Request): Promise<unknown> => JSON.parse(await req.text());
+/**
+ * The planner's pages at times where a scroll is far quicker than a page, so blocks are joined by scrolls: the provider
+ * plans at the measured times, where a new page is the quicker way to a block, and joins none.
+ */
+const joinedPlan = (q: DiscoveryQuery) =>
+  planGridTiles(q, {
+    stepDays: GRID_STEP_DAYS,
+    scrollCap: 30,
+    today: asIsoDate('2026-10-14'),
+    horizonDays: GRID_HORIZON_DAYS,
+    times: { pageSeconds: 1000, scrollSeconds: 1 },
+  });
 
 afterEach(() => {
   server.resetHandlers();
@@ -160,16 +165,12 @@ describe('camoufox grid mode', () => {
       },
     ]);
   });
-  it('splits the run’s allowances across the stage’s pairs (share)', () => {
-    // why: one stay over five weeks is five blocks, each a column apart: 7 days right and 7 down, 14 scrolls a move
-    const { d } = setup({ executionPageCap: 2, executionScrollCap: 28, scrollCap: 30 });
-    const wide = { ...Q, departureTo: asIsoDate('2027-04-14') };
-    const one = d.plan(wide);
-    const four = d.plan({ ...wide, share: { pairs: 2 } });
-    const scrolls = (ts: typeof one) =>
-      ts.reduce((n, t) => n + (t.request.kind === 'grid-path' ? t.request.moves.length : 0), 0);
-    expect(scrolls(one)).toBe(28);
-    expect(scrolls(four)).toBe(14);
+  it('plans every block as its own page at the measured times, however many pages: no page or scroll cap a run', () => {
+    // why: one stay over five weeks is five blocks, each a column apart (a 14-scroll move, slower than a new page)
+    const { d } = setup();
+    const tiles = d.plan({ ...Q, departureTo: asIsoDate('2027-04-14') });
+    expect(tiles).toHaveLength(5);
+    expect(tiles.every((t) => t.request.kind === 'grid-path' && t.request.moves.length === 0)).toBe(true);
   });
   it('preflight refuses grid mode until the worker reports the measured step', async () => {
     const { d } = setup();
@@ -218,39 +219,10 @@ describe('camoufox grid mode', () => {
       detail: expect.stringMatching(/CAMOUFOX_PAGE_TIMEOUT_SECONDS.*240.*90/),
     });
   });
-  // why: re-review N2: a page held back leaves no ledger row and breaks parity; with no scroll left the page drops its
-  // lead scroll and reads the view it opens on, a day later on the returns, so only the same-day corner is unseen
-  it('a 0-night page with no scroll left drops its lead scroll and reads the view it opens on (re-review N2)', async () => {
-    let sent: unknown;
-    server.use(
-      http.post(URL_, async ({ request }) => {
-        sent = await body(request);
-        return HttpResponse.json(answer({ views: [], ended: 'complete' }), contacted);
-      }),
-    );
-    const { d, budget } = setup(undefined, { scrollsLeft: () => 0 });
-    const q = { ...Q, minNights: 0, maxNights: 0 };
-    const [tile] = d.plan(q);
-    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
-    expect([tile.request.moves, tile.request.reads]).toEqual([['up'], [false, true]]);
-    const r = await d.fetchTile(tile, q, ctx);
-    expect(sent).toMatchObject({ moves: [], reads: [true], scrollAllowance: 0 });
-    expect(r.kind === 'tile' && r.notes).toContain('lead-scroll-dropped');
-    expect(budget.rowsOf('camoufox')).toHaveLength(1);
-  });
-  it('a page asks for no more scrolls than the run’s and the month’s caps leave, and reserves that many (CA 1)', async () => {
-    const left: Array<string | null> = [];
-    const { d, budget } = setup(
-      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
-      {
-        scrollsLeft: (id) => {
-          left.push(id);
-          return 10;
-        },
-      },
-    );
+  it('a page asks for every scroll of its path and reserves that many', async () => {
+    const { d, budget } = setup();
     const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
-    const [tile] = d.plan(wide);
+    const [tile] = joinedPlan(wide);
     if (tile?.request.kind !== 'grid-path') throw new Error('tile');
     expect(tile.request.moves).toHaveLength(14);
     let sent: unknown;
@@ -261,20 +233,16 @@ describe('camoufox grid mode', () => {
       }),
     );
     const r = await d.fetchTile(tile, wide, ctx);
-    expect(sent).toMatchObject({ scrollAllowance: 10 });
-    expect(left).toEqual(['exec-1']);
-    expect(budget.rowsOf('camoufox').map((x) => [x.scrolls, x.scrollCount])).toEqual([[10, 10]]);
+    expect(sent).toMatchObject({ moves: tile.request.moves, reads: tile.request.reads, scrollAllowance: 14 });
+    expect(budget.rowsOf('camoufox').map((x) => [x.scrolls, x.scrollCount])).toEqual([[14, 10]]);
     if (r.kind !== 'tile') throw new Error('tile');
     expect(r.cellIssues?.map((i) => i.detail.split(' ')[0])).toEqual(Array(7).fill('scroll-allowance'));
   });
   // why: spec rev 64: a page the worker stopped short at its allowance holds no later tile back; each asks the worker
   it('a grid answer that stopped short at its allowance keeps its views, and the next tile asks the worker again', async () => {
-    const { d } = setup(
-      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
-      { scrollsLeft: () => 10 },
-    );
+    const { d } = setup();
     const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
-    const [tile] = d.plan(wide);
+    const [tile] = joinedPlan(wide);
     if (tile === undefined) throw new Error('tile');
     let hits = 0;
     server.use(
@@ -288,91 +256,6 @@ describe('camoufox grid mode', () => {
     expect((await d.fetchTile(tile, wide, ctx)).kind).toBe('tile');
     expect(hits).toBe(2);
   });
-  it('with no scrolls left, a page still opens and reads its first block, reserving none (CA 1)', async () => {
-    const { d, budget } = setup(
-      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
-      { scrollsLeft: () => 0 },
-    );
-    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
-    const [tile] = d.plan(wide);
-    if (tile === undefined) throw new Error('tile');
-    let sent: unknown;
-    server.use(
-      http.post(URL_, async ({ request }) => {
-        sent = await body(request);
-        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
-      }),
-    );
-    const r = await d.fetchTile(tile, wide, ctx);
-    expect(sent).toMatchObject({ scrollAllowance: 0 });
-    expect(budget.rowsOf('camoufox').map((x) => x.scrolls)).toEqual([0]);
-    expect(r.kind === 'tile' && r.prices).toHaveLength(7);
-  });
-  // why: CAMOUFOX_PAGES_AT_ONCE > 1: a page reads what the scroll cap leaves before its reservation, so two pages started
-  // together must not both ask for the same scrolls (the second's reservation would breach the run's scroll cap)
-  it('two pages started together never ask for the same scrolls: the second takes off what the first asked for', async () => {
-    let budgetOf: () => ReturnType<typeof setup>['budget'] = () => {
-      throw new Error('unbound');
-    };
-    const { d, budget } = setup(
-      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
-      {
-        scrollsLeft: () =>
-          20 -
-          budgetOf()
-            .rowsOf('camoufox')
-            .reduce((n, r) => n + (r.scrolls ?? 0), 0),
-      },
-    );
-    budgetOf = () => budget;
-    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
-    const [tile] = d.plan(wide);
-    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
-    expect(tile.request.moves).toHaveLength(14);
-    const sent: unknown[] = [];
-    server.use(
-      http.post(URL_, async ({ request }) => {
-        sent.push(await body(request));
-        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
-      }),
-    );
-    // why: another destination, so http-kit never joins the two as one request
-    const other = { ...wide, destination: asIata('EWR') };
-    await Promise.all([d.fetchTile(tile, wide, ctx), d.fetchTile(tile, other, ctx)]);
-    expect(sent).toMatchObject([{ scrollAllowance: 14 }, { scrollAllowance: 6 }]);
-    expect(budget.rowsOf('camoufox').map((r) => r.scrolls)).toEqual([14, 6]);
-    // why: once each page has reserved, what it asked for is no longer held back: the ledger alone says what is left
-    // (each answer stated 0 scrolls, but the fake guard counts the plan, so 0 are left here)
-    await d.fetchTile(tile, wide, ctx);
-    expect(sent[2]).toMatchObject({ scrollAllowance: 0 });
-  });
-  it('a page refused before it was sent holds no scrolls back from the next page', async () => {
-    const { d } = setup(
-      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
-      { scrollsLeft: () => 20 },
-    );
-    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
-    const [tile] = d.plan(wide);
-    if (tile === undefined) throw new Error('tile');
-    const sent: unknown[] = [];
-    server.use(
-      http.post(URL_, async ({ request }) => {
-        sent.push(await body(request));
-        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
-      }),
-    );
-    const refused = new Error('outside the browser window');
-    await expect(
-      d.fetchTile(tile, wide, {
-        ...ctx,
-        beforeSend: () => {
-          throw refused;
-        },
-      }),
-    ).rejects.toBe(refused);
-    await d.fetchTile(tile, wide, ctx);
-    expect(sent).toMatchObject([{ scrollAllowance: 14 }]);
-  });
   it('estimates each page at the page time and each scroll at the measured time, or the spacing when longer (CB-7)', () => {
     const t = {
       index: 0,
@@ -385,12 +268,7 @@ describe('camoufox grid mode', () => {
       },
     };
     expect(setup().d.estimateTile?.(t)).toEqual({ scrolls: 2, seconds: 30 + 2 * 9.3 });
-    const slow = setup({
-      executionPageCap: 100,
-      executionScrollCap: 600,
-      scrollCap: 30,
-      scrollSpacingSeconds: 30,
-    });
+    const slow = setup({ scrollCap: 30, scrollSpacingSeconds: 30 });
     expect(slow.d.estimateTile?.(t)).toEqual({ scrolls: 2, seconds: 30 + 2 * 30 });
   });
   it('plans from the operator’s date (London), not the UTC date (CA 10)', () => {
@@ -517,12 +395,12 @@ describe('camoufox grid mode', () => {
     expect(r.notes).toContain('no-flights-inferred:1');
   });
   it('a joined page inside the horizon that lands on no flights leaves every later block unsearched', async () => {
-    const { d } = setup({ executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 });
+    const { d } = setup();
     const wide = { ...Q, departureTo: asIsoDate('2027-03-31'), maxNights: 21 };
     server.use(
       http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
     );
-    const tiles = d.plan(wide);
+    const tiles = joinedPlan(wide);
     expect(tiles.some((t) => t.request.kind === 'grid-path' && t.request.moves.length > 0)).toBe(true);
     for (const tile of tiles) {
       if (tile.request.kind !== 'grid-path') throw new Error('tile');

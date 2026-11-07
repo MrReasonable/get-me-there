@@ -241,7 +241,7 @@ export class PageSession {
     const phase = asksForReturns(asked) && this.S.RETURN_SELECT_VERIFIED;
     const counts = { loads: 0, reclaimed: false };
     const r = await this.run(asked, phase, counts);
-    return this.counted(asked, phase, counts, r);
+    return this.counted(phase, counts, r);
   }
 
   /**
@@ -255,7 +255,7 @@ export class PageSession {
       answer: { kind: 'spacing', retryAfterSeconds: this.waitSeconds() },
       googleContacted: false,
     };
-    return this.counted(asked, phase, { loads: 0, reclaimed: false }, r);
+    return this.counted(phase, { loads: 0, reclaimed: false }, r);
   }
 
   /** The wait a busy answer from this session states (`busyWait` over the pacer's own wait while it is full). */
@@ -263,12 +263,7 @@ export class PageSession {
     return this.busyWait(Math.max(1, Math.ceil(this.d.pacer.spacingMs / 1000)));
   }
 
-  private counted(
-    asked: PageRequest | FlightsRequest,
-    phase: boolean,
-    counts: { loads: number; reclaimed: boolean },
-    r: PageResult,
-  ): PageResult {
+  private counted(phase: boolean, counts: { loads: number; reclaimed: boolean }, r: PageResult): PageResult {
     if (!phase) return r;
     // why: review M5: the pacer's last start moves when the reload re-claims it, whether or not that document then
     // loaded (held, or its load failed), so the next start is stated from the re-claim, not only from a second load

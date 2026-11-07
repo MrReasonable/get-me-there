@@ -103,22 +103,6 @@ export interface RunState {
   readonly disabledDetail: Map<ProviderId, DisabledDetail>;
   /** Revision 55 §6.6: the date pairs of the run's snapshot space `datePairSearched` accepts over its roll-ups. */
   searchedDatePairs(): number;
-  /**
-   * Revision 55 §8.1: the flight-list step's counts once it ran (Task 20.9 sets them), carried on the budget cause it
-   * runs after; null when the step did not run.
-   */
-  flightLists: { read: number; planned: number } | null;
-  /**
-   * Revision 55 §8.1: a cancel, SIGTERM or fatal stop that arrives during the flight-list step after an earlier stop, or
-   * a cancel or SIGTERM once the browser worker's per-run page cap stands and before the step starts (`stopRun`); finish
-   * prefers it to `stop`.
-   */
-  flightStop: StopReason | null;
-  /**
-   * Revision 55 §8.1: true while the flight-list step runs (stages/flightLists.ts sets and clears it), so `stopRun` can
-   * record a cancel, SIGTERM or fatal stop that arrives then, after an earlier stop, as `flightStop`.
-   */
-  flightStepActive: boolean;
   readonly parseStreak: Map<ProviderId, number>;
   /** How many of the parse streak's latest errors in a row are camoufox pages that did not settle (rev 49). */
   readonly notReadyStreak: Map<ProviderId, number>;
@@ -204,9 +188,6 @@ export function newRun(
     disabledReason: new Map(),
     disabledDetail: disabledDetailBefore(ctx, exec.id),
     searchedDatePairs: () => searchedDatePairsOf(ctx, exec),
-    flightLists: null,
-    flightStop: null,
-    flightStepActive: false,
     parseStreak: new Map(),
     notReadyStreak: new Map(),
     lanes: new Map(),
@@ -217,22 +198,9 @@ export function newRun(
   };
 }
 
-/**
- * Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal.
- * Revision 55 §8.1 (ruling A16, the 20.9 review's ruling and the final review's): a later stop becomes `flightStop`,
- * which `finish` prefers, in two cases only. While the flight-list step runs after an earlier stop, a cancel, SIGTERM or
- * fatal stop (the step's own database failure, R-dberror) ends the run `cancelled`, `interrupted` or fatal. Once the
- * browser worker's per-run page cap stands and before the step starts, only a cancel or SIGTERM does
- * (`cancelOrSigtermBeforeFlightStep`); a fatal stop there is logged and the run keeps the budget stop's outcome.
- */
+/** Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal. */
 export function stopRun(run: RunState, reason: StopReason): void {
   if (run.stop === null) run.stop = reason;
-  else if (
-    run.flightStop === null &&
-    ABORTING.has(reason.kind) &&
-    (run.flightStepActive || cancelOrSigtermBeforeFlightStep(run.stop, reason))
-  )
-    run.flightStop = reason;
   else if (reason.kind === 'fatal')
     // why: a fatal stop that is not recorded must still be seen: its message is in the log, never lost silently
     run.log.error(
@@ -241,21 +209,6 @@ export function stopRun(run: RunState, reason: StopReason): void {
     );
   run.intake.abort();
   if (ABORTING.has(reason.kind)) run.controller.abort();
-}
-
-/**
- * Whether `reason` is a cancel or SIGTERM arriving after the one stop the flight-list step runs after (spec rev 55
- * §8.1: the browser worker's own per-run page cap) and before the step starts (the 20.9 review's ruling). Only those
- * two are recorded as `flightStop` there, so the run ends cancelled or interrupted rather than paused; a fatal stop
- * never is (the final review's ruling), so it cannot replace the page cap's paused_budget before the step has run.
- */
-function cancelOrSigtermBeforeFlightStep(stop: StopReason, reason: StopReason): boolean {
-  return (
-    (reason.kind === 'cancel' || reason.kind === 'sigterm') &&
-    stop.kind === 'budget' &&
-    stop.error.scope === 'provider-execution' &&
-    stop.error.providerId === 'camoufox'
-  );
 }
 
 /** The lane for (stage, provider), created on first use. */
@@ -511,7 +464,7 @@ export function applyBudgetBreach(
       laneFor(run, stage, id).budgetOutScope === null,
   );
   if (remaining.length === 0) {
-    // why: a provider's own per-run cap (camoufox pages, spec §8.1 rev 32) has no window to wait for: manual resume only.
+    // why: a provider's own allowance within the run has no window to wait for: manual resume only
     if (err.scope === 'provider-execution') {
       stopRun(run, { kind: 'budget', error: err, resumeAfter: null, resetsAt: null });
       return;

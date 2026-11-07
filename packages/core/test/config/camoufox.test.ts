@@ -85,12 +85,11 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     expect(c).toMatchObject({
       workerUrl: 'http://host.docker.internal:8090',
       minSpacingSeconds: 30,
-      executionPageCap: 100,
       cooldownHours: 48,
       pageTimeoutSeconds: 90,
     });
     expect(c?.key.reveal()).toBe(ON.CAMOUFOX_WORKER_KEY);
-    // why: spec rev 64: no monthly page cap; the ledger counts the calendar month's pages with no cap on them
+    // why: spec revs 64, 65: no monthly or per-run page cap; the ledger counts the calendar month's pages, uncapped
     expect(c?.limits).toEqual({
       monthlyCallCap: null,
       window: 'month',
@@ -102,11 +101,17 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       costPerCallMicroGbp: 0,
       planFixedMicroGbp: 0,
       excludedFromSchedule: false,
-      executionCallCap: 100,
       pagesOnly: true,
       minSpacingSeconds: 30,
-      executionScrollCap: 600,
     });
+  });
+  // why: spec rev 65: the per-run page and scroll caps are withdrawn; a line an older settings file still holds is ignored
+  it('CAMOUFOX_EXECUTION_PAGE_CAP and CAMOUFOX_EXECUTION_SCROLL_CAP are no longer settings: a line naming one is ignored', () => {
+    const c = ok({ ...ON, CAMOUFOX_EXECUTION_PAGE_CAP: '0', CAMOUFOX_EXECUTION_SCROLL_CAP: 'lots' }).providers
+      .camoufox;
+    expect(c).not.toHaveProperty('executionPageCap');
+    expect(c).not.toHaveProperty('executionScrollCap');
+    expect(c?.limits).not.toHaveProperty('executionCallCap');
   });
   it('CAMOUFOX_PAGES_AT_ONCE is the engine’s concurrency for camoufox: 1 by default, up to 8', () => {
     expect(ok(ON).providers.camoufox?.limits.concurrency).toBe(1);
@@ -124,13 +129,12 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
   it('every override is read', () => {
     const c = ok({
       ...ON,
-      CAMOUFOX_EXECUTION_PAGE_CAP: '400',
       CAMOUFOX_COOLDOWN_HOURS: '72',
       CAMOUFOX_PAGE_TIMEOUT_SECONDS: '240',
       CAMOUFOX_MODE: 'list',
     }).providers.camoufox;
-    expect(c).toMatchObject({ executionPageCap: 400, cooldownHours: 72, pageTimeoutSeconds: 240 });
-    expect(c?.limits).toMatchObject({ monthlyCallCap: null, billingDay: 1, executionCallCap: 400 });
+    expect(c).toMatchObject({ cooldownHours: 72, pageTimeoutSeconds: 240 });
+    expect(c?.limits).toMatchObject({ monthlyCallCap: null, billingDay: 1 });
   });
   it.each([
     ['CAMOUFOX_MIN_SPACING_SECONDS', '-1'],
@@ -139,8 +143,6 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_MIN_SPACING_SECONDS', '  '],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '  '],
-    ['CAMOUFOX_EXECUTION_PAGE_CAP', '401'],
-    ['CAMOUFOX_EXECUTION_PAGE_CAP', '0'],
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '29'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
@@ -203,7 +205,6 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
         ratePerMinute: NO_RATE_LIMIT,
         ratePerHour: NO_RATE_LIMIT,
         concurrency: 1,
-        executionCallCap: 100,
       });
       expect(ok(ON).providers.camoufox?.limits).toMatchObject({ ratePerMinute: 2, ratePerHour: 120 });
       expect(ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '1' }).providers.camoufox?.limits).toMatchObject({

@@ -89,7 +89,7 @@ describe('one read of each other schedule per engine call (ruling 5 reservations
 
 // why: spec rev 64: the browser worker has no monthly cap, so another schedule holds none of its pages
 describe('another schedule never cuts the browser plan', () => {
-  it('with another weekly browser search saved, the plan still covers its 100 cells: 100 date pairs partly', () => {
+  it('with another weekly browser search saved, the plan still covers every one of its date pairs', () => {
     const e = engineWith([stubCamoufox({ cells: 1 })], { scheduleCron: '0 5 * * 1' });
     const def = widen(e);
     e.ctx.repos.definitions.create({
@@ -103,8 +103,8 @@ describe('another schedule never cuts the browser plan', () => {
     });
     const built = buildSnapshot(e.ctx, def);
     expect(askedPairs(e.ctx, built.snapshot, built.cells, def.id, new Set())).toMatchObject({
-      datePairsCovered: 0,
-      datePairsPartly: 100,
+      datePairsCovered: 2184,
+      datePairsPartly: 0,
     });
   });
 });
@@ -204,7 +204,7 @@ describe('the small space, read back through a real engine', () => {
     expect(ask).toMatchObject({ datePairsCovered: 0, datePairsPartly: 5, datePairsReused: 0 });
   });
 
-  it('the cells’ order does not matter: list mode plans the same 100 cells whatever order they are given', () => {
+  it('the cells’ order does not matter: list mode plans every cell whatever order they are given', () => {
     const e = engineWith([stubCamoufox({ cells: 1 })]);
     const def = widen(e);
     const built = buildSnapshot(e.ctx, def);
@@ -212,8 +212,8 @@ describe('the small space, read back through a real engine', () => {
     const backwards = askedPairs(e.ctx, built.snapshot, [...built.cells].reverse(), null, new Set());
     expect(forwards).toEqual({
       datePairs: 2184,
-      datePairsCovered: 0,
-      datePairsPartly: 100,
+      datePairsCovered: 2184,
+      datePairsPartly: 0,
       datePairsReused: 0,
     });
     expect(backwards).toEqual(forwards);

@@ -82,25 +82,15 @@ export interface CamoufoxProviderOptions {
    * request as APP_INSTANCE_HEADER so the worker can report a second app in a month.
    */
   appInstance?: string;
-  /**
-   * Spec §2 rev 34: grid mode and the run's page and scroll caps, which the planner splits across the stage's pairs
-   * (`DiscoveryQuery.share`); absent or `list`: one page per cell.
-   */
+  /** Spec §2 rev 34: grid mode and its per-page scroll cap; absent or `list`: one page per cell. */
   grid?: {
     mode: 'list' | 'grid';
-    executionPageCap: number;
-    executionScrollCap: number;
     scrollCap: number;
     /** CAMOUFOX_GRID_SCROLL_SPACING_SECONDS, which the preflight checks against the worker's. */
     scrollSpacingSeconds: number;
     /** CAMOUFOX_PAGE_TIMEOUT_SECONDS, which the preflight checks against the worker's in grid mode. */
     pageTimeoutSeconds: number;
   };
-  /**
-   * Fix round 1 (CA 1): the scrolls the run's and the month's scroll caps leave for camoufox (the budget guard's), or
-   * null for no cap. A grid page asks for, and reserves, no more than that.
-   */
-  scrollsLeft?: (executionId: string | null) => number | null;
   /**
    * Spec rev 56 §2 "The return phase", §12 (ruling A6): the timeout of a flights request with a return phase, core's
    * `flightRequestSeconds` of the app's page timeout and spacing, computed once by the wiring: with the booking read
@@ -152,8 +142,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
-  /** Per execution: the scrolls of grid pages asked for and not yet reserved (pages at once, see fetchGrid). */
-  const askedScrolls = new Map<string | null, number>();
   async function fetchTile(
     plan: TilePlan,
     q: DiscoveryQuery,
@@ -231,65 +219,29 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     ctx: ProviderContext,
     fail: (e: ProviderError) => DiscoveryTileResult,
   ): Promise<DiscoveryTileResult> {
-    // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the run's scroll cap leaves; the worker stops there
-    // (`allowance`) and the unreached cells are resumable issues, while a page with no scroll left still reads its first
-    // block
-    const ledgerLeft = o.scrollsLeft?.(ctx.executionId) ?? null;
-    // why: CAMOUFOX_PAGES_AT_ONCE > 1: this read comes before the limiter admits the page, so the scrolls other pages of
-    // the run have asked for but not yet reserved are taken off too, or two pages could ask for the same ones
-    const asked = askedScrolls.get(ctx.executionId) ?? 0;
-    const left = ledgerLeft === null ? null : Math.max(0, ledgerLeft - asked);
-    // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the cap leaves (a 0-night
-    // lead scroll with none left) drops its lead scrolls and reads the view it opens on, a day later on the returns;
-    // the cells that view does not show stay resumable issues, and the page keeps its ledger row
-    const firstRead = Math.max(0, path.reads.indexOf(true));
-    const leadDropped = left !== null && firstRead > left;
-    const moves = leadDropped ? path.moves.slice(firstRead) : path.moves;
-    const reads = leadDropped ? [true, ...path.reads.slice(firstRead + 1)] : path.reads;
-    const allowance = left === null ? moves.length : Math.max(0, Math.min(moves.length, left));
+    // why: spec §2: the page may make every scroll of its path (the planner kept it within CAMOUFOX_GRID_SCROLL_CAP)
+    const allowance = path.moves.length;
     const request = pageRequestSchema.safeParse({
       mode: 'grid',
       origin: q.origin,
       destination: q.destination,
       gl: o.pointOfSale,
       start: path.start,
-      moves,
-      reads,
+      moves: path.moves,
+      reads: path.reads,
       scrollAllowance: allowance,
     });
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
     const started = o.clock.now();
-    askedScrolls.set(ctx.executionId, asked + allowance);
-    let held = true;
-    // why: the page's scrolls stop being held back once its reservation counts them (http-kit reserves straight after
-    // beforeSend, in the same turn), or once the request ends without one
-    const release = (): void => {
-      if (!held) return;
-      held = false;
-      const now = (askedScrolls.get(ctx.executionId) ?? 0) - allowance;
-      if (now > 0) askedScrolls.set(ctx.executionId, now);
-      else askedScrolls.delete(ctx.executionId);
-    };
-    let sent: Awaited<ReturnType<typeof postToWorker>>;
-    try {
-      // why: ruling 12: the reservation checks the page's allowed scrolls against the run's scroll cap
-      sent = await postToWorker(o, {
-        path: PAGE_PATH,
-        body: request.data,
-        tileIndex: plan.index,
-        ctx: {
-          ...ctx,
-          beforeSend: () => {
-            ctx.beforeSend?.();
-            release();
-          },
-        },
-        scrolls: allowance,
-      });
-    } finally {
-      release();
-    }
+    // why: ruling 12: the reservation records the page's planned scrolls
+    const sent = await postToWorker(o, {
+      path: PAGE_PATH,
+      body: request.data,
+      tileIndex: plan.index,
+      ctx,
+      scrolls: allowance,
+    });
     if (!sent.ok) return fail(sent.error);
     const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
@@ -299,10 +251,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );
-    const mapped = gridTile(plan, a.data);
-    return leadDropped && mapped.kind === 'tile'
-      ? { ...mapped, notes: [...mapped.notes, 'lead-scroll-dropped'] }
-      : mapped;
+    return gridTile(plan, a.data);
   }
 
   const grid = o.grid?.mode === 'grid' ? o.grid : null;
@@ -313,12 +262,9 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   });
   const plan = (q: DiscoveryQuery): TilePlan[] => {
     if (grid === null) return planSingleCells(q);
-    const pairs = Math.max(1, q.share?.pairs ?? 1);
     return planGridTiles(q, {
       stepDays: GRID_STEP_DAYS,
       scrollCap: grid.scrollCap,
-      pageAllowance: Math.floor(grid.executionPageCap / pairs),
-      scrollAllowance: Math.floor(grid.executionScrollCap / pairs),
       // why: CA 10: the operator's date, as the worker's near-today check takes it
       today: o.clock.todayLondon(),
       horizonDays: GRID_HORIZON_DAYS,

@@ -65,13 +65,12 @@ export interface Config {
     searchapi: { key: Secret; plan: PlanId; trialUsed: number; limits: CappedProviderLimits } | null;
     /**
      * Spec §2 and §12 rev 32 (decisions 68, 69): the opt-in camoufox provider, null unless CAMOUFOX_ENABLED=true. The
-     * app reaches its host-side worker at `workerUrl` with `key`; `limits` derive from the spacing and the page caps.
+     * app reaches its host-side worker at `workerUrl` with `key`; `limits` derive from the spacing and the pages at once.
      */
     camoufox: {
       key: Secret;
       workerUrl: string;
       minSpacingSeconds: number;
-      executionPageCap: number;
       cooldownHours: number;
       pageTimeoutSeconds: number;
       /** Spec §2 rev 34: `grid` reads the Dates tab's date grid once the worker reports it verified. */
@@ -80,8 +79,6 @@ export interface Config {
       gridScrollSpacingSeconds: number;
       /** Grid mode: scrolls a page may make. */
       gridScrollCap: number;
-      /** Grid mode: scrolls a run may make. */
-      executionScrollCap: number;
       limits: ProviderLimits;
       /**
        * Spec §12: the app's effective shared settings (core's effectiveSharedSettings over the same lines), which the
@@ -287,10 +284,8 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
   const mode = sharedMode(shared);
   const gridScrollSpacingSeconds = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS');
   const gridScrollCap = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_CAP');
-  const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
   const minSpacingSeconds = sharedInt(shared, 'CAMOUFOX_MIN_SPACING_SECONDS');
   const pagesAtOnce = sharedInt(shared, 'CAMOUFOX_PAGES_AT_ONCE');
-  const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const cooldownHours = sharedInt(shared, 'CAMOUFOX_COOLDOWN_HOURS');
   const pageTimeoutSeconds = sharedInt(shared, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
   if (!enabled) return null;
@@ -307,22 +302,20 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
     key: new Secret(key),
     workerUrl,
     minSpacingSeconds,
-    executionPageCap,
     cooldownHours,
     pageTimeoutSeconds,
     mode,
     gridScrollSpacingSeconds,
     gridScrollCap,
-    executionScrollCap,
     limits: {
-      // why: spec §2: no monthly page cap; the per-run page cap and the page spacing bound the browser's pages. The ledger
-      // still counts its pages over the calendar month (billing day 1) for the providers view, with no cap on them.
+      // why: spec §2: no page or scroll cap; the page spacing and the pages at once pace the browser. The ledger still
+      // counts its pages over the calendar month (billing day 1) for the providers view, with no cap on them.
       monthlyCallCap: null,
       window: 'month',
       billingDay: 1,
       // why: display and reservoirs only; the app's limiter spaces starts by minIntervalMs = spacing × 1000 (ruling 7).
-      // Spacing 0 (operator, 2026-10-25) means no rate limit: the page caps alone bound a run, so there is no division
-      // by zero and the reservoirs never bind.
+      // Spacing 0 (operator, 2026-10-25) means no rate limit, so there is no division by zero and the reservoirs never
+      // bind.
       ratePerMinute:
         minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.max(1, Math.floor(60 / minSpacingSeconds)),
       ratePerHour: minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.floor(3600 / minSpacingSeconds),
@@ -332,10 +325,8 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
       costPerCallMicroGbp: 0,
       planFixedMicroGbp: 0,
       excludedFromSchedule: false,
-      executionCallCap: executionPageCap,
       pagesOnly: true,
       minSpacingSeconds,
-      executionScrollCap,
     },
     sharedSettings: shared,
   };

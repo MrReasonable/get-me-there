@@ -260,38 +260,6 @@ describe('BudgetExceeded global-month (spec §8.1 with decision 25)', () => {
   });
 });
 
-describe('a scroll-cap breach names the scroll cap and scrolls (fix round 1, CA 2)', () => {
-  it.each([
-    [
-      'provider-execution',
-      "camoufox's scroll cap for this run is 600 scrolls; 590 scrolls used; the next page needed 30 scrolls",
-    ],
-  ] as const)('%s: the paused notice', (scope, words) => {
-    const cap = 600;
-    const notice = finalStatus(
-      {
-        kind: 'budget',
-        error: new BudgetExceeded({
-          scope,
-          cap,
-          current: cap - 10,
-          requested: 30,
-          providerId: 'camoufox',
-          unit: 'scrolls',
-        }),
-        resumeAfter: null,
-        resetsAt: null,
-      },
-      asIsoDateTime('2026-10-14T09:00:00.000Z'),
-      'Europe/London',
-      causeRun(),
-      true,
-    ).notice;
-    expect(notice?.detail).toContain(words);
-    expect(notice?.detail).not.toMatch(/calls?\b|page cap|call cap/);
-  });
-});
-
 describe('the alerts step and "alerts running on calendar basis only" (spec §6.8, §8.1, decision 25)', () => {
   it('runs once after a completed pass with (deps, executionId, pass); a failing hook is logged, not fatal', async () => {
     const h = createHarness();

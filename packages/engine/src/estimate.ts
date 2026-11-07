@@ -257,8 +257,6 @@ interface Line {
   rawCalls: number;
   rawCostMicroGbp: number;
   rawSeconds: number;
-  /** A provider's own per-execution cap (camoufox pages): calls and seconds are clamped to it after the factor. */
-  cap?: { calls: number; seconds: number };
   /** camoufox grid: the scrolls beside the pages (spec §2 rev 34). */
   scrolls?: number;
   /** Ruling 13: a provider that never retries (camoufox) carries no retry factor. */
@@ -276,16 +274,14 @@ function assemble(
   const perProvider = lines.map((l) => {
     const f = l.noRetry === true ? 1 : factor;
     const costMicroGbp = Math.ceil(l.rawCostMicroGbp * f);
-    // why: cost-004: the guard refuses a page past the snapshot cap, so the factor can never ask for more than it
-    const clamp = (n: number, cap: number | undefined): number => (cap === undefined ? n : Math.min(n, cap));
     return {
       providerId: l.providerId,
       stage: l.stage,
-      calls: clamp(Math.ceil(l.rawCalls * f), l.cap?.calls),
+      calls: Math.ceil(l.rawCalls * f),
       planCalls: l.rawCalls,
       costMicroGbp,
       costPence: microGbpToPence(costMicroGbp),
-      seconds: clamp(Math.ceil(l.rawSeconds * f), l.cap?.seconds),
+      seconds: Math.ceil(l.rawSeconds * f),
       blocked: null,
       ...(l.scrolls === undefined ? {} : { scrolls: l.scrolls }),
     };
@@ -400,8 +396,6 @@ function discoveryLine(
   cells: readonly CellKey[],
   definitionId: string | null,
   notes: string[],
-  /** The execution a resume continues (its pages already loaded count against the cap); null for a start. */
-  executionId: string | null = null,
   /** Where this line leaves its plan over every cell, for `askedPairs` (a start's save-time estimate only). */
   keep?: Map<ProviderId, readonly PlannedTile[]>,
 ): Line | null {
@@ -430,34 +424,25 @@ function discoveryLine(
   if (tiles > 0)
     notes.push(`${providerId}: ${tiles} discovery tiles planned; a tile that pages spends one call a page`);
   const l = ctx.limitsOf(providerId);
-  const pageCap = snapshot.budget.providerMaxCalls?.[providerId];
-  if (pageCap !== undefined && l.minSpacingSeconds !== null) {
-    // why: spec §2 rev 32, cost-004/009/011, prov-013: one page per cell, at most the snapshot's page cap a run; a page
-    // takes about 20–60 s plus the start-to-start spacing, estimated as spacing + 40 s
+  if (l.minSpacingSeconds !== null) {
+    // why: spec §2 rev 32, cost-004/009/011, prov-013: one page per tile and no page cap a run (spec rev 65); a list
+    // page takes about 20–60 s plus the start-to-start spacing, estimated as spacing + 40 s
     const perPage = l.minSpacingSeconds + 40;
-    // why: fix round 1 (CodeRabbit): a resume has the cap less the pages this execution already loaded; with none left
-    // the line still asks one page, so checkBudget's provider-execution check refuses the resume instead of the guard
-    const used =
-      executionId === null
-        ? 0
-        : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId }).calls;
-    const left = Math.max(0, pageCap - used);
-    const pages = tiles === 0 ? 0 : left === 0 ? 1 : Math.min(tiles, left);
     const perTile = cap.estimateTile;
     if (perTile !== undefined) {
-      // why: spec §2 rev 34 (CB-3): the run's pages are the first `pages` of the plan; each states its own scrolls and
-      // seconds (the provider's estimateTile: the page time and the measured scroll time)
-      const run = planned.slice(0, pages).map((t) => perTile(t.plan));
+      // why: spec §2 rev 34 (CB-3): each page states its own scrolls and seconds (the provider's estimateTile: the page
+      // time and the measured scroll time)
+      const run = planned.map((t) => perTile(t.plan));
       const scrolls = run.reduce((n, t) => n + t.scrolls, 0);
       const seconds = atOnce(
         run.reduce((n, t) => n + t.seconds, 0),
-        pages,
+        tiles,
         l,
       );
-      const read = planned.slice(0, pages).reduce((n, t) => n + t.plan.coveredCells.length, 0);
-      notes.push(
-        `${providerId} grid mode reads ${read} of ${fresh.length} cells this run in ${pages} pages and ${scrolls} scrolls; a full pass takes ${Math.max(1, Math.ceil(tiles / pageCap))} run${Math.ceil(tiles / pageCap) > 1 ? 's' : ''}`,
-      );
+      if (fresh.length > 0)
+        notes.push(
+          `${providerId} grid mode reads ${fresh.length} cells in ${tiles} pages and ${scrolls} scrolls`,
+        );
       // why: CB-7: at the maximum spacing and per-page scrolls a run can outlast the stuck-run threshold; say so
       const stuck = ctx.config.stuckAfterHours;
       if (seconds > stuck * 3600)
@@ -467,30 +452,19 @@ function discoveryLine(
       return {
         providerId,
         stage: 'discovery',
-        rawCalls: pages,
+        rawCalls: tiles,
         rawCostMicroGbp: 0,
         rawSeconds: seconds,
-        cap: { calls: Math.max(left, 1), seconds: Math.ceil(seconds) },
         scrolls,
         noRetry: true,
       };
     }
-    if (fresh.length > 0)
-      notes.push(
-        `${providerId} list mode prices ${pages} of ${fresh.length} cells this run; a full pass takes ${Math.ceil(fresh.length / pageCap)} runs`,
-      );
     return {
       providerId,
       stage: 'discovery',
-      rawCalls: pages,
+      rawCalls: tiles,
       rawCostMicroGbp: 0,
-      rawSeconds: atOnce(pages * perPage, pages, l),
-      // why: fix round 2 (CodeRabbit): the retry factor is clamped to the pages this execution has left (one when none
-      // are, which checkBudget refuses), never to the whole cap
-      cap: {
-        calls: Math.max(left, 1),
-        seconds: atOnce(Math.max(left, 1) * perPage, Math.max(left, 1), l),
-      },
+      rawSeconds: atOnce(tiles * perPage, tiles, l),
       // why: ruling 13: camoufox never retries, so its estimate is the plan's own
       noRetry: true,
     };
@@ -551,7 +525,7 @@ export function estimateStart(
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
-    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes, null, keep);
+    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes, keep);
     if (l !== null) lines.push(l);
   }
   const verifyCount = Math.min(snapshot.verification.maxCells, cells.length);
@@ -593,7 +567,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
     // why: ssr M2 — the same reuse query the pass applies, so a cell another run has priced since is not counted
-    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes, exec.id);
+    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes);
     if (l !== null) lines.push(l);
   }
   const seeded = ctx.repos.cells.hasVerificationOutcomes(exec.id);
@@ -758,8 +732,7 @@ export interface AskedPairs {
 
 /**
  * The cells the runnable discovery lines would plan, and the cells they would reuse (spec §8.1 rev 55). Each
- * provider's plan is cut at the lesser of its per-run page cap (a provider with page spacing, camoufox) and what its
- * monthly or lifetime window has left; a blocked line (`blocked` set by a budget check) plans nothing, but its reused
+ * provider's plan is cut at what its monthly or lifetime window has left (camoufox has no cap); a blocked line (`blocked` set by a budget check) plans nothing, but its reused
  * cells still stand, since reuse makes no call. Two providers planning the same cell count it once.
  *
  * `known` is the plan the estimate made over every cell (see `PlanMemo`); it is used as it stands for a provider with
@@ -782,15 +755,13 @@ export function askedPairs(
     const plan = planDiscovery(ctx, snapshot, id, cap, cells, definitionId, known.get(id));
     for (const c of plan.reused) reused.add(cellKeyString(c));
     if (blocked.has(lineKey('discovery', id))) continue;
-    const pageCap = snapshot.budget.providerMaxCalls?.[id];
-    const perRun = pageCap !== undefined && ctx.limitsOf(id).minSpacingSeconds !== null ? pageCap : Infinity;
     // why: belt and braces. A line the budget guard would stop is already `blocked`, and a run of a line that fits its
     // window plans no more than the window leaves; the real flow reaches this cut only when `checkBudget` has not
     // blocked the line (a run it lets start and the guard then stops part way). It uses `callsLeftIn`, the same
     // reading `checkBudget` takes, other schedules' reservations included.
     // Known limit: a tile that pages spends one call a page, but is cut here by tile count, not calls, so a paging
     // provider's coverage may be overstated when its window is nearly spent.
-    const allowed = Math.min(plan.planned.length, perRun, callsLeftIn(ctx, id, definitionId) ?? Infinity);
+    const allowed = Math.min(plan.planned.length, callsLeftIn(ctx, id, definitionId) ?? Infinity);
     for (const tile of plan.planned.slice(0, allowed))
       for (const c of tile.plan.coveredCells) planned.add(cellKeyString(c));
   }

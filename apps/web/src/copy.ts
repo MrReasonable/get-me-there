@@ -501,7 +501,7 @@ export const COPY = {
     } satisfies Record<BlockedPage, string>,
     coolingDown: (until: string) => `cooling down until ${until}; Google was not contacted`,
     unavailable: 'browser worker not reachable',
-    note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most its page cap of day pairs a run (100 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped until later runs. Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
+    note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds, so a run takes hours (${EXAMPLE_PAIR_CELLS} day pairs). Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
   providersHeading: 'Providers',
   providerEnabled: 'configured',

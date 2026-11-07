@@ -125,21 +125,8 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     await e.resume(ex.id, { manual: true });
     expect(s.calls.length).toBeGreaterThan(calls);
   });
-  it('the snapshot page cap stops camoufox at 2 pages though config says 100, and travelpayouts continues', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 }), stubTravelpayouts({ cells: 6 })], {
-      camoufoxConfigCap: 100,
-      snapshotCap: 2,
-    });
-    const ex = await e.runToEnd();
-    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(2);
-    expect(
-      outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'skipped' && o.reason === 'budget'),
-    ).toHaveLength(4);
-    expect(outcomes(e, ex.id, 'travelpayouts').filter((o) => o.status === 'priced')).toHaveLength(6);
-  });
-  // why: CAMOUFOX_PAGES_AT_ONCE: the engine runs that many camoufox tiles at once, and the per-run page cap, reserved
-  // in one transaction a page, still holds exactly
-  it('two pages at once: a second tile starts while the first is in flight, and the page cap of 3 holds exactly', async () => {
+  // why: CAMOUFOX_PAGES_AT_ONCE: the engine runs that many camoufox tiles at once, each cell read once
+  it('two pages at once: a second tile starts while the first is in flight, and each cell is read exactly once', async () => {
     const second = deferred();
     let inFlight = 0;
     let most = 0;
@@ -161,34 +148,14 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
         inFlight -= 1;
       }
     };
-    const e = engineWith([s], {
-      camoufoxConfigCap: 100,
-      snapshotCap: 3,
-      env: { CAMOUFOX_PAGES_AT_ONCE: '2' },
-    });
+    const e = engineWith([s], { env: { CAMOUFOX_PAGES_AT_ONCE: '2' } });
     expect(e.ctx.limitsOf('camoufox').concurrency).toBe(2);
     const ex = await e.runToEnd();
     expect(most).toBe(2);
-    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(3);
-    const cf = outcomes(e, ex.id, 'camoufox');
-    expect(cf.filter((o) => o.status === 'priced')).toHaveLength(3);
-    expect(cf.filter((o) => o.status === 'skipped' && o.reason === 'budget')).toHaveLength(3);
-  });
-  it('the page cap is frozen into the snapshot from config at start', async () => {
-    const e = engineWith([stubCamoufox({ cells: 1 })], { camoufoxConfigCap: 7 });
-    const ex = await e.runToEnd();
-    expect(ex.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 7 });
-  });
-  it('alone, the page cap pauses paused_budget and the tick does not resume it', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 })], {
-      camoufoxConfigCap: 100,
-      snapshotCap: 2,
-      scheduleCron: '0 5 * * 1',
-    });
-    const ex = await e.runToEnd();
-    expect(ex.status).toBe('paused_budget');
-    expect(ex.resumeAfter).toBeNull();
-    expect(await e.tick()).toEqual({ resumed: false });
+    expect(ex.status).toBe('completed');
+    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(6);
+    expect(new Set(s.calls.map((t) => t.coveredCells.map((c) => c.departureDate).join())).size).toBe(6);
+    expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(6);
   });
   it('the engine fills airportNames from the airports repository', async () => {
     const s = stubCamoufox({ cells: 1 });

@@ -1,7 +1,14 @@
 // WP14 fix round 1: the camoufox engine paths the branch reviews found untested (arch I1, I2, M3, M4; prov I3).
 import { asIsoDateTime, cooldownNoticeKey, ProviderError } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { engineWith, outcomes, realCamoufox, stubCamoufox, stubTravelpayouts } from './support/camoufox.js';
+import {
+  engineWith,
+  outcomes,
+  realCamoufox,
+  storeStoppedAtPageCap,
+  stubCamoufox,
+  stubTravelpayouts,
+} from './support/camoufox.js';
 import { T0 } from './support/harness.js';
 
 const A = asIsoDateTime('2026-10-20T05:00:00.000Z');
@@ -78,47 +85,28 @@ describe('the cool-down notice key (arch I1, M3, M4)', () => {
   });
 });
 
-describe('a manual resume of paused_budget keeps the camoufox page cap (arch I2)', () => {
-  // why: fix round 2 (re-review N3): the resume must run, so the snapshot it persists is the refreshed one. The run
-  // pauses at the page cap with cells left; two of its page rows are then removed, so the cap has two pages left; the
-  // definition's cost cap is lowered (no confirmation needed), which the refreshed snapshot must show
-  it('the refreshed snapshot still carries providerMaxCalls, and no page past the cap is loaded', async () => {
-    const e = engineWith([stubCamoufox({ cells: 8 })], { camoufoxConfigCap: 4 });
+// why: spec rev 65: the browser has no page cap a run; a run stored earlier still carries one in its snapshot and, when
+// it stopped there, its cause, which still offers Search again and never Resume
+describe('the withdrawn per-run page cap (spec rev 65)', () => {
+  it('a run reads every cell, more than the old default of 100 pages, and completes', async () => {
+    const e = engineWith([stubCamoufox({ cells: 120 })]);
     const ex = await e.runToEnd();
-    expect(ex.status).toBe('paused_budget');
-    e.ctx.db.raw
-      .prepare(
-        "DELETE FROM provider_requests WHERE id IN (SELECT id FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' ORDER BY id LIMIT 2)",
-      )
-      .run(ex.id);
-    // why: fix round 2 (CodeRabbit major): the retry factor never asks more pages than the cap has left
-    const { estimateRemainingFor } = await import('../src/estimate.js');
-    const paused = e.ctx.repos.executions.get(ex.id);
-    if (paused === null) throw new Error('gone');
-    expect(
-      estimateRemainingFor(e.ctx, paused, true).perProvider.find((p) => p.providerId === 'camoufox')?.calls,
-    ).toBe(2);
-    e.ctx.repos.definitions.update(e.definition.id, {
-      budget: { ...e.definition.budget, maxCostMicroGbp: 999 },
-    });
-    // why: revision 55 §8.1 — a stop stored with its cause (camoufox's per-run page cap) is never resumed: refused `cap`
+    expect(ex.status).toBe('completed');
+    expect(ex.snapshot.budget).not.toHaveProperty('providerMaxCalls');
+    expect(e.ledgerRows('camoufox').filter((row) => row.pageClass === 'page')).toHaveLength(120);
+  });
+  it('a page cap a stored snapshot carries is never read: all 8 pages load past a stored cap of 4', async () => {
+    const e = engineWith([stubCamoufox({ cells: 8 })], { snapshotCap: 4 });
+    const ex = await e.runToEnd();
+    expect(ex.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 4 });
+    expect(ex.status).toBe('completed');
+    expect(e.ledgerRows('camoufox').filter((row) => row.pageClass === 'page')).toHaveLength(8);
+  });
+  it('a run stored paused at that cap is refused a manual resume (`cap`): Search again carries on', async () => {
+    const e = engineWith([stubCamoufox({ cells: 2 })]);
+    const ex = await e.runToEnd();
+    storeStoppedAtPageCap(e, ex.id);
     expect(await e.resumeResult(ex.id, { manual: true })).toMatchObject({ ok: false, code: 'cap' });
-    // why: a row stopped before migration 0011 has no cause and still resumes, so the refreshed-snapshot rule this test
-    // pins is still reached through it
-    e.ctx.db.raw.prepare('UPDATE search_executions SET stop_cause_json = NULL WHERE id = ?').run(ex.id);
-    const r = await e.resumeResult(ex.id, { manual: true });
-    expect(r.ok ? 'ok' : `${r.code}: ${r.message}`).toBe('ok');
-    // why: the final review of 2026-10-18: wait through the harness's bounded settle, which fails loudly, never a loop
-    // that can fall through
-    const stored = await e.settled(ex.id);
-    expect(stored?.snapshot.budget.maxCostMicroGbp).toBe(999);
-    expect(stored?.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 4 });
-    // two pages left: the resumed pass loads two of the four remaining cells and stops at the cap
-    expect(e.ledgerRows('camoufox').filter((row) => row.pageClass === 'page')).toHaveLength(4);
-    expect(
-      outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'skipped' && o.reason === 'budget'),
-    ).toHaveLength(2);
-    expect(stored?.status).toBe('paused_budget');
   });
 });
 
@@ -182,27 +170,5 @@ describe('the real adapter through the engine: what is stored for each answer (p
       ['skipped', 'provider_disabled'],
     ]);
     expect(e.ctx.repos.notifications.noticeKeyClaimed(cooldownNoticeKey('camoufox', B))).toBe(true);
-  });
-});
-
-// why: fix round 1 (CodeRabbit major): a resume counts the pages the execution already loaded
-describe('a resume reads the page cap the execution has left', () => {
-  it('with the cap spent, a manual resume is refused naming the provider-execution cap, and nothing is reserved', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 2 });
-    const ex = await e.runToEnd();
-    expect(ex.status).toBe('paused_budget');
-    const r = await e.resumeResult(ex.id, { manual: true });
-    expect(r).toMatchObject({ ok: false, code: 'cap' });
-    expect(r.ok ? '' : r.message).toMatch(/camoufox/);
-    expect(e.ledgerRows('camoufox')).toHaveLength(2);
-  });
-  it('with no page left the remaining line asks one page (which the cap refuses), never the whole cap', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 4 });
-    const ex = await e.runToEnd();
-    const { estimateRemainingFor } = await import('../src/estimate.js');
-    const exec = e.ctx.repos.executions.get(ex.id);
-    if (exec === null) throw new Error('gone');
-    const line = estimateRemainingFor(e.ctx, exec, true).perProvider.find((p) => p.providerId === 'camoufox');
-    expect(line?.planCalls).toBe(1);
   });
 });
