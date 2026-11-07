@@ -314,3 +314,43 @@ describe('Pacer.reclaim (the holder’s further document load)', () => {
     expect(p.spacingMs).toBe(45_000);
   });
 });
+
+// why: CAMOUFOX_PAGES_AT_ONCE: the worker's one pacer serves that many pages at once, its spacing still start to start
+// across all of them
+describe('Pacer with a capacity', () => {
+  it('with spacing 0, passes up to its capacity at once and refuses the next until one is released', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity: 3 });
+    for (let i = 0; i < 3; i++) {
+      expect(p.isBusy()).toBe(false);
+      expect(p.claim()).toEqual({ ok: true });
+    }
+    expect(p.isBusy()).toBe(true);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 1 });
+    p.release();
+    expect(p.isBusy()).toBe(false);
+    expect(p.claim()).toEqual({ ok: true });
+  });
+  it('with a spacing, a second page may start only once the spacing has passed since the first one’s start', () => {
+    const clock = fixedClock(T0);
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 30, clock, capacity: 2 });
+    expect(p.claim()).toEqual({ ok: true });
+    clock.advance(10_000);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 18 });
+    clock.advance(18_000);
+    expect(p.claim()).toEqual({ ok: true });
+    // why: both pages are in flight: the capacity refuses, with the spacing as its wait
+    clock.advance(60_000);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 30 });
+  });
+  it('a release with nothing claimed never frees more than the capacity', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity: 1 });
+    p.release();
+    expect(p.claim()).toEqual({ ok: true });
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 1 });
+  });
+  it.each([0, -1, 1.5])('refuses a capacity of %s', (capacity) => {
+    expect(() => new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0), capacity })).toThrow(
+      /capacity/,
+    );
+  });
+});

@@ -266,7 +266,7 @@ export function camoufoxWorkerUrlOk(raw: string): boolean {
 }
 
 /**
- * Spec §12 "Where settings live" (review R27): the ten shared settings, read once through core's one rule set
+ * Spec §12 "Where settings live" (review R27): the shared settings, read once through core's one rule set
  * (readSharedSettings), whether or not camoufox is enabled; every invalid name is reported, and the typed fields below
  * all come from the one effective record.
  */
@@ -289,6 +289,7 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
   const gridScrollCap = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_CAP');
   const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
   const minSpacingSeconds = sharedInt(shared, 'CAMOUFOX_MIN_SPACING_SECONDS');
+  const pagesAtOnce = sharedInt(shared, 'CAMOUFOX_PAGES_AT_ONCE');
   const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const cooldownHours = sharedInt(shared, 'CAMOUFOX_COOLDOWN_HOURS');
   const pageTimeoutSeconds = sharedInt(shared, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
@@ -325,7 +326,8 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
       ratePerMinute:
         minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.max(1, Math.floor(60 / minSpacingSeconds)),
       ratePerHour: minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.floor(3600 / minSpacingSeconds),
-      concurrency: 1,
+      // why: the engine runs this many tiles at once and the worker loads as many pages, each in its own browser
+      concurrency: pagesAtOnce,
       cacheTtlHours: 0,
       costPerCallMicroGbp: 0,
       planFixedMicroGbp: 0,

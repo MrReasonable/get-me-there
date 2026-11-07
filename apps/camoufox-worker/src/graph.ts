@@ -2,7 +2,7 @@
  * The Price graph exploration (step 1 of a "graph" mode; observed 2026-10-18). Nobody yet knows how Google builds the
  * graph in the accessibility tree, so this module only looks: on a settled Best view it clicks the one button named
  * "Price graph" in the main frame, finds whichever dialog or region appeared after the click (no role names inside the
- * graph are assumed), polls until that region's printed snapshot holds still across two polls at least 2 s apart, and
+ * graph are assumed), polls until that region's printed snapshot holds still across two polls at least STABLE_MS apart, and
  * lists the names and roles of the controls inside it. Every await is a timed step, logged as the Cheapest flow's are.
  *
  * The printed snapshot is stored for people to read, never parsed: nothing in the provider path imports this module

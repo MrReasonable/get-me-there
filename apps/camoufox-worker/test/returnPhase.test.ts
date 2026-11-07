@@ -23,6 +23,7 @@ import type { FlightsRead } from '../src/flights.js';
 import type { GuardState } from '../src/guard.js';
 import { OFFER_GRAMMAR_VERSION } from '../src/offers.js';
 import { Pacer } from '../src/pacer.js';
+import { POLL_MS } from '../src/ready.js';
 import { Refusal } from '../src/refusal.js';
 import { flightsWithPicks, refusalOf, returnPhase, unverifiedReturns } from '../src/returnPhase.js';
 import { SELECTORS, type Selectors } from '../src/selectors.js';
@@ -190,6 +191,8 @@ interface Shows {
 }
 interface Opts {
   selectors?: Selectors;
+  /** The session's poll interval (default POLL_MS); a test whose budgets count polls 2 s apart pins 2000. */
+  pollMs?: number;
   req?: FlightsRequest;
   /** Each load's Best tree and the Cheapest trees after its tab click (the first load's, then the reload's). */
   loads?: Array<{ best: FakeNode[]; cheapest: FakeNode[] }>;
@@ -286,6 +289,7 @@ function setup(o: Opts = {}) {
     timers,
     selectors: o.selectors ?? VERIFIED,
     pageTimeoutMs: 90_000,
+    ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
     log,
     versions,
     driverFor: (p, g, S) => {
@@ -593,6 +597,8 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
     ];
     const t = setup({
       ...second(),
+      // why: 40 fetching polls 2 s apart put the reload past 180 s
+      pollMs: 2000,
       loads: [
         { best: [...Array(40).fill(fetching), best()], cheapest: [...Array(30).fill(loading), cheapest()] },
         { best: [best()], cheapest: [cheapest()] },
@@ -2015,8 +2021,8 @@ describe('budgets (spec rev 56 §2: the page budget, the admission, the spacing 
     const t = setup();
     await t.session.page(REQ);
     expect(reclaim).not.toHaveBeenCalled();
-    // every sleep is a 2 s poll, or the read-back's and the close's 5 s bounds
-    expect(t.timers.sleeps.every((x) => x === 2000 || x === 5000)).toBe(true);
+    // every sleep is a poll's POLL_MS, or the read-back's and the close's 5 s bounds
+    expect(t.timers.sleeps.every((x) => x === POLL_MS || x === 5000)).toBe(true);
     const s = setup({
       press: {
         [PICK]: { trees: [returnTree([rt('1,300', { stops: '2 stops' })])], url: RETURN_URL },

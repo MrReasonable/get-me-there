@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   authError,
   blockedError,
+  deferred,
   engineWith,
   outcomes,
   stubCamoufox,
@@ -135,6 +136,43 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
       outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'skipped' && o.reason === 'budget'),
     ).toHaveLength(4);
     expect(outcomes(e, ex.id, 'travelpayouts').filter((o) => o.status === 'priced')).toHaveLength(6);
+  });
+  // why: CAMOUFOX_PAGES_AT_ONCE: the engine runs that many camoufox tiles at once, and the per-run page cap, reserved
+  // in one transaction a page, still holds exactly
+  it('two pages at once: a second tile starts while the first is in flight, and the page cap of 3 holds exactly', async () => {
+    const second = deferred();
+    let inFlight = 0;
+    let most = 0;
+    const s = stubCamoufox({
+      cells: 6,
+      holdCall: { call: 1, until: second.promise },
+      onTile: (n) => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        if (n === 2) second.resolve();
+      },
+    });
+    const fetch = s.discovery?.fetchTile;
+    if (fetch === undefined || s.discovery === undefined) throw new Error('discovery');
+    s.discovery.fetchTile = async (plan, q, pctx) => {
+      try {
+        return await fetch(plan, q, pctx);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const e = engineWith([s], {
+      camoufoxConfigCap: 100,
+      snapshotCap: 3,
+      env: { CAMOUFOX_PAGES_AT_ONCE: '2' },
+    });
+    expect(e.ctx.limitsOf('camoufox').concurrency).toBe(2);
+    const ex = await e.runToEnd();
+    expect(most).toBe(2);
+    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(3);
+    const cf = outcomes(e, ex.id, 'camoufox');
+    expect(cf.filter((o) => o.status === 'priced')).toHaveLength(3);
+    expect(cf.filter((o) => o.status === 'skipped' && o.reason === 'budget')).toHaveLength(3);
   });
   it('the page cap is frozen into the snapshot from config at start', async () => {
     const e = engineWith([stubCamoufox({ cells: 1 })], { camoufoxConfigCap: 7 });

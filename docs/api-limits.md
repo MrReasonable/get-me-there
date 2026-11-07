@@ -114,7 +114,8 @@ window's start and end with calls and cost so far.
 - Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600) from the start of one page to the start of the
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and
-  120 at the default). A page spacing of 0 means no pause: pages go back to back, from your own address, the limiter applies no rate limit and the page caps alone bound a run. Scrolls run back to back only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0. The worker and the app must hold the same `CAMOUFOX_MIN_SPACING_SECONDS`; a difference skips the provider like any other shared setting. Concurrency is 1.
+  120 at the default). A page spacing of 0 means no pause: pages go back to back, from your own address, the limiter applies no rate limit and the page caps alone bound a run. Scrolls run back to back only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0. The worker and the app must hold the same `CAMOUFOX_MIN_SPACING_SECONDS`; a difference skips the provider like any other shared setting.
+- Pages at once: `CAMOUFOX_PAGES_AT_ONCE` (default 1, 1 to 8) is the app's concurrency for camoufox and the pages the worker loads at once, each in its own browser and profile; the spacing above still runs from one page's start to the next, across every page in flight. A shared setting: a difference between the worker and the app skips the provider.
 - Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, 24 to 100,000) after a challenge, sign-in or consent page or a
   signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
 - Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every

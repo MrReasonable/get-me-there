@@ -108,8 +108,8 @@ own signal handling, six preferences that switch off telemetry, crash reports, N
 and a minimal browser environment (`HOME`, `PATH`, `TMPDIR`, `LANG`), since without `env` the library passes the whole
 process environment to the browser. Any other `camoufox-js` version or Camoufox build is refused at start.
 
-**Limits.** One page at a time; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never randomised; a value of 0 means no pause: pages go back to back, from your own address; scrolls do so only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0)
-from the start of one page to the next, persisted across restarts; `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, at most
+**Limits.** `CAMOUFOX_PAGES_AT_ONCE` pages at once (default 1, at most 8), each in its own browser and profile; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never randomised; a value of 0 means no pause: pages start back to back, from your own address; scrolls do so only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0)
+from the start of one page to the next, whichever pages are in flight, persisted across restarts; `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, at most
 400) pages a run, frozen into the execution's snapshot; no monthly cap. No
 proxies; no challenge is ever solved, clicked through or waited out; consent is rejected, never accepted (the
 operator's saved cookie choice, Reject all, is applied before every page and compared by value after it; a consent page
@@ -122,7 +122,8 @@ comes from the address of the machine running the worker, so a block lands on th
 a changed page reads as unrecognised and stops the provider for an hour; the selectors and grammar must be re-dated
 against a new recording, and an upgrade of `camoufox-js`, `playwright-core` or the binary is a re-verification.
 **Speed:** about 50–90 s a page at the default 30 s page spacing (`CAMOUFOX_MIN_SPACING_SECONDS`), so 100 cells a run
-take about 1½–2½ hours. **Availability:** only while the machine running the worker is on and the worker runs; otherwise
+take about 1½–2½ hours one page at a time; with `CAMOUFOX_PAGES_AT_ONCE` above 1 a run takes about that share of the
+time, never less than its page starts spaced apart. **Availability:** only while the machine running the worker is on and the worker runs; otherwise
 its cells read skipped ("browser worker not reachable"). **Image size:** none in the app image; Camoufox stays on the
 machine running the worker: a 313 MB download on `darwin-arm64` and 320 MB on `darwin-x64` (about 670 MB unpacked), 654 MB
 on `linux-arm64` and 663 MB on `linux-x64` (about 1.25 GB unpacked). **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the

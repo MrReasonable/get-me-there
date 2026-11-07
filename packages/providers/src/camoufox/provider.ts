@@ -152,6 +152,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
+  /** Per execution: the scrolls of grid pages asked for and not yet reserved (pages at once, see fetchGrid). */
+  const askedScrolls = new Map<string | null, number>();
   async function fetchTile(
     plan: TilePlan,
     q: DiscoveryQuery,
@@ -232,7 +234,11 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the run's scroll cap leaves; the worker stops there
     // (`allowance`) and the unreached cells are resumable issues, while a page with no scroll left still reads its first
     // block
-    const left = o.scrollsLeft?.(ctx.executionId) ?? null;
+    const ledgerLeft = o.scrollsLeft?.(ctx.executionId) ?? null;
+    // why: CAMOUFOX_PAGES_AT_ONCE > 1: this read comes before the limiter admits the page, so the scrolls other pages of
+    // the run have asked for but not yet reserved are taken off too, or two pages could ask for the same ones
+    const asked = askedScrolls.get(ctx.executionId) ?? 0;
+    const left = ledgerLeft === null ? null : Math.max(0, ledgerLeft - asked);
     // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the cap leaves (a 0-night
     // lead scroll with none left) drops its lead scrolls and reads the view it opens on, a day later on the returns;
     // the cells that view does not show stay resumable issues, and the page keeps its ledger row
@@ -254,14 +260,36 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
     const started = o.clock.now();
-    // why: ruling 12: the reservation checks the page's allowed scrolls against the run's scroll cap
-    const sent = await postToWorker(o, {
-      path: PAGE_PATH,
-      body: request.data,
-      tileIndex: plan.index,
-      ctx,
-      scrolls: allowance,
-    });
+    askedScrolls.set(ctx.executionId, asked + allowance);
+    let held = true;
+    // why: the page's scrolls stop being held back once its reservation counts them (http-kit reserves straight after
+    // beforeSend, in the same turn), or once the request ends without one
+    const release = (): void => {
+      if (!held) return;
+      held = false;
+      const now = (askedScrolls.get(ctx.executionId) ?? 0) - allowance;
+      if (now > 0) askedScrolls.set(ctx.executionId, now);
+      else askedScrolls.delete(ctx.executionId);
+    };
+    let sent: Awaited<ReturnType<typeof postToWorker>>;
+    try {
+      // why: ruling 12: the reservation checks the page's allowed scrolls against the run's scroll cap
+      sent = await postToWorker(o, {
+        path: PAGE_PATH,
+        body: request.data,
+        tileIndex: plan.index,
+        ctx: {
+          ...ctx,
+          beforeSend: () => {
+            ctx.beforeSend?.();
+            release();
+          },
+        },
+        scrolls: allowance,
+      });
+    } finally {
+      release();
+    }
     if (!sent.ok) return fail(sent.error);
     const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);

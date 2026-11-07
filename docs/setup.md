@@ -933,7 +933,8 @@ provider for an hour (never a silent zero), and the selectors and grammar must b
 `camoufox-js` is marked experimental by its authors, and an upgrade of it, of `playwright-core` or of the Camoufox
 binary is a re-verification. **Speed:** a page takes about 20–60 s (load, settle, read) plus the page spacing
 (`CAMOUFOX_MIN_SPACING_SECONDS`, 30 s by default), so at the default about 50–90 s in all and 100 cells a run take
-about 1½–2½ hours; a smaller spacing shortens the run, never the page. **Availability:** the provider runs only while
+about 1½–2½ hours; a smaller spacing shortens the run, never the page, and `CAMOUFOX_PAGES_AT_ONCE` above 1 loads
+pages side by side (never more often than the spacing allows). **Availability:** the provider runs only while
 the machine running the worker is on and the worker is running; otherwise its cells read skipped ("browser worker not
 reachable") and every other provider runs. **Image size:** none in the app image, which is unchanged; Camoufox (a
 313 MB download on Apple silicon or 320 MB on an Intel Mac, about 670 MB unpacked; 654 MB on arm64 Linux or 663 MB on
@@ -952,7 +953,8 @@ sets the flag back, and empty routes then read as not searched again.
 
 ### How it behaves
 
-- One page at a time, at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30 seconds, 0 to 600) from the start of one page to the start of the next (never randomised). A value of 0 means no pause: pages go back to back, from your own address, still one at a time. Keep it equal in `worker.env` and the app's settings.
+- One page at a time by default, at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30 seconds, 0 to 600) from the start of one page to the start of the next (never randomised). A value of 0 means no pause: pages start back to back, from your own address. Keep it equal in `worker.env` and the app's settings.
+- `CAMOUFOX_PAGES_AT_ONCE` (default 1, 1 to 8) loads that many pages at once, each in its own browser and its own profile (`profile`, then `profile-1`, `profile-2` … in the worker's data directory); the spacing above still runs from one page's start to the next across all of them, and a stop seen by any page pauses them all. Each browser takes its own memory. Keep it equal in `worker.env` and the app's settings.
 - Its own signed-out browser profile, never shared and never seeded from any cookie file; service workers are blocked
   and every redirect is checked, so a page that leaves `https://www.google.com/travel/flights` stops at once.
 - Your saved cookie choice (Reject all) is applied before every page and checked by value after it; a consent page, or a
@@ -1222,7 +1224,7 @@ provider never clicks the graph and nothing reads these files yet.
   `set -a; . ~/.config/get-me-there/dev-camoufox.env; set +a`, so the key is never typed or exported by hand and never
   reaches your shell history. Never put that URL in `.env`, where it would break the container.
 
-Keep `CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS` and `CAMOUFOX_MIN_SPACING_SECONDS` equal on both sides (`worker.env` and the app's); the
+Keep `CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`, `CAMOUFOX_MIN_SPACING_SECONDS` and `CAMOUFOX_PAGES_AT_ONCE` equal on both sides (`worker.env` and the app's); the
 smoke test flags a mismatch.
 
 ### Grid mode (optional)
@@ -1287,7 +1289,7 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
   `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A list page in flight finishes before the
   worker exits (its stop waits up to 270 s); a longer page is ended and stays counted. `stop --only worker` and `restart --only worker` ask a native app about a running
   search first, as `stop` does.
-- After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile first).
+- After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes every page's profile first).
 - Deleting the cool-down record ends a pause early, which defeats its purpose.
 
 ### Appendix: the manual steps

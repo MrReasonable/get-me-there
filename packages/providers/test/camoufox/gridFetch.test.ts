@@ -308,6 +308,71 @@ describe('camoufox grid mode', () => {
     expect(budget.rowsOf('camoufox').map((x) => x.scrolls)).toEqual([0]);
     expect(r.kind === 'tile' && r.prices).toHaveLength(7);
   });
+  // why: CAMOUFOX_PAGES_AT_ONCE > 1: a page reads what the scroll cap leaves before its reservation, so two pages started
+  // together must not both ask for the same scrolls (the second's reservation would breach the run's scroll cap)
+  it('two pages started together never ask for the same scrolls: the second takes off what the first asked for', async () => {
+    let budgetOf: () => ReturnType<typeof setup>['budget'] = () => {
+      throw new Error('unbound');
+    };
+    const { d, budget } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      {
+        scrollsLeft: () =>
+          20 -
+          budgetOf()
+            .rowsOf('camoufox')
+            .reduce((n, r) => n + (r.scrolls ?? 0), 0),
+      },
+    );
+    budgetOf = () => budget;
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
+    expect(tile.request.moves).toHaveLength(14);
+    const sent: unknown[] = [];
+    server.use(
+      http.post(URL_, async ({ request }) => {
+        sent.push(await body(request));
+        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
+      }),
+    );
+    // why: another destination, so http-kit never joins the two as one request
+    const other = { ...wide, destination: asIata('EWR') };
+    await Promise.all([d.fetchTile(tile, wide, ctx), d.fetchTile(tile, other, ctx)]);
+    expect(sent).toMatchObject([{ scrollAllowance: 14 }, { scrollAllowance: 6 }]);
+    expect(budget.rowsOf('camoufox').map((r) => r.scrolls)).toEqual([14, 6]);
+    // why: once each page has reserved, what it asked for is no longer held back: the ledger alone says what is left
+    // (each answer stated 0 scrolls, but the fake guard counts the plan, so 0 are left here)
+    await d.fetchTile(tile, wide, ctx);
+    expect(sent[2]).toMatchObject({ scrollAllowance: 0 });
+  });
+  it('a page refused before it was sent holds no scrolls back from the next page', async () => {
+    const { d } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      { scrollsLeft: () => 20 },
+    );
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile === undefined) throw new Error('tile');
+    const sent: unknown[] = [];
+    server.use(
+      http.post(URL_, async ({ request }) => {
+        sent.push(await body(request));
+        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
+      }),
+    );
+    const refused = new Error('outside the browser window');
+    await expect(
+      d.fetchTile(tile, wide, {
+        ...ctx,
+        beforeSend: () => {
+          throw refused;
+        },
+      }),
+    ).rejects.toBe(refused);
+    await d.fetchTile(tile, wide, ctx);
+    expect(sent).toMatchObject([{ scrollAllowance: 14 }]);
+  });
   it('estimates each page at the page time and each scroll at the measured time, or the spacing when longer (CB-7)', () => {
     const t = {
       index: 0,

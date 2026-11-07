@@ -108,6 +108,13 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       executionScrollCap: 600,
     });
   });
+  it('CAMOUFOX_PAGES_AT_ONCE is the engine’s concurrency for camoufox: 1 by default, up to 8', () => {
+    expect(ok(ON).providers.camoufox?.limits.concurrency).toBe(1);
+    expect(ok({ ...ON, CAMOUFOX_PAGES_AT_ONCE: '3' }).providers.camoufox?.limits.concurrency).toBe(3);
+    expect(ok({ ...ON, CAMOUFOX_PAGES_AT_ONCE: '8' }).providers.camoufox?.sharedSettings).toMatchObject({
+      CAMOUFOX_PAGES_AT_ONCE: '8',
+    });
+  });
   it('a 45 s spacing gives 1 a minute and 80 an hour', () => {
     expect(ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '45' }).providers.camoufox?.limits).toMatchObject({
       ratePerMinute: 1,
@@ -144,6 +151,8 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     ['CAMOUFOX_WORKER_URL', 'http://127.0.0.1:8090/path'],
     ['CAMOUFOX_WORKER_URL', 'http://user:pw@127.0.0.1:8090'],
     ['CAMOUFOX_MODE', 'calendar'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '0'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '9'],
     ['CAMOUFOX_ENABLED', 'yes'],
   ])('%s=%s fails boot naming the field', (name, value) => {
     expect(errors({ ...ON, [name]: value })).toContain(name);

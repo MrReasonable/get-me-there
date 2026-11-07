@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 64.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 65.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -436,8 +436,10 @@ the name: a tab with none there is unpriced.
   (default 5, 0 to 30, fixed, never randomised; 0 means no pause, the scrolls go
   back to back). A run makes at most
   `CAMOUFOX_EXECUTION_SCROLL_CAP` scrolls (default 600); the adapter asks the
-  budget guard what that cap leaves, passes the page no more than that as its
-  allowance and reserves that many, and the worker never scrolls past it: a
+  budget guard what that cap leaves, less the scrolls the run's other pages
+  have asked for but not yet reserved (pages at once), passes the page no more
+  than that as its allowance and reserves that many, and the worker never
+  scrolls past it: a
   page with no scroll left still reads its first block, and the blocks it did
   not reach are `error` (`parse`, `scroll-allowance`), resumable. The worker
   reports its scroll cap and spacing in its status, and the preflight skips
@@ -448,7 +450,8 @@ the name: a tab with none there is unpriced.
   **Settles and deadlines.** The first view, after the Dates click, settles by
   the two-stable-polls rule. A view after a scroll counts only when its
   departures or returns line differs from the view before the move, and then
-  holds stable across two polls at least 2 s apart. Either view is taken only
+  holds stable across two polls at least 1 s apart (the worker polls again
+  0.5 s after each read ends). Either view is taken only
   once it names every cell its lines call for (49 less the pairs whose return
   precedes the departure): a view whose lines read but which names fewer cells
   is still drawing, and a stable poll of it does not settle. The settle polls
@@ -822,26 +825,38 @@ Account: …") is `blocked`, page `signed-in`, and the worker refuses to serve
 until the operator clears a persisted flag after wiping the profile. **No
 proxies** of any kind: every page comes from the operator's own IP address.
 **No challenge is ever solved or bypassed**: no CAPTCHA solver, no clicking a
-challenge, no waiting a challenge out. One page at a time (concurrency 1), at
-least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never
+challenge, no waiting a challenge out. At most `CAMOUFOX_PAGES_AT_ONCE`
+pages at once (default 1, 1 to 8, a shared setting; the app's concurrency for
+the provider), each in its own browser over its own profile
+(`<workerData>/profile` for the first, `profile-<i>` for the others, each
+0700), at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never
 randomised) from the **start** of one Google document load to the start of
-the next, whichever request it belongs to, so a flights request's reload is
-spaced from the load before it and the next request's first load from the
-reload. The app's limiter takes that spacing directly as its minimum interval
+the next, whichever request or page it belongs to, so a flights request's
+reload is spaced from the load before it and the next request's first load
+from the reload. The pages share one pacer (its capacity the pages at once),
+the cool-downs, the signed-in refusal, the `SOCS` capture, the lock and the
+keep-awake lease: a stop seen by any page stops every later page, while pages
+already in flight finish; each page sets `SOCS` on its own browser and checks
+that browser's account cookies before it loads, and the worker's "second such
+grid page in a row" is counted across them all. The worker launches the first
+browser at its start (the start's account-cookie check reads it, as the
+status does) and each other one on its first page; `clear-signed-in` wipes
+every profile. The app's limiter takes that spacing directly as its minimum interval
 between request starts, and after an answer stating `nextLoadNotBefore` it
 holds its next camoufox start until then (§5.3); the worker enforces the
 spacing per document load with a fixed 2 s tolerance for arrival jitter,
 re-claiming its pacer before a reload, so documents per hour stay at most
-`floor(3600 / spacing)`. A request that arrives while a page is in flight is
-answered `spacing` with the rest of that page's overall cap plus its bounded
-close (twice the 5 s finally bound) as its wait, never less than the
-pacer's own (its `retryAfterSeconds` and `Retry-After`), and the app's retry
-waits that long, so its attempts are not spent while the browser is busy. An activation (an outbound's, a return's, the
+`floor(3600 / spacing)`. A request that arrives while every page is in
+flight is answered `spacing` with the rest of the overall cap of the page that
+can end soonest plus its bounded close (twice the 5 s finally bound) as its
+wait, never less than the pacer's own (its `retryAfterSeconds` and
+`Retry-After`), and the app's retry waits that long, so its attempts are not
+spent while the browsers are busy. An activation (an outbound's, a return's, the
 booking view's expansion) loads no document and, like the Cheapest tab's
 click, waits for no spacing and counts as no page. The last page time is persisted, so a
-restart keeps the spacing. A value of 0 means no pause: pages go back to
-back, from your own address, still one at a time, with no rate limit beyond
-the page caps. A flights request with a return phase has a page budget of
+restart keeps the spacing. A value of 0 means no pause: pages start back to
+back, from your own address, at most `CAMOUFOX_PAGES_AT_ONCE` at once, with no
+rate limit beyond the page caps. A flights request with a return phase has a page budget of
 its own, eight page periods plus one spacing (750 s at the defaults; six
 periods without a booking read, 570 s), and the app's flights request
 timeout `flightRequestSeconds` covers it (780 s, or 600 s, at the defaults),
@@ -1220,7 +1235,9 @@ other provider keep each pair's tiles together), so with the defaults the
 run's estimate is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of the 8,736 day pairs, and a full
 pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP` raised to 312 it is one
 run of 312 pages and no scrolls, about 2.6 hours. A scroll takes the measured
-9.3 s or the configured spacing when that is longer, and the estimate says
+9.3 s or the configured spacing when that is longer; with
+`CAMOUFOX_PAGES_AT_ONCE` above 1 the run's seconds are divided by it, never
+below its pages times the page spacing (their starts); and the estimate says
 when a run would pass `STUCK_AFTER_HOURS`. `list` mode needs 8,736 pages for
 the same pass.
 
@@ -5110,7 +5127,8 @@ SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime win
 CAMOUFOX_ENABLED=false                   # true only with the host-side worker running (a new search then names it); false = the provider does not exist
 CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or http://host.docker.internal:8090 (app in Docker; the compose default); loopback or host.docker.internal only, explicit port, no path
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
-CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
+CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start, across every page in flight; 0–600 (0 means no pause: pages start back to back, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
+CAMOUFOX_PAGES_AT_ONCE=1                 # pages the worker loads at once, each in its own browser and profile; 1–8; the run takes about 1/n of the time, never less than its page starts spaced as above; a shared setting, kept equal in worker.env (a difference skips the provider)
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400; flight-list pages (10 date pairs, up to 20 pages) have their own allowance
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 4 × this + page spacing + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2; without one: 2 × this + 30 s, listRequestSeconds)
@@ -5120,7 +5138,7 @@ CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
 CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
 CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
 # worker side only (macOS and Linux; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
-# fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0; the page caps still bound a run), cost 0, cache never
+# fixed, not configurable: concurrency = CAMOUFOX_PAGES_AT_ONCE, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0; the page caps still bound a run), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
 SMTP_PORT=
@@ -5160,7 +5178,7 @@ for the worker's two directories, so the CLI and the worker always agree);
 and keeps the settings the two sides must share equal:
 `SHARED_WORKER_SETTINGS` in `core/camoufox/settings.ts`
 (`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`,
-`CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_MODE`,
+`CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_PAGES_AT_ONCE`, `CAMOUFOX_MODE`,
 `CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`,
 `POINT_OF_SALE`), beside `workerDataDir(home)`, the
 one rule for `<workerData>` that the worker, the CLI and the app's status
@@ -5689,6 +5707,20 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 65: pages at once and a quicker settle (2026-11-07)
+
+A full browser run took about 2 h 40 because the worker loaded one page at a time, and a grid page spent most of its
+3–6 minutes waiting between polls; the page spacing never bound. The new shared setting `CAMOUFOX_PAGES_AT_ONCE`
+(default 1, 1 to 8) is the app's concurrency for camoufox and the pages the worker loads at once, each in its own
+browser over its own profile, behind one pacer whose spacing still runs start to start across every page in flight; the
+cool-downs, the signed-in refusal, the `SOCS` capture and the "second not-drawn grid page in a row" are shared, and a
+request that finds every page busy is answered `spacing` for the page that can end soonest. A grid page's scroll
+allowance also leaves out the scrolls other pages of the run have asked for but not yet reserved, so two pages never
+ask for the same ones. The estimate divides the browser's seconds by the pages at once, never below its page starts
+spaced apart. The settle now polls 0.5 s after each read and takes a view held still across two polls at least 1 s
+apart (it was 2 s and 2 s); what counts as settled is unchanged. The measured grid times (30 s a page, 9.3 s a scroll)
+stand until a run re-measures them (§2, §8.1, §12).
 
 ### Revision 64: no monthly browser caps (2026-11-06)
 

@@ -993,7 +993,7 @@ export async function pollUntilSettled(
         (o.loads?.() ?? changedFrom.documentLoads) > changedFrom.documentLoads);
     if (changed && o.track !== undefined) o.track.changed = true;
     const settled = isSettled(facts.page, facts.settle, view, changed);
-    // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart
+    // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least STABLE_MS apart
     const stable = settled && stableAcross(previous, current);
     const elapsedMs = timers.now() - startedAt;
     // why: one debug line a poll: the view, the booleans, the link count and the elapsed time only, so a page that

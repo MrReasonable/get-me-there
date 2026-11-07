@@ -307,6 +307,19 @@ function assemble(
 }
 
 /**
+ * CAMOUFOX_PAGES_AT_ONCE: `seconds` of pages one after another, run `concurrency` at a time, but never quicker than their
+ * starts allow (the page spacing runs start to start across every page in flight). At one at a time it is `seconds`.
+ */
+function atOnce(
+  seconds: number,
+  pages: number,
+  l: { concurrency: number; minSpacingSeconds: number | null },
+): number {
+  if (l.concurrency <= 1) return seconds;
+  return Math.max(Math.ceil(seconds / l.concurrency), pages * (l.minSpacingSeconds ?? 0));
+}
+
+/**
  * Spec §8.1 "seconds including limiter waits": the slowest of the minute window, the hour window and the pool
  * (cost-r1-011); the hour window is named in the assumptions when it binds.
  */
@@ -436,7 +449,11 @@ function discoveryLine(
       // seconds (the provider's estimateTile: the page time and the measured scroll time)
       const run = planned.slice(0, pages).map((t) => perTile(t.plan));
       const scrolls = run.reduce((n, t) => n + t.scrolls, 0);
-      const seconds = run.reduce((n, t) => n + t.seconds, 0);
+      const seconds = atOnce(
+        run.reduce((n, t) => n + t.seconds, 0),
+        pages,
+        l,
+      );
       const read = planned.slice(0, pages).reduce((n, t) => n + t.plan.coveredCells.length, 0);
       notes.push(
         `${providerId} grid mode reads ${read} of ${fresh.length} cells this run in ${pages} pages and ${scrolls} scrolls; a full pass takes ${Math.max(1, Math.ceil(tiles / pageCap))} run${Math.ceil(tiles / pageCap) > 1 ? 's' : ''}`,
@@ -467,10 +484,13 @@ function discoveryLine(
       stage: 'discovery',
       rawCalls: pages,
       rawCostMicroGbp: 0,
-      rawSeconds: pages * perPage,
+      rawSeconds: atOnce(pages * perPage, pages, l),
       // why: fix round 2 (CodeRabbit): the retry factor is clamped to the pages this execution has left (one when none
       // are, which checkBudget refuses), never to the whole cap
-      cap: { calls: Math.max(left, 1), seconds: Math.max(left, 1) * perPage },
+      cap: {
+        calls: Math.max(left, 1),
+        seconds: atOnce(Math.max(left, 1) * perPage, Math.max(left, 1), l),
+      },
       // why: ruling 13: camoufox never retries, so its estimate is the plan's own
       noRetry: true,
     };

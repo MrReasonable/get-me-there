@@ -14,6 +14,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
 import { Pacer } from '../src/pacer.js';
+import { STABLE_MS } from '../src/ready.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS, type Selectors } from '../src/selectors.js';
 import { type GridSettings, PageSession, pageCapMs } from '../src/session.js';
@@ -87,6 +88,8 @@ interface Run {
   /** Called on each scroll with the context, to change its cookie jar. */
   onScrollContext?: (c: FakeContext) => void;
   pollMs?: number;
+  /** The worker's shared record of its last grid page (pages at once: every session holds the same one). */
+  gridRow?: { notDrawn: boolean };
 }
 function setup(o: Run = {}) {
   const dataDir = tmpDir();
@@ -168,6 +171,7 @@ function setup(o: Run = {}) {
     versions,
     grid: o.grid ?? GRID,
     ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
+    ...(o.gridRow === undefined ? {} : { gridRow: o.gridRow }),
   });
   return { session, timers, cooldown, contexts, pacer, profileDir, dataDir, loads };
 }
@@ -423,7 +427,7 @@ describe('grid pages: pairs shown without a price', () => {
     );
   const statuses = (v: { cells: Array<{ status: string }> }) =>
     ['price', 'no-flights', 'price-unknown'].map((x) => v.cells.filter((c) => c.status === x).length);
-  it('each view is read whole on its two stable polls: priced, no-flights and price-unknown cells as named', async () => {
+  it('each view is read whole once its polls hold still: priced, no-flights and price-unknown cells as named', async () => {
     const log = memoryLog();
     const t = setup({ log, view: (d, r, i) => [sparse(d, r, i)] });
     const r = await t.session.page(req(['right', 'down']));
@@ -441,7 +445,7 @@ describe('grid pages: pairs shown without a price', () => {
     });
     // why: the unpriced cells are buttons, so no poll finds the view still drawing and none waits for them
     const polls = log.lines.filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'dates');
-    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([false, false]);
+    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([false, false, false]);
   });
   it('a view whose unpriced cells are drawn but whose new column still prints "0000" is waited on, then read whole', async () => {
     const log = memoryLog();
@@ -459,7 +463,15 @@ describe('grid pages: pairs shown without a price', () => {
       ['ok', 49],
     ]);
     const polls = log.lines.filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'move-1');
-    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([true, true, true, true, false, false]);
+    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
   it('without GRID_UNPRICED_VERIFIED the same views are refused whole (structural), and the page goes on', async () => {
     const t = setup({
@@ -505,7 +517,7 @@ describe('grid pages: a view still drawing its cells', () => {
       [49, 'ok'],
       [49, 'ok'],
     ]);
-    expect(pollsOf(log, 'move-1')).toEqual([true, true, true, true, false, false]);
+    expect(pollsOf(log, 'move-1')).toEqual([true, true, true, true, false, false, false]);
   });
   it('a first view that has drawn no cell yet is waited on and read once it has', async () => {
     const t = setup({
@@ -658,6 +670,19 @@ describe('grid pages: a view still drawing its cells', () => {
     });
     expect(t.cooldown.active()?.cause).toBe('unrecognised');
   });
+  // why: CAMOUFOX_PAGES_AT_ONCE: "in a row" is the worker's row, whichever page session read the page before
+  it('a second such page in a row is refused when another page session read the first', async () => {
+    const gridRow = { notDrawn: false };
+    const view = (d: string, r: string) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))];
+    const a = setup({ gridRow, view });
+    const b = setup({ gridRow, view });
+    expect((await a.session.page(req(['down']))).answer).toMatchObject({ ended: 'first-not-drawn' });
+    expect(gridRow.notDrawn).toBe(true);
+    expect((await b.session.page(req(['down']))).answer).toMatchObject({
+      kind: 'blocked',
+      rule: 'grid:first-view:not-drawn-again',
+    });
+  });
   it('a page read whole between two such pages starts the count again: neither is refused', async () => {
     let drawn = false;
     const t = setup({
@@ -771,7 +796,7 @@ describe('grid pages: a view still drawing its cells', () => {
       [49, 'ok'],
       [0, 'unparsed'],
     ]);
-    expect(pollsOf(log, 'move-1')).toEqual([false, false]);
+    expect(pollsOf(log, 'move-1')).toEqual([false, false, false]);
   });
 });
 
@@ -833,7 +858,7 @@ describe('grid pages: the grid’s reset control', () => {
     const polls = log.lines
       .filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'move-6')
       .map((l) => Reflect.get(l.o, 'drawing'));
-    expect(polls).toEqual([true, true, true, true, false, false]);
+    expect(polls).toEqual([true, true, true, true, false, false, false]);
   });
 });
 
@@ -926,6 +951,8 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
   });
   it('a scroll click that overruns its step is counted: the ledger never undercounts (CodeRabbit)', async () => {
     const t = setup({
+      // why: the loop below runs the pending bounds out a fixed number of times, counted for polls 2 s apart
+      pollMs: 2000,
       view: (d, r) => {
         const g = gridTree({ depart: d, ret: r });
         const panel = (g.children ?? []).find((x) => x.role === 'tabpanel');
@@ -968,9 +995,9 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
     t.pacer.release();
     expect(c.ok).toBe(true);
   });
-  it('a view settles only once two polls 2 s apart match, however short the poll interval (ruling 9)', async () => {
+  it('a view settles only once two polls STABLE_MS apart match, however short the poll interval (ruling 9)', async () => {
     const log = memoryLog();
-    const t = setup({ pollMs: 500, log });
+    const t = setup({ pollMs: 250, log });
     const r = await t.session.page(req([]));
     expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete' });
     const get = (o: object | undefined, k: string): unknown =>
@@ -981,7 +1008,9 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
     const last = polls.at(-1);
     const firstSame = polls.find((p) => get(p, 'container') === get(last, 'container'));
     expect(get(last, 'stable')).toBe(true);
-    expect(Number(get(last, 'elapsedMs')) - Number(get(firstSame, 'elapsedMs'))).toBeGreaterThanOrEqual(2000);
+    expect(Number(get(last, 'elapsedMs')) - Number(get(firstSame, 'elapsedMs'))).toBeGreaterThanOrEqual(
+      STABLE_MS,
+    );
     expect(polls.length).toBeGreaterThanOrEqual(5);
   });
   it.each([

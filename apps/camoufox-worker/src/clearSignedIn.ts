@@ -1,12 +1,12 @@
 import { rmSync } from 'node:fs';
 import { systemClock } from '@gmt/core';
 import { acquireLock } from './lock.js';
-import { profileDir } from './paths.js';
+import { profileDirs } from './paths.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG } from './run.js';
 
 /**
- * `clear-signed-in` (spec §2; devops-011): with the worker stopped (it takes the lock), wipes the profile first, then
+ * `clear-signed-in` (spec §2; devops-011): with the worker stopped (it takes the lock), wipes the profiles first, then
  * clears the persisted signed-in refusal, so the next start runs in a fresh signed-out profile.
  */
 export function clearSignedIn(ctx: EntryContext, pid: number): number {
@@ -18,7 +18,8 @@ export function clearSignedIn(ctx: EntryContext, pid: number): number {
     return EX_CONFIG;
   }
   try {
-    rmSync(profileDir(ctx.dataDir), { recursive: true, force: true });
+    // why: CAMOUFOX_PAGES_AT_ONCE: every page session's profile, so none keeps the account it may have held
+    for (const dir of profileDirs(ctx.dataDir)) rmSync(dir, { recursive: true, force: true });
     new Refusal({ dir: ctx.dataDir, clock: systemClock }).clear();
     ctx.out(
       'profile wiped and the signed-in refusal cleared; the next start uses a fresh signed-out profile',

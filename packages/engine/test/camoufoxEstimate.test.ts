@@ -49,6 +49,27 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
     expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
     expect(line?.seconds).toBe(4000);
   });
+  // why: CAMOUFOX_PAGES_AT_ONCE: pages run that many at a time, their starts still spaced by the page spacing
+  it('two pages at once halve the time, but never below the spacing between their starts', () => {
+    const at = (env: Record<string, string>) => {
+      const e = engineWith([stubCamoufox({ cells: 1 })], { env });
+      const def = e.ctx.repos.definitions.update(e.definition.id, {
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
+        minNights: 10,
+        maxNights: 21,
+        scheduleCron: '0 5 * * 1',
+      });
+      const built = buildSnapshot(e.ctx, def);
+      return estimateStart(e.ctx, built.snapshot, built.cells, null).perProvider.find(
+        (p) => p.providerId === 'camoufox',
+      )?.seconds;
+    };
+    // why: 100 pages at 30 + 40 s are 7000 s one at a time, 3500 s two at a time (above 100 starts × 30 s)
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '2' })).toBe(3500);
+    // why: four at a time would be 1750 s, but 100 starts 30 s apart take 3000 s
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '4' })).toBe(3000);
+    expect(at({ CAMOUFOX_PAGES_AT_ONCE: '4', CAMOUFOX_MIN_SPACING_SECONDS: '0' })).toBe(1000);
+  });
   it('is not blocked at start by its month, which has no cap, or by the shared free-calls cap', () => {
     const { e, def } = workedExample();
     const built = buildSnapshot(e.ctx, def);
@@ -124,6 +145,31 @@ describe('the camoufox grid estimate', () => {
     expect(est.assumptions).toContain(
       'camoufox never retries: its pages, scrolls and seconds carry no retry factor',
     );
+  });
+  it('grid pages at once share the time, never below the spacing between their starts', () => {
+    const { e, def } = workedGrid(
+      { pageAllowance: 25, scrollAllowance: 150 },
+      { CAMOUFOX_PAGES_AT_ONCE: '3' },
+    );
+    const built = buildSnapshot(e.ctx, def);
+    const line = estimateStart(e.ctx, built.snapshot, built.cells, null).perProvider.find(
+      (p) => p.providerId === 'camoufox',
+    );
+    // why: 57 pages and 147 scrolls are 3077.1 s one at a time; a third is 1026 s, under 57 starts × 30 s
+    expect(line?.seconds).toBe(57 * 30);
+    const wide = workedGrid(
+      { pageAllowance: 25, scrollAllowance: 150 },
+      {
+        CAMOUFOX_PAGES_AT_ONCE: '3',
+        CAMOUFOX_MIN_SPACING_SECONDS: '5',
+      },
+    );
+    const b = buildSnapshot(wide.e.ctx, wide.def);
+    expect(
+      estimateStart(wide.e.ctx, b.snapshot, b.cells, null).perProvider.find(
+        (p) => p.providerId === 'camoufox',
+      )?.seconds,
+    ).toBe(Math.ceil((57 * 30 + 147 * 9.3) / 3));
   });
   it('under a tight page allowance: pages up to the cap and scrolls within theirs, at 9.3 s a scroll', () => {
     const { e, def } = workedGrid({ pageAllowance: 25, scrollAllowance: 150 });

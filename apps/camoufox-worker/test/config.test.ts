@@ -24,6 +24,7 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     expect(c).toMatchObject({
       port: 8090,
       minSpacingSeconds: 30,
+      pagesAtOnce: 1,
       cooldownHours: 48,
       pageTimeoutSeconds: 90,
       home: '/Users/op',
@@ -41,6 +42,7 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
         HOME: '/h',
         CAMOUFOX_WORKER_PORT: '9000',
         CAMOUFOX_MIN_SPACING_SECONDS: '45',
+        CAMOUFOX_PAGES_AT_ONCE: '3',
         CAMOUFOX_COOLDOWN_HOURS: '72',
         CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120',
         POINT_OF_SALE: 'US',
@@ -48,6 +50,7 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ).toMatchObject({
       port: 9000,
       minSpacingSeconds: 45,
+      pagesAtOnce: 3,
       cooldownHours: 72,
       pageTimeoutSeconds: 120,
       pointOfSale: 'US',
@@ -66,6 +69,8 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '29'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '0'],
+    ['CAMOUFOX_PAGES_AT_ONCE', '9'],
     ['POINT_OF_SALE', 'gb'],
     ['HOME', ''],
   ])('%s=%s refuses, naming the variable and never the value', (name, value) => {

@@ -14,15 +14,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNT_COOKIE_NAMES } from '../src/accountCookies.js';
 import { CooldownStore } from '../src/cooldown.js';
 import { Pacer } from '../src/pacer.js';
+import { POLL_MS, STABLE_MS } from '../src/ready.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS, type Selectors, selectorsFor } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
+import { PageSlots } from '../src/slots.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { descendants, type FakeNode, formNodes, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { SYNTHETIC_ACCEPT, SYNTHETIC_REJECT } from './support/socsValues.js';
-import { fakeTimers, flush } from './support/timers.js';
+import { fakeTimers, flush, T0 } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
 const SOCS_VALUE = SYNTHETIC_REJECT;
@@ -68,6 +70,9 @@ function setup(
     pollMs?: number;
     /** The capture's value, in place of the stored one (review X1: a value that is not a rejection). */
     socsValue?: string;
+    /** The pacer's spacing (default 30 s) and capacity (default 1: CAMOUFOX_PAGES_AT_ONCE). */
+    spacing?: number;
+    capacity?: number;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -78,7 +83,12 @@ function setup(
   const clock = timers.clock;
   const contexts: FakeContext[] = [];
   const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
-  const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
+  const pacer = new Pacer({
+    dir: dataDir,
+    minSpacingSeconds: o.spacing ?? 30,
+    clock,
+    ...(o.capacity === undefined ? {} : { capacity: o.capacity }),
+  });
   const refusal = new Refusal({ dir: dataDir, clock });
   const launches = { count: 0 };
   const make = (): PageSession =>
@@ -157,7 +167,8 @@ beforeEach(() => {
   expect.hasAssertions();
 });
 
-// Fake times below include the one extra 2 s poll a page needs to show stable links (ruling of 2026-10-18).
+// Fake times below include the polls a page needs to show stable links: at the default POLL_MS (500 ms) the third poll
+// is the first STABLE_MS (1 s) after the first (ruling of 2026-10-18).
 describe('PageSession (spec §2; brief Task 14.4)', () => {
   it('settled results → cells; SOCS set before goto; the read-back ran; pacer released; page closed', async () => {
     const t = setup();
@@ -165,7 +176,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(r).toEqual({
       answer: {
         kind: 'cells',
-        fetchedAt: '2026-10-18T05:00:02.000Z',
+        fetchedAt: '2026-10-18T05:00:01.000Z',
         currency: 'GBP',
         pointOfSale: 'GB',
         notes: [],
@@ -202,9 +213,9 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(page0(t).calls.clicks).toEqual([]);
     expect(released(t)).toBe(true);
   });
-  it('a Best view settles at a short poll interval, on two matching polls at least 2 s apart (fix round 1, TS 8)', async () => {
+  it('a Best view settles at a short poll interval, on two matching polls at least STABLE_MS apart (fix round 1, TS 8)', async () => {
     const log = memoryLog();
-    const t = setup({ pollMs: 500, log });
+    const t = setup({ pollMs: 250, log });
     const r = await t.session.page(REQ);
     expect(r.answer.kind).toBe('cells');
     const polls = log.lines.filter((l) => l.msg === 'settle poll').map((l) => l.o);
@@ -213,7 +224,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(get(polls.at(-1), 'stable')).toBe(true);
     expect(
       Number(get(polls.at(-1), 'elapsedMs')) - Number(get(polls.at(-5), 'elapsedMs')),
-    ).toBeGreaterThanOrEqual(2000);
+    ).toBeGreaterThanOrEqual(STABLE_MS);
   });
   // why: review X1: every page's consent check reads the value's own mark, so an Accept all cookie is never applied
   it('a capture whose value is not a rejection sets no cookie and loads no page: a browser error before Google', async () => {
@@ -247,7 +258,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       expect(r.answer).toEqual({
         kind: 'blocked',
         page: 'consent-unhandled',
-        cooldownUntil: '2026-10-20T05:00:02.000Z',
+        cooldownUntil: '2026-10-20T05:00:01.000Z',
         rule: 'socs-read-back',
       });
       expect(r.googleContacted).toBe(true);
@@ -288,7 +299,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect((await t.session.page(REQ)).answer).toEqual({
       kind: 'blocked',
       page: 'unrecognised',
-      cooldownUntil: '2026-10-20T05:00:02.000Z',
+      cooldownUntil: '2026-10-20T05:00:01.000Z',
       rule: 'search-form:mismatch',
     });
     expect(t.cooldown.active()?.cause).toBe('unrecognised');
@@ -340,14 +351,14 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
   it('settles after polling', async () => {
     const t = setup({ trees: [n('document', '', [text('Fetching results')]), resultsTree()] });
     expect((await t.session.page(REQ)).answer.kind).toBe('cells');
-    expect(t.timers.sleeps).toContain(2000);
+    expect(t.timers.sleeps).toContain(POLL_MS);
   });
   it('a form mismatch → unrecognised, 1 h', async () => {
     const t = setup({ tree: resultsTree({ form: formNodes({ dep: 'Fri, 6 Nov' }) }) });
     expect((await t.session.page(REQ)).answer).toEqual({
       kind: 'blocked',
       page: 'unrecognised',
-      cooldownUntil: '2026-10-18T06:00:02.000Z',
+      cooldownUntil: '2026-10-18T06:00:01.000Z',
       rule: 'search-form:mismatch',
     });
   });
@@ -463,8 +474,8 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     const r = await t.session.page(REQ);
     expect(r.answer).toEqual({ kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' });
     // why: fix round 1 (TS M1): the bound is exactly 5 s of fake time, not merely at least that
-    // the 2 s stability poll (ruling of 2026-10-18), then exactly the 5 s bound
-    expect(t.timers.now() - before).toBe(2000 + 5000);
+    // the polls that show the links stable for STABLE_MS (ruling of 2026-10-18), then exactly the 5 s bound
+    expect(t.timers.now() - before).toBe(STABLE_MS + 5000);
     expect(ctx0(t).closed).toBe(1);
     t.clock.advance(30_000);
     await t.session.page(REQ);
@@ -529,7 +540,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     await t.session.page(REQ);
     t.clock.advance(5000);
     expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'spacing', retryAfterSeconds: 21 },
+      answer: { kind: 'spacing', retryAfterSeconds: 22 },
       googleContacted: false,
     });
     expect(ctx0(t).pages).toHaveLength(1);
@@ -791,8 +802,10 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
     return t;
   };
+  // why: these budgets count polls 2 s apart, so the flow pins that interval (two such polls are STABLE_MS apart)
   const flow = (firstPolls: number, cheapestPolls: number) =>
     setup({
+      pollMs: 2000,
       selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
       shape: (c) => {
         c.onNewPage = (p) => {
@@ -864,7 +877,9 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       'click-tab:end',
       'confirm-selected:start',
       'confirm-selected:end',
-      // each Cheapest poll is its own bounded step (two polls show the links stable)
+      // each Cheapest poll is its own bounded step (three polls POLL_MS apart show the links stable for STABLE_MS)
+      'cheapest-poll:start',
+      'cheapest-poll:end',
       'cheapest-poll:start',
       'cheapest-poll:end',
       'cheapest-poll:start',
@@ -1044,7 +1059,7 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     expect(r).toEqual({
       answer: {
         kind: 'flights',
-        fetchedAt: '2026-10-18T05:00:02.000Z',
+        fetchedAt: '2026-10-18T05:00:01.000Z',
         currency: 'GBP',
         pointOfSale: 'GB',
         listed: 'flights',
@@ -1101,7 +1116,7 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     const c = setup();
     expect((await c.session.page(FREQ)).answer.kind).toBe('flights');
     c.clock.advance(5000);
-    expect((await c.session.page(FREQ)).answer).toEqual({ kind: 'spacing', retryAfterSeconds: 21 });
+    expect((await c.session.page(FREQ)).answer).toEqual({ kind: 'spacing', retryAfterSeconds: 22 });
     expect(ctx0(c).pages).toHaveLength(1);
   });
   it('a second request during a page answers spacing, nothing more opened', async () => {
@@ -1245,5 +1260,111 @@ describe('page counts only on a return-phase request (WP21 Task 21.3)', () => {
     const a = (await t.session.page(REQ)).answer;
     expect(a).toMatchObject({ kind: 'blocked', page: 'captcha' });
     expect('pagesLoaded' in a).toBe(false);
+  });
+});
+
+// why: CAMOUFOX_PAGES_AT_ONCE: page sessions side by side, behind the one pacer, the one cool-down and the one refusal
+describe('PageSlots (pages at once)', () => {
+  /** A setup whose first context's page holds at its load until `open`; `loading` resolves once it waits there. */
+  const held = (o: Parameters<typeof setup>[0] = {}) => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      open = r;
+    });
+    let reached: () => void = () => undefined;
+    const loading = new Promise<void>((r) => {
+      reached = r;
+    });
+    const contexts: FakeContext[] = [];
+    const t = setup({
+      spacing: 0,
+      capacity: 2,
+      ...o,
+      shape: (c) => {
+        contexts.push(c);
+        o.shape?.(c);
+        if (contexts.length !== 1) return;
+        c.onNewPage = (p) => {
+          const g = p.goto.bind(p);
+          p.goto = async (u, opts) => {
+            reached();
+            await gate;
+            return g(u, opts);
+          };
+        };
+      },
+    });
+    return { t, loading, open: () => open() };
+  };
+  it('a request goes to an idle session; with every session busy it is answered spacing for the soonest end', async () => {
+    const h = held();
+    const slots = new PageSlots([h.t.session, h.t.make()]);
+    const a = slots.page(REQ);
+    await h.loading;
+    expect(slots.busySince()).toBe(T0);
+    const b = await slots.page(REQ);
+    expect(b.answer.kind).toBe('cells');
+    expect(h.t.contexts).toHaveLength(2);
+    // why: the second session is idle again, so a third request loads there while the first page still waits
+    expect((await slots.page(REQ)).answer.kind).toBe('cells');
+    // why: the first session alone, busy: the rest of its page's overall cap (twice the 90 s page timeout) and its
+    // bounded close, from the page's start at T0
+    const alone = new PageSlots([h.t.session]);
+    expect(await alone.page(REQ)).toEqual({
+      answer: {
+        kind: 'spacing',
+        retryAfterSeconds: Math.ceil((Date.parse(T0) + 190_000 - h.t.timers.now()) / 1000),
+      },
+      googleContacted: false,
+    });
+    h.open();
+    expect((await a).answer.kind).toBe('cells');
+    expect(slots.busySince()).toBeNull();
+    await slots.settled();
+  });
+  it('a block in one session stops every later page, while the page in flight in another finishes', async () => {
+    let launched = 0;
+    const h = held({
+      shape: (c) => {
+        // why: the second context's page meets a challenge frame
+        launched += 1;
+        if (launched === 2)
+          c.navigations = [
+            {
+              hops: [URL0, LANDED],
+              tree: resultsTree(),
+              frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+            },
+          ];
+      },
+    });
+    const slots = new PageSlots([h.t.session, h.t.make()]);
+    const a = slots.page(REQ);
+    await h.loading;
+    expect((await slots.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'captcha' });
+    expect((await slots.page(REQ)).answer).toMatchObject({ kind: 'cooling-down', cause: 'captcha' });
+    h.open();
+    expect((await a).answer.kind).toBe('cells');
+  });
+  it('with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing', async () => {
+    const h = held({ capacity: 1 });
+    const slots = new PageSlots([h.t.session]);
+    const a = slots.page(REQ);
+    await h.loading;
+    const grid: PageRequest = {
+      mode: 'grid',
+      origin: REQ.origin,
+      destination: REQ.destination,
+      gl: 'GB',
+      start: { departureDate: REQ.departureDate, returnDate: REQ.returnDate },
+      moves: [],
+      reads: [true],
+      scrollAllowance: 0,
+    };
+    expect((await slots.page(grid)).answer).toEqual({ kind: 'mode-unavailable', mode: 'grid' });
+    h.t.cooldown.start('captcha');
+    expect((await slots.page(REQ)).answer).toMatchObject({ kind: 'cooling-down', cause: 'captcha' });
+    h.open();
+    expect((await a).answer.kind).toBe('cells');
   });
 });
