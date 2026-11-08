@@ -3,7 +3,8 @@
 Written 2026-11-08. Status: draft for the operator's approval. When approved, the rules here are folded into the main
 design spec (`2026-10-14-flight-price-optimiser-design.md`, §6.9, §8.1, §11) as one revision; this document is the
 brief for that change and the plan that follows it. Choices marked *(my call)* were made by the author, not the
-operator; the operator decided the goal, the 5 trips and stopping rule A.
+operator; the operator decided the goal, the 5 trips, stopping rule A, the ranking tiers of §5.2 and the wording
+"trips with flights read" (2026-11-08, after the plan's review).
 
 ## 1. Why
 
@@ -55,9 +56,12 @@ to be read by hand. They should not have to: checking the prices the app is abou
   in `packages/engine/src/estimate.ts` call these "outbound-only" reads; that is wrong and is corrected with this
   change.
 - **Confirmed trip** *(my call)*: a date pair whose pairing candidate (spec §6.9 `cheapestPairing`) fits the search's
-  current limits (`fits`, `underCurrentLimits`) and was read within the refresh (`fresh`). Its **confirmed price** is
-  the cheapest seller offer when the booking read kept complete offers (`offersComplete`), else Google's round-trip
-  price for the paired outbound and return. A pairing older than the refresh is not confirmed; it is re-read. A
+  current limits (`fits`), was read under them (`underCurrentLimits`) and within the refresh (`fresh`). Its
+  **confirmed price** is the cheapest seller offer when the booking read kept complete offers (`offersComplete`), else
+  Google's round-trip price for the paired outbound and return; the figure says which of the two it is. A booking read
+  that ended transient still confirms the trip at Google's price: sellers are not required. The operator-facing words
+  are **"trips with flights read"**, never "confirmed", which the app already uses for its "≠ price not confirmed"
+  mark (Ian, 2026-11-08); "confirmed" stays the internal term. A pairing older than the refresh is not confirmed; it is re-read. A
   `verified` figure (an itinerary price from SearchApi's itinerary search) is a confirmed trip at its price; such
   pairs are not in the step's queue, since they were already priced as itineraries.
 - **No trip within limits**: a read whose return status is `no-outbound`, or whose pairing has no return within the
@@ -68,8 +72,8 @@ without a seller offer *(my call)*. The `sellers-not-read` and `offers-incomplet
 
 ### 4.2 What gets checked, in what order
 
-After discovery, the step builds its **queue** from every date pair that has a current calendar price, departs after
-today (London) and has no `verified` figure, in **calendar price order, cheapest first**, with the board's existing
+After discovery, the step builds its **queue** from every date pair that has a current calendar price (not superseded,
+not missing from the latest search), departs after today (London) and has no `verified` figure, in **calendar price order, cheapest first**, with the board's existing
 tie order. There is no fixed count: the stopping rule ends the step. `FLIGHT_LIST_COUNT` (10) stops being the step's
 limit and remains only for the outbound-only fallback of §4.6.
 
@@ -84,11 +88,12 @@ Each finished check either:
 
 - adds a confirmed trip at its confirmed price,
 - or marks the pair checked with no trip within limits,
-- or leaves the pair without a confirmed trip for another reason: a failed read that does not end the step, an
-  outbound-only read after returns stopped, a return or booking read that ended transient, or a list reused because
+- or leaves the pair **unread** (no confirmed trip, nothing learnt about its flights): a failed read that does not end
+  the step, an outbound-only read after returns stopped, a return read that ended transient, or a list reused because
   its last two reads ended transient (`transientStreak` 2).
 
-The **standings** are the confirmed trips, cheapest first.
+The **standings** are the confirmed trips, cheapest first. Fresh `verified` figures (itinerary prices from SearchApi)
+enter the standings by reuse before the queue is walked, since they are confirmed trips too.
 
 ### 4.4 When the step stops (rule A)
 
@@ -124,7 +129,9 @@ held no improvement, so the step starts no more reads; the 2 still in flight fin
 
 When the step stops, the **unchecked cheaper-looking dates** are the queue's remaining pairs whose calendar price is
 below the `CONFIRM_TARGET`-th confirmed price; with fewer than 5 confirmed, every remaining pair in the queue
-*(my call)*. The count is stored with the run (§7) and shown (§5).
+*(my call)*. The count is stored with the run (§7) and shown (§5). No row is written for a pair the step did not start: when an
+ending error stops the step, the pairs not started stay as they were (their last real trip, if any, keeps leading) and
+count as unchecked, never as "couldn't be read".
 
 ### 4.6 When returns cannot be read
 
@@ -136,50 +143,69 @@ below the `CONFIRM_TARGET`-th confirmed price; with fewer than 5 confirmed, ever
 
 ### 4.7 Suspend and resume *(my call)*
 
-A run that pauses during the step (outside its browser window, a cool-down) and resumes rebuilds the queue from the
-calendar as it then stands. The pairs this run already read are reused from their stored lists (they fill the
-standings without a page), and patience starts again at 0. The stored plan no longer lists a fixed set of cells:
-`flight_lists_json` holds the counts of §7 instead, and the api readers' `planned` becomes the checks made so far.
+A step that **finished** (a stop of §4.4, `returns-stopped`, or an ending error) reads nothing on a later pass of the
+same run, such as a resume after a verification pause. A step that was **interrupted** (the run's window, a
+cool-down, a crash) resumes by rebuilding the queue from the calendar as it then stands: this run's own stored lists
+count as reads already made (not as reuse), lists from other runs as reuse, `returnsStopped` and `bookingStopped`
+carry over, the counts are cumulative, and only patience starts again at 0. A resumed pass that cannot enter the step
+because the window has passed records `ended: 'window'`.
 
 ### 4.8 The per-run flight allowance is withdrawn *(my call)*
 
-Each run's snapshot carries `flightListPages` (10 pairs × 2 pages = 20), enforced by the budget guard, and returns
-are planned only when it holds 2 pages for every candidate. With an open-ended queue that allowance would stop the
-step after 10 pairs and never plan returns. It is withdrawn, as the browser's other per-run caps were (spec revisions
-64 and 65): rule A bounds the step. A resumed run whose stored snapshot still carries the allowance ignores it.
+Each run's snapshot carries `flightListPages` (10 pairs × 2 pages = 20), checked by the step itself before each read
+and by the budget guard, and returns are planned only when it holds 2 pages for every candidate. With an open-ended
+queue that allowance would stop the step after 10 pairs and never plan returns. It is withdrawn everywhere it is
+checked or reported, as the browser's other per-run caps were (spec revisions 64 and 65): rule A bounds the step. The
+snapshot field stays only as the step's on-switch, and the usage report stops calling it a cap. A resumed run whose
+stored snapshot still carries the figure ignores it.
 
 ## 5. What the operator sees
 
 These are the changes this project makes to the existing screens; the card's new layout is project 2's.
 
-1. **One price per row.** A row with a confirmed trip shows its confirmed price, the outbound and return times, and
-   journey time and changes each way. A row with only a calendar price shows it as "calendar £565 · flights not
-   checked" in the secondary style, never in the price column's main weight. Google's list "from" figure moves into
-   the expanded detail.
-2. **Confirmed trips first, everywhere** *(my call)*. The shared ranking (`rankDatePairs`) ranks confirmed trips by
-   confirmed price, then the rest by calendar price. Everything that reads it moves together: the best-dates table,
-   "best per departure week", the card's cheapest price and the engine's own ranking. The overview grid keeps
-   shading by calendar price, since it is a calendar, and outlines the confirmed trips.
-3. **Rows closed by default.** Each row shows one line; its full flight detail opens on demand. (Today every row
-   opens, and 10 rows make a 14,000 px page.)
-4. **Ranks in order.** A tie is listed in rank order; the tie note stays but never puts rank 2 above rank 1.
-5. **The stop is stated**, under the table, in one line *(my call: wording)*:
-   - rule A: "Checked 18 dates; 5 trips confirmed. 31 dates look cheaper on the calendar but weren't checked; the
-     next search checks them first."
-   - queue empty: "Checked every date that could be cheaper; 5 trips confirmed."
-   - fewer than 5 confirmed by rule A: "Checked 14 dates; 2 trips confirmed. The other dates' flights didn't fit your
-     limits or couldn't be read."
-   - stopped for another reason: "Stopped checking flights (the browser window closed / returns couldn't be read /
-     cancelled) after 9 dates; 3 trips confirmed."
-6. **The card** shows the cheapest confirmed price and its dates instead of the calendar price, until project 2
-   replaces the card.
+1. **One price per row.** A row with flights read shows its price with what kind it is ("seller's price" or "Google's
+   price, sellers not read") and when it was read ("read 6 h ago"), the outbound and return times, and journey time
+   and changes each way. A row with only a calendar price shows it in the secondary style as "calendar £565" with what
+   is known of its flights: "flights not checked" only when its flights were never read, otherwise the existing
+   reading ("no trip within your limits", "flights couldn't be read", "read under other limits", "return flights not
+   read"). Google's list "from" figure moves into the expanded detail.
+2. **Ranking in three tiers** (Ian, 2026-11-08): trips whose flights were read within the refresh (and fresh verified
+   figures), by price; then older trips with flights read that still lead their date under the 2026-11-06 ruling (and
+   stale verified figures), by price, each showing its age; then calendar-only prices. The shared ranking
+   (`rankDatePairs`) does this, so the best-dates table, "best per departure week", the card's cheapest price and the
+   engine's own ranking move together. A labelled break separates the trips from the "not checked yet" rows. The
+   overview grid keeps shading by each date's own price; its outline marks the date pairs with flights read, and its
+   legend says so.
+3. **Rows closed by default.** Each row shows one line; its full flight detail opens on demand with a keyboard-operable
+   button. (Today every row opens, and 10 rows make a 14,000 px page.)
+4. **Ranks in order.** Within a tie the rows are numbered in the order shown; rank 2 never sits above rank 1.
+5. **How checking ended**, under the table, in one line *(my call: wording)*. "Checked N dates" counts reads and reuses
+   together; ", K couldn't be read" is added when any read was unread (§4.3):
+   - rule A, 5 or more trips: "Checked 18 dates; 7 trips with flights read. 31 dates look cheaper on the calendar but
+     weren't checked."
+   - queue empty: "Checked every date with a calendar price; 5 trips with flights read."
+   - rule A, fewer than 5: "Checked 12 dates; 2 trips with flights read: the other dates' flights didn't fit your limits
+     or couldn't be read. 288 dates weren't checked."
+   - stopped otherwise: "Stopped checking flights after 9 dates because the browser's time ran out (… return flights
+     couldn't be read / … the search was cancelled); 3 trips with flights read. 120 dates weren't checked."
+   - returns off on this machine: "Trips couldn't be checked on this machine: it can't read return flights."
+   - while the step runs: "Checking flights: 9 dates so far; 3 trips with flights read."
+   - a run from before this change, or one that never reached the step: no line.
+6. **The card** shows the first-ranked trip's price and dates instead of the calendar price, with its price kind and
+   age, until project 2 replaces the card.
 
 ## 6. The estimate
 
 The flight line of the estimate (spec §8.1, revision 66) changes from "the first 10 pairs" to a range:
 
-- **Typical:** `CONFIRM_TARGET + CONFIRM_PATIENCE + 8` = 25 reads, less the pairs the estimate finds reusable.
-- **At most:** every pair in the queue.
+- **Typical:** 25 reads (`CONFIRM_TARGET + CONFIRM_PATIENCE` plus 8 for the improving reads expected beyond the
+  target), less the reusable pairs among the queue's first 25, but never fewer than `CONFIRM_PATIENCE` (or the
+  unreused queue, if smaller), since reuse does not spend patience.
+- **At most:** every unreused pair in the queue.
+
+The same queue feeds the estimate before a run, the estimate with the worker's flags unread (returns assumed, as the
+never-understates rule requires), and the remaining estimate of a resumed run (a rebuilt queue; 0 for a finished
+step).
 
 Each read is costed at **25 s** (the measured 19–29 s of §4.1, rounded up), in waves of `CAMOUFOX_PAGES_AT_ONCE`.
 The current per-pair figures (230 s typical, 285 s at most with the booking read) came from page counts and are about
@@ -188,9 +214,10 @@ checking flights, longer if prices are close together".
 
 ## 7. Data
 
-- The step's stored summary (`flight_lists_json`) holds: reads made, pairs reused, trips confirmed, the unchecked
-  cheaper-looking count of §4.5, and which stop ended the step (`patience` for rule A, `queue-empty`,
-  `returns-stopped`, or the existing stops). One migration if the column's shape needs it; no new table.
+- The step's stored summary (`flight_lists_json`) holds: the mode (`confirm`, or `outbound-only` when returns are off),
+  reads made, pairs reused, trips confirmed, reads left unread (§4.3), the unchecked cheaper-looking count of §4.5,
+  and which stop ended the step (`patience` for rule A, `queue-empty`, `returns-stopped`, or the existing stops). An
+  absent summary means a run stored before this change. No migration: the column is JSON read through its schema.
 - Confirmed trips are not stored separately: they are derived from the newest flight lists, as the board does now.
 
 ## 8. Testing
