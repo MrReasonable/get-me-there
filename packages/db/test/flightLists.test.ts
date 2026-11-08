@@ -328,22 +328,6 @@ describe('FlightListsRepo.forExecution', () => {
   });
 });
 
-// Design 2026-11-08 §5.5: why a confirm-mode step ended (`ended: 'stopped'`): the reason of the execution's newest failed list
-describe('FlightListsRepo.lastFailureReason', () => {
-  it("is the newest failed list's reason of that execution, and null with none (another run's and on-demand rows never count)", () => {
-    const { repo, list, executionId, db } = setup();
-    expect(repo.lastFailureReason(executionId)).toBeNull();
-    repo.insert(list({ ...failed, reason: 'parse', fetchedAt: hoursAt(9) }));
-    repo.insert(list({ ...D2, ...failed, reason: 'quota', fetchedAt: hoursAt(10) }));
-    repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(11) })); // read: not a failure
-    repo.insert(list({ ...D2, executionId: null, ...failed, reason: 'blocked', fetchedAt: hoursAt(12) }));
-    const other = rawExecution(db, budget);
-    repo.insert(list({ executionId: other.executionId, ...failed, reason: 'auth', fetchedAt: hoursAt(13) }));
-    expect(repo.lastFailureReason(executionId)).toBe('quota');
-    expect(repo.lastFailureReason(other.executionId)).toBe('auth');
-  });
-});
-
 // Spec rev 55 §8.1 (Task 20.9): a resumed flight-list step reads only planned cells with no row of this execution, so
 // it never writes a pair twice; this is the read it asks.
 describe('FlightListsRepo.cellsOfExecution', () => {

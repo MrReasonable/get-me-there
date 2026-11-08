@@ -150,6 +150,7 @@ describe('ExecutionsRepo stop causes (spec revision 55 §7)', () => {
       returnsStopped: null,
       bookingStopped: null,
       confirm: null,
+      endedReason: null,
       note: 'free text',
     };
     expect(() => repo.patch(id, { flightLists: plan })).toThrow(RowRejected);
@@ -190,6 +191,7 @@ describe('ExecutionsRepo flight-list plan summary (design 2026-11-08 §7)', () =
     booking: true,
     returnsStopped: null,
     bookingStopped: null,
+    endedReason: null,
   };
 
   it('a stored confirm reads back as written, and a null one as null', () => {
@@ -207,11 +209,23 @@ describe('ExecutionsRepo flight-list plan summary (design 2026-11-08 §7)', () =
     expect(repo.get(id)?.flightLists).toEqual({ ...base, confirm: null });
   });
 
+  // Design 2026-11-08 §5.5: the ending page's stop detail is stored on the plan and read back; absent reads as null
+  it('a stored endedReason reads back as written, and an absent one as null', () => {
+    const { repo, id } = setup();
+    repo.patch(id, { flightLists: { ...base, ended: 'stopped', confirm: null, endedReason: 'quota' } });
+    expect(repo.get(id)?.flightLists).toMatchObject({ ended: 'stopped', endedReason: 'quota' });
+  });
+
   it('a plan stored before the change, with no confirm key, reads with confirm null', () => {
     const { db, repo, id } = setup();
     db.raw
       .prepare('UPDATE search_executions SET flight_lists_json = ? WHERE id = ?')
       .run('{"planned":10,"cells":[],"reused":0,"ended":null,"returns":true,"booking":true}', id);
-    expect(repo.get(id)?.flightLists).toMatchObject({ planned: 10, returns: true, confirm: null });
+    expect(repo.get(id)?.flightLists).toMatchObject({
+      planned: 10,
+      returns: true,
+      confirm: null,
+      endedReason: null,
+    });
   });
 });

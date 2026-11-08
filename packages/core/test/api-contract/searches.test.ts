@@ -106,7 +106,18 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
   it('carries the run’s flight counts as the execution read does, and refuses more in hand than planned (R-reading)', () => {
     const f = (x: Record<string, unknown>) =>
       searchCard({
-        latestRun: latestRun({ flights: { planned: 10, read: 3, reused: 2, failed: 1, ended: null, ...x } }),
+        latestRun: latestRun({
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 2,
+            failed: 1,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+            ...x,
+          },
+        }),
       });
     expect(searchCardSchema.safeParse(f({})).success).toBe(true);
     expect(searchCardSchema.safeParse(f({ ended: 'window' })).success).toBe(true);

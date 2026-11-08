@@ -21,7 +21,13 @@ import {
   workedDates,
 } from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
-import { flightList, flightListsResponse, flightPair, listedFlight } from '../../fixtures.searches.js';
+import {
+  flightList,
+  flightListsResponse,
+  flightPair,
+  listedFlight,
+  pairingList,
+} from '../../fixtures.searches.js';
 import { expectConsoleErrors, poundsOutsidePrices } from '../../guards.js';
 import { askedPairs, FLIGHT_LISTS_URL, serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
@@ -839,6 +845,42 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
       expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(words);
     });
 
+    // design 2026-11-08 §5.1: changes each way, from the board's own list, only when it is the figure's own trip
+    it('shows the changes each way when the served list pairs the same flights as the figure', async () => {
+      server.use(
+        serveFlightLists(
+          (d, r) =>
+            flightPair(
+              d,
+              r,
+              d === '2027-03-14' ? { list: pairingList({ departureDate: d, returnDate: r }) } : {},
+            ),
+          { pagesPlanned: 2 },
+        ),
+      );
+      const { row } = await rowFor(pairingFig());
+      await waitFor(() =>
+        expect(within(row).getByTestId('pairing-changes')).toHaveTextContent('1 change out · 1 change back'),
+      );
+    });
+
+    it('shows no changes line when the list pairs other flights than the figure shows', async () => {
+      server.use(
+        serveFlightLists(
+          (d, r) =>
+            flightPair(
+              d,
+              r,
+              d === '2027-03-14' ? { list: pairingList({ departureDate: d, returnDate: r }) } : {},
+            ),
+          { pagesPlanned: 2 },
+        ),
+      );
+      const { row } = await rowFor(pairingFig({ pairing: figurePairing({ departOut: '09:00' }) }));
+      await screen.findByRole('button', { name: /^Show flights/ });
+      expect(within(row).queryByTestId('pairing-changes')).toBeNull();
+    });
+
     it('the phone card says when it was read too', async () => {
       setViewportWidth(375);
       try {
@@ -983,6 +1025,23 @@ describe('tiers on screen (design 2026-11-08 §5.2)', () => {
       ['0', 'break', '3', '6'],
     );
     expect(tierBreak(table)).toHaveTextContent('Not checked yet');
+  });
+
+  // a read trip that is not current ranks after every current one, so it can follow the calendar rows: no break there
+  it('a not-current read trip after the calendar rows is not drawn under the break', async () => {
+    const table = await render({
+      [at('2027-03-14', 10)]: pricedPair(trip(118_000)),
+      [at('2027-03-15', 10)]: pricedPair(
+        priced(90_000, { price: { ...priced(90_000).price, provenance: provCached() } }),
+      ),
+      [at('2027-03-16', 10)]: pricedPair(verifiedFig({ notSeenInLatest: { ageHours: 30 } })),
+    });
+    const rows = [...table.querySelectorAll<HTMLElement>('tbody > tr')];
+    expect(rows.map((r) => (r.classList.contains('tier-break') ? 'break' : (r.dataset.pair ?? '?')))).toEqual(
+      ['0', 'break', '3', '6'],
+    );
+    expect(table.querySelectorAll('tr.tier-break')).toHaveLength(1);
+    expect(rows[3]).toHaveAttribute('data-state', 'superseded');
   });
 
   it('has no break when every row is a trip, or when none is', async () => {

@@ -1,4 +1,4 @@
-import type { StopCause } from '../api-contract/stopCause.js';
+import type { StopCause, StopDetail } from '../api-contract/stopCause.js';
 import type { NormalisationReason, ProviderErrorKind } from '../errors.js';
 import type { CellKey, DefinitionSnapshot } from './definition.js';
 import type { IsoDateTime } from './ids.js';
@@ -192,6 +192,11 @@ export interface FlightListsState {
   bookingStopped: string | null;
   /** Design 2026-11-08 §7: how checking went (`ConfirmSummary`); null on a plan stored before that change. */
   confirm: ConfirmSummary | null;
+  /**
+   * Design 2026-11-08 §5.5: the stop detail of the ending page or cap that set `ended: 'stopped'` (the first one the step
+   * met, never a later in-flight failure); null otherwise and on a plan stored before it.
+   */
+  endedReason: StopDetail | null;
 }
 
 /** Design 2026-11-08 §4.6, §7: whether the step reads until rule A stops it, or why it reads outbound only. */

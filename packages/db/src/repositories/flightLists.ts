@@ -13,7 +13,6 @@ import {
   type ReturnRead,
   returnReadSchema,
   returnsOutboundIssue,
-  type StopDetail,
 } from '@gmt/core';
 import type { Db } from '../client.js';
 import { CABINS, LISTED, STOP_DETAILS } from '../internal/enums.js';
@@ -160,9 +159,6 @@ newest AS (
     ${NEWEST}) AS status
   FROM asked a)
 SELECT COALESCE(SUM(status = 'read'), 0) AS read, COALESCE(SUM(status = 'failed'), 0) AS failed FROM newest`;
-
-const LAST_FAILURE_SQL = `
-SELECT reason FROM flight_lists WHERE execution_id = ? AND status = 'failed' ORDER BY id DESC LIMIT 1`;
 
 const CELLS_OF_EXECUTION_SQL = `
 SELECT DISTINCT origin, destination, departure_date AS departureDate, return_date AS returnDate
@@ -729,15 +725,6 @@ export class FlightListsRepo {
         departureDate: readDate('flight_lists.departure_date', r.departureDate),
         returnDate: readDate('flight_lists.return_date', r.returnDate),
       }));
-  }
-
-  /**
-   * Design 2026-11-08 §5.5: the reason of this execution's newest failed list (the stop detail the step ended with when
-   * an ending page or a cap stopped it: the ending page writes its own failed row), or null when it has none.
-   */
-  lastFailureReason(executionId: string): StopDetail | null {
-    const row = this.db.raw.prepare<[string], { reason: string | null }>(LAST_FAILURE_SQL).get(executionId);
-    return nullableOneOf('flight_lists.reason', STOP_DETAILS, row?.reason ?? null);
   }
 
   /**

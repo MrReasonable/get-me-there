@@ -138,6 +138,7 @@ export const readFlightLists = (column: string, text: string): FlightListsState 
     bookingStopped: p.bookingStopped ?? null,
     // why: design 2026-11-08 §7: a plan stored before the change has no summary; null says so (the page shows no line)
     confirm: p.confirm ?? null,
+    endedReason: p.endedReason ?? null,
   };
 };
 

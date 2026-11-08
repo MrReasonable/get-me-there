@@ -682,6 +682,7 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
       returnsStopped: null,
       bookingStopped: null,
       confirm: null,
+      endedReason: null,
     };
     expect(flightWindowMarginSeconds(restarted, est, plan)).toBe(780);
     expect(flightWindowMarginSeconds(restarted, est, { ...plan, bookingStopped: 'expand-failed' })).toBe(600);

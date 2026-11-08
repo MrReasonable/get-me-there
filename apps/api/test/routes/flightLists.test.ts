@@ -283,6 +283,7 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
         returnsStopped: null,
         bookingStopped: null,
         confirm: null,
+        endedReason: null,
       },
     });
     for (const [i, c] of planned.entries())
@@ -327,6 +328,7 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
         returnsStopped: null,
         bookingStopped: null,
         confirm: summary,
+        endedReason: null,
       },
     });
     const res = await x.request(`/api/executions/${id}`);
@@ -346,17 +348,19 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
       returnsStopped: null,
       bookingStopped: null,
       confirm: { mode: 'confirm', confirmed: 1, unread: 0, uncheckedCheaper: 5, stop: null } as const,
+      endedReason: null,
     });
     const flightsOfRun = async (x: Harness, id: string) =>
       apiContract.executionResponseSchema.parse(await (await x.request(`/api/executions/${id}`)).json())
         .flights;
 
-    it("an ending error's detail is the newest failed list's reason when the step ended 'stopped'", async () => {
+    it("an ending error's detail is the one the plan stored, whatever failed after it", async () => {
       const { x, def, s } = await setup();
       const id = s.id('E');
-      x.ports.repos.executions.patch(id, { flightLists: plan('stopped') });
-      list(x, def, A, { fetchedAt: at(-1), executionId: id, failed: true, reason: 'execution-cap' });
-      expect((await flightsOfRun(x, id))?.stopCause).toEqual({ kind: 'detail', detail: 'execution-cap' });
+      x.ports.repos.executions.patch(id, { flightLists: { ...plan('stopped'), endedReason: 'quota' } });
+      // a read in flight failed later with another reason: it is never named as the stop's
+      list(x, def, A, { fetchedAt: at(-1), executionId: id, failed: true, reason: 'network' });
+      expect((await flightsOfRun(x, id))?.stopCause).toEqual({ kind: 'detail', detail: 'quota' });
     });
 
     it.each([

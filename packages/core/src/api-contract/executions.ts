@@ -49,6 +49,8 @@ export const flightListsStateSchema = z.strictObject({
   // why: design 2026-11-08 §7: the step's summary; absent on a plan stored before that change, read as null (no line).
   // A null is accepted too, so such a plan read back and stored again (an early end marked on it) still writes
   confirm: confirmSummarySchema.nullable().exactOptional(),
+  // why: design 2026-11-08 §5.5: the ending page's stop detail; absent on an earlier plan, read as null
+  endedReason: z.enum(STOP_DETAILS).nullable().exactOptional(),
 });
 
 /**

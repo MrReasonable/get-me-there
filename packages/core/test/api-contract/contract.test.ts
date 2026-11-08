@@ -393,7 +393,7 @@ describe("startExecutionRequestSchema (spec rev 55 §8.1: Search again's start f
 });
 
 describe('executionResponseSchema (spec rev 55 §10: stop, estimatedFinishAt and flights)', () => {
-  const flights = { planned: 10, read: 6, reused: 2, failed: 2, ended: null };
+  const flights = { planned: 10, read: 6, reused: 2, failed: 2, ended: null, confirm: null, stopCause: null };
   it('carries the three fields, each nullable', () => {
     for (const k of ['stop', 'estimatedFinishAt', 'flights'] as const)
       expect(executionResponseSchema.shape[k].safeParse(null).success, k).toBe(true);

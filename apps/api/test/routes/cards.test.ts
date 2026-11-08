@@ -139,6 +139,7 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
           returnsStopped: null,
           bookingStopped: null,
           confirm,
+          endedReason: null,
         },
       });
     }

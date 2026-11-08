@@ -432,6 +432,7 @@ function outboundPlanOf(
     returnsStopped: null,
     bookingStopped: null,
     confirm: { mode, confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+    endedReason: null,
   };
   ctx.repos.executions.patch(run.executionId, { flightLists: plan });
   return { plan, toRead: plan.cells, confirm: null };
@@ -527,6 +528,7 @@ function confirmPlanOf(ctx: EngineContext, run: RunState, stored: FlightListsSta
     ...phase,
     returnsStopped: stored?.returnsStopped ?? null,
     bookingStopped: stored?.bookingStopped ?? null,
+    endedReason: stored?.endedReason ?? null,
     confirm: {
       mode: 'confirm',
       confirmed: standings.prices.length,
@@ -683,6 +685,7 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     let stopped = false;
     // why: an ending error met first; in outbound-only mode the pairs no lane had started yet fail with its reason
     let ending: Extract<PageOutcome, { kind: 'failed' }> | null = null;
+    let endedReason: StopDetail | null = null;
     const started = new Set<number>();
     // why: the pairs that wrote a row this pass (read, or failed); the rest were never read (design §4.5)
     const written = new Set<number>();
@@ -759,6 +762,9 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
           // ending error stopped the step (`stopped`, as a cap does), or a later pass would read on; outbound-only mode
           // keeps today's end (its failed rows say why)
           ended = o.ended ?? (confirm === null ? null : 'stopped');
+          // why: design §5.5 — the ending page's own detail is the stop's reason; a read in flight that fails later (a
+          // parse, the network) never replaces it, because only the first stop the step meets is recorded here
+          if (ended === 'stopped') endedReason = o.reason;
         }
         stopped = true;
         intake.abort();
@@ -799,9 +805,10 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
         reused,
         planned: plan.cells.length + reused,
         ended: ended ?? plan.ended,
+        endedReason: endedReason ?? plan.endedReason,
         confirm: last === null ? null : { ...last, uncheckedCheaper: uncheckedCheaper(remaining, standings) },
       });
-    } else if (ended !== null) store({ ...plan, ended });
+    } else if (ended !== null) store({ ...plan, ended, endedReason: endedReason ?? plan.endedReason });
     const counts = ctx.repos.flightLists.forExecution(run.executionId, plan.cells);
     log.info({ ...counts, reused: plan.reused, ended, confirm: plan.confirm }, 'flight lists: step done');
   } catch (err) {

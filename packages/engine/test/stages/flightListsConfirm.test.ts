@@ -556,6 +556,25 @@ describe('returns, the window and other stops in confirm mode (design 2026-11-08
     expect(cam.flightCalls).toHaveLength(3);
   }, 15_000);
 
+  // Design 2026-11-08 §5.5: the stop's reason is the ending page's own detail, never a later failure of a read in flight
+  it("an ending page followed by an in-flight non-ending failure stores the ending page's detail", async () => {
+    const { e } = confirming({
+      ranked: pairs(40, (i) => 30_000 + i),
+      env: AT_ONCE,
+      // why: four pages at once; the second ends the step (a quota), the third and fourth were already in flight and fail
+      // after it with the network, which does not end a step
+      reply: (n) => (n === 2 ? 'quota' : 'network'),
+    });
+    const done = await e.settled(await start(e));
+    expect(done.flightLists).toMatchObject({ ended: 'stopped', endedReason: 'quota' });
+  }, 15_000);
+
+  it('a step nothing ended stores no reason', async () => {
+    const { e } = confirming({ ranked: pairs(40, (i) => 30_000 + i), reply: (n) => returnsAt(35_000 + n) });
+    const done = await e.settled(await start(e));
+    expect(done.flightLists?.endedReason).toBeNull();
+  }, 15_000);
+
   it("the window closing mid-step: ended 'window', no stop of rule A, and the counts so far", async () => {
     let id = '';
     const { e, cam } = confirming({

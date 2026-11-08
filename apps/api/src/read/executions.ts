@@ -111,25 +111,23 @@ export function flightsOf(ports: Pick<Ports, 'repos'>, e: Execution): ExecutionR
     failed,
     ended: f.ended,
     confirm: f.confirm,
-    stopCause: flightsStopCauseOf(ports, e, f.ended),
+    stopCause: flightsStopCauseOf(e, f),
   };
 }
 
 /**
  * Design 2026-11-08 §5.5: why the flight step stopped before its own rule ended it. An ending page or a cap
- * (`ended 'stopped'`) is told by the reason of the run's newest failed list (the ending page writes its own failed row);
+ * (`ended 'stopped'`) is told by the stop detail the plan stored for the ending page (`endedReason`);
  * otherwise the run's own stop cause, as a kind only (cancelled, budget, fatal, any other): no cause text travels.
  * Null while nothing stopped it.
  */
 function flightsStopCauseOf(
-  ports: Pick<Ports, 'repos'>,
   e: Execution,
-  ended: NonNullable<Execution['flightLists']>['ended'],
+  f: NonNullable<Execution['flightLists']>,
 ): apiContract.FlightsStopCause | null {
-  if (ended === 'stopped') {
-    const detail = ports.repos.flightLists.lastFailureReason(e.id);
-    if (detail !== null) return { kind: 'detail', detail };
-  }
+  // why: the ending page's detail is stored on the plan when the step ends, so a read in flight that failed later is
+  // never named as the reason
+  if (f.ended === 'stopped' && f.endedReason !== null) return { kind: 'detail', detail: f.endedReason };
   const cause = e.stopCause;
   if (cause === null) return null;
   switch (cause.kind) {

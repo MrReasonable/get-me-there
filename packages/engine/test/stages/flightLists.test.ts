@@ -125,6 +125,7 @@ describe('the flight-list step after discovery', () => {
       returnsStopped: null,
       bookingStopped: null,
       confirm: { mode: 'flags-unread', confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+      endedReason: null,
     };
     expect(seenPlan).toEqual([
       {
@@ -175,6 +176,7 @@ describe('the flight-list step after discovery', () => {
       returnsStopped: null,
       bookingStopped: null,
       confirm: { mode: 'flags-unread', confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+      endedReason: null,
     });
   });
 

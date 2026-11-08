@@ -303,14 +303,20 @@ export function BoardTable(props: BoardProps) {
             const entry = flights.byKey.get(pairKey(p));
             const key = pairKey(p);
             const tie = tieAt.get(p.index);
-            // why: design 2026-11-08 §5.2 — a labelled break where the trips with flights read give way to the dates
-            // only the calendar prices (sorted by price, the tiers are contiguous; under another sort they interleave)
+            // why: design 2026-11-08 §5.2 — a labelled break where the current trips with flights read give way to the
+            // current dates with only a calendar price (sorted by price). Not-current figures (superseded, not seen)
+            // rank after every current one, so a read trip among them never sits under "Not checked yet", and no break
+            // is drawn for them
             const prev = rows[at - 1];
+            const isCurrent = (q: DatePair) =>
+              q.figure !== null && !q.figure.superseded && q.figure.notSeenInLatest === null;
             const breaks =
               byPrice &&
               prev !== undefined &&
               prev.figure !== null &&
               p.figure !== null &&
+              isCurrent(prev) &&
+              isCurrent(p) &&
               rankTierOf(prev.figure) < 2 &&
               rankTierOf(p.figure) === 2;
             const outcome = <FlightOutcome entry={entry} available={available} />;
@@ -319,7 +325,14 @@ export function BoardTable(props: BoardProps) {
             const detailId = `${detailBase}-${p.index}`;
             // why: design 2026-11-08 §5.1 — the pairing's changes each way come from the list the board asked for
             const view = entry?.list == null ? null : pairingOf(entry.list, limits);
-            const changes = view === null ? null : { out: view.outbound.stops, back: view.ret.stops };
+            // (only when that list's pairing is the figure's own: its departures are the ones the row's times show)
+            const q = p.figure?.pairing ?? null;
+            const sameTrip =
+              view !== null &&
+              q !== null &&
+              view.outbound.departsLocal === q.departOut &&
+              view.ret.departsLocal === q.departBack;
+            const changes = sameTrip ? { out: view.outbound.stops, back: view.ret.stops } : null;
             const toggle = hasBlock ? (
               <FlightsToggle
                 open={open}
