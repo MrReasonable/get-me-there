@@ -4356,9 +4356,12 @@ merged into price.
   **Search now** button. The two dates of Leave between are browser date
   fields: each is picked from a calendar (on a phone, the phone's own date
   picker) and shown in the browser's date format; the earliest cannot be
-  picked before today, nor the latest before the earliest. A field holding no
-  whole date counts as empty ("Enter the dates"), and no estimate is asked
-  while either is. Elsewhere the app shows dates as "10 Jan 2027". Under
+  picked before today, nor the latest before the earliest. An earliest date
+  before today typed past the picker is refused ("The first date is before
+  today"); on Edit, a saved search whose first date has already passed keeps
+  that date while it is unchanged, and any other past date is refused. A field
+  holding no whole date counts as empty ("Enter the dates"), and no estimate is
+  asked while either field is empty or refused. Elsewhere the app shows dates as "10 Jan 2027". Under
   **More options**, already filled in from the presets (§8.2): longest journey
   each way (25 h), cabin (economy), rolling instead of fixed dates ("starts in
   N days", "lasts M days"), the sources (every free source the install has
@@ -5704,7 +5707,9 @@ as specified in §5.3; no secrets, no full URLs.
 Leave between's two dates were text fields taking "10 Jan 2027" (and a few other spellings), refusing another form
 beside the field. They are now browser date fields: the operator picks each date from a calendar, or the phone's own
 date picker, and sees it in the browser's date format. The earliest cannot be picked before today, nor the latest
-before the earliest; a field holding no whole date counts as empty and waits with "Enter the dates". The typed-date
+before the earliest, and an earliest date before today typed past the picker is refused ("The first date is before
+today"); Edit keeps a saved search's own first date that has already passed while it is unchanged. A field holding no
+whole date counts as empty and waits with "Enter the dates". The typed-date
 reader, its refusal ("Enter the date as 10 Jan 2027") and its echo are withdrawn. Dates elsewhere are still shown as
 "10 Jan 2027" (§11).
 
