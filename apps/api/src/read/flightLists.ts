@@ -10,6 +10,7 @@ import {
   type apiContract,
   type CellKey,
   cellKeyString,
+  datePairIndex,
   hoursSince,
   type IsoDate,
   type IsoDateTime,
@@ -190,10 +191,13 @@ export function assembleFlightLists(
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
         // why: the operator asking is the reason to read (design §6.1): a fresh list and a pair with no figure both read;
-        // only a search that cannot read flights, a departed date pair and a list a per-run limit stopped do not
+        // only a search that cannot read flights, a departed date pair, one outside the search's current dates and a list a per-run limit stopped do not
         readNow:
           unavailable === null &&
           p.departureDate > today &&
+          // why: the engine's own window test (flightRead.ts), so the button never offers a read it refuses
+          space.departureFrom <= space.departureTo &&
+          datePairIndex(space, p.departureDate, p.returnDate) !== null &&
           !(list?.status === 'failed' && NO_READ_AGAIN.has(list.reason ?? '')),
       };
     }),

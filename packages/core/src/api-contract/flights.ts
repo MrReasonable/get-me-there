@@ -141,8 +141,8 @@ export const flightListsResponseSchema = z.strictObject({
       list: flightListSchema.nullable(),
       listOtherPair: flightListSchema.nullable(),
       /**
-       * Whether a read of this date pair would go now: flight lists can be read here, the date pair is the board's and
-       * departs after today, and its newest list is not a failed list a per-run limit stopped. The operator asking is
+       * Whether a read of this date pair would go now: flight lists can be read here, the date pair departs after today
+       * and is inside the search's current dates (its window and nights range), and its newest list is not a failed list a per-run limit stopped. The operator asking is
        * the reason to read, so a fresh list and a pair with no figure both read. The read button shows exactly when it
        * is true; the status notes word what happens next by it.
        */

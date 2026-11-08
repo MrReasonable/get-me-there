@@ -501,6 +501,10 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
   // no figure; false only where flight lists cannot be read, for a departed pair and for a limit-stopped failed list
   it('readNow: true with no list, a fresh list, a failed one and a pair with no figure; false when limit-stopped', async () => {
     const { x, def } = await setup();
+    // why: a third day inside the window that no tile priced: a pair of the search's dates with no figure
+    x.ports.repos.definitions.update(def.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-04') },
+    });
     const NO_FIGURE = '2026-11-04_2026-11-14';
     const readNow = async () =>
       apiContract.flightListsResponseSchema
@@ -518,6 +522,13 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     list(x, def, B, { fetchedAt: at(0), failed: true, reason: 'monthly-cap' });
     expect(await readNow()).toEqual([true, true, true]);
   });
+  it('readNow is false for a future date pair outside the search’s nights range or window', async () => {
+    const { x, def } = await setup();
+    const asked = ['2026-11-02_2026-11-13', '2026-11-20_2026-11-30', PAIRS.split(',')[0]].join(',');
+    const body = apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, asked)).json());
+    expect(body.pairs.map((p) => p.readNow)).toEqual([false, false, true]);
+  });
+
   it('pagesPlanned is 2 before the worker is read (prov-008: the read may then load 2), 1 with its flag off, 2 with it on', async () => {
     const { x, def } = await setup();
     const planned = async () =>
