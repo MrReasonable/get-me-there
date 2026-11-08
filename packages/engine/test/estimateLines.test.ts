@@ -213,7 +213,7 @@ describe('an estimate over several providers', () => {
       totalPlanCalls: 40,
       totalCostMicroGbp: 0,
       totalCostPence: 0,
-      seconds: 1050 + 6 + 72 + 2450,
+      seconds: 1050 + 6 + 72 + 2300,
       assumptions: [
         RETRY_NOTE,
         NO_RETRY_NOTE,
@@ -221,11 +221,11 @@ describe('an estimate over several providers', () => {
         'travelpayouts: 15 discovery tiles planned; a tile that pages spends one call a page',
         'searchapi: verification of up to 2 cells at 5 calls each',
         WORST_CASE_NOTE,
-        '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+        '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 38 minutes, at most 20 pages and 48 minutes',
       ],
       windowClamped: false,
       retryFactor: 1.2,
-      flightLists: { pairs: 10, pages: 15, seconds: 2450, pagesMax: 20, secondsMax: 3000, returns: true },
+      flightLists: { pairs: 10, pages: 15, seconds: 2300, pagesMax: 20, secondsMax: 2850, returns: true },
     });
   });
 
@@ -523,7 +523,7 @@ describe('the flight line: when it applies and which date pairs it counts (spec 
     expect(startOf(flightEngine(15, null), { snapshot: withFlightPages(10) }).flightLists).toEqual({
       pairs: 10,
       pages: 10,
-      seconds: 700,
+      seconds: 550,
       returns: false,
     });
   });
@@ -656,14 +656,14 @@ describe('the flight line on a resume', () => {
     expect('flightLists' in estimateRemainingFor(e.ctx, { ...done, isCatchUp: true }, true)).toBe(false);
   });
 
-  it('a stored plan without the booking read is estimated without it (165 s a pair, at most 220 s)', async () => {
+  it('a stored plan without the booking read is estimated without it (150 s a pair, at most 205 s)', async () => {
     const { e, done } = await stoppedAfterFour(BOTH);
     const plan = done.flightLists;
     if (plan === null) throw new Error('a stored plan');
     expect(plan).toMatchObject({ returns: true, booking: true });
     expect(
       estimateRemainingFor(e.ctx, { ...done, flightLists: { ...plan, booking: false } }, true).flightLists,
-    ).toEqual({ pairs: 6, pages: 9, seconds: 990, pagesMax: 12, secondsMax: 1320, returns: true });
+    ).toEqual({ pairs: 6, pages: 9, seconds: 900, pagesMax: 12, secondsMax: 1230, returns: true });
   });
 });
 

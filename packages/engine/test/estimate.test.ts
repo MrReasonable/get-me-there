@@ -291,7 +291,7 @@ describe('parity and the overrun baseline (spec §8.1)', () => {
 
 // Spec revision 55 §8.1 "Estimate" (WP20 Task 20.9): with camoufox in discovery the estimate carries the flight-list
 // step's `flightLists { pages, seconds }`: pages the least of 10 less the reusable date pairs and the run's free calls
-// left; seconds pages × (spacing + 40). Its seconds count in the total and the browser window; its pages never in
+// left; seconds pages × (spacing + 25). Its seconds count in the total and the browser window; its pages never in
 // totalCalls. Without camoufox the stored estimate has no `flightLists` key.
 describe('the estimate flight line (spec rev 55 §8.1)', () => {
   /** A camoufox engine over `cells` one-page cells (with a flight capability) and its start-time estimate. */
@@ -304,17 +304,17 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, saved ? e.definition.id : null) };
   }
 
-  it('reads 10 date pairs at spacing + 40 s a page (700 s at the defaults): in seconds, never in totalCalls', () => {
+  it('reads 10 date pairs at spacing + 25 s a page (550 s at the defaults): in seconds, never in totalCalls', () => {
     const { est } = flightEstimate(15);
-    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 550, returns: false });
     const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
     expect(est.totalCalls).toBe(grid?.calls);
-    expect(est.seconds).toBe((grid?.seconds ?? 0) + 700);
-    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+    expect(est.seconds).toBe((grid?.seconds ?? 0) + 550);
+    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 9 minutes');
     expect(apiContract.estimateSchema.parse(est).flightLists).toEqual({
       pairs: 10,
       pages: 10,
-      seconds: 700,
+      seconds: 550,
       returns: false,
     });
   });
@@ -361,7 +361,7 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   // why: spec rev 65: the browser's pages, its flight pages too, count against no free-call cap
   it("the run's free-call limit never cuts the flight pairs: maxFreeCalls 15 after 100 grid pages still plans 10", () => {
     const { est } = flightEstimate(100, { maxFreeCalls: 15 });
-    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 550, returns: false });
     expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
   });
 
@@ -374,13 +374,13 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   it('is carried through withBlocked (zero when the browser line is blocked) and addPass', () => {
     const { est } = flightEstimate(15);
     const blockedTp = withBlocked(est, new Map());
-    expect(blockedTp.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(blockedTp.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 550, returns: false });
     expect(blockedTp.seconds).toBe(est.seconds);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
     expect(blocked.seconds).toBe(0);
     const twice = addPass(est, est);
-    expect(twice.flightLists).toEqual({ pairs: 20, pages: 20, seconds: 1400, returns: false });
+    expect(twice.flightLists).toEqual({ pairs: 20, pages: 20, seconds: 1100, returns: false });
     expect(twice.seconds).toBe(2 * est.seconds);
   });
 
@@ -454,8 +454,8 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
 });
 
 // Spec rev 56 §8.1 "Estimate" (R-estimate; ruling D6): with the worker's RETURN_SELECT_VERIFIED the flight
-// line plans each pair out and back: typically 1.5 pages and 245 s (165 s without the booking read), at most 2 pages and
-// 300 s (220 s); free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
+// line plans each pair out and back: typically 1.5 pages and 230 s (150 s without the booking read), at most 2 pages and
+// 285 s (205 s); free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
 describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () => {
   const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   function returnsEstimate(
@@ -469,37 +469,64 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, null) };
   }
 
-  it('both flags: 10 pairs, usually 15 pages and 2,450 s, at most 20 pages and 3,000 s', () => {
+  it('4 pages at once: the pairs go in waves of 4, never quicker than their page starts spaced apart', () => {
+    const at = (env: Record<string, string>, flags: Record<string, boolean>) =>
+      returnsEstimate(15, flags, { env: { CAMOUFOX_PAGES_AT_ONCE: '4', ...env } }).est.flightLists;
+    // why: at spacing 0, 3 waves of one request: 3 × 25 s outbound-only; 3 × 185 s typical, 3 × 225 s at most
+    expect(at({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }, { RETURN_SELECT_VERIFIED: false })).toEqual({
+      pairs: 10,
+      pages: 10,
+      seconds: 75,
+      returns: false,
+    });
+    expect(at({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }, BOTH)).toEqual({
+      pairs: 10,
+      pages: 15,
+      seconds: 555,
+      pagesMax: 20,
+      secondsMax: 675,
+      returns: true,
+    });
+    // why: at the default 30 s spacing, 10 outbound pages start 30 s apart: 300 s, longer than 3 waves of 55 s
+    expect(at({}, { RETURN_SELECT_VERIFIED: false })).toEqual({
+      pairs: 10,
+      pages: 10,
+      seconds: 300,
+      returns: false,
+    });
+  });
+
+  it('both flags: 10 pairs, usually 15 pages and 2,300 s, at most 20 pages and 2,850 s', () => {
     const { est } = returnsEstimate(15, BOTH);
     expect(est.flightLists).toEqual({
       pairs: 10,
       pages: 15,
-      seconds: 2450,
+      seconds: 2300,
       pagesMax: 20,
-      secondsMax: 3000,
+      secondsMax: 2850,
       returns: true,
     });
     expect(est.assumptions).toContain(
-      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 38 minutes, at most 20 pages and 48 minutes',
     );
     expect(est.assumptions.some((a) => a.startsWith('+ flights for up to'))).toBe(false);
     const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
-    expect(est.seconds).toBe((grid?.seconds ?? 0) + 2450);
+    expect(est.seconds).toBe((grid?.seconds ?? 0) + 2300);
     expect(apiContract.estimateSchema.parse(est).flightLists).toEqual(est.flightLists);
   });
 
-  it('without the booking flag: 165 s a pair (1,650 s), at most 220 s (2,200 s)', () => {
+  it('without the booking flag: 150 s a pair (1,500 s), at most 205 s (2,050 s)', () => {
     const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false });
     expect(est.flightLists).toEqual({
       pairs: 10,
       pages: 15,
-      seconds: 1650,
+      seconds: 1500,
       pagesMax: 20,
-      secondsMax: 2200,
+      secondsMax: 2050,
       returns: true,
     });
     expect(est.assumptions).toContain(
-      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 28 minutes, at most 20 pages and 37 minutes',
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 25 minutes, at most 20 pages and 34 minutes',
     );
   });
 
@@ -542,13 +569,13 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
       });
     // why: the plan judges the allowance over its 10 candidates (10 < 10 × 2: outbound-only), never over the 5 it reads
     const est = estimateStart(e.ctx, snapshot, b.cells, e.definition.id);
-    expect(est.flightLists).toEqual({ pairs: 5, pages: 5, seconds: 350, returns: false });
+    expect(est.flightLists).toEqual({ pairs: 5, pages: 5, seconds: 275, returns: false });
   });
 
-  it('with the return flag false: outbound-only, 10 pages and 700 s', () => {
+  it('with the return flag false: outbound-only, 10 pages and 550 s', () => {
     const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true });
-    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
-    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 550, returns: false });
+    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 9 minutes');
   });
 
   // why: final review B-M3 (prov-008, 21.6 N2): the run's own preflight may set the flags and plan 2 pages a pair, so
@@ -556,7 +583,7 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
   it('with the flags unread: the return phase with the booking read assumed (the bound), as with both flags', () => {
     const { est } = returnsEstimate(15, null);
     expect(est.flightLists).toEqual(returnsEstimate(15, BOTH).est.flightLists);
-    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 3000, returns: true });
+    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 2850, returns: true });
   });
 
   // why: spec rev 65: the browser's pages, its flight pages too, count against no free-call cap
@@ -565,9 +592,9 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.flightLists).toEqual({
       pairs: 10,
       pages: 15,
-      seconds: 2450,
+      seconds: 2300,
       pagesMax: 20,
-      secondsMax: 3000,
+      secondsMax: 2850,
       returns: true,
     });
     expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
@@ -610,9 +637,9 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(addPass(est, est).flightLists).toEqual({
       pairs: 20,
       pages: 30,
-      seconds: 4900,
+      seconds: 4600,
       pagesMax: 40,
-      secondsMax: 6000,
+      secondsMax: 5700,
       returns: true,
     });
   });
@@ -693,9 +720,9 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(estimateRemainingFor(e.ctx, done, true).flightLists).toEqual({
       pairs: 6,
       pages: 9,
-      seconds: 1470,
+      seconds: 1380,
       pagesMax: 12,
-      secondsMax: 1800,
+      secondsMax: 1710,
       returns: true,
     });
     // why: a resumed pass keeps the stored plan's phase less what a transient end stopped, and never counts a planned
@@ -707,15 +734,15 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(resumedWith({ returnsStopped: 'not-settled' })).toEqual({
       pairs: 6,
       pages: 6,
-      seconds: 420,
+      seconds: 330,
       returns: false,
     });
     expect(resumedWith({ bookingStopped: 'expand-failed' })).toEqual({
       pairs: 6,
       pages: 9,
-      seconds: 990,
+      seconds: 900,
       pagesMax: 12,
-      secondsMax: 1320,
+      secondsMax: 1230,
       returns: true,
     });
     const first = plan.cells[0];
