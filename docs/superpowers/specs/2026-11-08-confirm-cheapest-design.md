@@ -73,7 +73,7 @@ without a seller offer *(my call)*. The `sellers-not-read` and `offers-incomplet
 ### 4.2 What gets checked, in what order
 
 After discovery, the step builds its **queue** from every date pair that has a current calendar price (not superseded,
-not missing from the latest search), departs after today (London) and has no `verified` figure, in **calendar price order, cheapest first**, with the board's existing
+not missing from the latest search), departs after today (London) and has no fresh `verified` figure, in **calendar price order, cheapest first**, with the board's existing
 tie order. There is no fixed count: the stopping rule ends the step. `FLIGHT_LIST_COUNT` (10) stops being the step's
 limit and remains only for the outbound-only fallback of §4.6.
 
@@ -92,8 +92,11 @@ Each finished check either:
   the step, an outbound-only read after returns stopped, a return read that ended transient, or a list reused because
   its last two reads ended transient (`transientStreak` 2).
 
-The **standings** are the confirmed trips, cheapest first. Fresh `verified` figures (itinerary prices from SearchApi)
-enter the standings by reuse before the queue is walked, since they are confirmed trips too.
+The **standings** are the confirmed trips, cheapest first. Fresh, current `verified` figures (itinerary prices from
+SearchApi) enter the standings by reuse before the queue is walked, since they are confirmed trips too; a stale
+verified figure's pair is queued and read like a calendar one *(my call, after the plan's re-review)*. A pair read
+recently enough to lead (within the refresh) but too old to reuse (over 0.9 × the refresh) that the step does not
+reach counts as checked, not as unchecked.
 
 ### 4.4 When the step stops (rule A)
 
@@ -163,8 +166,8 @@ stored snapshot still carries the figure ignores it.
 
 These are the changes this project makes to the existing screens; the card's new layout is project 2's.
 
-1. **One price per row.** A row with flights read shows its price with what kind it is ("seller's price" or "Google's
-   price, sellers not read") and when it was read ("read 6 h ago"), the outbound and return times, and journey time
+1. **One price per row.** A row with flights read shows its price with what kind it is ("seller's price", "Google's
+   price, sellers not read", or "Google's price, not every seller read") and when it was read ("read 6 h ago"), the outbound and return times, and journey time
    and changes each way. A row with only a calendar price shows it in the secondary style as "calendar £565" with what
    is known of its flights: "flights not checked" only when its flights were never read, otherwise the existing
    reading ("no trip within your limits", "flights couldn't be read", "read under other limits", "return flights not
@@ -187,8 +190,12 @@ These are the changes this project makes to the existing screens; the card's new
    - rule A, fewer than 5: "Checked 12 dates; 2 trips with flights read: the other dates' flights didn't fit your limits
      or couldn't be read. 288 dates weren't checked."
    - stopped otherwise: "Stopped checking flights after 9 dates because the browser's time ran out (… return flights
-     couldn't be read / … the search was cancelled); 3 trips with flights read. 120 dates weren't checked."
+     couldn't be read / … the search was cancelled / the stop's own existing words for an ending page or a cap); 3 trips
+     with flights read. 120 dates weren't checked." With 5 or more trips the count is the cheaper-looking dates: "31
+     dates that look cheaper on the calendar weren't checked."
    - returns off on this machine: "Trips couldn't be checked on this machine: it can't read return flights."
+   - the browser had not reported what it can read when the step planned: "Trips couldn't be checked this run: the
+     browser hadn't yet said what it can read."
    - while the step runs: "Checking flights: 9 dates so far; 3 trips with flights read."
    - a run from before this change, or one that never reached the step: no line.
 6. **The card** shows the first-ranked trip's price and dates instead of the calendar price, with its price kind and

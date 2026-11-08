@@ -35,7 +35,7 @@
 
 **Files:**
 - Create: `packages/core/src/datePairs/confirm.ts`
-- Modify: `packages/core/src/datePairs/index.ts` (export), `packages/core/src/datePairs/pairing.ts` (`pairingOffer`, `pairingPrice`), `apps/api/src/read/pairings.ts` (`candidateOf` and `pairingGroupOf` use them), `packages/core/stryker.config.json` (add `src/datePairs/confirm.ts`)
+- Modify: `packages/core/src/datePairs/index.ts` (export), `packages/core/src/datePairs/pairing.ts` (`pairingOffer`, `pairingPrice`), `apps/api/src/read/pairings.ts` (`candidateOf` uses `pairingOffer`; its output unchanged), `packages/core/stryker.config.json` (add `src/datePairs/confirm.ts`)
 - Test: `packages/core/test/datePairs/confirm.test.ts` (new), `packages/core/test/datePairs/pairing.test.ts`
 
 **Interfaces:**
@@ -64,7 +64,7 @@
 
 - [ ] **Step 2: Run** `cd packages/core && npx vitest run test/datePairs/confirm.test.ts`. Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implement.** `pairingOffer` moves `candidateOf`'s `forPairing` test into core unchanged. `checkOfRead` = `cheapestPairing(r, flights, limits)` then `pairingOffer` then `pairingPrice`. `candidateOf` calls `pairingOffer`; `pairingGroupOf` prices and words its group from `pairingPrice` so the group and the figure always carry the same price and kind.
+- [ ] **Step 3: Implement.** `pairingOffer` moves `candidateOf`'s `forPairing` test into core unchanged. `checkOfRead` = `cheapestPairing(r, flights, limits)` then `pairingOffer` then `pairingPrice`. `candidateOf` calls `pairingOffer` and its output is unchanged (`pairingGroupOf` changes in Task 2, with the contract).
 
 - [ ] **Step 4: Run** core, then `cd apps/api && npx vitest run test/routes/pairingFigure.test.ts test/routes/flightLists.test.ts`. Expected: PASS.
 
@@ -75,24 +75,26 @@
 ### Task 2: Read trips lead and rank in two tiers, worded by price kind
 
 **Files:**
-- Modify: `packages/core/src/datePairs/pairing.ts` (`pairingLeads`), `packages/core/src/datePairs/figure.ts` (`withPairing`, `overStaleVerified`, the pairing figure carries `priceKind`), `packages/core/src/datePairs/rank.ts`, the figure contract in `packages/core/src/api-contract/` (`priceKind`), `apps/web/src/views/Dates/pairing.ts` and `PairingSection.tsx` (lead with the board's price), `apps/web/src/views/Dates/board.ts` (`sellerCoverage` counts complete offers only), the pairing figure lines component that calls `sellerOf` (an `isFrom` branch that never calls it), `apps/web/src/copy.ts` (`basisName.pairing`, `pairingSource`, `howFar.pairing` per kind), `apps/web/src/views/Dates/OverviewGrid.tsx` and the legend copy (`ring`)
+- Modify: `packages/core/src/datePairs/pairing.ts` (`pairingLeads`; `pairingReadOf` loses its `sellers-not-read` and `offers-incomplete` branches, the `PAIRING_READ` values stay for their wire codes and are never produced), `packages/core/src/datePairs/figure.ts` (`withPairing`, `overStaleVerified`), `packages/core/src/datePairs/rank.ts` (`rankTierOf`), `packages/core/src/api-contract/datePairs.ts` (the leading-pairing refinements and `beneathBreach`), `apps/api/src/read/pairings.ts` (`pairingGroupOf` prices and words its group from `pairingPrice`), `apps/web/src/views/Dates/pairing.ts` and `PairingSection.tsx` (lead with the board's price), `apps/web/src/views/Dates/board.ts` (`sellerCoverage` counts complete offers only), `apps/web/src/views/Dates/BoardCard.tsx` (an `isFrom` branch that never calls `sellerOf`), `apps/web/src/copy.ts` (`basisName.pairing`, `pairingSource`, `howFar.pairing` per kind; the beneath-rule copy that becomes unreachable is removed), `apps/web/src/views/Dates/OverviewGrid.tsx` and the legend copy (`ring`)
 - Test: `packages/core/test/datePairs/pairing.test.ts`, `figure.test.ts`, `rank.test.ts`; `apps/api/test/routes/cards.test.ts`, `pairingFigure.test.ts`; `apps/web/test/views/dates/flights.test.tsx`, `board.test.tsx`, `overview.test.tsx`, `logic/pairing.test.ts`
 
 **Interfaces:**
 - Consumes: `pairingPrice`, `PairingPriceKind` (Task 1).
-- Produces: `pairingLeads` (same signature); the pairing figure's `priceKind: PairingPriceKind`; `rankDatePairs` (same signature) with the tier key.
+- Produces: `pairingLeads` (same signature); `rankTierOf(f: DatePairFigure): 0 | 1 | 2` (used by `rankDatePairs` and by Task 5's tie key and tier break); `pairingKindOf(g: DatePairPairing): 'seller' | 'google-unread' | 'google-incomplete'` (from the group's `isFrom` and `offersRead`; no new contract field: the group's `isFrom` already says which price it is).
+- The contract rule: a leading pairing figure carries either a complete offer (`isFrom` false, a seller) or the return's "from" price (`isFrom` true, no seller); never an incomplete offer's price.
 
 - [ ] **Step 1: Write the failing tests:**
   - `pairingLeads` is true for a fitting, current-limits pairing with `offer: null` and with incomplete offers; false over the limits, under other limits, or older than the refresh with a newer grid price (the 2026-11-06 ruling unchanged).
-  - `figuresByDatePair`: no offer → a `pairing` figure at `fromMinor`, `priceKind: 'google'`; complete offers → offer price, `'seller'`; incomplete → `fromMinor`, `'google'`. The figure keeps the list's provider, source kind and fetch time in its provenance. The `pairingRead` stays `within`; the seller detail ("sellers not read", "a cheaper seller may not have been read") comes from the candidate's `offer`/`complete`, shown in the expanded detail.
-  - `rankDatePairs` tiers, then price: a fresh `pairing` at 63400 before an older leading `pairing` at 60000 before a `calendar` at 56500; a fresh `verified` in tier 0, a stale `verified` in tier 1; superseded and not-seen figures still after every current one.
+  - `figuresByDatePair`: no offer → a `pairing` figure at `fromMinor`; complete offers → offer price; incomplete → `fromMinor`. `pairingGroupOf` gives the same price, `isFrom` true for both `fromMinor` cases, no seller, `offersRead` as read.
+  - Contract (`packages/core/test/api-contract/`): a leading pairing with a complete offer parses; one at `fromMinor` with `isFrom` and no seller parses; one carrying an incomplete offer's price is refused. The figure keeps the list's provider, source kind and fetch time in its provenance. The `pairingRead` stays `within`; the seller detail ("sellers not read", "a cheaper seller may not have been read") comes from the candidate's `offer`/`complete`, shown in the expanded detail.
+  - `rankTierOf` and `rankDatePairs` tiers (tier 0 = `pairing` or `verified` with `figure.price.stale === false`; 1 = any other `pairing`/`verified`; 2 = `calendar`), then price: a fresh `pairing` at 63400 before an older leading `pairing` at 60000 before a `calendar` at 56500; a fresh `verified` in tier 0, a stale `verified` in tier 1; superseded and not-seen figures still after every current one.
   - Card: a calendar 56500 and a fresh fitting pairing 63400 on another pair → `cheapest` is the pairing, with `priceKind` and age.
-  - Web: a no-offer pairing figure renders "Google's price, sellers not read" and never calls `sellerOf`; a complete one renders the seller and "seller's price"; `PairingSection` leads with the same price as the board row; `sellerCoverage` ignores incomplete offers.
+  - Web: a no-offer pairing renders "Google's price, sellers not read" and an incomplete one "Google's price, not every seller read", neither calling `sellerOf`; a complete one renders the seller and "seller's price"; `PairingSection` leads with the same price as the board row; `sellerCoverage` ignores incomplete offers.
   - Overview: with 3 read trips among 10 board rows, only those 3 are outlined, and the legend reads "outlined: trips with flights read".
 
 - [ ] **Step 2: Run** `cd packages/core && npx vitest run test/datePairs`. Expected: FAIL on the new cases.
 
-- [ ] **Step 3: Implement.** `pairingLeads` drops `p.offer !== null && p.complete`. `figure.ts` prices through `pairingPrice` and sets `priceKind`. `rankDatePairs` adds `tier` after `current`: 0 for `pairing` with `pairing.fresh` or a `verified` figure without a stale mark, 1 for any other `pairing` or `verified`, 2 for `calendar`.
+- [ ] **Step 3: Implement.** `pairingLeads` drops `p.offer !== null && p.complete`. `figure.ts` and `pairingGroupOf` price through `pairingPrice`. `rankDatePairs` compares `rankTierOf` after `current`.
 
 - [ ] **Step 4: Run** core, then api, then web, one at a time. Fix only tests that pinned the old lead rule or the calendar-first order, and list each in the commit message. Expected: PASS.
 
@@ -103,15 +105,15 @@
 ### Task 3: The flight-list step reads until rule A stops it
 
 **Files:**
-- Modify: `packages/engine/src/stages/flightLists.ts` (`readPage` loses its allowance check; `budgetOutcome` keeps only the scopes still raised; `planOf`, `markLeftByWindow`, the pool loop, `returnPhaseOf`), `packages/engine/src/stages/flightLists/select.ts`, `packages/engine/src/types.ts` (`RankedDatePair.basis`, `.current`, `.stale`), `apps/api/src/read/ranked.ts`, `packages/core/src/types/execution.ts` and `packages/core/src/api-contract/executions.ts` (`ConfirmSummary`), `packages/core/src/ports/budget.ts`, `packages/core/src/api-contract/common.ts` and `apps/api/src/read/usage.ts` (usage reports flight pages with no cap), `packages/db/src/budgetGuard.ts` (no flight cap statement or check), `packages/engine/src/snapshot.ts` and `packages/core/src/types/definition.ts` (document `flightListPages` as the step's on-switch), the web copy that calls it a page allowance
-- Test: `packages/engine/test/stages/flightLists.test.ts`, `flightListsEdges.test.ts`, `flightListsResume.test.ts`, `flightListsSelect.test.ts`; `packages/db/test/budgetGuard.flightLists.test.ts`; `packages/core/test/api-contract/executions.test.ts`; `apps/api/test/bootstrap/engine.test.ts`
+- Modify: `packages/engine/src/stages/flightLists.ts` (`readPage` loses its allowance check; `budgetOutcome` keeps only the scopes still raised; `planOf`, `markLeftByWindow`, the pool loop, `returnPhaseOf`), `packages/engine/src/stages/flightLists/select.ts`, `packages/engine/src/types.ts` (`RankedDatePair.basis`, `.current`, `.stale`), `apps/api/src/read/ranked.ts`, `packages/core/src/types/execution.ts` and `packages/core/src/api-contract/executions.ts` (`ConfirmSummary`), `packages/core/src/ports/budget.ts`, `packages/core/src/api-contract/common.ts` and `apps/api/src/read/usage.ts` (usage reports flight pages with no cap), `packages/db/src/budgetGuard.ts` (no flight cap statement or check), `packages/engine/src/snapshot.ts` and `packages/core/src/types/definition.ts` (document `flightListPages` as the step's on-switch), `apps/web/src/copy/estimate.ts` (`'provider-execution': 'over its page allowance for one run'` no longer names a flight allowance), `packages/db/src/internal/read.ts` (`readFlightLists` passes `confirm` through, absent read as null)
+- Test: `packages/engine/test/stages/flightLists.test.ts`, `flightListsEdges.test.ts`, `flightListsResume.test.ts`, `flightListsSelect.test.ts`; `packages/db/test/budgetGuard.flightLists.test.ts` and a db round-trip test of a stored `confirm`; `packages/core/test/api-contract/executions.test.ts`; `apps/api/test/bootstrap/engine.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1's `Standings`, `applyCheck`, `patienceSpent`, `uncheckedCheaper`, `checkOfRead`, `EMPTY_STANDINGS`.
 - Produces:
   - `RankedDatePair` gains `basis: FigureBasis`, `current: boolean` (`!superseded && notSeenInLatest === null`), `stale: boolean`.
-  - `interface ConfirmSummary { mode: 'confirm' | 'outbound-only'; reads: number; reused: number; confirmed: number; unread: number; uncheckedCheaper: number; stop: 'patience' | 'queue-empty' | 'returns-stopped' | null }` on `FlightListsState.confirm?` (schema `.exactOptional()`, absent read as null = a run stored before this change). `reads` counts pages read this run across passes; `reused` counts lists from other runs and verified figures; `confirmed` is `standings.prices.length`; `unread` counts `unread` checks. The page's "Checked N" is `reads + reused`.
-  - `confirmQueue(ranked: readonly RankedDatePair[]): RankedDatePair[]` = `ranked.filter(p => p.current && p.basis !== 'verified')` (departed pairs are already dropped by `rankedPairsFor`). The read/reuse split is `selectFlightPairs(queue, …, Number.POSITIVE_INFINITY)`.
+  - `interface ConfirmSummary { mode: 'confirm' | 'outbound-only' | 'flags-unread'; confirmed: number; unread: number; uncheckedCheaper: number; stop: 'patience' | 'queue-empty' | 'returns-stopped' | null }` on `FlightListsState.confirm?` (schema `.exactOptional()`, absent read as null = a run stored before this change). One owner per count: date pairs read = `cells.length` (`cells` = this run's started pairs, carried across passes and appended to); reused = `FlightListsState.reused` (other runs' reusable lists, fresh verified figures, and the recently read pairs of §"end of step" below); `confirmed` = `standings.prices.length`; `unread` = `unread` checks. The page's "Checked N" is `cells.length + reused`. `planned = cells.length + reused`, so the existing `read + reused + failed <= planned` refinement holds. `mode` is `outbound-only` only when the worker's flags were read and lack `RETURN_SELECT_VERIFIED`; `flags-unread` when no flags had been read when the step planned.
+  - `confirmQueue(ranked: readonly RankedDatePair[]): RankedDatePair[]` = `ranked.filter(p => p.current && !(p.basis === 'verified' && !p.stale))`: stale verified pairs are queued for a read; fresh verified pairs enter the standings instead (departed pairs are already dropped by `rankedPairsFor`). The read/reuse split is `selectFlightPairs(queue, …, Number.POSITIVE_INFINITY)`.
   - `returnPhaseOf(ctx, snapshot)`: no `pairs` parameter, no allowance test.
 
 - [ ] **Step 1: Write the failing tests** (fake worker and in-memory repos as the existing step tests use; 15_000 timeouts):
@@ -119,8 +121,12 @@
   - **Rule A ends the step:** 40 queued pairs at concurrency 1; reads 1–6 confirm per the worked example, 7–18 do not improve: exactly 18 reads, `confirm = { mode: 'confirm', reads: 18, reused: 0, confirmed: 16, unread: 0, uncheckedCheaper: <the queued pairs after 18 priced below 37100>, stop: 'patience' }`.
   - **Finishing order:** concurrency 4; read 1 confirms a trip and is held; reads 2 onward are `no-outbound` and finish at once, in order. Each finish starts the next read, so when read 13 (the 12th non-improving finish) finishes, reads 1–15 have started and patience is spent: assert no read 16 starts, `stop: 'patience'`, and read 1, released afterwards, still writes its row and counts in `confirmed`. Counting in queue order (read 1 first) would reset patience and start more reads.
   - **Reuse does not spend patience** (Review Focus 4): the newest lists hold 13 reusable non-improving pairs and 5 reusable improving ones at the head of the queue; the step sends no request for them, then reads at least 12 further pairs, and `reused: 18`.
-  - **Verified in the standings:** two fresh verified figures cheaper than every read; they count in `confirmed` and `reused`, are not queued, and set the 5th price `uncheckedCheaper` uses.
+  - **Verified in the standings:** two fresh, current verified figures cheaper than every read count in `confirmed` and `reused`, are not queued, and set the 5th price `uncheckedCheaper` uses; a fresh verified figure the latest search did not see (`current` false) does not count; a stale verified pair is queued and read (`flightListsSelect.test.ts`).
   - **Not current:** a superseded cheap pair is not queued and not counted in `uncheckedCheaper` (`flightListsSelect.test.ts`).
+  - **Unread reads spend patience:** 12 reads in a row that fail without ending the step: `confirm.unread: 12`, `stop: 'patience'`, the rows `failed`. A read whose booking ends transient is confirmed at `fromMinor` and counts in `confirmed`.
+  - **Recently read, not reached:** an unstarted pair whose newest list is 22 h old under a 24 h refresh (not reusable at 0.9 × refresh, still fresh) with a leading pairing is counted as reused at the end of the step and not in `uncheckedCheaper`.
+  - **Window too short for returns:** in confirm mode, when the window cannot hold a return-phase read, the step ends `window` and sends no outbound-only read.
+  - **Running counts:** the execution read mid-step returns `cells` and the `confirm` counts so far; a plan interrupted by a crash still carries `confirm`.
   - **No trip can be read** (Review Focus 3): every read `no-outbound`; 12 reads, `confirmed: 0`, `stop: 'patience'`.
   - **Equal prices** (Review Focus 2): 80 pairs at one price; reads follow ranked order; stop at patience.
   - **Queue empty:** 7 pairs, all confirming; `stop: 'queue-empty'`.
@@ -128,19 +134,20 @@
   - **Returns off** (Review Focus 1): no `RETURN_SELECT_VERIFIED`; the first `FLIGHT_LIST_COUNT` pairs outbound-only as before; `confirm.mode: 'outbound-only'`.
   - **Blocked page mid-step** (Review Focus 5): read 3 of 40 ends blocked; rows exist only for pages sent; a pair whose older pairing led before the run still leads after it; `ended: 'stopped'`; unstarted pairs count in `uncheckedCheaper`.
   - **Window and cancel:** the existing first-stop tests pass; a window mid-step stores `ended: 'window'`, `confirm.stop: null` and the counts so far; patience and returns-stopped set the shared `stopped` flag, so a later in-flight error or window changes neither `ended` nor `stop`.
-  - **Resume** (`flightListsResume.test.ts`): a run interrupted by the window and resumed stores the same `confirm` as an uninterrupted run with the same fake worker (its own lists counted as reads, not reused); a step that finished at patience and is resumed after a verification pause sends no flight request; a resumed pass refused by the window records `ended: 'window'`; a plan stored before this change (fixed `cells`, no `confirm`, snapshot `flightListPages: 20`) parses with `confirm` null, resumes by rebuilding the queue, and is not refused.
+  - **Resume** (`flightListsResume.test.ts`): a run interrupted by the window just after an improving read and resumed stores the same `cells`, `reused` and `confirm` as an uninterrupted run with the same fake worker; a non-ending failed read before the interruption is not read again; a resume with the worker's flags unset keeps the stored `returns`, `booking` and `mode`; a step that finished at patience and is resumed after a verification pause sends no flight request; a resumed confirm-mode pass refused by the window records `ended: 'window'` (an outbound-only plan keeps today's rule); a plan stored before this change (fixed `cells`, no `confirm`, snapshot `flightListPages: 20`) parses with `confirm` null, resumes by rebuilding the queue, and is not refused.
 
-- [ ] **Step 2: Run** `cd packages/engine && npx vitest run test/stages`. Expected: FAIL on the new cases.
+- [ ] **Step 2: Run** `cd packages/engine && npx vitest run test/stages`, then the db and core test files named above, one suite at a time. Expected: FAIL on the new cases.
 
 - [ ] **Step 3: Implement.**
   - `rankedPairsFor` sets `basis`, `current` and `stale` from the figure.
   - Delete `readPage`'s allowance check and its doc comment; the guard drops `FLIGHT_LIST_CAP_SQL` and its check; usage keeps the page count.
-  - `planOf` in confirm mode (returns planned): if a stored plan has `confirm.stop` set or `ended` other than `null`/`'window'`, return null (finished). Else build the queue, apply fresh verified pairs by `'reuse'`, split with `selectFlightPairs`, and apply each reused pair's stored list through `checkOfRead`: by `'reuse'` when the list is another run's, counted as a read when it is this run's own. Carry `returnsStopped`, `bookingStopped` and the earlier counts. Without returns: today's first-`FLIGHT_LIST_COUNT` selection and `confirm.mode: 'outbound-only'`.
-  - `cells` holds the pairs whose read has started (appended as each starts); `planned` = `cells.length + reused`.
+  - `planOf` in confirm mode (returns planned): if a stored plan has `confirm.stop` set or `ended` other than `null`/`'window'`, return null (finished). Else build the queue; apply fresh, current verified pairs by `'reuse'`; leave out of the read split every cell with a row of this execution, whatever its status, and apply this run's `read` rows to the standings' prices without touching patience or `reused`; split the rest with `selectFlightPairs`; apply each reused pair's stored list through `checkOfRead` by `'reuse'`. On a resume keep the stored `returns`, `booking`, `mode`, `returnsStopped`, `bookingStopped`, `cells`, `reused` and `confirm` counts, never recomputed from flags. Without returns: today's first-`FLIGHT_LIST_COUNT` selection, `mode` per the flags. Write the plan with `confirm` (zero counts, `stop: null`) before the first read.
+  - The pool worker patches `cells` when a read starts and the `confirm` counts when it finishes, so the running line and a crash both see them.
+  - In confirm mode, `requestOf`'s window-shortfall path ends the step `window` instead of sending an outbound-only read.
   - Pool worker, after `writeRow`: `applyCheck(standings, checkOfRead(o.list.returns, o.list.flights, flightLimitsOf(constraints)), 'read')`; a failed read without `end` applies `{ kind: 'unread' }`. If `patienceSpent` or `returnsStopped` became non-null and `!stopped`, set the stop, `stopped = true` and `intake.abort()`.
   - On an ending error in confirm mode, write no rows for unstarted pairs (today's write-the-rest stays only in outbound-only mode).
-  - After the pool: `queue-empty` when every queued pair started and no stop was set; `uncheckedCheaper` from the unstarted pairs' `pricePence`; patch `confirm`.
-  - `markLeftByWindow`: a stored plan with `confirm` present, `confirm.stop` null and `ended` null gets `ended: 'window'`.
+  - After the pool: `queue-empty` when every queued pair started and no stop was set. Then, for each unstarted pair whose newest list is fresh (`listFresh` with the full refresh) and gives a confirmed check, apply it by `'reuse'` and add it to `reused`; `uncheckedCheaper` from the remaining unstarted pairs' `pricePence`; patch `confirm`.
+  - `markLeftByWindow`: a stored plan with `confirm.mode === 'confirm'`, `confirm.stop` null and `ended` null gets `ended: 'window'`; other plans keep today's rule.
 
 - [ ] **Step 4: Run** engine, then db, then core, then api suites, one at a time. Expected: PASS.
 
@@ -156,7 +163,7 @@
 
 **Interfaces:**
 - Consumes: `CONFIRM_TARGET`, `CONFIRM_PATIENCE` (Task 1); `confirmQueue`, `selectFlightPairs`, `returnPhaseOf(ctx, snapshot)` (Task 3).
-- Produces: `FLIGHT_READ_SECONDS = 25`, `CONFIRM_TYPICAL_EXTRA = 8`; the flight object keeps its shape (`pairs` typical reads, `pairsMax` at-most reads).
+- Produces: `FLIGHT_READ_SECONDS = 25`, `CONFIRM_TYPICAL_EXTRA = 8`; the flight object keeps its exact shape (`pages`, `seconds`, `pairs`, `returns`, `pagesMax`, `secondsMax`): `pairs`/`pages`/`seconds` are the typical reads, `pagesMax`/`secondsMax` the at-most reads. `withFlights`' note reads "usually about N dates, at most M" from them, never "up to" the typical count.
 
 - [ ] **Step 1: Write the failing tests:**
   - 300 queued pairs, reusable at positions 1–10: typical `max(min(290, 12), 25 - 10)` = 15 reads, at most 290; at 4 at once, spacing 0: `ceil(15/4) × 25 = 100` s and `ceil(290/4) × 25 = 1825` s.
@@ -166,7 +173,7 @@
   - Worker flags unread with 40 queued pairs: returns and booking assumed (the bound), the confirm figures above, never outbound-only.
   - A resumed run with an interrupted confirm-mode plan: the remaining flight line equals a fresh estimate over the rebuilt queue (this run's reads not counted again); a finished step's remaining flight line is 0.
   - Returns off: today's 10 outbound-only pairs at 25 s.
-  - Web: "then about 2 minutes checking flights, longer if prices are close together" for 100 s; "about 1 minute" singular.
+  - Web: "then about 2 minutes checking flights, longer if prices are close together" for 100 s; "about 1 minute" singular. The note for the 300-pair case reads "usually about 15 dates, at most 290".
 
 - [ ] **Step 2: Run** `cd packages/engine && npx vitest run test/estimate.test.ts test/estimateLines.test.ts`. Expected: FAIL.
 
@@ -181,15 +188,15 @@
 ### Task 5: The search page: one price per row, closed rows, how checking ended
 
 **Files:**
-- Modify: the api execution and card readers (pass `confirm` through), `packages/core/src/api-contract/executions.ts` (`flights.confirm`), `apps/web/src/views/Dates/BoardTable.tsx`, `board.ts`, `flightLines.ts` (`tieKey` includes the tier; ranks follow display order within a tie), new `apps/web/src/views/Dates/ConfirmLine.tsx`, `apps/web/src/views/Searches/cardWords.ts`, `apps/web/src/lib/flightsReading.ts`, `apps/web/src/copy.ts`
-- Test: `apps/api/test/routes/flightLists.test.ts`, `cards.test.ts`; `apps/web/test/views/dates/board.test.tsx`, `flights.test.tsx`, `keyboard.test.tsx`, `logic/flightLines.test.ts`, `confirmLine.test.tsx` (new); `apps/web/test/views/searches/` card tests
+- Modify: `apps/api/src/read/executions.ts` (`flightsOf` passes `confirm` through) and `apps/api/src/read/cards.ts`, `packages/core/src/api-contract/executions.ts` (`flights.confirm`), `apps/web/src/views/Dates/BoardTable.tsx` (the tier break via `rankTierOf`), `board.ts`, `flightLines.ts` (`tieKey` includes `rankTierOf`; ranks follow display order within a tie), new `apps/web/src/views/Dates/ConfirmLine.tsx`, `apps/web/src/views/Dates/stateLines.ts` (in confirm mode `flightsClause` adds nothing and the reading state uses ConfirmLine's running words), `packages/core/src/labels/stopCause.ts` (`budgetText`: "flights were read for N dates", no denominator, in confirm mode), `apps/web/src/views/Searches/cardWords.ts`, `apps/web/src/lib/flightsReading.ts`, `apps/web/src/copy.ts`
+- Test: `apps/api/test/routes/flightLists.test.ts`, `cards.test.ts`; `apps/web/test/views/dates/board.test.tsx`, `flights.test.tsx`, `keyboard.test.tsx`, `states.test.tsx`, `logic/flightLines.test.ts`, `confirmLine.test.tsx` (new); `apps/web/test/views/searches/` card tests; `packages/core/test/labels/` stop-cause tests
 
 **Interfaces:**
-- Consumes: `ConfirmSummary` (Task 3); the figure's `priceKind` (Task 2).
+- Consumes: `ConfirmSummary` (Task 3); `rankTierOf`, `pairingKindOf` (Task 2).
 - Produces: `GET /executions/:id` and a card's `latestRun.flights` carry `confirm: ConfirmSummary | null`. `ConfirmLine` takes `{ confirm, ended, stopCause, running }`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - **Price per row:** a read trip shows its price in the main element with "seller's price" or "Google's price, sellers not read" and "read 6 h ago" (visible, not hover-only), plus times, journey time and changes each way; an older leading trip also shows its age label. A calendar row shows "calendar £565" in the secondary style with "flights not checked" only for `not-read`, and with each other `pairingRead`'s words otherwise (one test per value). No "Google's list: from" in a closed row.
+  - **Price per row:** a read trip shows its price in the main element with "seller's price", "Google's price, sellers not read" or "Google's price, not every seller read" (from `pairingKindOf`) and "read 6 h ago" (visible, not hover-only), plus times, journey time and changes each way; an older leading trip also shows its age label. A calendar row shows "calendar £565" in the secondary style with "flights not checked" only for `not-read`, and with each other `pairingRead`'s words otherwise (one test per value). No "Google's list: from" in a closed row.
   - **Tiers on screen:** a labelled break between the read trips and the "not checked yet" rows; a read trip and a calendar row at the same price are not one tie group.
   - **Closed rows:** with 10 rows no flights block renders until its button is pressed; the button has `aria-expanded` and `aria-controls`, opens with Enter and Space, and shows a focus ring.
   - **Ranks in a tie:** three tied pairs reordered by flight time show 1, 2, 3 top to bottom.
@@ -199,12 +206,16 @@
     - patience, 0 unchecked: "Checked 18 dates; 7 trips with flights read."
     - queue empty: "Checked every date with a calendar price; 5 trips with flights read."
     - patience, 2 trips, 288 unchecked: "Checked 12 dates; 2 trips with flights read: the other dates' flights didn't fit your limits or couldn't be read. 288 dates weren't checked."
-    - returns stopped / window / cancel (cancel read from `stopCause` when `stop` and `ended` are null): "Stopped checking flights after 9 dates because return flights couldn't be read; 3 trips with flights read. 120 dates weren't checked." with "because the browser's time ran out" and "because the search was cancelled".
+    - returns stopped / window / cancel, with fewer than 5 trips: "Stopped checking flights after 9 dates because return flights couldn't be read; 3 trips with flights read. 120 dates weren't checked." with "because the browser's time ran out" and "because the search was cancelled". With 5 or more trips the count reads "31 dates that look cheaper on the calendar weren't checked."
+    - `ended: 'stopped'` (an ending page or a cap): "Stopped checking flights after 3 dates because <reason>; 1 trip with flights read. 120 dates weren't checked.", where <reason> is the stop detail's existing wording from `stopText`, never new wording; a test per stop detail the error table can end with, each distinct from the cancel line.
+    - an abort with `stopCause` cancel, budget or fatal: the reason from `stopCause` ("because the search was cancelled", "because a spending limit was reached", "because the app hit an error"), and "because the search stopped" when it holds none of those.
+    - queue empty with `unread: 2`: "Checked every date with a calendar price, 2 couldn't be read; 5 trips with flights read."
     - mode `outbound-only`: "Trips couldn't be checked on this machine: it can't read return flights."
+    - mode `flags-unread`: "Trips couldn't be checked this run: the browser hadn't yet said what it can read."
     - running: "Checking flights: 9 dates so far; 3 trips with flights read."
     - `confirm: null` (a run before this change, or the step not reached): no line.
     - singulars: "1 date", "1 trip".
-  - **Card and reading copy:** in confirm mode the card's reading line has no "of N" denominator ("Reading flights · 9 dates checked, 3 trips with flights read") and "still reading" comes from the run's stage, not `read + reused + failed < planned`.
+  - **Card, page state and stop sentence:** in confirm mode the card's reading line has no "of N" denominator ("Reading flights · 9 dates checked, 3 trips with flights read") and "still reading" comes from the run's stage, not `read + reused + failed < planned`; the page's state line adds no flights clause (ConfirmLine owns it) and its reading state uses the running words; the stop sentence says "flights were read for 9 dates".
   - The api passes `confirm` through unchanged, and null for a pre-change run.
 
 - [ ] **Step 2: Run** `cd apps/web && npx vitest run test/views/dates`. Expected: FAIL.
