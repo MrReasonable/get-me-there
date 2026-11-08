@@ -1,5 +1,6 @@
 /**
- * Design 2026-11-08 §6.1 "Search log for these dates" (plan Task 5): one row per run that priced or read these dates,
+ * Design 2026-11-08 §6.1 "Search log for these dates" (plan Task 5): one row per run that searched or read these dates
+ * (a run that found them empty included, with no calendar price),
  * plus one per flight list read by hand (no execution), newest first. A row's calendar price is the run's own fetch
  * (never a copy it reused); its flights are what the run's newest list of these dates said, by the list reads the board
  * uses (`listReadOf`, `pairingReadOf`). Why a run read no list is not recorded, so the row says `not-read` and never
@@ -74,11 +75,13 @@ function runCalendar(
 }
 
 /**
- * The log over the runs (`executions`, newest first), their fetched prices and every list of these dates (both already
- * narrowed to the scope's airport pairs; the lists newest first), under today's limits and the search's refresh.
+ * The log over the runs (`executions`, newest first), the cells each searched itself (`searched`: its discovery
+ * outcomes of these dates), their fetched prices and every list of these dates (all already narrowed to the scope's
+ * airport pairs; the lists newest first), under today's limits and the search's refresh.
  */
 export function tripLog(o: {
   executions: readonly Execution[];
+  searched: ReadonlyArray<{ executionId: string }>;
   prices: ReadonlyArray<{ executionId: string; price: CalendarPriceRow; sourceLastError: string | null }>;
   lists: readonly StoredFlightList[];
   rc: RowContext;
@@ -91,7 +94,8 @@ export function tripLog(o: {
     const prices = o.prices.filter((p) => p.executionId === e.id);
     // why: `lists` is newest first, so the first of the run's is its newest for these dates
     const list = o.lists.find((l) => l.executionId === e.id);
-    if (prices.length === 0 && list === undefined) continue;
+    const touched = prices.length > 0 || list !== undefined || o.searched.some((s) => s.executionId === e.id);
+    if (!touched) continue;
     rows.push({
       at: e.startedAt ?? e.createdAt,
       byHand: false,

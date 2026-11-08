@@ -180,6 +180,23 @@ export class CellsRepo {
     });
   }
 
+  /**
+   * Design 2026-11-08 §6.1 (the Trip page's log): every discovery outcome of the definition's executions that searched
+   * one date pair itself (priced, empty or no_data, not a reused copy), any airport pair, newest execution first by
+   * (created_at, rowid), then by cell and provider. One statement.
+   */
+  searchedForDatePair(definitionId: string, departureDate: IsoDate, returnDate: IsoDate): CellOutcome[] {
+    return this.db.raw
+      .prepare<Record<string, unknown>, OutcomeDbRow>(
+        `SELECT o.* FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
+         WHERE e.definition_id = @definitionId AND o.departure_date = @departureDate AND o.return_date = @returnDate
+           AND o.stage = 'discovery' AND o.status IN ('priced', 'empty', 'no_data') AND o.reused_from_execution_id IS NULL
+         ORDER BY e.created_at DESC, e.rowid DESC, o.origin, o.destination, o.provider_id`,
+      )
+      .all({ definitionId, departureDate, returnDate })
+      .map(toOutcome);
+  }
+
   outcomes(
     executionId: string,
     filter: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] } = {},

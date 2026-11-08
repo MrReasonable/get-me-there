@@ -14,6 +14,7 @@ import {
 import { PAIRING_FIXTURE, PAIRING_LIMITS, SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import type { FlightListInsert } from '@gmt/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { safeSearchLink } from '../../src/read/links.js';
 import { expectContract } from '../helpers/contract.js';
 import { datesOf, pairOf } from '../helpers/dates.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR } from '../helpers/examples.js';
@@ -50,8 +51,8 @@ const W = cell(LGW, EWR, DEP, RET);
 /** Another booking page address of the real shape, for the LGW list (design §6.3). */
 const LGW_BOOKING_URL = `${SYNTHETIC_BOOKING_URL}&hl=en`;
 
-async function harness(): Promise<{ x: Harness; def: SearchDefinition }> {
-  h = await createHarness({ env: WORKER_ENV });
+async function harness(env: Record<string, string> = {}): Promise<{ x: Harness; def: SearchDefinition }> {
+  h = await createHarness({ env: { ...WORKER_ENV, ...env } });
   const def = h.ports.repos.definitions.create(
     exampleDefinitionInput({
       ...SPACE,
@@ -208,7 +209,7 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
       searchLink: { host: 'www.google.com' },
       booking: null,
       reading: false,
-      read: { available: true, unavailableReason: null, wouldGo: true },
+      read: { available: true, unavailableReason: null, wouldGo: true, origin: 'LHR', destination: 'JFK' },
       verificationConfigured: false,
       refreshHours: 168,
       limits: { maxJourneyMinutes: 1500, maxStops: 1, departureWindowLocal: null, arrivalWindowLocal: null },
@@ -240,6 +241,7 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     });
     expect(t.flightList?.id).toBe(lgw);
     expect(t.bookingUrl).toBe(LGW_BOOKING_URL);
+    expect(t.read).toMatchObject({ origin: 'LGW', destination: 'JFK' });
     expect(t.cells.map((c) => `${c.origin}-${c.destination}`)).toEqual(['LGW-EWR', 'LGW-JFK']);
     const board = pairOf(await datesOf(x, def.id, '?origins=LGW'), DEP, RET).figure;
     expect(board?.price.pricePence).toBe(46_100);
@@ -278,6 +280,50 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     expect((await tripOf(x, def.id, `${Q}&destinations=EWR&origins=LGW`)).listFailure).toBeNull();
   });
 
+  // the controller's ruling (prov-014, goal 4): the couldn't-read line is set only where the board shows a failed read;
+  // a fresh verified figure asks no list, so a failed newest list in its cell is not mentioned
+  it("a fresh verified figure whose cell's newest list failed: no listFailure, as the board shows none", async () => {
+    const { x, def } = await harness();
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', [A], { selected: [{ cell: A, reason: 'top_n' }] });
+    s.verified('E', A, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) }]);
+    store(x, def, A, { hoursAgo: 0, failed: 'network' });
+    const t = await tripOf(x, def.id, Q);
+    expect(t.figure).toMatchObject({ basis: 'verified', price: { stale: false }, pairingRead: 'not-read' });
+    expect(t.listFailure).toBeNull();
+  });
+
+  // the controller's ruling (goal 4): a stale verified figure's pairing read is the best calendar price's cell's, so
+  // every list-derived field follows that cell, never the verified figure's own
+  it("a stale verified figure on LGW→JFK read against LHR→JFK's list: every list field is LHR→JFK's", async () => {
+    const { x, def } = await harness({ STALE_AFTER_HOURS: '24' });
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-40), finishedAt: at(-39) });
+    s.cells('E', [A, G], { selected: [{ cell: G, reason: 'top_n' }] });
+    s.tile('E', A, { status: 'priced', fetchedAt: at(-40), pricePence: 40_000 });
+    s.verified('E', G, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-30) }]);
+    // the verified figure's own cell has a readable trip; the calendar cell's newest list stopped at a run limit
+    store(x, def, G, { hoursAgo: 2, returns: oneSeller({ bookingUrl: LGW_BOOKING_URL }) });
+    const failed = store(x, def, A, { hoursAgo: 1, failed: 'execution-cap' });
+    const t = await tripOf(x, def.id, Q);
+    expect(t.figure).toMatchObject({
+      basis: 'verified',
+      origin: 'LGW',
+      destination: 'JFK',
+      price: { stale: 'setting' },
+      pairingRead: 'list-failed',
+      listReason: 'execution-cap',
+    });
+    expect(t.flightList).toMatchObject({ id: failed, origin: 'LHR', destination: 'JFK' });
+    expect(t.listFailure).toEqual({ at: at(-1), cause: 'execution-cap' });
+    expect(t.bookingUrl).toBeNull();
+    expect(t.searchLink).toEqual(safeSearchLink('camoufox', A, def, null, 'GB'));
+    // a list a per-run limit stopped offers no read again (the calendar cell's; the verified cell's would), and a read
+    // from the card names the calendar cell
+    expect(t.read).toMatchObject({ wouldGo: false, origin: 'LHR', destination: 'JFK' });
+  });
+
   // Review Focus 4: an old alert link for departed dates, and dates outside the search's current dates, answer 200
   it.each([
     ['departed dates', 'departureDate=2026-10-12&returnDate=2026-10-22', 10],
@@ -303,7 +349,7 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
       cached: null,
       log: [],
       reading: false,
-      read: { available: true, wouldGo: false },
+      read: { available: true, wouldGo: false, origin: null, destination: null },
     });
   });
 
@@ -417,6 +463,26 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     for (const r of t.log)
       if (r.calendar !== null)
         expect(r.calendar.provenance).toMatchObject({ providerId: 'fixture', sourceKind: 'synthetic' });
+  });
+
+  it('log: a run that searched these dates and found them empty is its own row, with no calendar price', async () => {
+    const { x, def } = await harness();
+    const s = seeder(x.ports);
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [A]);
+    s.tile('E1', A, { status: 'priced', fetchedAt: at(-30), pricePence: 40_000 });
+    s.execution('E2', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E2', [A]);
+    s.tile('E2', A, { status: 'empty', fetchedAt: at(-3) });
+    // a run that seeded the dates but never searched them (not run) is not a row
+    s.execution('E3', { def, status: 'completed', startedAt: at(-1), finishedAt: at(-1) });
+    s.cells('E3', [A]);
+    const t = await tripOf(x, def.id, Q);
+    expect(t.log.map((r) => [r.at, r.calendar?.pricePence ?? null, r.flights.kind])).toEqual([
+      [at(-3), null, 'not-read'],
+      [at(-30), 40_000, 'not-read'],
+    ]);
+    expect(t.calendar?.notSeenAgain).toBe(true);
   });
 
   it.each<[string, string, ReturnRead]>([

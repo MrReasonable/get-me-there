@@ -58,7 +58,9 @@ export type PairingsRead = (asked: readonly CellKey[]) => PairingOf;
  * cheapest offer's price with the list's provenance, the calendar price it replaced as `gridPrice`, its own words in
  * `pairing`, and `fromEarlierSearch` from the list's `fetchedAt` against the latest parent run's start (R-lead).
  * Without `pairings` (the flight-list step's ranking, by the calendar figures alone) every figure is as before.
- * `chosen` is each figure's own row (a verified figure's booking is its row's; the Trip page reads it).
+ * `chosen` is each figure's own row (a verified figure's booking is its row's; the Trip page reads it), and
+ * `pairingCells` the cell whose flight list each figure's pairing read came from (a stale verified figure's is its date
+ * pair's best calendar cell, which may be another airport pair); none where no pairing was asked.
  */
 export function datePairFigures(
   loaded: Loaded,
@@ -69,11 +71,13 @@ export function datePairFigures(
   figures: Map<number, DatePairFigure>;
   journeyLeftOut: Map<number, number>;
   chosen: Map<number, ResultRow>;
+  pairingCells: Map<number, CellKey>;
 } {
   const confirmed = confirmedIn(loaded);
   const candidates = [...loaded.verified.filter(confirmed), ...loaded.calendar];
   const figureScope = { space: scope.space, maxJourneyMinutes: scope.maxJourneyMinutes };
   let pairingOf: PairingOf | undefined;
+  const pairingCells = new Map<number, CellKey>();
   if (pairings !== undefined) {
     // why: core asks a pairing only in a date pair's best calendar cell (its calendar figure's, or the one a stale
     // verified figure is weighed against); a first pass over the calendar prices alone names exactly those cells for
@@ -84,7 +88,15 @@ export function datePairFigures(
       asked.push(c);
       return { read: 'not-read', candidate: null };
     });
-    pairingOf = pairings(asked);
+    const read = pairings(asked);
+    const indexOf = datePairIndexer(scope.space);
+    // why: core asks at most one cell a date pair in this pass (the chosen figure's, or the best calendar cell a stale
+    // verified figure is weighed against), so the cell recorded is the one whose flight read the figure carries
+    pairingOf = (c) => {
+      const index = indexOf(c.departureDate, c.returnDate);
+      if (index !== null) pairingCells.set(index, c);
+      return read(c);
+    };
   }
   const picked = figuresByDatePair(candidates, figureScope, rc.now, pairingOf);
   const pairAt = new Map(
@@ -180,34 +192,33 @@ export function datePairFigures(
     figures.set(index, toFigure(f));
     chosen.set(index, f.chosen);
   }
-  return { figures, journeyLeftOut: picked.journeyLeftOut, chosen };
+  return { figures, journeyLeftOut: picked.journeyLeftOut, chosen, pairingCells };
+}
+
+/** A date pair's figure as the board picks it, with what the Trip page reads beside it. */
+export interface DatePairFigureRead {
+  figure: DatePairFigure | null;
+  journeyLeftOut: number;
+  /** the figure's own row (a verified figure's booking is its row's) */
+  chosen: ResultRow | null;
+  /** the cell whose flight list the figure's pairing read came from; null where none was asked */
+  pairingCell: CellKey | null;
 }
 
 /**
- * The one composition the date pair detail (`/results`) and the Trip page (`/trip`) read their figure through (plan
- * Task 5): the scope parsed by `parseScope` (its 422s included), the rows of that scope (`loadRows`, under the
- * execution scope when given), and the board's figure for the scope's date pair (`datePairFigures` with the board's one
- * pairings map, `pairingsFor`), so neither can disagree with the board's row. `figure` and `journeyLeftOut` are that
- * date pair's (none without a date pair); `scope`, `loaded` and `chosen` (the figure's own row) are handed back for the
- * caller's other parts, so it reads the same rows rather than a second time.
+ * The board's figure for the scope's date pair over rows already read for that scope (`datePairFigures` with the
+ * board's one pairings map, `pairingsFor`): the step `/results` takes with the rows it has read, and the rest of
+ * `datePairFigureOf`. None without a date pair.
  */
-export function datePairFigureOf(
+export function datePairFigureIn(
   def: SearchDefinition,
-  query: ScopeQuery,
+  scope: ParsedScope,
+  loaded: Loaded,
   ports: Ports,
-  executionIds?: readonly string[],
-): {
-  figure: DatePairFigure | null;
-  journeyLeftOut: number;
-  scope: ParsedScope;
-  loaded: Loaded;
-  chosen: ResultRow | null;
-} {
-  const scope = parseScope(def, query, currentSpace(def, ports.clock.todayLondon()));
-  const loaded = loadRows(def, ports, { executionIds, scope });
+): DatePairFigureRead {
   const pair = scope.datePair;
   const index = pair === null ? null : datePairIndex(scope.space, pair.departureDate, pair.returnDate);
-  if (index === null) return { figure: null, journeyLeftOut: 0, scope, loaded, chosen: null };
+  if (index === null) return { figure: null, journeyLeftOut: 0, chosen: null, pairingCell: null };
   // why: spec rev 56 §6.9: the board's one pairings map, so the detail, the Trip page and the board agree
   const read = datePairFigures(loaded, scope, loaded.rc, (asked) =>
     pairingsFor(ports, def, loaded.executionIds, asked),
@@ -215,10 +226,27 @@ export function datePairFigureOf(
   return {
     figure: read.figures.get(index) ?? null,
     journeyLeftOut: read.journeyLeftOut.get(index) ?? 0,
-    scope,
-    loaded,
     chosen: read.chosen.get(index) ?? null,
+    pairingCell: read.pairingCells.get(index) ?? null,
   };
+}
+
+/**
+ * The one composition the date pair detail (`/results`) and the Trip page (`/trip`) read their figure through (plan
+ * Task 5): the scope parsed by `parseScope` (its 422s included), the rows of that scope (`loadRows`, under the
+ * execution scope when given), and the board's figure for the scope's date pair (`datePairFigureIn`), so neither can
+ * disagree with the board's row. `scope` and `loaded` are handed back for the caller's other parts, so it reads the
+ * same rows rather than a second time.
+ */
+export function datePairFigureOf(
+  def: SearchDefinition,
+  query: ScopeQuery,
+  ports: Ports,
+  executionIds?: readonly string[],
+): DatePairFigureRead & { scope: ParsedScope; loaded: Loaded } {
+  const scope = parseScope(def, query, currentSpace(def, ports.clock.todayLondon()));
+  const loaded = loadRows(def, ports, { executionIds, scope });
+  return { ...datePairFigureIn(def, scope, loaded, ports), scope, loaded };
 }
 
 /**

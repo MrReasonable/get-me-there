@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { datePairFigureOf } from './datePairs.js';
+import { datePairFigureIn } from './datePairs.js';
 import { executionSummary } from './executions.js';
 import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
 import type { Basis } from './rows.js';
@@ -109,13 +109,9 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
   );
   let datePairFigure: ResultsResponse['datePairFigure'] = null;
   if (scope.datePair !== null) {
-    // why: plan Task 5: the one composition the Trip page reads too, under this read's execution scope (prov-002)
-    const { figure } = datePairFigureOf(
-      def,
-      q,
-      ports,
-      q.executionId === undefined ? undefined : [q.executionId],
-    );
+    // why: plan Task 5: the Trip page's composition over the rows this read already holds (a date pair is a scope,
+    // so they are the scope's, under this read's execution scope: prov-002)
+    const { figure } = datePairFigureIn(def, scope, loaded, ports);
     if (figure !== null) {
       const { airportPair: _airportPair, ...rest } = figure;
       datePairFigure = rest;

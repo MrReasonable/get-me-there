@@ -132,6 +132,12 @@ export const tripResponseSchema = z.strictObject({
     /** the search page's `readNow` rule for these dates */
     wouldGo: z.boolean(),
     pagesPlanned: countSchema,
+    /**
+     * The airport pair a read from the Trip page names: the cell `flightList` is read for (the one whose flight read the
+     * board's figure carries, else the figure's own, else the read cell); null when there is none
+     */
+    origin: iataSchema.nullable(),
+    destination: iataSchema.nullable(),
   }),
   verificationConfigured: z.boolean(),
   refreshHours: countSchema,

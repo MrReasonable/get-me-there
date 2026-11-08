@@ -12,6 +12,7 @@ import {
   type apiContract,
   type CellKey,
   cheapestPairing,
+  type DatePairFigure,
   datePairIndex,
   daysBetween,
   flightLimitsOf,
@@ -20,6 +21,7 @@ import {
   priceLabelKind,
   type SearchDefinition,
 } from '@gmt/core';
+import type { StoredFlightList } from '@gmt/db';
 import { type Engine, FLIGHT_LIST_PROVIDER, flightReadUnavailable, refreshHoursOf } from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError, fieldsDetail } from '../errors.js';
@@ -58,6 +60,21 @@ function newestOf(rows: readonly ResultRow[]): TripResponse['calendar'] {
     if (best === null || Date.parse(r.provenance.fetchedAt) > Date.parse(best.provenance.fetchedAt)) best = r;
   // why: decision 54: a newer search found the cell empty, so the price is "not seen again"
   return best === null ? null : { ...priceOf(best), notSeenAgain: best.superseded };
+}
+
+/**
+ * The controller's ruling (prov-014, goal 4): the couldn't-read line only where the board shows a failed read: a figure
+ * reading `list-failed` (its cause, at that failed list's read time), or no figure and the read cell's newest list failed.
+ */
+function listFailureOf(
+  figure: Pick<DatePairFigure, 'pairingRead' | 'listReason'> | null,
+  list: Pick<StoredFlightList, 'status' | 'reason' | 'fetchedAt'> | undefined,
+): TripResponse['listFailure'] {
+  if (list?.status !== 'failed') return null;
+  if (figure === null) return list.reason === null ? null : { at: list.fetchedAt, cause: list.reason };
+  return figure.pairingRead === 'list-failed' && figure.listReason !== null
+    ? { at: list.fetchedAt, cause: figure.listReason }
+    : null;
 }
 
 export function assembleTrip(
@@ -113,10 +130,17 @@ export function assembleTrip(
       cached: null,
       log: [],
       reading: false,
-      read: { available: unavailable === null, unavailableReason: unavailable, wouldGo: false, pagesPlanned },
+      read: {
+        available: unavailable === null,
+        unavailableReason: unavailable,
+        wouldGo: false,
+        pagesPlanned,
+        origin: null,
+        destination: null,
+      },
     };
 
-  const { figure, journeyLeftOut, scope, loaded, chosen } = datePairFigureOf(
+  const { figure, journeyLeftOut, scope, loaded, chosen, pairingCell } = datePairFigureOf(
     def,
     {
       departureDate: q.departureDate,
@@ -130,16 +154,20 @@ export function assembleTrip(
   const inScope = (c: { origin: string; destination: string }) =>
     scope.space.origins.some((o) => o === c.origin) &&
     scope.space.destinations.some((d) => d === c.destination);
-  // why: Ruling 3, Review Focus 3: the figure's own cell; with none, the read cell, which is the one a read with no pair
-  // named takes (the search's first origin and destination, in its own order), kept inside the filtered scope
+  // why: the controller's ruling (goal 4: the card agrees with the board): the cell whose flight read the figure carries
+  // (a stale verified figure's is its date pair's best calendar cell, maybe another airport pair); else the figure's own
+  // cell (Review Focus 3); with no figure, the read cell (Ruling 3), the one a read with no pair named takes (the
+  // search's first origin and destination, in its own order), kept inside the filtered scope
   const readOrigin = space.origins.find((o) => scope.space.origins.includes(o));
   const readDestination = space.destinations.find((d) => scope.space.destinations.includes(d));
   const cell: CellKey | null =
-    figure !== null
-      ? { origin: figure.origin, destination: figure.destination, ...pair }
-      : readOrigin === undefined || readDestination === undefined
-        ? null
-        : { origin: readOrigin, destination: readDestination, ...pair };
+    figure !== null && figure.pairingRead !== 'not-read' && pairingCell !== null
+      ? pairingCell
+      : figure !== null
+        ? { origin: figure.origin, destination: figure.destination, ...pair }
+        : readOrigin === undefined || readDestination === undefined
+          ? null
+          : { origin: readOrigin, destination: readDestination, ...pair };
   const pointOfSale = ports.config.pointOfSale;
   const list =
     cell === null
@@ -167,8 +195,7 @@ export function assembleTrip(
     inWindow: true,
     figure: figureOut,
     journeyLeftOut,
-    listFailure:
-      list?.status === 'failed' && list.reason !== null ? { at: list.fetchedAt, cause: list.reason } : null,
+    listFailure: listFailureOf(figure, list),
     cells: classes.map((c) => ({
       origin: c.cell.origin,
       destination: c.cell.destination,
@@ -184,6 +211,7 @@ export function assembleTrip(
     cached: newestOf(loaded.calendar.filter(isCached)),
     log: tripLog({
       executions: loaded.all,
+      searched: ports.repos.cells.searchedForDatePair(def.id, departureDate, returnDate).filter(inScope),
       prices: ports.repos.calendarPrices
         .perExecutionForDatePair(def.id, departureDate, returnDate)
         .filter((p) => p.price.cabin === def.cabin && inScope(p.price.cell)),
@@ -204,6 +232,8 @@ export function assembleTrip(
       unavailableReason: unavailable,
       wouldGo: readNow(unavailable, today, space, pair, list ?? null),
       pagesPlanned,
+      origin: cell?.origin ?? null,
+      destination: cell?.destination ?? null,
     },
   };
 }
