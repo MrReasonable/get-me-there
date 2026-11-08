@@ -75,7 +75,10 @@ export function checkOfRead(
   limits: FlightLimits,
 ): Check {
   if (r === null) return { kind: 'unread' };
-  // why: a read under other limits, a no-outbound one included, says nothing about today's limits (controller ruling)
+  // why: a read under other limits, a no-outbound one included, says nothing about today's limits: the worker picked its
+  // outbounds and returns under those limits, so a looser limit today may admit a trip it never read and a tighter one
+  // may exclude the one it found; counting it as a trip or as none would put a price in the standings, or leave one
+  // out, that today's limits never checked
   if (!sameFlightLimits(r.limits, limits)) return { kind: 'unread' };
   if (r.status === 'no-outbound') return { kind: 'none' };
   if (r.status !== 'read') return { kind: 'unread' };

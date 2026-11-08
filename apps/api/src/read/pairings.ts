@@ -95,6 +95,9 @@ export function candidateOf(
       departBack: ret.departsLocal,
       arriveBack: ret.arrivesLocal,
     },
+    // why: final whole-branch review I2: the trip's own journey time, as a verified figure's is its two legs' sum, so
+    // the board's Journey column shows it rather than "not known" (the calendar row beneath states none)
+    journeyMinutes: outbound.durationMinutes + ret.durationMinutes,
     mismatch: offer !== null && offer.priceMinor !== p.fromMinor,
     provenance: flightListProvenance(l),
     // why: spec rev 55 §10: a list is judged against the camoufox refresh only; stale exactly when not fresh

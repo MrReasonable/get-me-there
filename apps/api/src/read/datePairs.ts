@@ -132,6 +132,9 @@ export function datePairFigures(
       case 'pairing':
         return {
           ...base,
+          // why: final whole-branch review I2: the trip's journey time, not the calendar row's (which states none); its
+          // local times stay in its pairing entry (spec §10: the figure's own times are a verified figure's)
+          journeyMinutes: f.pairing.journeyMinutes,
           price: {
             pricePence: f.pricePence,
             provenance: f.pairing.provenance,

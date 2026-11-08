@@ -489,6 +489,7 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     complete: true,
     which: 'next-cheapest',
     times: { departOut: '07:15', arriveOut: '18:05', departBack: '14:20', arriveBack: '06:25' },
+    journeyMinutes: 1_615,
     mismatch: false,
     provenance: {
       providerId: 'camoufox',

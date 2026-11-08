@@ -173,6 +173,9 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       destination: 'JFK',
       superseded: before?.superseded,
       notSeenInLatest: null,
+      // why: final whole-branch review I2: the trip's own journey time, its outbound's 14h 50m and its return's 12h 05m
+      // as the list states them (a verified figure's journey time sums its two legs too)
+      journeyMinutes: 890 + 725,
       departOut: null,
       arriveOut: null,
       departBack: null,
@@ -303,6 +306,9 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       price: { pricePence: 40_000 },
       pairingRead: 'within-older',
       pairing: { ...PAIRING, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
+      // why: final whole-branch review I2: the leading price is the grid's, which states no journey time; the pairing
+      // beneath it does not lend its own
+      journeyMinutes: null,
     });
   });
 

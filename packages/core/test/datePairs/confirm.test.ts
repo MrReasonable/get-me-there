@@ -119,7 +119,7 @@ describe('pairingPrice', () => {
       kind: 'seller',
     });
   });
-  it('no offer, or an incomplete one, is Googles price', () => {
+  it("no offer, or an incomplete one, is Google's price", () => {
     expect(pairingPrice({ offer: null, complete: false, fromMinor: 120 })).toEqual({
       pricePence: 120,
       kind: 'google',

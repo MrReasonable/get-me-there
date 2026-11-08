@@ -208,7 +208,7 @@ export function pairingPrice(c: {
  * What the api attaches per cell for the pairing figure (spec rev 56 §6.9, §10): the return's "from" price, the
  * cheapest offer of the booking read that names the pairing (`cheapestOffer`; null when none kept offers), how many
  * offers were read, whether they are complete (`offersComplete`), which outbound the pairing used (`cheapest`: the first
- * attempt's, within the limits; `next-cheapest`: the second attempt's; `over-limit`), the two legs' local times, whether
+ * attempt's, within the limits; `next-cheapest`: the second attempt's; `over-limit`), the two legs' local times and journey time, whether
  * the cheapest offer differs from the "from" price (`mismatch`), the flight list's provenance, stale mark and age, and
  * the four facts `pairingLeads` reads.
  */
@@ -219,6 +219,11 @@ export interface PairingCandidate {
   complete: boolean;
   which: 'cheapest' | 'next-cheapest' | 'over-limit';
   times: { departOut: string; arriveOut: string; departBack: string; arriveBack: string };
+  /**
+   * The trip's journey time: its outbound's and its return's durations as the list states them, summed as a verified
+   * figure's two legs are (final whole-branch review I2), so a pairing figure's Journey column and its sort read it
+   */
+  journeyMinutes: number;
   mismatch: boolean;
   provenance: Provenance;
   stale: StaleMark;
