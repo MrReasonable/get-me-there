@@ -69,7 +69,6 @@ export function ReturnRow({
           <>
             {F.separator}
             {F.sellerLine(price.offer.seller, price.offer.fare, price.offer.offersRead)}
-            {price.offer.complete ? null : `${F.separator}${F.offersIncomplete}`}
           </>
         ) : price.sellers !== null ? (
           <>

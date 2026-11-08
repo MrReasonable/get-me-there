@@ -9,7 +9,9 @@ import {
   type IsoDate,
   type IsoDateTime,
   isoDateSchema,
+  type PairingKind,
   type PairingRead,
+  pairingKindOf,
   rankDatePairs,
   resultBasisOf,
   type StopDetail,
@@ -260,18 +262,7 @@ export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
   return q.seller;
 }
 
-/** Whose price a pairing carries, in the board's words (design 2026-11-08 §4.1, §5.1). */
-export type PairingKind = 'seller' | 'google-unread' | 'google-incomplete';
-
-/**
- * The kind of a pairing's price from its group alone, with no new contract field: `isFrom` says whether it is the
- * return's "from" price (Google's), and `offersRead` then says whether any seller was read (`google-incomplete`: some
- * were, not every one) or none (`google-unread`). A seller's price (`isFrom` false) is of complete offers.
- */
-export function pairingKindOf(g: Pick<DatePairPairing, 'isFrom' | 'offersRead'>): PairingKind {
-  if (!g.isFrom) return 'seller';
-  return g.offersRead === 0 ? 'google-unread' : 'google-incomplete';
-}
+export { type PairingKind, pairingKindOf };
 
 /**
  * The board head's seller-price count (21.7 persona coverage): of the date pairs shown, how many carry a seller's price

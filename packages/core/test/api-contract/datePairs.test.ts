@@ -847,7 +847,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
                 ? calendarFigure({
                     airportPair: 0,
                     pairingRead: 'offers-incomplete',
-                    pairing: figurePairing({ complete: false }),
+                    pairing: figurePairing({}),
                   })
                 : i % 120 === 2
                   ? calendarFigure({ airportPair: 0, pairingRead: 'outbound-only' })
@@ -944,9 +944,10 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(under('sellers-not-read', from)).toEqual([]);
     // why: design 2026-11-08 §4.1: these two reads are never produced now; the beneath rule keeps only the fresh mark
     // for them, and no longer says which price the pairing carries
-    expect(under('sellers-not-read', { complete: false })).toEqual([]);
     expect(under('sellers-not-read', { ...from, stale: 'refresh' })).toEqual(['pairing.stale']);
-    expect(under('offers-incomplete', { complete: false })).toEqual([]);
+    // why: design 2026-11-08 §4.1: an offer's price, beneath a figure too, is of complete offers only
+    expect(under('sellers-not-read', { complete: false })).toEqual(['pairing.complete']);
+    expect(under('offers-incomplete', { complete: false })).toEqual(['pairing.complete']);
     expect(under('offers-incomplete', {})).toEqual([]);
     expect(paths({ ...calendar, pairingRead: 'over-limit', pairing: null })).toEqual(['pairing']);
   });
@@ -955,13 +956,13 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(
       paths({
         ...beneath,
-        pairing: figurePairing({ complete: false, provenance: calendar.price.provenance }),
+        pairing: figurePairing({ provenance: calendar.price.provenance }),
       }),
     ).toEqual(['pairing.provenance']);
   });
   it('Task 21.7: fromPence is the return\'s "from" price, the figure\'s own when isFrom, unlike it exactly on a mismatch', () => {
     const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
-    const incomplete = { complete: false };
+    const incomplete = {};
     expect(
       paths({ ...beneath, pairing: figurePairing({ ...incomplete, fromPence: 117_500, mismatch: true }) }),
     ).toEqual([]);
@@ -1015,7 +1016,7 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       paths({
         ...calendar,
         pairingRead: 'offers-incomplete',
-        pairing: figurePairing({ seller: null, complete: false }),
+        pairing: figurePairing({ seller: null }),
       }),
     ).toEqual(['pairing.seller']);
     expect(
@@ -1297,7 +1298,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a pairing beneath of no flight list',
-      under('offers-incomplete', { complete: false, provenance: calendar.price.provenance }),
+      under('offers-incomplete', { provenance: calendar.price.provenance }),
       'pairing.provenance',
       "a pairing's provenance is a flight list's",
     ],
@@ -1315,7 +1316,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a stale pairing beneath read offers-incomplete',
-      under('offers-incomplete', { complete: false, stale: 'refresh' }),
+      under('offers-incomplete', { stale: 'refresh' }),
       'pairing.stale',
       'a pairing within the refresh is fresh',
     ],
@@ -1327,7 +1328,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'an offer without its seller',
-      under('offers-incomplete', { seller: null, complete: false }),
+      under('offers-incomplete', { seller: null }),
       'pairing.seller',
       "a seller exactly when the price is an offer's",
     ],
@@ -1345,7 +1346,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a mismatch on an offer equal to its "from" price',
-      under('offers-incomplete', { complete: false, mismatch: true }),
+      under('offers-incomplete', { mismatch: true }),
       'pairing.mismatch',
       'a mismatch exactly when an offer differs from the from price',
     ],

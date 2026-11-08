@@ -13,6 +13,7 @@ import {
   type Execution,
   type IsoDateTime,
   isScheduled,
+  pairingKindOf,
   type ResolvedSpace,
   type SearchCard,
   type SearchCardsResponse,
@@ -132,6 +133,11 @@ function cardOf(
             // why: decision 36 — a partial minimum from a truncated tile is marked on the card as on the board
             truncated: best.figure.price.truncated,
             basis: best.figure.basis,
+            // why: design 2026-11-08 §5.6: the kind of the figure's own pairing group, null off a pairing figure
+            priceKind:
+              best.figure.basis === 'pairing' && best.figure.pairing !== null
+                ? pairingKindOf(best.figure.pairing)
+                : null,
             departureDate: best.departureDate,
             returnDate: best.returnDate,
             origin: best.figure.origin,

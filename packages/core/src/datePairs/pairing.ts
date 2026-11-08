@@ -176,6 +176,21 @@ export function pairingOffer(
 /** Whose price a pairing's figure carries: a seller's complete offer, or Google's round-trip price. */
 export type PairingPriceKind = 'seller' | 'google';
 
+/** Whose price a pairing's group shows, in the board's words (design 2026-11-08 §4.1, §5.1). */
+export const PAIRING_KINDS = ['seller', 'google-unread', 'google-incomplete'] as const;
+export type PairingKind = (typeof PAIRING_KINDS)[number];
+
+/**
+ * The kind of a pairing's price from its group alone: `isFrom` says whether it is the return's "from" price (Google's),
+ * and `offersRead` then says whether any seller was read (`google-incomplete`) or none (`google-unread`). A seller's
+ * price (`isFrom` false) is of complete offers. The one place the kind is derived: the board, the detail and the card
+ * (whose contract carries it as `priceKind`) all read it.
+ */
+export function pairingKindOf(g: { isFrom: boolean; offersRead: number }): PairingKind {
+  if (!g.isFrom) return 'seller';
+  return g.offersRead === 0 ? 'google-unread' : 'google-incomplete';
+}
+
 /**
  * The one price of a pairing (design 2026-11-08 §4.1): the cheapest seller offer when the booking read kept complete
  * offers, else Google's round-trip "from" price for the paired outbound and return.

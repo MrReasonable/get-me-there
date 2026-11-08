@@ -215,8 +215,7 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
  * Spec rev 56 §6.9, §11 Board (R-heads): what a calendar figure (or a stale verified one, ruling 21.2) says of its date
  * pair's flight read, beneath its price: its words ("return leg not read", "no return flight read", "flights couldn't be
  * read: …", "return flights read 9d ago, older than this search's refresh:", …) and the pairing that does not lead,
- * through PriceCell with its own age: an offer with its seller ("a cheaper seller may not have been read" when its offers
- * may be incomplete; an over-limit pairing's offer too, as the search's page block shows it: 21.7 code I3), or a "from"
+ * through PriceCell with its own age: an offer with its seller (complete offers only; an over-limit pairing's offer too, as the search's page block shows it: 21.7 code I3), or a "from"
  * price, always with "· sellers not read" ("from £1,180 · sellers not read": final review B-M2); "Google listed from £1,180" beneath an offer
  * that differs from its return's "from" price (21.7 code M12, prov-008). Nothing for a pairing figure or a fresh
  * verified one; "flights not read" by `lists` (21.7 prov-004), "loading flights" while the request is pending.
@@ -250,7 +249,6 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
               <span>
                 {F.separator}
                 {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
-                {q.complete ? null : `${F.separator}${F.offersIncomplete}`}
               </span>
             </>
           )}

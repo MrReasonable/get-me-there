@@ -173,8 +173,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                 // over-limit, stale on within-older, fresh on the two seller reads, a from price when no seller was
                 // read, an offer not complete when the offers may be incomplete)
                 const pairing = (read: PairingRead) => {
-                  const isFrom =
-                    read === 'sellers-not-read' ? true : read === 'offers-incomplete' ? false : f.isFrom;
+                  const isFrom = read === 'sellers-not-read' ? true : f.isFrom;
                   const stale =
                     read === 'within-older'
                       ? f.cheaperFlags[0] === false
@@ -191,7 +190,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                     isFrom,
                     seller: isFrom ? null : 'QQ Fares',
                     fare: isFrom ? null : f.fare,
-                    ...(isFrom || read === 'offers-incomplete' ? { complete: false } : {}),
+                    ...(isFrom ? { complete: false } : {}),
                     ...(isFrom ? { offersRead: 0 } : {}),
                     which,
                     // why: 21.7 prov-012: a pairing beneath is a flight list's; the variant's fields over it keep the

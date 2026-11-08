@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PAIRING_KINDS } from '../datePairs/pairing.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { provenanceSchema } from '../types/provenance.js';
 import {
@@ -96,11 +97,18 @@ const cardCheapestSchema = z
     truncated: z.boolean(),
     // why: spec rev 56 §10: a card's cheapest takes the board's three bases (a pairing figure is the cheapest offer read)
     basis: figureBasisSchema,
+    // why: design 2026-11-08 §5.6: whose price a pairing figure is (a seller's, or Google's with no seller read or not
+    // every one), from the board group's own isFrom and offersRead (`pairingKindOf`); null on the other bases
+    priceKind: z.enum(PAIRING_KINDS).nullable(),
     departureDate: isoDateSchema,
     returnDate: isoDateSchema,
     origin: iataSchema,
     destination: iataSchema,
     fromLatestRun: z.boolean(),
+  })
+  .refine((c) => (c.basis === 'pairing') === (c.priceKind !== null), {
+    message: 'a price kind exactly on a pairing figure',
+    path: ['priceKind'],
   })
   .refine((c) => !c.truncated || c.basis === 'calendar', {
     message: 'truncated is for calendar figures',

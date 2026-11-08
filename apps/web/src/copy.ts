@@ -900,7 +900,6 @@ export const COPY = {
       `${fare === null ? seller : `${seller}, ${fare}`} · cheapest of ${n} ${noun(n, 'offer', 'offers')} read`,
     sellersNotRead: 'sellers not read',
     notEverySellerRead: 'not every seller read',
-    offersIncomplete: 'a cheaper seller may not have been read',
     priceAppliesTo: 'this price is for the Out: and Back: flights shown',
     // 21.7 persona booking link: the link opens a search, not the flights shown
     bookOnGoogle:
@@ -1339,7 +1338,12 @@ export const COPY = {
     boardDiffers:
       'It differs from the cheapest found here because the board prefers a price the latest search returned, then a fresh one.',
     // 21.7 prov-002: a pairing figure differs for what it is, never for its recency
-    boardPairing: `It is a seller's offer read from ${mainPathSource('camoufox')}'s flight list for one outbound and one return, not one of the prices listed here.`,
+    // design 2026-11-08 §4.1: said by whose price the figure is, never calling Google's price a seller's offer
+    boardPairing: {
+      seller: `It is a seller's offer read from ${mainPathSource('camoufox')}'s flight list for one outbound and one return, not one of the prices listed here.`,
+      'google-unread': `It is Google's round-trip price for one outbound and one return, read from ${mainPathSource('camoufox')}'s flight list with no seller read, not one of the prices listed here.`,
+      'google-incomplete': `It is Google's round-trip price for one outbound and one return, read from ${mainPathSource('camoufox')}'s flight list with not every seller read, not one of the prices listed here.`,
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
     rowGone: "That result is no longer among this date pair's results.",
     noRows: 'No round trip found for these dates on this basis.',
     coverageSection: 'Open the coverage section',

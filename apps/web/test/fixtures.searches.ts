@@ -48,6 +48,7 @@ export function cheapest(
     ageHours: 2,
     truncated: false,
     basis: 'verified',
+    priceKind: null,
     departureDate: '2027-01-12',
     returnDate: '2027-01-23',
     origin: 'BHX',

@@ -733,6 +733,10 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
     // why: prov-001, design 2026-11-08 §4.1: a "from" price is shown when no complete offers were read for the pairing:
     // none read, or some read and not complete (`offersRead` says which), so it is never complete itself and an
     // incomplete offer's price is never shown
+    // why: design 2026-11-08 §4.1: an offer's price, leading or beneath, is of complete offers only; an incomplete
+    // offer's price is never shown (the group is Google's "from" price then)
+    if (basis !== 'pairing' && !isFrom && !columnAt(q.complete, k))
+      fail('pairingComplete', ['pairing', 'complete', k], "an offer's price is of complete offers");
     if (isFrom && columnAt(q.complete, k))
       fail('pairingFromComplete', ['pairing', 'complete', k], 'a from price is never complete');
     if (isFrom === (columnAt(q.seller, k) !== null))
@@ -940,6 +944,8 @@ export const datePairFigureSchema = z
       const breach = beneathBreach(read, p);
       if (breach !== null) fail(['pairing', breach.column], breach.message);
     }
+    if (!pairingBasis && !p.isFrom && !p.complete)
+      fail(['pairing', 'complete'], "an offer's price is of complete offers");
     if (p.isFrom && p.complete) fail(['pairing', 'complete'], 'a from price is never complete');
     if (p.isFrom === (p.seller !== null))
       fail(['pairing', 'seller'], "a seller exactly when the price is an offer's");

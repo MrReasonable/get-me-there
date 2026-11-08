@@ -646,7 +646,7 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
   it('21.7 code M12 / prov-008: a pairing beneath whose offer differs from its "from" price names both', async () => {
     const row = await figureRow({
       pairingRead: 'offers-incomplete',
-      pairing: figurePairing({ complete: false, pricePence: 119_500, mismatch: true }),
+      pairing: figurePairing({ pricePence: 119_500, mismatch: true }),
     });
     const mark = within(row).getByTestId('flight-read-mismatch');
     expect(mark).toHaveTextContent(/^Google listed from/);
@@ -676,16 +676,22 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     expect(within(row).getAllByTestId('price-cell')[0]).toHaveTextContent('£312');
   });
 
-  it('offers-incomplete: the offer beneath with "a cheaper seller may not have been read"', async () => {
+  // why: design 2026-11-08 §4.1: offers that may be incomplete show Google's "from" price beneath, never an offer's
+  it('incomplete offers beneath: the from price, "not every seller read", no seller named', async () => {
     const row = await figureRow({
-      pairingRead: 'offers-incomplete',
-      pairing: figurePairing({ complete: false }),
+      pairingRead: 'within-older',
+      pairing: figurePairing({
+        isFrom: true,
+        seller: null,
+        fare: null,
+        complete: false,
+        offersRead: 2,
+        stale: 'refresh',
+      }),
     });
     const line = within(row).getByTestId('flight-read-pairing');
-    expect(line).toHaveTextContent(
-      'QQ Travel · cheapest of 3 offers read · a cheaper seller may not have been read',
-    );
-    expect(line).not.toHaveTextContent(/^from/);
+    expect(line).toHaveTextContent(/^from.*not every seller read/);
+    expect(line).not.toHaveTextContent('cheapest of');
   });
 
   it.each([

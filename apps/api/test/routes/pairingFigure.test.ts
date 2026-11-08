@@ -510,6 +510,7 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       pricePence: 118_000,
       provenance: listProvenance(1),
       basis: 'pairing',
+      priceKind: 'seller',
       departureDate: '2026-11-02',
       origin: 'LHR',
       destination: 'JFK',
@@ -529,6 +530,7 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     expect(card?.cheapest).toMatchObject({
       pricePence: 118_000,
       basis: 'pairing',
+      priceKind: 'google-unread',
       departureDate: '2026-11-02',
       provenance: listProvenance(1),
       ageHours: 1,

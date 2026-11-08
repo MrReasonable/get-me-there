@@ -103,7 +103,11 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
       </span>
       {/* why: 21.7 prov-002: a pairing figure is a seller's offer from a flight list, never one of these rows, so it
       differs for what it is; the recency reason is for a verified or calendar figure */}
-      <span className="w-full text-fg-2">{figure.basis === 'pairing' ? D.boardPairing : D.boardDiffers}</span>
+      <span className="w-full text-fg-2">
+        {figure.basis === 'pairing' && figure.pairing !== null
+          ? D.boardPairing[pairingKindOf(figure.pairing)]
+          : D.boardDiffers}
+      </span>
     </div>
   );
 }

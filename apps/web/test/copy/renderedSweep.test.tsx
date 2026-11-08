@@ -146,7 +146,13 @@ describe('a search\'s page with the return leg read says no banned word, no set-
           calendarFig({
             price: { ...calendarFig().price, pricePence: 130_000, provenance: provCached() },
             pairingRead: 'offers-incomplete',
-            pairing: figurePairing({ complete: false }),
+            pairing: figurePairing({
+              isFrom: true,
+              seller: null,
+              fare: null,
+              complete: false,
+              offersRead: 2,
+            }),
           }),
         ),
         [at('2027-03-16', 10)]: pricedPair(
