@@ -888,8 +888,40 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
       );
       const { row } = await rowFor(pairingFig());
       await waitFor(() =>
-        expect(within(row).getByTestId('pairing-changes')).toHaveTextContent('1 change out · 1 change back'),
+        expect(within(row).getByTestId('pairing-changes')).toHaveTextContent('14h 50m, 1 change out · 12h 05m, 1 change back'),
       );
+    });
+
+    it('says each direction\'s journey time with its changes, "direct" for none, and wraps on a phone', async () => {
+      const base = pairingList({ departureDate: '2027-03-14', returnDate: '2027-03-24' });
+      const read = base.returns;
+      if (read === null) throw new Error('the pairing fixture has a return read');
+      const direct = pairingList({
+        departureDate: '2027-03-14',
+        returnDate: '2027-03-24',
+        flights: base.flights.map((f) => ({ ...f, stops: 0 })),
+        returns: {
+          ...read,
+          // only the second attempt (the pairing's own): the first must keep having no return within the limits
+          attempts: read.attempts.map((a, at) =>
+            at === 1 ? { ...a, returns: a.returns.map((r) => ({ ...r, stops: 0 })) } : a,
+          ),
+        },
+      });
+      server.use(
+        serveFlightLists((d, r) => flightPair(d, r, d === '2027-03-14' ? { list: direct } : {}), { pagesPlanned: 2 }),
+      );
+      setViewportWidth(375);
+      try {
+        const { row } = await rowFor(pairingFig());
+        const line = await within(row).findByTestId('pairing-changes');
+        expect(line).toHaveTextContent('14h 50m, direct out · 12h 05m, direct back');
+        // like its neighbours: a block that wraps, never a no-wrap that could push the card wider
+        expect(line).toHaveClass('block');
+        expect(line.className).not.toMatch(/nowrap/);
+      } finally {
+        setViewportWidth(1280);
+      }
     });
 
     it('shows no changes line when the list pairs other flights than the figure shows', async () => {

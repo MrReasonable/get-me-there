@@ -161,6 +161,12 @@ function PairingPrice({
   );
 }
 
+/** One direction of a read trip: its changes and its journey time (design 2026-11-08 §5.1). */
+export interface LegChanges {
+  stops: number;
+  minutes: number;
+}
+
 /**
  * Spec rev 56 §6.9, §11 Board (R-board, R-grid; 21.7 persona H2, ui-005): a pairing figure's own short lines beneath its
  * price: the seller line "QQ Travel · cheapest of 3 offers read", "2nd outbound tried" when the pairing used the second
@@ -179,7 +185,7 @@ export function PairingFigureLines({
   figure: DatePairFigure;
   settings: boolean;
   /** The pairing's changes each way, from the flight list the board asked for, or null while there is none. */
-  changes?: { out: number; back: number } | null;
+  changes?: { out: LegChanges; back: LegChanges } | null;
 }) {
   const now = useNow();
   const id = useId();
@@ -230,7 +236,10 @@ export function PairingFigureLines({
       </span>
       {changes !== null ? (
         <span data-testid="pairing-changes" className="block">
-          {D.pairingChanges(F.changes(changes.out), F.changes(changes.back))}
+          {D.pairingChanges(
+            { duration: formatMinutes(changes.out.minutes), changes: F.changes(changes.out.stops) },
+            { duration: formatMinutes(changes.back.minutes), changes: F.changes(changes.back.stops) },
+          )}
         </span>
       ) : null}
       {q.mismatch ? (
@@ -471,7 +480,7 @@ export function BoardCard({
   /** The button that opens and closes the flights detail, or null when there is none to open. */
   toggle?: ReactNode;
   /** The pairing's changes each way (design 2026-11-08 §5.1), or null. */
-  changes?: { out: number; back: number } | null;
+  changes?: { out: LegChanges; back: LegChanges } | null;
   /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
   lists?: ListsState;
   /** The search sets an airline or layover setting (a pairing figure says they are not applied). */

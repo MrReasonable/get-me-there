@@ -29,6 +29,7 @@ import {
   CheaperCached,
   FlightRead,
   Journey,
+  type LegChanges,
   PairingFigureLines,
   RankFlaps,
   RowPrice,
@@ -332,7 +333,12 @@ export function BoardTable(props: BoardProps) {
               q !== null &&
               view.outbound.departsLocal === q.departOut &&
               view.ret.departsLocal === q.departBack;
-            const changes = sameTrip ? { out: view.outbound.stops, back: view.ret.stops } : null;
+            const changes = sameTrip
+              ? {
+                  out: { stops: view.outbound.stops, minutes: view.outbound.durationMinutes },
+                  back: { stops: view.ret.stops, minutes: view.ret.durationMinutes },
+                }
+              : null;
             const toggle = hasBlock ? (
               <FlightsToggle
                 open={open}
@@ -470,7 +476,7 @@ function BoardRow({
   lit: boolean;
   onLight: (index: number | null) => void;
   /** The pairing's changes each way (design 2026-11-08 §5.1), or null. */
-  changes: { out: number; back: number } | null;
+  changes: { out: LegChanges; back: LegChanges } | null;
   /** The row's button that opens its flights detail (design 2026-11-08 §5.3), or null when it has none. */
   toggle: ReactNode;
   /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
