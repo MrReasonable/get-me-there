@@ -153,13 +153,19 @@ function estimatePhaseOf(ctx: EngineContext, snapshot: DefinitionSnapshot, pairs
 }
 
 /**
+ * A flight list's first view and its Cheapest flow, after the spacing: measured 2026-11-07 over ten outbound-only reads
+ * at spacing 0, 19–28.5 s (23.5 s on average).
+ */
+const FLIGHT_VIEW_SECONDS = 25;
+
+/**
  * Spec rev 56 §8.1 "Estimate" (R-estimate): one pair's seconds and pages, typical and at most. Out and back: the first
- * view (spacing + 40 s), the return steps (`RETURN_STEP_SECONDS` × 3 with the booking read, × 1 without) and, for the
- * share of pairs needing the second outbound, its spaced reload and two steps; at most the phase's own bound and the
- * one spaced reload. Outbound-only: the first view, 1 page.
+ * view (spacing + `FLIGHT_VIEW_SECONDS`), the return steps (`RETURN_STEP_SECONDS` × 3 with the booking read, × 1
+ * without) and, for the share of pairs needing the second outbound, its spaced reload and two steps; at most the phase's
+ * own bound and the one spaced reload. Outbound-only: the first view, 1 page.
  */
 function perPair(spacing: number, booking: boolean) {
-  const view = spacing + 40;
+  const view = spacing + FLIGHT_VIEW_SECONDS;
   return {
     outbound: view,
     typical:
@@ -172,21 +178,43 @@ function perPair(spacing: number, booking: boolean) {
 }
 
 /**
+ * CAMOUFOX_PAGES_AT_ONCE: `pairs` requests of `each` seconds read that many at a time, so in waves of that many, each
+ * wave as long as one request, but never quicker than their `pages` starts spaced apart (the spacing runs start to start
+ * across every page in flight). At one at a time it is `pairs × each`.
+ */
+function inWaves(
+  pairs: number,
+  each: number,
+  pages: number,
+  l: { concurrency: number; minSpacingSeconds: number | null },
+): number {
+  if (pairs === 0 || l.concurrency <= 1) return pairs * each;
+  return Math.max(Math.ceil(pairs / l.concurrency) * each, pages * (l.minSpacingSeconds ?? 0));
+}
+
+/**
  * Spec revision 56 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `pairs` is the date
  * pairs the step would read (its pages count against no free-call cap, spec rev 65; the step's own allowance holds
- * them). With the return leg every pair goes out and back; without it, outbound-only. `pages` and `seconds` are the typical figures (1.5 pages and 245 s a pair out
- * and back at the defaults; 1 page and spacing + 40 s outbound-only), `pagesMax` and `secondsMax` the bound (2 pages
- * and 300 s). The assumptions say so.
+ * them). With the return leg every pair goes out and back; without it, outbound-only. `pages` and `seconds` are the
+ * typical figures (1.5 pages and 230 s a pair out and back at the defaults; 1 page and spacing + 25 s outbound-only),
+ * `pagesMax` and `secondsMax` the bound (2 pages and 285 s), the pairs read CAMOUFOX_PAGES_AT_ONCE at a time
+ * (`inWaves`). The assumptions say so.
  */
 function withFlights(ctx: EngineContext, est: Estimate, wanted: number, phase: FlightPhase): Estimate {
   const pairs = Math.max(0, wanted);
-  const per = perPair(ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0, phase.booking);
+  const l = ctx.limitsOf(FLIGHT_LIST_PROVIDER);
+  const per = perPair(l.minSpacingSeconds ?? 0, phase.booking);
   const outAndBack = phase.returns ? pairs : 0;
   const outbound = phase.returns ? 0 : pairs;
   const pagesMax = outAndBack * FLIGHT_LIST_PAGES_PER_PAIR_MAX + outbound;
   const pages = Math.min(Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound, pagesMax);
-  const seconds = Math.ceil(outAndBack * per.typical + outbound * per.outbound);
-  const secondsMax = Math.ceil(outAndBack * per.bound + outbound * per.outbound);
+  // why: a plan is all out and back or all outbound-only, so one of the two terms is always 0 (no pairs, no seconds)
+  const seconds = Math.ceil(
+    inWaves(outAndBack, per.typical, pages, l) + inWaves(outbound, per.outbound, outbound, l),
+  );
+  const secondsMax = Math.ceil(
+    inWaves(outAndBack, per.bound, pagesMax, l) + inWaves(outbound, per.outbound, outbound, l),
+  );
   // why: no "+ flights" clause when no date pair is read (20.9 review finding 6)
   const notes =
     pairs === 0

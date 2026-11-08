@@ -1013,3 +1013,106 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
 function cellsOf(e: CamoufoxEngine, id: string) {
   return e.ctx.repos.executions.get(id)?.flightLists?.cells ?? [];
 }
+
+describe('flight pages at once (CAMOUFOX_PAGES_AT_ONCE)', () => {
+  // why: a page held in flight is released by another page's start; one at a time it never is, and the test times out
+  const atOnce = { env: { CAMOUFOX_PAGES_AT_ONCE: '4' } };
+
+  it('with 4 at once, a page held in flight does not hold the others: all 10 start before it ends', async () => {
+    const held = deferred();
+    const ends: number[] = [];
+    const { e, cam } = camoufoxOnly({
+      ...atOnce,
+      flights: {
+        holdCall: { call: 1, until: held.promise },
+        // why: one at a time, page 10 never starts while page 1 is held; 4 at once, the other lanes read the rest
+        onStart: (n) => {
+          if (n === 10) held.resolve();
+        },
+        onEnd: (n) => ends.push(n),
+      },
+    });
+    const id = await start(e);
+    const done = await e.settled(id);
+    expect(done.status).toBe('completed');
+    expect(cam.flightCalls).toHaveLength(10);
+    expect(ends.at(-1)).toBe(1);
+    const rows = flightRows(e, id);
+    expect(rows).toHaveLength(10);
+    expect(rows.every((r) => r.status === 'read')).toBe(true);
+    expect(done.flightLists?.ended).toBeNull();
+  }, 15_000);
+
+  it('an ending error with a page in flight: that page writes its own read, only the pairs never started fail', async () => {
+    const held = deferred();
+    const ends: number[] = [];
+    // why: the quota row is written and the intake stopped in one step, so a page starting once it exists started
+    // after the stop
+    const startedAfterStop: number[] = [];
+    let id = '';
+    const { e, cam } = camoufoxOnly({
+      ...atOnce,
+      flights: {
+        holdCall: { call: 1, until: held.promise },
+        onStart: (n) => {
+          if (flightRows(e, id).some((r) => r.reason === 'quota')) startedAfterStop.push(n);
+        },
+        answer: (_q, n) => {
+          if (n !== 2) return undefined;
+          held.resolve();
+          return listError('quota');
+        },
+        onEnd: (n) => ends.push(n),
+      },
+    });
+    id = await start(e);
+    const done = await e.settled(id);
+    expect(done.status).toBe('completed');
+    expect(startedAfterStop).toEqual([]);
+    // why: page 1 was in flight when page 2 ended the step, and ended after it
+    expect(ends.indexOf(1)).toBeGreaterThan(ends.indexOf(2));
+    const called = cam.flightCalls.map((c) => JSON.stringify(c.query.cell));
+    expect(called.length).toBeGreaterThanOrEqual(2);
+    expect(called.length).toBeLessThan(10);
+    const plan = done.flightLists?.cells ?? [];
+    const rows = flightRows(e, id);
+    expect(rows).toHaveLength(10);
+    // why: each planned pair departs on its own day, so the departure date names its row
+    const rowOf = (cell: (typeof plan)[number]) => rows.find((r) => r.departureDate === cell.departureDate);
+    plan.forEach((cell) => {
+      const i = called.indexOf(JSON.stringify(cell));
+      const row = rowOf(cell);
+      if (i === 1) expect([row?.status, row?.reason]).toEqual(['failed', 'quota']);
+      else if (i >= 0) expect([row?.status, row?.reason]).toEqual(['read', null]);
+      else expect([row?.status, row?.reason]).toEqual(['failed', 'quota']);
+    });
+  }, 15_000);
+
+  it('the window met first decides the end: an ending error in flight after it writes its own row, and no other', async () => {
+    const held = deferred();
+    let id = '';
+    const { e, cam } = camoufoxOnly({
+      ...atOnce,
+      flights: {
+        holdCall: { call: 2, until: held.promise },
+        onStart: (n) => {
+          if (n !== 3) return;
+          // why: the window ends while page 2 is in flight, so page 3's gate refuses it
+          const end = e.ctx.repos.executions.get(id)?.browserWindowEnd ?? null;
+          if (end !== null) e.clock.set(asIsoDateTime(new Date(Date.parse(end) + 1_000).toISOString()));
+          // why: page 2 answers once page 3's refusal has been met (the next turn of the event loop, never a delay)
+          setImmediate(() => held.resolve());
+        },
+        answer: (_q, n) => (n === 2 ? listError('quota') : undefined),
+      },
+    });
+    id = await start(e);
+    const done = await e.settled(id);
+    expect(done.status).toBe('completed');
+    expect(done.flightLists?.ended).toBe('window');
+    const rows = flightRows(e, id);
+    // why: page 1 read, page 2 its own quota row; the pairs never sent carry no row, as a window end leaves them
+    expect(rows.map((r) => r.reason).sort()).toEqual([null, 'quota']);
+    expect(cam.flightRequests()).toBe(2);
+  }, 15_000);
+});

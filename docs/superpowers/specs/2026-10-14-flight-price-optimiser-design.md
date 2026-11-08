@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 65.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 66.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -3047,7 +3047,14 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   one whose booking status is transient it sets `bookingStopped`, so the
   pass sends no further return phase (or booking read); `skipped`,
   `no-outbound` and a clean `read` stop nothing. The step reads its date
-  pairs one at a time; each page carries the run's own
+  pairs `CAMOUFOX_PAGES_AT_ONCE` at a time (one at the default), in the
+  plan's order; a request already sent when another sets `returnsStopped`
+  or `bookingStopped` keeps the phase it was sent with. The first stop the
+  step meets (a cancel, the window, or a result that ends the step: the
+  error table's "the rest" column) decides how it ends; a page already in
+  flight then writes its own row and stops nothing more, and after an
+  ending result only the pairs no page had started fail with that reason,
+  with no request. Each page carries the run's own
   cancel signal (cancel, SIGTERM, a fatal error) with an intake of its own,
   never a lane's intake or the run's discovery intake, which a budget stop
   has already aborted; and before every page it passes a gate of its own that
@@ -3180,19 +3187,25 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   window cannot hold a return phase. `pairs` is 10 less the reusable date
   pairs (no free-call cap cuts them: a browser page counts against none);
   with returns every one of them goes out and back, and "for up to N date pairs" counts them. A pair
-  out and back is typically `CAMOUFOX_MIN_SPACING_SECONDS + 40 +
+  out and back is typically `CAMOUFOX_MIN_SPACING_SECONDS + 25 +
   RETURN_STEP_SECONDS × 3 + RETURN_SECOND_OUTBOUND_RATE ×
-  (CAMOUFOX_MIN_SPACING_SECONDS + 2 × RETURN_STEP_SECONDS)` seconds (245 s at
-  the defaults; with `RETURN_STEP_SECONDS × 1` and 165 s without the booking
+  (CAMOUFOX_MIN_SPACING_SECONDS + 2 × RETURN_STEP_SECONDS)` seconds (230 s at
+  the defaults; with `RETURN_STEP_SECONDS × 1` and 150 s without the booking
   read) and 1 + `RETURN_SECOND_OUTBOUND_RATE` pages (1.5), and at most
-  `CAMOUFOX_MIN_SPACING_SECONDS + 40 + RETURN_PHASE_SECONDS_MAX +
-  RETURN_SPACED_LOADS × CAMOUFOX_MIN_SPACING_SECONDS` seconds (300 s, or 220
+  `CAMOUFOX_MIN_SPACING_SECONDS + 25 + RETURN_PHASE_SECONDS_MAX +
+  RETURN_SPACED_LOADS × CAMOUFOX_MIN_SPACING_SECONDS` seconds (285 s, or 205
   s without the booking read) and `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages; an
-  outbound-only pair is `CAMOUFOX_MIN_SPACING_SECONDS + 40` seconds (70 s)
-  and 1 page. `pages` and `seconds` are the typical figures and `pagesMax`
+  outbound-only pair is `CAMOUFOX_MIN_SPACING_SECONDS + 25` seconds (55 s)
+  and 1 page; the 25 s is the first view and its Cheapest flow, measured
+  2026-11-07 over ten outbound-only reads at spacing 0 (19–28.5 s, 23.5 s on
+  average). `pages` and `seconds` are the typical figures and `pagesMax`
   and `secondsMax` the bound: for 10 pairs at the defaults, 15 pages and
-  2,450 s, at most 20 pages and 3,000 s (1,650 s and 2,200 s without the
-  booking read; 10 pages and 700 s without returns). The typical seconds
+  2,300 s, at most 20 pages and 2,850 s (1,500 s and 2,050 s without the
+  booking read; 10 pages and 550 s without returns). With
+  `CAMOUFOX_PAGES_AT_ONCE` above 1 the pairs go in waves of that many, each
+  wave as long as one pair, never quicker than the line's pages started
+  `CAMOUFOX_MIN_SPACING_SECONDS` apart (10 outbound-only pairs 4 at a time:
+  75 s at spacing 0, 300 s at 30 s). The typical seconds
   count in the estimate's total and in the browser window's end (§8.2), and
   the pairs in no `budgetFit` line and never in `totalCalls`; the re-read of a
   transient list (the reuse rule above) is inside that bound, at most one
@@ -3200,9 +3213,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   planned flight cell with no row yet. Its assumptions say "+ flights, out
   and back, for up to N date pairs: usually about P pages and M minutes, at
   most Pmax pages and Mmax minutes" ("+ flights, out and back, for up to 10
-  date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50
+  date pairs: usually about 15 pages and 38 minutes, at most 20 pages and 48
   minutes"), or "+ flights for up to N date pairs, about M minutes" without
-  returns ("… 10 date pairs, about 12 minutes"), minutes rounded.
+  returns ("… 10 date pairs, about 9 minutes"), minutes rounded.
   Without camoufox the stored estimate
   has no `flightLists` key; an estimate stored before revision 56, holding
   only `pages` and `seconds`, reads as `pairs` = `pages` and `returns`
@@ -5685,6 +5698,19 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 66: flight lists read pages at once, and the flight line's measured view (2026-11-08)
+
+The flight-list step read its date pairs one at a time while the grid pages around it ran `CAMOUFOX_PAGES_AT_ONCE` at
+a time. It now reads them that many at a time too, in the plan's order: a request already sent keeps the return phase
+it was sent with when another sets `returnsStopped` or `bookingStopped`, and the first stop the step meets (a cancel,
+the window or an ending result) decides how it ends: a page already in flight writes its own row, and after an
+ending result only the pairs not yet started fail with that reason. The allowance is
+unchanged and still held at each request's reservation. The estimate's flight line now takes 25 s for a first view
+after the spacing (it took 40 s), as ten outbound-only reads measured on 2026-11-07 (19–28.5 s, 23.5 s on average),
+and with pages at once counts its pairs in waves of that many, never quicker than its page starts spaced apart. The
+measured grid times stand: that run's 156 grid pages averaged about 28 s each 4 at a time, inside the 30 s a page the
+planner and estimate use, and it made no scrolls to re-measure (§8.1).
 
 ### Revision 65: pages at once, no per-run browser caps, and a quicker settle (2026-11-07)
 

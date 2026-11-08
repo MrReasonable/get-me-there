@@ -1,8 +1,9 @@
 /**
  * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
  * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
- * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, on an allowance of its
- * own (the snapshot's `flightListPages`, 20 pages; a browser page counts against no free-call cap). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
+ * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, CAMOUFOX_PAGES_AT_ONCE at
+ * a time, on an allowance of its own (the snapshot's `flightListPages`, 20 pages; a browser page counts against no
+ * free-call cap). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
  * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
  * limits sent with it, an outbound-only request instead when the window cannot hold that, and no further
  * return phase (or booking read) after one ends transient.
@@ -38,6 +39,7 @@ import type { FlightListInsert } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
 import { lineKey } from '../lines.js';
+import { runPool } from '../pool.js';
 import { disableProvider, type RunState, stopRun } from '../run.js';
 import { toStopDetail } from '../stopCause.js';
 import { airportNamesOf, cellAirportNames } from './discovery.js';
@@ -157,13 +159,13 @@ async function readPage(
   run: RunState,
   cap: FlightListCapability,
   cell: CellKey,
-  plan: FlightListsState,
+  planNow: () => FlightListsState,
   gate: (requestSeconds: number) => () => void,
 ): Promise<PageOutcome> {
   const names = airportNamesOf(ctx);
   try {
     await ctx.lease.whenFree(run.controller.signal);
-    const req = requestOf(ctx, run, plan);
+    const req = requestOf(ctx, run, planNow());
     const allowance = ctx.budget.usage({
       kind: 'provider-execution',
       executionId: run.executionId,
@@ -443,8 +445,8 @@ export function bookingStopOf(r: ReturnRead | null): string | null {
 }
 
 /**
- * Spec revision 56 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs one at a time
- * (concurrency 1) under the error table, each request shaped by `requestOf`, stops the pass's return phases (or booking
+ * Spec revision 56 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs as many at a time as
+ * the browser loads pages at once (CAMOUFOX_PAGES_AT_ONCE) under the error table, each request shaped by `requestOf`, stops the pass's return phases (or booking
  * reads) after a transient end. A failure outside the error table (the database itself) stops the run fatal
  * (R-dberror).
  */
@@ -480,22 +482,32 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     const intake = new AbortController();
     const gate = flightPageGate(ctx, run);
     let ended: FlightListsState['ended'] = null;
-    for (let i = 0; i < toRead.length && !intake.signal.aborted; i++) {
-      const cell = toRead[i];
-      if (cell === undefined) break;
-      const o = await readPage(ctx, run, cap, cell, plan, gate);
+    // why: the first stop the step meets (an abort, the window, or an ending error) decides how the step ends, as it did
+    // one page at a time; a page already in flight then writes its own row and stops nothing more
+    let stopped = false;
+    // why: an ending error met first; the pairs no lane had started yet fail with its reason, no request sent
+    let ending: Extract<PageOutcome, { kind: 'failed' }> | null = null;
+    const started = new Set<number>();
+    // why: as many pages at once as the worker loads (CAMOUFOX_PAGES_AT_ONCE); the guard reserves each request's pages
+    // against the allowance as it is sent, so pages in flight together never overspend it
+    await runPool(toRead, ctx.limitsOf(FLIGHT_LIST_PROVIDER).concurrency, intake.signal, async (cell, i) => {
+      started.add(i);
+      const o = await readPage(ctx, run, cap, cell, () => plan, gate);
       if (o.kind === 'abort') {
+        stopped = true;
         intake.abort();
-        break;
+        return;
       }
       if (o.kind === 'window') {
-        ended = 'window';
+        if (!stopped) ended = 'window';
+        stopped = true;
         intake.abort();
-        break;
+        return;
       }
       writeRow(ctx, run, cell, o);
       if (o.kind === 'read') {
-        // why: Review Focus 2 — a wrong return or booking view is not repeated: the pass sends no further one
+        // why: Review Focus 2 — a wrong return or booking view is not repeated: no further request carries one (a
+        // request already in flight was shaped before it, and reads as it was sent)
         const returnsStopped = plan.returnsStopped ?? returnsStopOf(o.list.returns);
         const bookingStopped = plan.bookingStopped ?? bookingStopOf(o.list.returns);
         if (returnsStopped !== plan.returnsStopped || bookingStopped !== plan.bookingStopped) {
@@ -508,11 +520,21 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
         }
       }
       if (o.kind === 'failed' && o.end) {
-        // why: the rest fail with the same reason and no request is sent (the error table's "the rest" column)
-        for (const rest of toRead.slice(i + 1)) writeRow(ctx, run, rest, o);
-        ended = o.ended;
+        if (!stopped) {
+          ending = o;
+          ended = o.ended;
+        }
+        stopped = true;
         intake.abort();
       }
+    });
+    if (ending !== null) {
+      const o = ending;
+      // why: the rest fail with the same reason and no request is sent (the error table's "the rest" column); a page
+      // already in flight wrote its own row
+      toRead.forEach((rest, i) => {
+        if (!started.has(i)) writeRow(ctx, run, rest, o);
+      });
     }
     if (ended !== null) ctx.repos.executions.patch(run.executionId, { flightLists: { ...plan, ended } });
     const counts = ctx.repos.flightLists.forExecution(run.executionId, plan.cells);
