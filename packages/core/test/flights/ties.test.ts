@@ -35,6 +35,19 @@ const shownOf = (...flights: ListedFlight[]): ShownFlights<ListedFlight> => ({
 });
 
 describe('tieGroups (spec rev 55 §11 Ties)', () => {
+  // Design 2026-11-08 §5.2: a trip with flights read and a calendar price at one price are not one tie group
+  it('splits a run at a change of tier when the key names one, and ignores tier when it names none', () => {
+    const ranked = [row(1, 86), row(2, 86), row(3, 86), row(4, 86)];
+    const tierOf = (r: Row) => (r.id <= 2 ? 0 : 2);
+    expect(
+      tieGroups(ranked, (r) => ({ ...keyOf(r), tier: tierOf(r) })).map((g) => g.map((r) => r.id)),
+    ).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(tieGroups(ranked, keyOf).map((g) => g.length)).toEqual([4]);
+  });
+
   it('groups contiguous runs of equal price and equal current flag, in rank order', () => {
     const ranked = [row(1, 86), row(2, 86), row(3, 86, false), row(4, 92), row(5, 92)];
     const groups = tieGroups(ranked, keyOf);

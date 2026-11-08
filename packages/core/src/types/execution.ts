@@ -1,4 +1,4 @@
-import type { StopCause } from '../api-contract/stopCause.js';
+import type { StopCause, StopDetail } from '../api-contract/stopCause.js';
 import type { NormalisationReason, ProviderErrorKind } from '../errors.js';
 import type { CellKey, DefinitionSnapshot } from './definition.js';
 import type { IsoDateTime } from './ids.js';
@@ -177,6 +177,8 @@ export interface Estimate {
  * Revision 56 §7, §8.1: `returns` and `booking`, whether the plan reads returns and the shown pairing's booking options
  * (from the worker's flags), and `returnsStopped` and `bookingStopped`, the rule that stopped the run's return phases or
  * booking reads; a plan stored before WP21 has none of the four, and the reader fills false, false, null, null.
+ * Design 2026-11-08 §4.2, §7: in confirm mode the step reads an open-ended queue, so `cells` grows as each read starts
+ * (carried across passes) and `planned` is always `cells.length + reused`; an outbound-only plan keeps the fixed cells.
  */
 export interface FlightListsState {
   planned: number;
@@ -188,6 +190,36 @@ export interface FlightListsState {
   booking: boolean;
   returnsStopped: string | null;
   bookingStopped: string | null;
+  /** Design 2026-11-08 §7: how checking went (`ConfirmSummary`); null on a plan stored before that change. */
+  confirm: ConfirmSummary | null;
+  /**
+   * Design 2026-11-08 §5.5: the stop detail of the ending page or cap that set `ended: 'stopped'` (the first one the step
+   * met, never a later in-flight failure); null otherwise and on a plan stored before it.
+   */
+  endedReason: StopDetail | null;
+}
+
+/** Design 2026-11-08 §4.6, §7: whether the step reads until rule A stops it, or why it reads outbound only. */
+export const CONFIRM_MODES = ['confirm', 'outbound-only', 'flags-unread'] as const;
+/** Design 2026-11-08 §4.4, §4.6: the stops the step's own rule records (the run's other stops stay in `ended`). */
+export const CONFIRM_STOPS = ['patience', 'queue-empty', 'returns-stopped'] as const;
+
+/**
+ * Design 2026-11-08 §7 (confirm the cheapest trips): the step's stored summary, one owner per count. The date pairs read
+ * are `FlightListsState.cells` (this run's started pairs, carried across passes) and the pairs reused are
+ * `FlightListsState.reused`, so "Checked N" is `cells.length + reused` (= `planned`). Here: `mode` (`confirm` while
+ * returns are read; `outbound-only` when the worker's flags were read and lack RETURN_SELECT_VERIFIED; `flags-unread`
+ * when no flags had been read when the step planned), `confirmed` the trips in the standings ("trips with flights read"
+ * to the operator), `unread` the reads that learnt nothing about their flights (§4.3), `uncheckedCheaper` the queue's
+ * pairs left unread whose calendar price is below the 5th confirmed price (every one with fewer than 5, §4.5), and
+ * `stop` the rule-A stop that ended the step (null while it runs, or when another stop ended it: see `ended`).
+ */
+export interface ConfirmSummary {
+  mode: (typeof CONFIRM_MODES)[number];
+  confirmed: number;
+  unread: number;
+  uncheckedCheaper: number;
+  stop: (typeof CONFIRM_STOPS)[number] | null;
 }
 
 /** Spec §7 `search_executions` as read back. */

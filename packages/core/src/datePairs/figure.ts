@@ -10,6 +10,7 @@ import {
   type PairingCandidate,
   type PairingRead,
   pairingLeads,
+  pairingPrice,
   pairingReadOf,
 } from './pairing.js';
 import { datePairIndexer } from './space.js';
@@ -224,13 +225,12 @@ function withPairing<T extends FigureCandidate>(
   const lookup = pairingOf(f.chosen.cell);
   if (lookup.candidate === null) return withListRead(f, lookup);
   const { candidate } = lookup;
-  const offer = candidate.offer;
   // why: spec rev 63: an older pairing gives way to a grid price read after it for the same cell
   const grid = f.chosen.provenance.fetchedAt;
-  // why: `pairingLeads` requires the offer; reading it first narrows it here without an assertion
-  if (offer === null || !pairingLeads(candidate, grid))
+  if (!pairingLeads(candidate, grid))
     return { ...f, pairingRead: pairingReadOf(candidate, grid), pairing: candidate };
-  return pairingFigure(f.chosen, candidate, offer.priceMinor);
+  // why: design 2026-11-08 §4.1: the seller's price when complete offers were read, else Google's "from" price
+  return pairingFigure(f.chosen, candidate, pairingPrice(candidate).pricePence);
 }
 
 /**
@@ -251,11 +251,10 @@ function overStaleVerified<T extends FigureCandidate>(
   if (lookup.candidate === null) return withListRead(f, lookup);
   const { candidate } = lookup;
   const grid = calendar.provenance.fetchedAt;
-  // why: `pairingLeads` requires the offer; testing it first narrows it here without an assertion
-  if (candidate.offer === null || !pairingLeads(candidate, grid))
+  if (!pairingLeads(candidate, grid))
     return { ...f, pairingRead: pairingReadOf(candidate, grid), pairing: candidate };
   if (!candidate.fresh) return { ...f, pairingRead: 'within-older', pairing: candidate };
-  return pairingFigure(calendar, candidate, candidate.offer.priceMinor);
+  return pairingFigure(calendar, candidate, pairingPrice(candidate).pricePence);
 }
 
 /**

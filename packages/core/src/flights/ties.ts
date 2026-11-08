@@ -6,19 +6,30 @@
 import { clockOf, type ShownFlights } from './choose.js';
 import type { ListedFlight } from './types.js';
 
+/** A tie group's key: price and whether current, and (design 2026-11-08 §5.2) optionally the rank tier. */
+export interface TieKey {
+  pricePence: number;
+  current: boolean;
+  tier?: number;
+}
+
 /**
  * Spec rev 55 §11 Ties: the contiguous runs of `ranked` at one price and of one current or superseded kind, in rank
- * order (a superseded figure at the same price is its own run). The groups, flattened, are `ranked` itself.
+ * order (a superseded figure at the same price is its own run). Design 2026-11-08 §5.2: a key may also name a `tier`
+ * (the figure's rank tier), and a run then holds one tier only, so a trip with flights read and a calendar price at one
+ * price are not one tie. The groups, flattened, are `ranked` itself.
  */
-export function tieGroups<P>(
-  ranked: readonly P[],
-  keyOf: (p: P) => { pricePence: number; current: boolean },
-): P[][] {
-  const runs: Array<{ key: { pricePence: number; current: boolean }; members: P[] }> = [];
+export function tieGroups<P>(ranked: readonly P[], keyOf: (p: P) => TieKey): P[][] {
+  const runs: Array<{ key: TieKey; members: P[] }> = [];
   for (const p of ranked) {
     const key = keyOf(p);
     const run = runs.at(-1);
-    if (run !== undefined && run.key.pricePence === key.pricePence && run.key.current === key.current)
+    if (
+      run !== undefined &&
+      run.key.pricePence === key.pricePence &&
+      run.key.current === key.current &&
+      run.key.tier === key.tier
+    )
       run.members.push(p);
     else runs.push({ key, members: [p] });
   }

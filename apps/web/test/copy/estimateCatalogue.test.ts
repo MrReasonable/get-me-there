@@ -29,9 +29,10 @@ const SAMPLES: Record<string, unknown[][]> = {
     [1, false],
     [2, true],
   ],
-  'estimate.flightsOutAndBack': [
-    ['10', '15', '41 minutes', '20', '50 minutes'],
-    ['1', '1', 'under a minute', '1', '2 minutes'],
+  'estimate.flightsChecking': [['about 2 minutes'], ['about 1 minute']],
+  'estimate.flightsDates': [
+    ['15', '290'],
+    ['1', '1'],
   ],
   'estimate.billed': [
     ['120', '9,880', 'SearchApi', 'month'],

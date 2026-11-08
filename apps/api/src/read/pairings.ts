@@ -7,10 +7,8 @@
  * `offersComplete`), and the stored limits against today's (`sameFlightLimits`). A list never changes coverage.
  */
 import {
-  bookingReturnOf,
   type CellKey,
   cellKeyString,
-  cheapestOffer,
   cheapestPairing,
   type DatePairPairing,
   type FlightLimits,
@@ -18,10 +16,11 @@ import {
   hoursSince,
   type IsoDateTime,
   listFresh,
-  offersComplete,
   type PairingCandidate,
   type PairingOf,
   type Provenance,
+  pairingOffer,
+  pairingPrice,
   RETURN_FINISHED,
   type SearchDefinition,
   sameFlightLimits,
@@ -76,16 +75,8 @@ export function candidateOf(
   const outbound = attempt === undefined ? undefined : l.flights[attempt.outboundIndex];
   const ret = p === null ? undefined : attempt?.returns[p.returnIndex];
   if (p === null || outbound === undefined || ret === undefined) return null;
-  const booked = bookingReturnOf(r, l.flights);
   const b = r.booking;
-  const forPairing =
-    b !== null &&
-    booked !== null &&
-    b.attempt === booked.attempt &&
-    b.returnIndex === booked.returnIndex &&
-    b.attempt === p.attempt &&
-    b.returnIndex === p.returnIndex;
-  const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
+  const { offer, complete } = pairingOffer(r, l.flights, p);
   const ageHours = hoursSince(l.fetchedAt, now);
   // why: prov-007: freshness is judged on the elapsed milliseconds, as the engine's reuse rule is; `hoursSince` floors to
   // whole hours and is for display only (a list 168 h 59 m old under refresh 168 is past it); core's one rule, which
@@ -96,7 +87,7 @@ export function candidateOf(
     fromMinor: p.fromMinor,
     offer,
     offersRead: offer === null || b === null ? 0 : b.offers.length,
-    complete: offer !== null && b !== null && offersComplete(b, p.fromMinor),
+    complete,
     which: !fits ? 'over-limit' : p.attempt > 0 ? 'next-cheapest' : 'cheapest',
     times: {
       departOut: outbound.departsLocal,
@@ -104,6 +95,9 @@ export function candidateOf(
       departBack: ret.departsLocal,
       arriveBack: ret.arrivesLocal,
     },
+    // why: final whole-branch review I2: the trip's own journey time, as a verified figure's is its two legs' sum, so
+    // the board's Journey column shows it rather than "not known" (the calendar row beneath states none)
+    journeyMinutes: outbound.durationMinutes + ret.durationMinutes,
     mismatch: offer !== null && offer.priceMinor !== p.fromMinor,
     provenance: flightListProvenance(l),
     // why: spec rev 55 §10: a list is judged against the camoufox refresh only; stale exactly when not fresh
@@ -119,7 +113,8 @@ export function candidateOf(
 
 /**
  * Spec rev 56 §10's `pairing` group from a candidate: the cheapest offer's stated price with its seller and fare, or the
- * return's "from" price (`isFrom`, no seller) when no offer was read for it; the return's "from" price itself
+ * return's "from" price (`isFrom`, no seller) when no complete offers were read for it (none read, or not every seller
+ * read: `offersRead` tells which); the return's "from" price itself
  * (`fromPence`, Task 21.7); the offers read, whether complete, which outbound, the four times, the mismatch mark, and the
  * list's provenance, stale mark and age.
  */
@@ -127,19 +122,22 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
   // why: 21.7 code I3 (Ian's ruling 2 for returns): an over-limit pairing keeps the offer read for it, as the search's
   // page block shows it, so the board and the block name the same price; `which: 'over-limit'` marks it, and it never
   // leads (the lead rule needs both legs within the limits)
-  const offer = c.offer;
+  // why: design 2026-11-08 §4.1: `pairingPrice` is the one price rule; incomplete offers are not shown as an offer's
+  // price (a cheaper seller may not have been read), so that group is Google's "from" price with `offersRead` as read
+  const { pricePence, kind } = pairingPrice(c);
+  const offer = kind === 'seller' ? c.offer : null;
   return {
-    pricePence: offer?.priceMinor ?? c.fromMinor,
+    pricePence,
     // why: Task 21.7: the return's "from" price rides beside the offer's, so the board's mismatch mark can name it
     fromPence: c.fromMinor,
-    isFrom: offer === null,
+    isFrom: kind === 'google',
     seller: offer?.seller ?? null,
     fare: offer?.fare ?? null,
-    offersRead: offer === null ? 0 : c.offersRead,
-    complete: offer !== null && c.complete,
+    offersRead: c.offersRead,
+    complete: kind === 'seller',
     which: c.which,
     ...c.times,
-    mismatch: offer !== null && c.mismatch,
+    mismatch: kind === 'seller' && c.mismatch,
     provenance: c.provenance,
     stale: c.stale,
     ageHours: c.ageHours,

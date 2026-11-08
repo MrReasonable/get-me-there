@@ -13,6 +13,9 @@ import { defaultDefinitionInput } from '../../src/defaults.js';
 import { budgetScopes } from '../../src/read/usage.js';
 import { collectSecrets, httpLimitsFor, providersFor } from '../../src/wiring.js';
 import { cleanEnv, silentLog } from '../helpers/env.js';
+import { exampleDefinitionInput } from '../helpers/examples.js';
+import { createHarness } from '../helpers/harness.js';
+import { at, seeder } from '../helpers/seed.js';
 
 const KEY = 'test-camoufox-worker-key-0123456789abcdef';
 const ON = {
@@ -78,7 +81,7 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
     expect(input.providers.discovery).toContain('camoufox');
     expect(input.providers.verification).not.toContain('camoufox');
   });
-  it('an execution’s budget rows include camoufox’s own page scope (its pages, uncapped, and its flight allowance)', () => {
+  it('an execution’s budget rows include camoufox’s own page scope (its pages and its flight pages, both uncapped)', async () => {
     const c = config(ON);
     expect(budgetScopes({ config: c, providers: providersFor(c, deps) }, 'e1')).toContainEqual({
       kind: 'provider-execution',
@@ -90,6 +93,23 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
         (s) => s.kind === 'provider-execution',
       ),
     ).toBe(false);
+    // why: design 2026-11-08 §4.8 and spec rev 65: neither the pages nor the flight pages carry a cap; read from the
+    // real guard over a stored execution, not from the scope list
+    const h = await createHarness({ env: ON });
+    const def = h.ports.repos.definitions.create(exampleDefinitionInput());
+    const id = seeder(h.ports).execution('E', {
+      def,
+      status: 'completed',
+      startedAt: at(-2),
+      finishedAt: at(-1),
+    });
+    const usage = h.ports.budget.usage({
+      kind: 'provider-execution',
+      executionId: id,
+      providerId: 'camoufox',
+    });
+    expect(usage.cap).toBeNull();
+    expect(usage.flightLists).toEqual({ calls: 0 });
   });
 });
 

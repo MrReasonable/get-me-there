@@ -564,14 +564,18 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(raggedPairing, 'pairing').mismatch = [];
     expect(issuePaths(raggedPairing)).toEqual(['pairing.mismatch']);
   });
-  it('pairing: the pairing figure has an entry that is not a "from" price; none on a verified figure', () => {
+  it('pairing: the pairing figure has an entry (an offer\'s or a "from" price); none on a verified figure', () => {
     expect(issuePaths(withPairing({ pairing: null }))).toEqual(['pairing.figure']);
-    const isFrom = withPairing();
-    groupOf(isFrom, 'pairing').isFrom[0] = true;
-    groupOf(isFrom, 'pairing').seller[0] = null;
-    groupOf(isFrom, 'pairing').offersRead[0] = 0;
-    groupOf(isFrom, 'pairing').complete[0] = false;
-    expect(issuePaths(isFrom)).toEqual(['pairing.isFrom.0']);
+    // why: design 2026-11-08 §4.1: a leading pairing may carry the return's "from" price (no seller), with its offers read
+    // as read (none, or some not complete)
+    for (const offersRead of [0, 2]) {
+      const isFrom = withPairing();
+      groupOf(isFrom, 'pairing').isFrom[0] = true;
+      groupOf(isFrom, 'pairing').seller[0] = null;
+      groupOf(isFrom, 'pairing').offersRead[0] = offersRead;
+      groupOf(isFrom, 'pairing').complete[0] = false;
+      expect(issuePaths(isFrom)).toEqual([]);
+    }
     const onVerified = withPairing();
     groupOf(onVerified, 'pairing').figure[1] = 2;
     // why: final review B-M5: figure 1's within-older read then names a pairing the group no longer holds
@@ -585,6 +589,11 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const incomplete = withPairing();
     pairingAt(incomplete).complete[0] = false;
     expect(issuePaths(incomplete)).toEqual(['pairing.complete.0']);
+    // why: design 2026-11-08 §4.1: an offer shown beneath a calendar figure is of complete offers too, so an
+    // incomplete one (entry 1) is refused by the beneath rule, not the leading one
+    const incompleteBeneath = withPairing();
+    pairingAt(incompleteBeneath).complete[1] = false;
+    expect(issuePaths(incompleteBeneath)).toEqual(['pairing.complete.1']);
     const overLimit = withPairing();
     pairingAt(overLimit).which[0] = 'over-limit';
     expect(issuePaths(overLimit)).toEqual(['pairing.which.0']);
@@ -638,12 +647,12 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     pairingAt(past).provenance[0] = past.provenances.length;
     expect(issuePaths(past)).toEqual(['pairing.provenance.0']);
   });
-  it('prov-001: a "from" price read no offer and is never complete', () => {
+  it('prov-001: a "from" price is never complete, whether no offer was read or not every seller was (design 2026-11-08)', () => {
     const offers = withPairing();
     groupOf(offers, 'pairing').isFrom[1] = true;
     groupOf(offers, 'pairing').seller[1] = null;
     groupOf(offers, 'pairing').complete[1] = false;
-    expect(issuePaths(offers)).toEqual(['pairing.offersRead.1']);
+    expect(issuePaths(offers)).toEqual([]);
     const complete = withPairing();
     groupOf(complete, 'pairing').isFrom[1] = true;
     groupOf(complete, 'pairing').seller[1] = null;
@@ -843,7 +852,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
                 ? calendarFigure({
                     airportPair: 0,
                     pairingRead: 'offers-incomplete',
-                    pairing: figurePairing({ complete: false }),
+                    pairing: figurePairing({}),
                   })
                 : i % 120 === 2
                   ? calendarFigure({ airportPair: 0, pairingRead: 'outbound-only' })
@@ -912,7 +921,7 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       }),
     ).toEqual(['pairing.provenance']);
   });
-  it('prov-001: a "from" price read no offer and is never complete', () => {
+  it('prov-001: a "from" price is never complete, whether no offer was read or not every seller was (design 2026-11-08)', () => {
     const from = { isFrom: true, seller: null } as const;
     const beneath = { ...calendar, pairingRead: 'sellers-not-read' as const };
     expect(
@@ -920,7 +929,7 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     ).toEqual([]);
     expect(
       paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 2, complete: false }) }),
-    ).toEqual(['pairing.offersRead']);
+    ).toEqual([]);
     expect(paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 0, complete: true }) })).toEqual(
       ['pairing.complete'],
     );
@@ -938,10 +947,13 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(under('within-older', { stale: 'refresh' })).toEqual([]);
     expect(under('within-older', {})).toEqual(['pairing.stale']);
     expect(under('sellers-not-read', from)).toEqual([]);
-    expect(under('sellers-not-read', { complete: false })).toEqual(['pairing.isFrom']);
+    // why: design 2026-11-08 §4.1: these two reads are never produced now; the beneath rule keeps only the fresh mark
+    // for them, and no longer says which price the pairing carries
     expect(under('sellers-not-read', { ...from, stale: 'refresh' })).toEqual(['pairing.stale']);
-    expect(under('offers-incomplete', { complete: false })).toEqual([]);
-    expect(under('offers-incomplete', {})).toEqual(['pairing.complete']);
+    // why: design 2026-11-08 §4.1: an offer's price, beneath a figure too, is of complete offers only
+    expect(under('sellers-not-read', { complete: false })).toEqual(['pairing.complete']);
+    expect(under('offers-incomplete', { complete: false })).toEqual(['pairing.complete']);
+    expect(under('offers-incomplete', {})).toEqual([]);
     expect(paths({ ...calendar, pairingRead: 'over-limit', pairing: null })).toEqual(['pairing']);
   });
   it("21.7 prov-012: a pairing shown beneath a figure carries a flight list's provenance", () => {
@@ -949,13 +961,13 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(
       paths({
         ...beneath,
-        pairing: figurePairing({ complete: false, provenance: calendar.price.provenance }),
+        pairing: figurePairing({ provenance: calendar.price.provenance }),
       }),
     ).toEqual(['pairing.provenance']);
   });
   it('Task 21.7: fromPence is the return\'s "from" price, the figure\'s own when isFrom, unlike it exactly on a mismatch', () => {
     const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
-    const incomplete = { complete: false };
+    const incomplete = {};
     expect(
       paths({ ...beneath, pairing: figurePairing({ ...incomplete, fromPence: 117_500, mismatch: true }) }),
     ).toEqual([]);
@@ -985,24 +997,31 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       'listReason',
     ]);
   });
-  it('a grid price exactly on a pairing figure; within exactly on one; its pairing never a "from" price', () => {
+  it('a grid price exactly on a pairing figure; within exactly on one', () => {
     expect(paths({ ...pairing, gridPrice: null })).toEqual(['gridPrice']);
     expect(paths({ ...calendar, gridPrice: pairing.gridPrice })).toEqual(['gridPrice']);
     expect(paths({ ...pairing, pairingRead: 'within-older' })).toEqual(['pairingRead']);
     expect(paths({ ...calendar, pairingRead: 'within' })).toEqual(['pairingRead']);
     expect(paths({ ...pairing, pairing: null })).toEqual(['pairing']);
+    // why: design 2026-11-08 §4.1: a leading pairing may be the return's "from" price, read or not
     expect(
       paths({
         ...pairing,
         pairing: figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false }),
       }),
-    ).toEqual(['pairing.isFrom']);
+    ).toEqual([]);
+    expect(
+      paths({
+        ...pairing,
+        pairing: figurePairing({ isFrom: true, seller: null, offersRead: 3, complete: false }),
+      }),
+    ).toEqual([]);
     expect(paths({ ...calendar, pairing: figurePairing() })).toEqual(['pairing']);
     expect(
       paths({
         ...calendar,
         pairingRead: 'offers-incomplete',
-        pairing: figurePairing({ seller: null, complete: false }),
+        pairing: figurePairing({ seller: null }),
       }),
     ).toEqual(['pairing.seller']);
     expect(
@@ -1179,7 +1198,8 @@ describe('datePairsResponseSchema: the sparse groups at their edges', () => {
     groupOf(r, 'pairing').which[1] = 'over-limit';
     expect(issuePaths(r)).toEqual(['pairingRead.code']);
   });
-  it('a leading "from" price is refused as one, never also by the beneath rule\'s source check', () => {
+  // why: design 2026-11-08 §4.1: a leading "from" price is allowed, so what refuses this one is its provenance, once
+  it('a leading "from" price of another list\'s provenance is refused by the leading rule only, never also the beneath source check', () => {
     const r = withPairing();
     const q = groupOf(r, 'pairing');
     q.isFrom[0] = true;
@@ -1187,7 +1207,7 @@ describe('datePairsResponseSchema: the sparse groups at their edges', () => {
     q.offersRead[0] = 0;
     q.complete[0] = false;
     q.provenance[0] = columnOf(r.figures.provenance, 1);
-    expect(issuePaths(r)).toEqual(['pairing.isFrom.0']);
+    expect(issuePaths(r)).toEqual(['pairing.provenance.0']);
   });
   // why: zod still runs the refinement after a column's own (continuable) minimum refusal, so a negative index names
   // no provenance and is refused as no flight list's, never read through
@@ -1240,10 +1260,10 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
       'a pairing read beneath its figure needs its pairing',
     ],
     [
-      'a leading "from" price',
-      { ...pairing, pairing: figurePairing(from) },
-      'pairing.isFrom',
-      "a pairing figure's price is an offer's, never a from price",
+      'a leading "from" price that is complete',
+      { ...pairing, pairing: figurePairing({ ...from, complete: true }) },
+      'pairing.complete',
+      'a from price is never complete',
     ],
     [
       'a leading pairing not complete',
@@ -1283,7 +1303,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a pairing beneath of no flight list',
-      under('offers-incomplete', { complete: false, provenance: calendar.price.provenance }),
+      under('offers-incomplete', { provenance: calendar.price.provenance }),
       'pairing.provenance',
       "a pairing's provenance is a flight list's",
     ],
@@ -1301,27 +1321,9 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a stale pairing beneath read offers-incomplete',
-      under('offers-incomplete', { complete: false, stale: 'refresh' }),
+      under('offers-incomplete', { stale: 'refresh' }),
       'pairing.stale',
       'a pairing within the refresh is fresh',
-    ],
-    [
-      'an offer beneath read sellers-not-read',
-      under('sellers-not-read', { complete: false }),
-      'pairing.isFrom',
-      'a pairing whose sellers were not read shows its from price',
-    ],
-    [
-      'a complete offer beneath read offers-incomplete',
-      under('offers-incomplete', {}),
-      'pairing.complete',
-      'a pairing whose offers may be incomplete shows an offer not complete',
-    ],
-    [
-      'a "from" price that read offers',
-      under('sellers-not-read', { ...from, offersRead: 2 }),
-      'pairing.offersRead',
-      'a from price reads no offer',
     ],
     [
       'a complete "from" price',
@@ -1331,7 +1333,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'an offer without its seller',
-      under('offers-incomplete', { seller: null, complete: false }),
+      under('offers-incomplete', { seller: null }),
       'pairing.seller',
       "a seller exactly when the price is an offer's",
     ],
@@ -1349,7 +1351,7 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
     ],
     [
       'a mismatch on an offer equal to its "from" price',
-      under('offers-incomplete', { complete: false, mismatch: true }),
+      under('offers-incomplete', { mismatch: true }),
       'pairing.mismatch',
       'a mismatch exactly when an offer differs from the from price',
     ],

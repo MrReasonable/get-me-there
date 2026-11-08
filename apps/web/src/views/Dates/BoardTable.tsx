@@ -1,4 +1,4 @@
-import type { DatePair, DatePairFigure, DecodedDatePairs } from '@gmt/core';
+import { type DatePair, type DatePairFigure, type DecodedDatePairs, rankTierOf } from '@gmt/core';
 import {
   Fragment,
   type MouseEvent,
@@ -27,11 +27,12 @@ import { navigateTo, updateSearchParams } from '../../state/urlState.js';
 import {
   BoardCard,
   CheaperCached,
-  FigurePrice,
   FlightRead,
   Journey,
+  type LegChanges,
   PairingFigureLines,
   RankFlaps,
+  RowPrice,
   rowState,
   StateFlap,
 } from './BoardCard.js';
@@ -56,11 +57,13 @@ import {
   limitsOf,
   orderedGroups,
   pairKey,
+  ranksInOrder,
   requestPages,
   shownOf,
 } from './flightLines.js';
 import { type Animate, useFlip } from './flip.js';
 import { howFarChecked } from './howFar.js';
+import { pairingOf } from './pairing.js';
 import { TieLine } from './TieLine.js';
 
 const D = COPY.datesView;
@@ -114,6 +117,7 @@ export function BoardTable(props: BoardProps) {
   const reduced = useMediaQuery(REDUCED_MOTION_QUERY);
   const region = useRef<HTMLDivElement>(null);
   const noteId = useId();
+  const detailBase = `${noteId}-flights`;
   // why: ties are runs in the price order, so they are grouped (and reordered) only while the board is sorted by price
   const byPrice = state.sort.key === 'price';
   const groups = useMemo(() => boardGroups(model.rows.map(withFigure), byPrice), [model.rows, byPrice]);
@@ -138,7 +142,7 @@ export function BoardTable(props: BoardProps) {
           : { byKey: flights.byKey, available, rev: o.rev + 1 },
       );
   }, [held, flights.byKey, available]);
-  const { rows, tieAt } = useMemo(() => {
+  const { rows, tieAt, ranks } = useMemo(() => {
     const shownFor = (p: DatePair) =>
       shownOf(orderBy.byKey.get(pairKey(p))?.list ?? null, limits, orderBy.available);
     const ordered = orderedGroups(groups, shownFor);
@@ -157,8 +161,17 @@ export function BoardTable(props: BoardProps) {
           byFlights: g.some((p) => (shownFor(p)?.shown.length ?? 0) > 0),
         });
     }
-    return { rows, tieAt };
-  }, [groups, orderBy, limits, visible]);
+    // why: design 2026-11-08 §5.4 — within a tie the rank follows the order shown, so rank 2 never sits above rank 1
+    return { rows, tieAt, ranks: ranksInOrder(ordered, model.rankOf) };
+  }, [groups, orderBy, limits, visible, model.rankOf]);
+  // why: design 2026-11-08 §5.3 — rows are closed; the date pairs whose flights detail is open, by the wire's pair key
+  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(new Set());
+  const toggleOpen = (key: string) =>
+    setOpenKeys((o) => {
+      const next = new Set(o);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   const airportPairs = data.scope.airportPairs;
   const filtered = state.journey !== null;
   // why: both only count up, so their sum changes whenever a read is applied or a tie's flight lists are applied
@@ -224,7 +237,7 @@ export function BoardTable(props: BoardProps) {
     </button>
   );
   // why: the rank's cells: two, or as many as the largest shown rank needs
-  const digits = Math.max(2, ...rows.map((p) => String(model.rankOf.get(p.index) ?? 0).length));
+  const digits = Math.max(2, ...rows.map((p) => String(ranks.get(p.index) ?? 0).length));
 
   // why: 21.7 persona coverage: the board says for how many of the rows shown a seller's price was read
   const coverage = sellerCoverage(rows);
@@ -287,45 +300,101 @@ export function BoardTable(props: BoardProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((p) => {
+          {rows.map((p, at) => {
             const entry = flights.byKey.get(pairKey(p));
+            const key = pairKey(p);
             const tie = tieAt.get(p.index);
+            // why: design 2026-11-08 §5.2 — a labelled break where the current trips with flights read give way to the
+            // current dates with only a calendar price (sorted by price). Not-current figures (superseded, not seen)
+            // rank after every current one, so a read trip among them never sits under "Calendar prices only", and no break
+            // is drawn for them
+            const prev = rows[at - 1];
+            const isCurrent = (q: DatePair) =>
+              q.figure !== null && !q.figure.superseded && q.figure.notSeenInLatest === null;
+            const breaks =
+              byPrice &&
+              prev !== undefined &&
+              prev.figure !== null &&
+              p.figure !== null &&
+              isCurrent(prev) &&
+              isCurrent(p) &&
+              rankTierOf(prev.figure) < 2 &&
+              rankTierOf(p.figure) === 2;
             const outcome = <FlightOutcome entry={entry} available={available} />;
-            const block = hasFlightsBlock(entry, available) ? (
-              <FlightsBlock
-                pairOf={p}
-                entry={entry}
-                flights={flights}
-                limits={limits}
-                gridFetchedAt={gridFetchedAtOf(p.figure)}
-                mayLead={p.figure !== null && p.figure.basis !== 'verified'}
+            const hasBlock = hasFlightsBlock(entry, available);
+            const open = hasBlock && openKeys.has(key);
+            const detailId = `${detailBase}-${p.index}`;
+            // why: design 2026-11-08 §5.1 — the pairing's changes each way come from the list the board asked for
+            const view = entry?.list == null ? null : pairingOf(entry.list, limits);
+            // (only when that list's pairing is the figure's own: its departures are the ones the row's times show)
+            const q = p.figure?.pairing ?? null;
+            const sameTrip =
+              view !== null &&
+              q !== null &&
+              view.outbound.departsLocal === q.departOut &&
+              view.ret.departsLocal === q.departBack;
+            const changes = sameTrip
+              ? {
+                  out: { stops: view.outbound.stops, minutes: view.outbound.durationMinutes },
+                  back: { stops: view.ret.stops, minutes: view.ret.durationMinutes },
+                }
+              : null;
+            const toggle = hasBlock ? (
+              <FlightsToggle
+                open={open}
+                controls={detailId}
+                onToggle={() => toggleOpen(key)}
+                dep={formatIsoDate(p.departureDate)}
+                ret={formatIsoDate(p.returnDate)}
               />
+            ) : null;
+            const detail = open ? (
+              <>
+                {outcome}
+                <FlightsBlock
+                  pairOf={p}
+                  entry={entry}
+                  flights={flights}
+                  limits={limits}
+                  gridFetchedAt={gridFetchedAtOf(p.figure)}
+                  mayLead={p.figure !== null && p.figure.basis !== 'verified'}
+                />
+              </>
             ) : null;
             const common = {
               pair: p,
-              rank: model.rankOf.get(p.index) ?? 0,
+              rank: ranks.get(p.index) ?? 0,
               digits,
               howFar: howFarChecked(p, airportPairs, state.journey),
               notes: definition.destinationNotes,
               journeyFiltered: filtered,
               lit: lit === p.index,
               onLight,
-              outcome,
               lists: flights.lists,
               settings,
+              changes,
+              toggle,
             };
             return (
               <Fragment key={p.index}>
+                {breaks ? (
+                  <tr className="tier-break" data-testid="tier-break">
+                    <td colSpan={8}>{D.tierBreak}</td>
+                  </tr>
+                ) : null}
                 {tie !== undefined ? <TieLine {...tie} /> : null}
                 {phone ? (
-                  <BoardCard {...common} flights={block} />
+                  <BoardCard
+                    {...common}
+                    flights={detail === null ? null : <div id={detailId}>{detail}</div>}
+                  />
                 ) : (
                   <>
                     <BoardRow {...common} />
-                    {block !== null ? (
+                    {detail !== null ? (
                       <tr className="flights-row">
-                        <td colSpan={8} data-flights-for={p.index}>
-                          {block}
+                        <td colSpan={8} id={detailId} data-flights-for={p.index}>
+                          {detail}
                         </td>
                       </tr>
                     ) : null}
@@ -393,9 +462,10 @@ function BoardRow({
   journeyFiltered,
   lit,
   onLight,
-  outcome,
   lists,
   settings,
+  changes,
+  toggle,
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
@@ -405,8 +475,10 @@ function BoardRow({
   journeyFiltered: boolean;
   lit: boolean;
   onLight: (index: number | null) => void;
-  /** The flight read's outcome beside the figure (spec rev 55 §6.9; persona-003). */
-  outcome: ReactNode;
+  /** The pairing's changes each way (design 2026-11-08 §5.1), or null. */
+  changes: { out: LegChanges; back: LegChanges } | null;
+  /** The row's button that opens its flights detail (design 2026-11-08 §5.3), or null when it has none. */
+  toggle: ReactNode;
   /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
   lists: ListsState;
   /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
@@ -455,11 +527,11 @@ function BoardRow({
         <Flaps text={String(pair.nights)} cells={2} align="right" slot="nights" />
       </td>
       <td className="board-price">
-        <FigurePrice figure={f} notes={notes} flapSlot="price" />
+        <RowPrice figure={f} notes={notes} flapSlot="price" />
         <CheaperCached figure={f} notes={notes} />
-        <PairingFigureLines figure={f} settings={settings} />
+        <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />
-        {outcome}
+        {toggle}
       </td>
       <td className="board-howfar">
         <StateFlap state={state} />
@@ -473,5 +545,39 @@ function BoardRow({
         <Flaps text={`${f.origin}–${f.destination}`} slot="airports" />
       </td>
     </tr>
+  );
+}
+
+/**
+ * Design 2026-11-08 §5.3: the button that opens and closes a row's flights detail. A real button (Enter and Space work
+ * as on any), with `aria-expanded` and `aria-controls` naming the detail; its visible words say what it does and its
+ * hidden ones, which dates.
+ */
+function FlightsToggle({
+  open,
+  controls,
+  onToggle,
+  dep,
+  ret,
+}: {
+  open: boolean;
+  controls: string;
+  onToggle: () => void;
+  dep: string;
+  ret: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="btn btn-quiet min-h-11 mt-1.5"
+      data-flights-toggle=""
+      aria-expanded={open}
+      aria-controls={controls}
+      onClick={onToggle}
+    >
+      {open ? D.flightsToggle.close : D.flightsToggle.open}
+      {/* why: the space sits outside the hidden span so the accessible name keeps it ("Show flights for …") */}{' '}
+      <span className="sr-only">{D.flightsToggleOf(dep, ret)}</span>
+    </button>
   );
 }

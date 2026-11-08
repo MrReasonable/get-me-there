@@ -8,7 +8,6 @@ import {
   type ErrorReason,
   type ExecutionStatus,
   type FigureBasis,
-  FLIGHT_LIST_COUNT,
   formatAgo,
   type MIXED_ERROR_REASON,
   mainPathSource,
@@ -72,11 +71,13 @@ const SELLER_SHOWN = "; the first Back price is a seller's stated price";
 // final review B-M2 (ruling ui-006): the one lead phrase of a limit edit, on the board and the search's page block alike
 const LIMITS_CHANGED = 'your limits have changed since these return flights were read';
 // final review B-I3: what happens to a read that did not finish: tried again while a read would go now (the button
-// shown beside the note; the step reads only the run's FLIGHT_LIST_COUNT cheapest date pairs: final re-review), else
-// once the list is past 0.9 × the refresh, the reuse limit (two transient ends in a row: R-retry)
+// shown beside the note), else once the list is past 0.9 × the refresh, the reuse limit (two transient ends in a row:
+// R-retry). Final whole-branch review I4: in confirm mode the step reads past its first 10 date pairs until its
+// stopping rule ends it (design 2026-11-08 §4.2), so the words name no count: the next search reads the date when it
+// reaches it
 const NEXT_READ = (readNow: boolean): string =>
   readNow
-    ? `tried again at the next search while among its ${FLIGHT_LIST_COUNT} cheapest date pairs, or press Read flights for this date now`
+    ? 'tried again when the next search reaches this date, or press Read flights for this date now'
     : "read again once the read is nearly as old as this search's refresh";
 
 export const COPY = {
@@ -176,12 +177,19 @@ export const COPY = {
   classSpoken: 'verdict class:',
   // why: spec rev 56 §6.9, §11 (prov-006; 21.7 persona H1): a pairing figure is the cheapest of the sellers read for one
   // outbound and one return (never "the lowest seller price": only the sellers read are), never checked with the
-  // airline; a card and the detail's header word it so, carrying no seller or count
+  // airline; a card and the detail's header word it so, carrying no seller or count. Design 2026-11-08 §4.1: its price
+  // is a seller's or Google's, which a card cannot tell (no seller, no offer count), so `basisName.pairing` says only
+  // that the flights were read; `basisKindName` words the kind where the figure's own pairing is known
   basisName: {
     verified: 'itinerary-search basis',
     calendar: 'calendar basis',
-    pairing: 'cheapest of the sellers read, not checked with the airline',
+    pairing: 'flights read, not checked with the airline',
   } satisfies Record<FigureBasis, string>,
+  basisKindName: {
+    seller: 'cheapest of the sellers read, not checked with the airline',
+    'google-unread': "Google's price, sellers not read, not checked with the airline",
+    'google-incomplete': "Google's price, not every seller read, not checked with the airline",
+  } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
   basisSwitchLabel: 'Price basis',
   // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
   // under COPY so the catalogue test sweeps it for banned words like every other string.
@@ -630,6 +638,9 @@ export const COPY = {
     searching: (done: number, total: number, left: string | null) =>
       `Searching · ${done} of ${total} date ${noun(total, 'pair', 'pairs')}${left === null ? '' : ` · ${left}`}`,
     readingFlights: (read: number, planned: number) => `Reading flights · ${read} of ${planned}`,
+    // why: design 2026-11-08 §5.5: the confirm step reads an open-ended queue, so the card has no "of N" denominator
+    readingFlightsConfirm: (dates: number, trips: number) =>
+      `Reading flights · ${dates} ${noun(dates, 'date', 'dates')} checked, ${trips} ${noun(trips, 'trip', 'trips')} with flights read`,
     left: (span: string) => `about ${span} left`,
     lessThanAMinuteLeft: 'less than a minute left',
     searchedAgo: (ago: string) => `Searched ${ago}`,
@@ -646,6 +657,10 @@ export const COPY = {
     neverSearched: (never: number, total: number) =>
       `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,
     cheapestSoFar: 'cheapest so far',
+    // why: while a search runs the card shows the first-ranked figure, which is not always the cheapest: a fresh trip
+    // with flights read ranks ahead of a cheaper older one, and a verified trip ahead of a cheaper calendar price; so a
+    // pairing or verified figure is "top trip", and only a calendar figure is "cheapest so far" (spec §11 card)
+    topTripSoFar: 'top trip with flights read so far',
     trip: (departure: string, back: string) => `${departure} → ${back}`,
     // actions
     seeDates: 'See dates',
@@ -892,7 +907,7 @@ export const COPY = {
     sellerLine: (seller: string, fare: string | null, n: number) =>
       `${fare === null ? seller : `${seller}, ${fare}`} · cheapest of ${n} ${noun(n, 'offer', 'offers')} read`,
     sellersNotRead: 'sellers not read',
-    offersIncomplete: 'a cheaper seller may not have been read',
+    notEverySellerRead: 'not every seller read',
     priceAppliesTo: 'this price is for the Out: and Back: flights shown',
     // 21.7 persona booking link: the link opens a search, not the flights shown
     bookOnGoogle:
@@ -1050,7 +1065,18 @@ export const COPY = {
     cachedFrom: 'cached from',
     cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
     // --- spec rev 56 §6.9, §11 Board: the pairing figure and the flight read beneath a calendar figure (Task 21.7) ---
-    pairingSource: `${mainPathSource('camoufox')}'s flight list, the cheapest of the sellers read for these two flights`,
+    // design 2026-11-08 §4.1: the source line says whose price it is, by the kind of the figure's pairing
+    pairingSource: {
+      seller: `${mainPathSource('camoufox')}'s flight list, the cheapest of the sellers read for these two flights`,
+      'google-unread': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
+      'google-incomplete': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
+    // the words beside a pairing figure: whose price it is (design 2026-11-08 §4.1, operator ruling 2026-11-08)
+    priceKind: {
+      seller: "seller's price",
+      'google-unread': "Google's price, sellers not read",
+      'google-incomplete': "Google's price, not every seller read",
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
     pairingWhich: {
       cheapest: 'cheapest outbound read within your limits',
       'next-cheapest':
@@ -1066,10 +1092,30 @@ export const COPY = {
     gridShowed: (source: string) => `${source} showed`,
     gridShowedAt: (when: string) => `· ${when}`,
     fromPrice: 'from',
+    // design 2026-11-08 §5.1: a calendar row's price in the secondary style, and a read trip's visible read age
+    calendarPrice: 'calendar',
+    readAgo: (hours: number | 'unknown') =>
+      hours === 'unknown' ? 'read time not known' : `read ${formatAgo(hours)}`,
+    // each direction's journey time with its changes ("16h 35m, 1 change out · 16h 50m, direct back"): the search limit
+    // is per direction, so the two legs are shown apart rather than added together as the Journey column does
+    pairingChanges: (
+      out: { duration: string; changes: string },
+      back: { duration: string; changes: string },
+    ) => `${out.duration}, ${out.changes} out · ${back.duration}, ${back.changes} back`,
+    // design 2026-11-08 §5.2: the labelled break before the rows led by a calendar price. Controller ruling on the final
+    // whole-branch review: not "Not checked yet", since a row under it can have had its flights read with no trip
+    // within the limits (or a read that did not finish); what they share is that only a calendar price leads them
+    tierBreak: 'Calendar prices only',
+    // design 2026-11-08 §5.3: rows are closed; the button opens the row's full flight detail
+    flightsToggle: { open: 'Show flights', close: 'Hide flights' },
+    // why: final whole-branch review: the hidden part follows the visible "Show flights", so it starts at "for" (the
+    // accessible name once read "Show flights flights for …")
+    flightsToggleOf: (dep: string, ret: string) => `for ${dep} to ${ret}`,
     pairingBeneath: (ago: string) => `return flights read ${ago}, older than this search's refresh:`,
     pairingOtherLimits: `${LIMITS_CHANGED}:`,
     pairingRead: {
-      'not-read': 'flights not read',
+      // why: design 2026-11-08 §5.1: "not checked" only when the date's flights were never read
+      'not-read': 'flights not checked',
       'outbound-only': 'return leg not read',
       'no-pairing-read': 'no return flight read',
       'over-limit': 'no pairing within your limits read',
@@ -1086,8 +1132,13 @@ export const COPY = {
     howFar: {
       verified: 'checked fares, verified',
       calendar: (from: string) => `${from}, constraints not checked`,
-      // spec rev 56 §6.9: a pairing figure's price is the cheapest of the sellers read from the browser worker's list
-      pairing: `from ${mainPathSource('camoufox')}'s flight list, not checked with the airline`,
+      // spec rev 56 §6.9, design 2026-11-08 §4.1: a pairing figure's price is a seller's or Google's, from the browser
+      // worker's list, by the kind of its pairing
+      pairing: {
+        seller: `from ${mainPathSource('camoufox')}'s flight list, a seller's price, not checked with the airline`,
+        'google-unread': `from ${mainPathSource('camoufox')}'s flight list, Google's price, sellers not read, not checked with the airline`,
+        'google-incomplete': `from ${mainPathSource('camoufox')}'s flight list, Google's price, not every seller read, not checked with the airline`,
+      } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
       calendarFrom: {
         searchapi: "from Google's date grid",
         camoufox: "from Google's date grid",
@@ -1110,6 +1161,42 @@ export const COPY = {
       noneWithin: (limit: string) => `none within ${limit}`,
     },
     // run updates (revision 50, Ian ruled)
+    // --- design 2026-11-08 §5.5: how checking flights ended, in one line under the board. The operator reads "trips with
+    // flights read", never "confirmed" (the price-not-confirmed mark owns that word) ---
+    confirm: {
+      dates: (n: number) => `${n} ${noun(n, 'date', 'dates')}`,
+      trips: (n: number) => `${n} ${noun(n, 'trip', 'trips')} with flights read`,
+      unread: (n: number) => `${n} couldn't be read`,
+      checked: (dates: string, unread: string | null) =>
+        `Checked ${dates}${unread === null ? '' : `, ${unread}`}`,
+      checkedEvery: (unread: string | null) =>
+        `Checked every date with a calendar price${unread === null ? '' : `, ${unread}`}`,
+      // why: fewer than the target of trips: what the other dates' flights were (they are not "unchecked cheaper")
+      fewTrips: "the other dates' flights didn't fit your limits or couldn't be read",
+      cheaperUnchecked: (n: number) =>
+        n === 1
+          ? "1 date looks cheaper on the calendar but wasn't checked."
+          : `${n} dates look cheaper on the calendar but weren't checked.`,
+      cheaperStopped: (n: number) =>
+        n === 1
+          ? "1 date that looks cheaper on the calendar wasn't checked."
+          : `${n} dates that look cheaper on the calendar weren't checked.`,
+      unchecked: (n: number) => (n === 1 ? "1 date wasn't checked." : `${n} dates weren't checked.`),
+      stopped: (dates: string, because: string) =>
+        `Stopped checking flights after ${dates} because ${because}`,
+      because: {
+        window: "the browser's time ran out",
+        returnsStopped: "return flights couldn't be read",
+        cancelled: 'the search was cancelled',
+        budget: 'a spending limit was reached',
+        fatal: 'the app hit an error',
+        other: 'the search stopped',
+      },
+      outboundOnly: "Trips couldn't be checked on this machine: it can't read return flights.",
+      flagsUnread: "Trips couldn't be checked this run: the browser hadn't yet said what it can read.",
+      running: (dates: number, trips: string) =>
+        `Checking flights: ${dates} ${noun(dates, 'date', 'dates')} so far; ${trips}.`,
+    },
     updateBoard: (n: number) => `${n} ${noun(n, 'change', 'changes')} · Update board`,
     updated: 'Best dates updated',
     pendingChanges: (n: number) =>
@@ -1197,7 +1284,7 @@ export const COPY = {
       notChecked:
         'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
       noAmount: 'The dots print no amount: point at or focus one to read its price beside the legend.',
-      ring: 'outlined: on the board above',
+      ring: 'outlined: trips with flights read',
     },
     // the coverage section (Task 19.5; what the Coverage view held)
     coverageToggle: 'Coverage of the latest run',
@@ -1315,7 +1402,12 @@ export const COPY = {
     boardDiffers:
       'It differs from the cheapest found here because the board prefers a price the latest search returned, then a fresh one.',
     // 21.7 prov-002: a pairing figure differs for what it is, never for its recency
-    boardPairing: `It is a seller's offer read from ${mainPathSource('camoufox')}'s flight list for one outbound and one return, not one of the prices listed here.`,
+    // design 2026-11-08 §4.1: said by whose price the figure is, never calling Google's price a seller's offer
+    boardPairing: {
+      seller: `It is a seller's offer read from ${mainPathSource('camoufox')}'s flight list for one outbound and one return, not one of the prices listed here.`,
+      'google-unread': `It is Google's round-trip price for one outbound and one return, read from ${mainPathSource('camoufox')}'s flight list with no seller read, not one of the prices listed here.`,
+      'google-incomplete': `It is Google's round-trip price for one outbound and one return, read from ${mainPathSource('camoufox')}'s flight list with not every seller read, not one of the prices listed here.`,
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
     rowGone: "That result is no longer among this date pair's results.",
     noRows: 'No round trip found for these dates on this basis.',
     coverageSection: 'Open the coverage section',

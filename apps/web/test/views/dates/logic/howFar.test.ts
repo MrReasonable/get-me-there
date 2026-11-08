@@ -5,6 +5,7 @@ import {
   bucketsOf,
   calendarFig,
   datePairOf,
+  figurePairing,
   pairingFig,
   provSynthetic,
   verifiedFig,
@@ -43,7 +44,26 @@ describe('the figure: checked fares, or a calendar price from its source (spec r
   });
   it("spec rev 56 §6.9: a pairing figure is worded as the browser worker's flight list, not checked with the airline", () => {
     const all = words(pair({ figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) }));
-    expect(all[0]).toBe("from the browser worker's flight list, not checked with the airline");
+    // why: design 2026-11-08 §4.1: the words say whose price it is, by the kind of the figure's pairing group
+    expect(all[0]).toBe(
+      "from the browser worker's flight list, a seller's price, not checked with the airline",
+    );
+    for (const [offersRead, words_] of [
+      [0, "Google's price, sellers not read"],
+      [2, "Google's price, not every seller read"],
+    ] as const) {
+      const google = words(
+        pair({
+          figure: pairingFig({
+            pairing: figurePairing({ isFrom: true, seller: null, offersRead, complete: false }),
+          }),
+          buckets: bucketsOf({ priced: 4 }),
+        }),
+      );
+      expect(google[0]).toBe(
+        `from the browser worker's flight list, ${words_}, not checked with the airline`,
+      );
+    }
     expect(all.some((w) => /(?<!\p{L})verified/u.test(w))).toBe(false);
   });
   it('"verified" never stands beside a calendar figure', () => {

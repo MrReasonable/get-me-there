@@ -489,6 +489,7 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     complete: true,
     which: 'next-cheapest',
     times: { departOut: '07:15', arriveOut: '18:05', departBack: '14:20', arriveBack: '06:25' },
+    journeyMinutes: 1_615,
     mismatch: false,
     provenance: {
       providerId: 'camoufox',
@@ -569,9 +570,16 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
   });
 
   it.each<[string, Partial<PairingCandidate>, PairingRead]>([
-    ['offers not complete', { complete: false }, 'offers-incomplete'],
-    ['no booking offer', { offer: null }, 'sellers-not-read'],
-    ['older than the refresh, with no complete offers', { fresh: false, offer: null }, 'within-older'],
+    [
+      'older than the refresh, with no offer, outdated by the grid price',
+      { fresh: false, offer: null },
+      'within-older',
+    ],
+    [
+      'older than the refresh, with incomplete offers, outdated',
+      { fresh: false, complete: false },
+      'within-older',
+    ],
     ['read under other limits', { underCurrentLimits: false }, 'within-other-limits'],
     ['over the limits', { fits: false }, 'over-limit'],
   ])('%s: the calendar figure stays, with the pairing beside it', (_name, over, read) => {
@@ -583,6 +591,37 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       cheaperCached: null,
       pairingRead: read,
       pairing: c,
+    });
+  });
+
+  // why: design 2026-11-08 §4.1: no offer, or offers not complete, lead at the return's "from" price (Google's price,
+  // never an incomplete offer's); a complete offer leads at the seller's price
+  it.each<[string, Partial<PairingCandidate>, number]>([
+    ['complete offers: the seller price', {}, 118_000],
+    [
+      'no offer: the from price',
+      { offer: null, offersRead: 0, complete: false, fromMinor: 121_000 },
+      121_000,
+    ],
+    [
+      'incomplete offers: the from price, not the offer price',
+      {
+        complete: false,
+        fromMinor: 121_000,
+        offer: { seller: 'QQ Travel', fare: null, priceMinor: 119_000 },
+      },
+      121_000,
+    ],
+  ])('a fitting current pairing leads with %s', (_name, over, price) => {
+    const c = candidate(over);
+    expect(figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0)).toEqual({
+      basis: 'pairing',
+      chosen: grid,
+      cheaperCached: null,
+      pricePence: price,
+      grid: { pricePence: 56_400, provenance: grid.provenance, stale: false, truncated: false },
+      pairing: c,
+      pairingRead: 'within',
     });
   });
 
@@ -672,19 +711,15 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       pairingRead: 'within-older',
       pairing: olderUnread,
     });
-    // why: an offer read but not complete does not lead either, so the stale verified figure stays above it
-    const incomplete = candidate({ complete: false });
-    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(incomplete)).figures.get(0)).toEqual({
-      ...pickFigure([grid, v], NOW),
-      pairingRead: 'offers-incomplete',
-      pairing: incomplete,
-    });
-    const unread = candidate({ offer: null });
-    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(unread)).figures.get(0)).toEqual({
-      ...pickFigure([grid, v], NOW),
-      pairingRead: 'sellers-not-read',
-      pairing: unread,
-    });
+    // why: design 2026-11-08: a pairing without complete offers leads like any other (at Google's price), so a fresh
+    // one replaces the stale verified figure
+    for (const over of [{ complete: false }, { offer: null }])
+      expect(
+        figuresByDatePair([grid, v], scope, NOW, withCandidate(candidate(over))).figures.get(0),
+      ).toMatchObject({
+        basis: 'pairing',
+        pairingRead: 'within',
+      });
     expect(figuresByDatePair([grid, v], scope, NOW, only('outbound-only')).figures.get(0)).toEqual({
       ...pickFigure([grid, v], NOW),
       pairingRead: 'outbound-only',

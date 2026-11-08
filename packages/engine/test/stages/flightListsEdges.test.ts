@@ -1,5 +1,5 @@
 // Spec revision 56 §8.1 "The flight-list step" at its edges: the entry predicate's other refusals, a blocked page with
-// and without a cool-down, a guard that states no flight allowance, a page that throws, a ranking that
+// and without a cool-down, a guard that still states the withdrawn flight allowance, a page that throws, a ranking that
 // starts with a departed pair, the early end a pass leaves (or clears) on its stored plan, the pass's log lines, what the
 // run counts as read, and the stops recorded during and after the step. Most cases run one pass of the step directly
 // (`runFlightLists` over `newRun`) on a run whose discovery is done, through the real guard and database; concurrency
@@ -154,7 +154,8 @@ describe('flightStepEntry: the refusals before the plan', () => {
   });
 
   // why: spec rev 65: the browser has no page cap, so no budget stop leaves the step to run after it
-  it('an allowance of one page is an allowance; a run stopped at any budget cap runs no step', async () => {
+  // why: design 2026-11-08 §4.8: the snapshot's figure is only the step's on-switch, so any positive figure runs it
+  it('a flightListPages of one switches the step on; a run stopped at any budget cap runs no step', async () => {
     const { e, pass } = await discovered();
     const run = pass();
     const budget = { ...run.snapshot.budget, flightListPages: 1 };
@@ -186,13 +187,31 @@ describe('one pass of the step, its plan and its pages', () => {
     expect(run.stop).toBeNull();
     expect(cam.flightCalls.every((c) => !c.recordFixtures)).toBe(true);
     const lines = e.logs.filter((l) => l.msg?.startsWith('flight lists:'));
+    // why: design 2026-11-08: with returns the step is in confirm mode: its queue is the 15 ranked pairs, none started
+    // when planned, and a transient return view stops it (returns lost part-way); the end states the summary
     expect(lines.map((l) => [l.msg, l.fields])).toEqual([
-      ['flight lists: planned', { planned: 10, reused: 0, toRead: 10, returns: true, booking: true }],
+      ['flight lists: planned', { planned: 0, reused: 0, toRead: 15, returns: true, booking: true }],
       [
         'flight lists: a transient end stops the rest of the pass',
         { returnsStopped: 'select-outbound:not-settled', bookingStopped: null },
       ],
-      ['flight lists: step done', { read: 10, failed: 0, reused: 0, ended: null }],
+      ['flight lists: no more reads', { stop: 'returns-stopped', confirmed: 0 }],
+      [
+        'flight lists: step done',
+        {
+          read: 2,
+          failed: 0,
+          reused: 0,
+          ended: null,
+          confirm: {
+            mode: 'confirm',
+            confirmed: 0,
+            unread: 2,
+            uncheckedCheaper: 13,
+            stop: 'returns-stopped',
+          },
+        },
+      ],
     ]);
     for (const l of lines)
       expect(l.bindings).toEqual({
@@ -212,6 +231,9 @@ describe('one pass of the step, its plan and its pages', () => {
       pricePence: 39_000,
       providerId: 'camoufox',
       sourceKind: 'scraped-self',
+      basis: 'calendar',
+      current: true,
+      stale: false,
     };
     const { e, cam, id, rank, pass } = await discovered();
     rank((q) => [today, ...rankedPairs(15)(q)]);
@@ -251,25 +273,83 @@ describe('one pass of the step, its plan and its pages', () => {
     expect(e.ctx.repos.flightLists.forExecution(second.id, plan.cells).read + plan.reused).toBe(10);
   });
 
-  it('a guard that states no flight allowance gives none: every pair failed execution-cap before any call', async () => {
-    const { e, cam, id, pass } = await discovered();
+  // why: design 2026-11-08 §4.8: the step checks no allowance, so a guard that still reports the stored 20-page figure
+  // (as a cap, or as no flight entry at all) stops nothing: rule A bounds the step
+  it('a guard still reporting the stored 20-page figure stops nothing: 30 two-page reads run, none refused', async () => {
+    const improving = (q: FlightListQuery, n: number): FlightListResult => ({
+      ...listAnswer(asIsoDateTime('2026-10-14T09:00:00.000Z')),
+      // why: each read confirms a trip cheaper than the last, so every one improves and rule A never stops the step
+      returns:
+        q.returnLimits === undefined
+          ? null
+          : returnReadSchema.parse({
+              limits: NONE,
+              status: 'read',
+              rule: null,
+              attempts: [
+                {
+                  outboundIndex: 0,
+                  outboundFits: true,
+                  listed: 'returns',
+                  moreListed: false,
+                  returns: [
+                    {
+                      departsLocal: '14:20',
+                      arrivesLocal: '06:25',
+                      arrivesDayOffset: 1,
+                      durationMinutes: 725,
+                      stops: 1,
+                      carriers: ['QQ Atlantic'],
+                      operatedBy: null,
+                      fromMinor: 100_000 - 100 * n,
+                    },
+                  ],
+                  optionsUnparsed: 0,
+                  optionsOtherCell: 0,
+                  resultsStated: null,
+                },
+              ],
+              triedAll: true,
+              booking: null,
+            }),
+    });
+    const { e, cam, id, rank, pass } = await discovered({ answer: improving });
+    rank(() =>
+      Array.from({ length: 30 }, (_, i): RankedDatePair => {
+        const dep = Date.parse('2026-11-02T00:00:00.000Z') + i * 86_400_000;
+        return {
+          departureDate: asIsoDate(new Date(dep).toISOString().slice(0, 10)),
+          returnDate: asIsoDate(new Date(dep + 10 * 86_400_000).toISOString().slice(0, 10)),
+          origin: LHR,
+          destination: JFK,
+          pricePence: 40_000 + i,
+          providerId: 'camoufox',
+          sourceKind: 'scraped-self',
+          basis: 'calendar',
+          current: true,
+          stale: false,
+        };
+      }),
+    );
+    e.ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false });
     const ctx = {
       ...e.ctx,
-      budget: guardWith(e.ctx.budget, (s, u) => {
-        if (s.kind !== 'provider-execution') return u;
-        const { flightLists: _none, ...rest } = u;
-        return rest;
-      }),
+      budget: guardWith(e.ctx.budget, (s, u) => (s.kind === 'provider-execution' ? { ...u, cap: 20 } : u)),
     };
     const run = pass();
     await runFlightLists(ctx, run);
     expect(run.stop).toBeNull();
-    expect(cam.flightCalls).toHaveLength(0);
-    expect(flightRows(e, id).map((r) => [r.status, r.reason])).toEqual(
-      Array(10).fill(['failed', 'execution-cap']),
-    );
-    expect(row(e, id).flightLists?.ended).toBe('stopped');
-  });
+    expect(cam.flightRequests()).toBe(30);
+    expect(cam.flightCalls.every((c) => c.query.returnLimits !== undefined)).toBe(true);
+    expect(flightRows(e, id).every((r) => r.status === 'read')).toBe(true);
+    expect(
+      e.ctx.budget.usage({ kind: 'provider-execution', executionId: id, providerId: 'camoufox' }).flightLists,
+    ).toEqual({ calls: 60 });
+    expect(row(e, id).flightLists).toMatchObject({
+      ended: null,
+      confirm: { stop: 'queue-empty', confirmed: 30 },
+    });
+  }, 15_000);
 });
 
 describe('what a page that throws or is blocked leaves', () => {

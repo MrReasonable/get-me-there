@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { DatePair } from '../../src/datePairs/encode.js';
-import { bestPerWeek, rankDatePairs } from '../../src/datePairs/rank.js';
+import { bestPerWeek, rankDatePairs, rankTierOf } from '../../src/datePairs/rank.js';
 import { type DatePairSpace, datePairCount, datePairIndex } from '../../src/datePairs/space.js';
 import { addDays } from '../../src/dates/epochDay.js';
 import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
@@ -69,9 +69,17 @@ function pairOf(s: Spec): DatePair {
 const CASES: Array<[string, Spec, Spec, 'a' | 'b']> = [
   [
     'price',
-    { pence: 30_000, basis: 'calendar', depart: '2027-03-21' },
+    { pence: 30_000, basis: 'verified', depart: '2027-03-21' },
     { pence: 31_000, basis: 'verified' },
     'a',
+  ],
+  // why: design 2026-11-08 §5.1: a fresh verified figure is a trip whose flights were read (tier 0); a calendar price
+  // alone (tier 2) ranks after it however much cheaper it is
+  [
+    'a fresh verified figure before a cheaper calendar price',
+    { pence: 30_000, basis: 'calendar', depart: '2027-03-21' },
+    { pence: 31_000, basis: 'verified' },
+    'b',
   ],
   [
     'equal price, basis',
@@ -286,8 +294,13 @@ describe('bestPerWeek (revision 50: the first-ranked date pair of each Monday-st
 });
 
 describe('rankDatePairs with a pairing figure (spec rev 56 §6.5: verified, then pairing, then calendar at equal price)', () => {
-  /** A pairing figure on a date pair of SPACE: the offer's price, the flight list's provenance, 2 h old. */
-  const pairingPair = (pence: number, depart: string, nights = 10): DatePair => {
+  /** A pairing figure on a date pair of SPACE: the offer's price, the flight list's provenance, 2 h old unless stale. */
+  const pairingPair = (
+    pence: number,
+    depart: string,
+    nights = 10,
+    stale: false | 'refresh' = false,
+  ): DatePair => {
     const at = asIsoDate(depart);
     const index = datePairIndex(SPACE, at, addDays(at, nights));
     if (index === null) throw new Error('outside SPACE');
@@ -301,7 +314,13 @@ describe('rankDatePairs with a pairing figure (spec rev 56 §6.5: verified, then
     return datePair(SPACE, index, 1, {
       figure: calendarFigure({
         basis: 'pairing',
-        price: { pricePence: pence, provenance, stale: false, ageHours: 2, truncated: false },
+        price: {
+          pricePence: pence,
+          provenance,
+          stale,
+          ageHours: stale === false ? 2 : 200,
+          truncated: false,
+        },
         pairingRead: 'within',
       }),
     });
@@ -316,11 +335,48 @@ describe('rankDatePairs with a pairing figure (spec rev 56 §6.5: verified, then
       'calendar',
     ]);
   });
-  it('price first: a £1,204 pairing ranks after an £86 calendar figure', () => {
+  // why: design 2026-11-08 §5.1 (operator ruling 2026-11-08): a pairing is a trip whose flights were read, so a fresh one
+  // ranks before any calendar price however cheap; this replaces "price first: a £1,204 pairing after an £86 calendar"
+  it('tier first: a £1,204 fresh pairing ranks before an £86 calendar figure', () => {
     const pairing = pairingPair(120_400, '2027-03-14');
     const calendar = pairOf({ pence: 8_600, basis: 'calendar', depart: '2027-03-20' });
-    expect(rankDatePairs([pairing, calendar], NOW).map((p) => p.figure?.price.pricePence)).toEqual([
-      8_600, 120_400,
+    expect(rankDatePairs([calendar, pairing], NOW).map((p) => p.figure?.price.pricePence)).toEqual([
+      120_400, 8_600,
     ]);
+  });
+  it('three tiers: a fresh pairing at 63400, then an older leading pairing at 60000, then a calendar at 56500', () => {
+    const fresh = pairingPair(63_400, '2027-03-16');
+    const older = pairingPair(60_000, '2027-03-15', 10, 'refresh');
+    const calendar = pairOf({ pence: 56_500, basis: 'calendar', depart: '2027-03-14' });
+    for (const input of [
+      [calendar, older, fresh],
+      [fresh, calendar, older],
+    ])
+      expect(rankDatePairs(input, NOW).map((p) => p.figure?.price.pricePence)).toEqual([
+        63_400, 60_000, 56_500,
+      ]);
+  });
+  it('within a tier price decides: an older pairing at 60000 before a dearer older one', () => {
+    const a = pairingPair(61_000, '2027-03-14', 10, 'refresh');
+    const b = pairingPair(60_000, '2027-03-15', 10, 'refresh');
+    expect(rankDatePairs([a, b], NOW)).toEqual([b, a]);
+  });
+  it('rankTierOf: fresh pairing or verified 0, stale pairing or verified 1, calendar 2', () => {
+    const tier = (p: DatePair) => (p.figure === null ? null : rankTierOf(p.figure));
+    expect(tier(pairingPair(1, '2027-03-14'))).toBe(0);
+    expect(tier(pairOf({ pence: 1, basis: 'verified' }))).toBe(0);
+    expect(tier(pairingPair(1, '2027-03-14', 10, 'refresh'))).toBe(1);
+    const staleVerified = pairOf({ pence: 1, basis: 'verified' });
+    if (staleVerified.figure === null) throw new Error('a figure');
+    expect(
+      rankTierOf({ ...staleVerified.figure, price: { ...staleVerified.figure.price, stale: 'refresh' } }),
+    ).toBe(1);
+    expect(tier(pairOf({ pence: 1, basis: 'calendar' }))).toBe(2);
+  });
+  it('superseded and not-seen figures still rank after every current one, whatever their tier', () => {
+    const superseded = pairOf({ pence: 1, basis: 'calendar', superseded: true });
+    const notSeen = pairOf({ pence: 1, basis: 'verified', notSeen: true, depart: '2027-03-21' });
+    const current = pairOf({ pence: 90_000, basis: 'calendar', depart: '2027-03-22' });
+    expect(rankDatePairs([superseded, notSeen, current], NOW)[0]).toEqual(current);
   });
 });

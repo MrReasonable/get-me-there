@@ -2,6 +2,18 @@
 // folded stay bands, the detail link, the route's codec, (WP20) the main path's five marks and (WP21) the pairing figure.
 // Re-exported through the package barrel.
 export { foldNights, MAX_NIGHT_BANDS, type NightsBand } from './bands.js';
+export {
+  applyCheck,
+  type Check,
+  CONFIRM_PATIENCE,
+  CONFIRM_TARGET,
+  checkOfRead,
+  EMPTY_STANDINGS,
+  improves,
+  patienceSpent,
+  type Standings,
+  uncheckedCheaper,
+} from './confirm.js';
 export { decodeDatePairs } from './decode.js';
 export { DETAIL_LINK_PARAMS, detailLinkQuery } from './detailLink.js';
 export {
@@ -39,15 +51,21 @@ export {
   type LeadFacts,
   type ListPairingRead,
   listFresh,
+  PAIRING_KINDS,
   PAIRING_READ,
   type Pairing,
   type PairingCandidate,
+  type PairingKind,
+  type PairingPriceKind,
   type PairingRead,
+  pairingKindOf,
   pairingLeads,
+  pairingOffer,
+  pairingPrice,
   pairingReadOf,
   resultBasisOf,
 } from './pairing.js';
-export { bestPerWeek, rankDatePairs } from './rank.js';
+export { bestPerWeek, rankDatePairs, rankTierOf } from './rank.js';
 export {
   type DatePairSpace,
   datePairAt,

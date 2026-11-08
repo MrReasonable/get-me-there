@@ -10,12 +10,14 @@ import {
 import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
 import type { FlightList } from '../../../src/api/types.js';
 import {
   at,
   type DatesOptions,
+  figurePairing,
+  pairingFig,
   priced,
   pricedPair,
   provCached,
@@ -34,7 +36,7 @@ import {
 } from '../../fixtures.searches.js';
 import { FLIGHT_LISTS_URL, serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { findBoard, renderDates } from './render.js';
+import { autoOpenFlights, boardRows, findBoard, renderDates } from './render.js';
 
 // Spec rev 56 §11 "Flights" and "The pairing section" (WP21 Task 21.7): a list whose return read is `read` with returns
 // shows the outbound the pairing used, its returns with their "from" prices, the cheapest seller's stated price first on
@@ -125,7 +127,16 @@ function plain(el: Element): string {
 }
 const lines = (testid: string) => within(block()).getAllByTestId(testid).map(plain);
 
-afterEach(() => vi.useRealTimers());
+// why: design 2026-11-08 §5.3 — rows are closed by default; these tests read the opened detail, so each row opens the
+// moment its button appears
+let stopOpening: () => void = () => undefined;
+beforeEach(() => {
+  stopOpening = autoOpenFlights();
+});
+afterEach(() => {
+  stopOpening();
+  vi.useRealTimers();
+});
 
 describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', () => {
   it("heads the block in one sentence with the outbound the pairing used and that the first Back price is a seller's", async () => {
@@ -391,7 +402,9 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(within(block()).getByTestId('pairing-limits-changed')).toBeInTheDocument();
     expect(leads()).toBe(0);
   });
-  it('offers that may be incomplete: no lead emphasis', async () => {
+  // why: design 2026-11-08 §4.1: offers that may be incomplete lead at Google's price, as the board's row does, so the
+  // shown price is emphasised and says not every seller was read
+  it("offers that may be incomplete: Google's price leads, not every seller read", async () => {
     await renderList(
       withBooking({
         status: 'expand-failed',
@@ -400,10 +413,10 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
         offers: [{ seller: 'QQ Fares', fare: null, priceMinor: 119_500 }],
       }),
     );
-    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent(
-      'a cheaper seller may not have been read',
+    expect(lines('return-line')[0]).toMatch(
+      /^Back: from £1,180 round trip · not every seller read · depart 14:20/,
     );
-    expect(leads()).toBe(0);
+    expect(leads()).toBe(1);
   });
 });
 
@@ -422,18 +435,69 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-mismatch')).toBeNull();
   });
 
-  it('an incomplete booking: "a cheaper seller may not have been read" on the line of the price it qualifies', async () => {
+  it('an incomplete booking: the Back line is Google\'s price, "not every seller read", the offer read in the mismatch line', async () => {
     await renderList(
       withBooking({
         moreControl: true,
         offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
       }),
     );
-    // why: 21.7 prov-006 (L): beside the price, as the board puts it
+    // why: 21.7 prov-006 (L), design 2026-11-08 §4.1: beside the price, as the board puts it; the incomplete offer's own
+    // price is not the headline, it is the mismatch line's detail
     expect(lines('return-line')[0]).toBe(
-      'Back: £1,195 round trip · QQ Fares, Economy Basic · cheapest of 1 offer read · a cheaper seller may not have been read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+      'Back: from £1,180 round trip · not every seller read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+    );
+    expect(plain(within(block()).getByTestId('pairing-mismatch'))).toBe(
+      "the cheapest offer read is £1,195; Google's list showed from £1,180",
     );
     expect(within(block()).queryByTestId('pairing-incomplete')).toBeNull();
+  });
+
+  // why: final whole-branch review I1, design 2026-11-08 §4.1: the head, the Back line and the board row say one thing
+  // about whose price leads: Google's when the offers read may be incomplete, a seller's only when they are complete
+  describe('the head, the Back line and the board row agree on whose price leads', () => {
+    /** The board with the date pair's pairing figure, the pairing group as given. */
+    const boardWith = (pairing: ReturnType<typeof figurePairing>): DatesOptions => ({
+      ...BOARD,
+      pairs: { [at('2027-03-14', 10)]: pricedPair(pairingFig({ pairing })) },
+    });
+    const boardRow = async () => {
+      const row = boardRows(await findBoard())[0];
+      if (row === undefined) throw new Error('no board row');
+      return row;
+    };
+
+    it("an incomplete booking: all three say Google's price, none a seller's", async () => {
+      await renderList(
+        withBooking({
+          moreControl: true,
+          offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
+        }),
+        {
+          board: boardWith(
+            figurePairing({ isFrom: true, seller: null, fare: null, complete: false, offersRead: 1 }),
+          ),
+        },
+      );
+      expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
+      expect(lines('return-line')[0]).toMatch(/^Back: from £1,180 round trip · not every seller read/);
+      const row = await boardRow();
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(
+        "Google's price, not every seller read",
+      );
+      expect(within(row).queryByTestId('pairing-seller')).toBeNull();
+    });
+
+    it("a complete booking: all three say a seller's price", async () => {
+      await renderList(FIXTURE, { board: boardWith(figurePairing()) });
+      expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
+        "the first Back price is a seller's stated price",
+      );
+      expect(lines('return-line')[0]).toMatch(/^Back: £1,180 round trip · QQ Travel/);
+      const row = await boardRow();
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent("seller's price");
+      expect(within(row).getByTestId('pairing-seller')).toHaveTextContent('QQ Travel');
+    });
   });
 
   it('sellers not read (an expansion that failed before any offer): "Back: from £1,180 · sellers not read" with its note', async () => {
@@ -447,14 +511,15 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"; final
     // review B-I3: "or press …" only beside the button it names
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
     // why: 21.7 prov-001: no seller's price is shown, so the head names none
     expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
-    // why: 21.7 re-review N2: a "from" price is a weaker claim than a seller's stated one: no lead emphasis
-    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
+    // why: design 2026-11-08 §4.1 (replacing 21.7 re-review N2): the board leads with this "from" price, so the block
+    // emphasises it too
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(1);
   });
 
   it('an expansion that failed after some offers keeps its note and its offer', async () => {
@@ -787,11 +852,11 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
     'no-outbound': null,
     skipped: 'return flights not read: the wait between pages ran past its time',
     'select-failed':
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     'not-settled':
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     unrecognised:
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     'not-verified':
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
   };
@@ -842,7 +907,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       readNow: true,
     });
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
   });

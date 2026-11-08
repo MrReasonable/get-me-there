@@ -118,8 +118,15 @@ describe('the flight-list step after discovery', () => {
       expect(c.gated).toBe(true);
     });
     // why: the plan is written once, before the first page, and the 10 cells are the selected ones
-    // why: spec rev 56 §7: until Task 21.6 plans returns from the worker's flags every plan is outbound-only
-    const outboundOnly = { returns: false, booking: false, returnsStopped: null, bookingStopped: null };
+    // why: spec rev 56 §7: no flags read, so the plan is outbound-only; design 2026-11-08 §7: its summary says why
+    const outboundOnly = {
+      returns: false,
+      booking: false,
+      returnsStopped: null,
+      bookingStopped: null,
+      confirm: { mode: 'flags-unread', confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+      endedReason: null,
+    };
     expect(seenPlan).toEqual([
       {
         planned: 10,
@@ -168,6 +175,8 @@ describe('the flight-list step after discovery', () => {
       booking: false,
       returnsStopped: null,
       bookingStopped: null,
+      confirm: { mode: 'flags-unread', confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+      endedReason: null,
     });
   });
 
@@ -193,7 +202,8 @@ describe('the flight-list step after discovery', () => {
     expect(flightLedger(e, done.id)).toBe(10);
   });
 
-  it('with the 20 flight pages already spent, the next is refused at provider-execution before any call', async () => {
+  // why: design 2026-11-08 §4.8: the per-run flight allowance is withdrawn; pages already spent refuse nothing
+  it('with 20 flight pages already spent in the run, the step still reads its 10', async () => {
     let id = '';
     const cam = stubCamoufox({ cells: 120, flights: {} });
     // why: the ranking is read as the step starts; seed the allowance's 10 rows for this execution there
@@ -216,12 +226,12 @@ describe('the flight-list step after discovery', () => {
     });
     id = await start(seeded);
     const done = await seeded.settled(id);
-    expect(cam.flightCalls).toHaveLength(0);
-    expect(flightLedger(seeded, id)).toBe(20);
+    expect(cam.flightCalls).toHaveLength(10);
+    expect(flightLedger(seeded, id)).toBe(30);
     const rows = flightRows(seeded, id);
     expect(rows).toHaveLength(10);
-    expect(rows.every((r) => r.status === 'failed' && r.reason === 'execution-cap')).toBe(true);
-    expect(done.flightLists?.ended).toBe('stopped');
+    expect(rows.every((r) => r.status === 'read')).toBe(true);
+    expect(done.flightLists?.ended).toBeNull();
     expect(done.status).toBe('completed');
   });
 
@@ -327,10 +337,8 @@ describe("the step's error table", () => {
     return { e, cam, done, rows: flightRows(e, id) };
   }
 
-  it.each([
-    ['execution-free-calls', 'free-call-cap', 'stopped'],
-    ['provider-execution', 'execution-cap', 'stopped'],
-  ] as const)(
+  // why: design 2026-11-08 §4.8: `provider-execution` (`execution-cap`) was the flight allowance's scope, withdrawn
+  it.each([['execution-free-calls', 'free-call-cap', 'stopped']] as const)(
     'BudgetExceeded (%s): the pair and the rest failed %s, no request, ended %s',
     async (scope, reason, ended) => {
       const { cam, done, rows } = await thirdPage(() => {
@@ -469,7 +477,7 @@ describe('the step after the review (Task 20.9 fix round 1)', () => {
   });
 });
 
-describe('snapshotBudget and the flight allowance (spec rev 56 §2, §8.1, the 20.8 note)', () => {
+describe("snapshotBudget and the step's on-switch (spec rev 56 §2, §8.1, the 20.8 note; design 2026-11-08 §4.8)", () => {
   it('strips a definition-supplied flightListPages and sets 20 (10 pairs × 2 pages) with camoufox; none without', () => {
     const e = engineWith([stubCamoufox({ cells: 3, flights: {} }), stubTravelpayouts({ cells: 3 })]);
     const own = { ...e.definition.budget, flightListPages: 500 };
@@ -513,7 +521,7 @@ describe('flightStepEntry (the entry predicate)', () => {
     );
   });
 
-  it('never on a catch-up, a child, camoufox disabled, a blocked browser line or a snapshot without the allowance', async () => {
+  it('never on a catch-up, a child, camoufox disabled, a blocked browser line or a snapshot without flightListPages', async () => {
     const { e, run } = await base();
     expect(flightStepEntry(e.ctx, { ...run, isCatchUp: true })).toBe(false);
     expect(flightStepEntry(e.ctx, { ...run, isChild: true })).toBe(false);
@@ -644,7 +652,8 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     const { e, cam } = withFlags(BOTH);
     const done = await e.settled(await start(e));
     expect(done.flightLists).toMatchObject({ returns: true, booking: true, returnsStopped: null });
-    expect(cam.flightCalls).toHaveLength(10);
+    // why: design 2026-11-08 §4.4: the stub's lists hold no return read (unread), so rule A stops after 12 reads
+    expect(cam.flightCalls).toHaveLength(12);
     for (const c of cam.flightCalls) {
       expect(c.query.returnLimits).toEqual(LIMITS);
       expect(c.query.booking).toBe(true);
@@ -708,11 +717,13 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
       returnsStopped: null,
       bookingStopped: 'more-options:not-settled',
     });
-    expect(cam.flightCalls.map((c) => c.query.booking)).toEqual([true, true, ...Array(8).fill(false)]);
+    // why: design 2026-11-08: every read confirms the same £1,180 trip, so the 15 queued pairs are all read
+    expect(cam.flightCalls.map((c) => c.query.booking)).toEqual([true, true, ...Array(13).fill(false)]);
     expect(cam.flightCalls.every((c) => c.query.returnLimits !== undefined)).toBe(true);
   });
 
-  it('Review Focus 2: a not-settled return view stops the return phases of the pass; outbound reads go on', async () => {
+  // why: design 2026-11-08 §4.6: no read after returns are lost could confirm a trip, so the step reads no more pages
+  it('Review Focus 2: a not-settled return view stops the return phases of the pass, and the step with them', async () => {
     const { e, cam } = withFlags(BOTH, {
       flights: {
         answer: answering((n) =>
@@ -722,13 +733,9 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     });
     const done = await e.settled(await start(e));
     expect(done.flightLists?.returnsStopped).toBe('select-outbound:not-settled');
-    expect(cam.flightCalls.map((c) => c.query.returnLimits !== undefined)).toEqual([
-      true,
-      true,
-      true,
-      ...Array(7).fill(false),
-    ]);
-    expect(flightRows(e, done.id)).toHaveLength(10);
+    expect(done.flightLists?.confirm?.stop).toBe('returns-stopped');
+    expect(cam.flightCalls.map((c) => c.query.returnLimits !== undefined)).toEqual([true, true, true]);
+    expect(flightRows(e, done.id)).toHaveLength(3);
   });
 
   it('a read whose second attempt ended transiently stops them too; skipped, no-outbound and a clean read do not', async () => {
@@ -811,8 +818,8 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
       ),
     );
     const done = await e.settled(await start(e));
-    expect(done.flightLists).toMatchObject({ planned: 10, reused: 0 });
-    expect(cam.flightCalls).toHaveLength(10);
+    expect(done.flightLists).toMatchObject({ reused: 0 });
+    expect(cam.flightCalls[0]?.query.cell.departureDate).toBe(first.departureDate);
   });
 
   // why: spec rev 64: pages already loaded this month never send a request outbound-only
@@ -833,47 +840,27 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     expect(w.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
   });
 
-  it("the allowance counts each request's pages: 20 holds 10 pairs at 2; 19 refuses the tenth before any call", async () => {
-    const full = withFlags(BOTH);
-    const fullId = await start(full.e);
-    await full.e.settled(fullId);
-    expect(full.cam.flightRequests()).toBe(10);
+  // why: design 2026-11-08 §4.8: the per-run flight allowance is withdrawn: every request's pages count, none is refused
+  it("each request's 2 pages count, with no cap: 15 pairs read out and back are 30 flight pages, none refused", async () => {
+    const { e, cam } = withFlags(BOTH, { flights: { answer: answering(() => returnsOf()) } });
+    const id = await start(e);
+    const done = await e.settled(id);
+    expect(cam.flightRequests()).toBe(15);
     expect(
-      full.e.ctx.budget.usage({ kind: 'provider-execution', executionId: fullId, providerId: 'camoufox' })
-        .flightLists,
-    ).toEqual({ calls: 20, cap: 20 });
-    let id = '';
-    const tight = withFlags(BOTH, {
-      flights: {
-        // why: once the plan (with returns, over a 20-page allowance) is written, the stored allowance shrinks to 19
-        onStart: (n) => {
-          if (n !== 1) return;
-          tight.e.ctx.db.raw
-            .prepare(
-              `UPDATE search_executions SET definition_snapshot_json =
-                 json_set(definition_snapshot_json, '$.budget.flightListPages', 19) WHERE id = ?`,
-            )
-            .run(id);
-        },
-      },
-    });
-    id = await start(tight.e);
-    const done = await tight.e.settled(id);
-    expect(tight.cam.flightRequests()).toBe(9);
-    const rows = flightRows(tight.e, id);
-    expect(rows).toHaveLength(10);
-    expect(rows[9]).toMatchObject({ status: 'failed', reason: 'execution-cap' });
-    expect(done.flightLists?.ended).toBe('stopped');
+      e.ctx.budget.usage({ kind: 'provider-execution', executionId: id, providerId: 'camoufox' }).flightLists,
+    ).toEqual({ calls: 30 });
+    expect(flightRows(e, id).every((r) => r.status === 'read')).toBe(true);
+    expect(done.flightLists).toMatchObject({ ended: null, confirm: { stop: 'queue-empty' } });
   });
 
-  it('an older snapshot (flightListPages 10) plans returns false and reads 10 outbound-only pages', async () => {
+  // why: design 2026-11-08 §4.8: a stored snapshot's figure is only the step's on-switch, so returns are planned
+  it('an older snapshot (flightListPages 10) still plans returns and reads out and back', async () => {
     const { e, cam } = withFlags(BOTH, { flightListPages: 10 });
     const id = await start(e);
     const done = await e.settled(id);
-    expect(done.flightLists).toMatchObject({ returns: false, booking: false });
-    expect(cam.flightRequests()).toBe(10);
-    expect(cam.flightCalls.every((c) => c.query.returnLimits === undefined)).toBe(true);
-    expect(flightLedger(e, id)).toBe(10);
+    expect(done.flightLists).toMatchObject({ returns: true, booking: true, confirm: { mode: 'confirm' } });
+    expect(cam.flightCalls.every((c) => c.query.returnLimits !== undefined)).toBe(true);
+    expect(flightRows(e, id).some((r) => r.reason === 'execution-cap')).toBe(false);
   });
 
   /** Sets the run's browser window to end `seconds` after now, as the step reads its plan. */
@@ -891,20 +878,21 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     };
   }
 
-  it('R-window: a window holding 700 s sends outbound-only requests (210 s each), not a 780 s return phase', async () => {
+  // why: design 2026-11-08 §4.6: with returns planned an outbound-only read confirms nothing, so a window that cannot
+  // hold a 780 s return phase ends the step window (it used to send 210 s outbound-only reads)
+  it('R-window: a window holding 700 s sends no request (not a 780 s return phase, nor an outbound-only read): ended window', async () => {
     const cam = stubCamoufox({ cells: 15, flights: {} });
     const e: CamoufoxEngine = engineWith([cam], { rankedDatePairs: (q) => reader(q) });
     const reader = windowAt(e, 700);
     e.ctx.workerFlags.set('camoufox', BOTH);
     const id = await start(e);
     const done = await e.settled(id);
-    expect(cam.flightCalls).toHaveLength(10);
-    expect(cam.flightCalls.every((c) => c.query.returnLimits === undefined)).toBe(true);
-    expect(flightRows(e, id)).toHaveLength(10);
-    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null, ended: null });
+    expect(cam.flightCalls).toHaveLength(0);
+    expect(flightRows(e, id)).toHaveLength(0);
+    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null, ended: 'window' });
   });
 
-  it('R-window: a window of exactly 780 s holds one return phase (the gate admits it); 779 s sends outbound-only', async () => {
+  it('R-window: a window of exactly 780 s holds one return phase (the gate admits it); 779 s holds none', async () => {
     for (const [seconds, phase] of [
       [780, true],
       [779, false],
@@ -914,9 +902,10 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
       const reader = windowAt(e, seconds);
       e.ctx.workerFlags.set('camoufox', BOTH);
       const id = await start(e);
-      await e.settled(id);
+      const done = await e.settled(id);
       expect(cam.flightCalls[0]?.query.returnLimits !== undefined).toBe(phase);
-      expect(flightRows(e, id).length).toBeGreaterThan(0);
+      expect(flightRows(e, id).length > 0).toBe(phase);
+      expect(done.flightLists?.ended === 'window').toBe(!phase);
     }
   });
 
@@ -937,19 +926,18 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     return { e, cam, id, done: await e.settled(id) };
   }
 
-  it('R-window (21.6 review M1): the request is shaped after a held lease: 800 s less 100 s waited sends outbound-only', async () => {
-    // why: at planning 800 s holds a 780 s return phase; after the wait 700 s holds only an outbound-only read
+  it('R-window (21.6 review M1): the request is shaped after a held lease: 800 s less 100 s waited ends the step window', async () => {
+    // why: at planning 800 s holds a 780 s return phase; after the wait 700 s does not, and confirm mode sends no
+    // outbound-only read instead (design 2026-11-08 §4.6)
     const { e, cam, id, done } = await heldLease(800, 100_000);
-    expect(cam.flightCalls).toHaveLength(10);
-    expect(cam.flightCalls.every((c) => c.query.returnLimits === undefined)).toBe(true);
-    expect(flightRows(e, id)).toHaveLength(10);
-    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null, ended: null });
+    expect(cam.flightCalls).toHaveLength(0);
+    expect(flightRows(e, id)).toHaveLength(0);
+    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null, ended: 'window' });
   });
 
-  it('R-window: a window that holds 50 s after a held lease holds no request; the gate refuses it, ended window', async () => {
+  it('R-window: a window that holds 50 s after a held lease holds no request: no page, ended window', async () => {
     const { e, cam, id, done } = await heldLease(800, 750_000);
-    expect(cam.flightCalls).toHaveLength(1);
-    expect(cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
+    expect(cam.flightCalls).toHaveLength(0);
     expect(cam.flightRequests()).toBe(0);
     expect(flightRows(e, id)).toHaveLength(0);
     expect(done.flightLists?.ended).toBe('window');

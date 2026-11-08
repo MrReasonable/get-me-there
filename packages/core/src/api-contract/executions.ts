@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { workerRuleSchema } from '../camoufox/rule.js';
-import { SKIP_CODES } from '../types/execution.js';
+import { CONFIRM_MODES, CONFIRM_STOPS, SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
 import {
   bucketsSchema,
@@ -15,9 +15,18 @@ import {
   usageSchema,
 } from './common.js';
 import { estimateSchema } from './definitions.js';
-import { stopTextSchema } from './stopCause.js';
+import { STOP_DETAILS, stopTextSchema } from './stopCause.js';
 
 const count = countSchema;
+
+/** Design 2026-11-08 §7: the step's stored summary (`ConfirmSummary`), on the stored plan and on a run's `flights`. */
+export const confirmSummarySchema = z.strictObject({
+  mode: z.enum(CONFIRM_MODES),
+  confirmed: count,
+  unread: count,
+  uncheckedCheaper: count,
+  stop: z.enum(CONFIRM_STOPS).nullable(),
+});
 
 /**
  * Spec revision 55 §7 `flight_lists_json`: the run's stored flight-list plan (`FlightListsState`), read back through
@@ -37,7 +46,24 @@ export const flightListsStateSchema = z.strictObject({
   // why: spec rev 56 §8.1: the rule that stopped the run's return phases (or its booking reads); absent read as null
   returnsStopped: workerRuleSchema.nullable().exactOptional(),
   bookingStopped: workerRuleSchema.nullable().exactOptional(),
+  // why: design 2026-11-08 §7: the step's summary; absent on a plan stored before that change, read as null (no line).
+  // A null is accepted too, so such a plan read back and stored again (an early end marked on it) still writes
+  confirm: confirmSummarySchema.nullable().exactOptional(),
+  // why: design 2026-11-08 §5.5: the ending page's stop detail; absent on an earlier plan, read as null
+  endedReason: z.enum(STOP_DETAILS).nullable().exactOptional(),
 });
+
+/**
+ * Design 2026-11-08 §5.5: why a run's flight step stopped before its own rule ended it, for the line under the board. A
+ * `detail` is the stop detail of the failed list that ended the step (an ending page or a cap: `ended 'stopped'`; worded
+ * by `stopDetailClause`); the other kinds are the run's own stop cause (cancelled, a budget stop, a fatal error, or any
+ * other cause). Never the cause's text: a fatal cause's message is not sent.
+ */
+export const flightsStopCauseSchema = z.union([
+  z.strictObject({ kind: z.literal('detail'), detail: z.enum(STOP_DETAILS) }),
+  z.strictObject({ kind: z.enum(['cancelled', 'budget', 'fatal', 'other']) }),
+]);
+export type FlightsStopCause = z.infer<typeof flightsStopCauseSchema>;
 
 /**
  * Spec revision 55 §8.1 "What the run reports", §10 `GET /executions/:id`: the flight-list step's counts, from the
@@ -51,6 +77,10 @@ export const executionFlightsSchema = z
     reused: count,
     failed: count,
     ended: z.enum(['window', 'monthly-cap', 'stopped', 'disabled']).nullable(),
+    // why: design 2026-11-08 §5.5, §7: the stored summary passed through unchanged; null for a run stored before it
+    confirm: confirmSummarySchema.nullable(),
+    // why: design 2026-11-08 §5.5: the reason the step stopped early, null while nothing stopped it
+    stopCause: flightsStopCauseSchema.nullable(),
   })
   .refine((f) => f.read + f.reused + f.failed <= f.planned, {
     message: 'flights read, reused and failed must not exceed flights planned',

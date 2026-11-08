@@ -17,8 +17,13 @@ import type { PairingOffer } from './pairing.js';
 const F = COPY.flights;
 const D = COPY.datesView;
 
-/** What a "Back:" line leads with: an offer's stated price, or the return's "from" price (with "sellers not read"). */
-export type BackPrice = { kind: 'offer'; offer: PairingOffer } | { kind: 'from'; sellersNotRead: boolean };
+/**
+ * What a "Back:" line leads with: an offer's stated price, or the return's "from" price with what was read of the
+ * sellers (`sellers`: none read, some read but not every one, or null where the line makes no claim about them).
+ */
+export type BackPrice =
+  | { kind: 'offer'; offer: PairingOffer }
+  | { kind: 'from'; sellers: 'unread' | 'incomplete' | null };
 
 /** The arrival's calendar date: the return date plus the page's day offset, −1 admitted (dates as strings, no zone). */
 function arrivalDate(returnDate: IsoDate, r: ListedReturn): IsoDate {
@@ -64,12 +69,11 @@ export function ReturnRow({
           <>
             {F.separator}
             {F.sellerLine(price.offer.seller, price.offer.fare, price.offer.offersRead)}
-            {price.offer.complete ? null : `${F.separator}${F.offersIncomplete}`}
           </>
-        ) : price.sellersNotRead ? (
+        ) : price.sellers !== null ? (
           <>
             {F.separator}
-            {F.sellersNotRead}
+            {price.sellers === 'unread' ? F.sellersNotRead : F.notEverySellerRead}
           </>
         ) : null}
         {F.separator}

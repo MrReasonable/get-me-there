@@ -308,22 +308,32 @@ describe('estimateSentence: the notes under it', () => {
     );
   });
 
-  // why: spec rev 56 §8.1 "Estimate" (R-estimate): the date pairs and the pages are two figures; out and back states
-  // the typical pages and minutes and the bound
-  it('out and back: "+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes"', () => {
+  // why: design 2026-11-08 §6: out and back the step reads until more reading stops finding cheaper trips, so the
+  // sentence gives the time and the note the dates read, typical and at most (the at-most reads are pagesMax / 2)
+  it('out and back: "then about 2 minutes checking flights, longer if prices are close together"', () => {
     const e = resp({
-      flightLists: { pairs: 10, pages: 15, seconds: 2450, pagesMax: 20, secondsMax: 3000, returns: true },
+      flightLists: { pairs: 15, pages: 23, seconds: 100, pagesMax: 580, secondsMax: 1825, returns: true },
     });
     expect(sentence(e).line).toBe(
-      'About 2½ hours · free · asks about all 405 date pairs · + flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+      'About 2½ hours · free · asks about all 405 date pairs · then about 2 minutes checking flights, longer if prices are close together',
     );
-    // one date pair out and back (21.7 code I1: a real one-pair plan, 2 pages at most): the singulars
+    // the singular minute
     const one = resp({
-      flightLists: { pairs: 1, pages: 2, seconds: 245, pagesMax: 2, secondsMax: 300, returns: true },
+      flightLists: { pairs: 1, pages: 2, seconds: 60, pagesMax: 2, secondsMax: 60, returns: true },
     });
-    expect(sentence(one).line).toContain(
-      '+ flights, out and back, for up to 1 date pair: usually about 2 pages and 4 minutes, at most 2 pages and 5 minutes',
-    );
+    expect(sentence(one).line).toContain('then about 1 minute checking flights, longer if');
+  });
+  it('out and back: the note reads "usually about 15 dates, at most 290" for the 300-pair case', () => {
+    const e = resp({
+      flightLists: { pairs: 15, pages: 23, seconds: 100, pagesMax: 580, secondsMax: 1825, returns: true },
+    });
+    expect(sentence(e).notes).toEqual(['usually about 15 dates, at most 290']);
+    // never "up to" the typical count
+    expect(sentence(e).notes.join(' ')).not.toContain('up to');
+    const one = resp({
+      flightLists: { pairs: 1, pages: 2, seconds: 60, pagesMax: 2, secondsMax: 60, returns: true },
+    });
+    expect(sentence(one).notes).toEqual(['usually about 1 date, at most 1']);
   });
   it('21.7 code I1: a plan the month cut to outbound-only (returns false, its bound kept) words no return leg', () => {
     // why: the engine's line with 1 page left: the plan reads returns where pages allow, none goes out and back
@@ -336,17 +346,11 @@ describe('estimateSentence: the notes under it', () => {
   it('outbound only: "+ flights for up to 10 date pairs, about 12 minutes", the pairs from pairs, never the pages', () => {
     const e = resp({ flightLists: { pairs: 10, pages: 10, seconds: 700, returns: false } });
     expect(sentence(e).line).toContain('+ flights for up to 10 date pairs, about 12 minutes');
-    // why: a plan of 6 pairs out and back that the month cut to 6 pages: the pairs are said, the pages are its own
-    const fewer = resp({
-      flightLists: { pairs: 6, pages: 9, seconds: 1470, pagesMax: 12, secondsMax: 1800, returns: true },
-    });
-    expect(sentence(fewer).line).toContain('for up to 6 date pairs: usually about 9 pages');
   });
-  it('out and back with no bound stated (an older line) states the typical figures as the bound', () => {
+  it('out and back with no bound stated (an older line) states the typical reads as the most', () => {
     const e = resp({ flightLists: { pairs: 4, pages: 6, seconds: 980, returns: true } });
-    expect(sentence(e).line).toContain(
-      '+ flights, out and back, for up to 4 date pairs: usually about 6 pages and 16 minutes, at most 6 pages and 16 minutes',
-    );
+    expect(sentence(e).line).toContain('then about 16 minutes checking flights');
+    expect(sentence(e).notes).toEqual(['usually about 4 dates, at most 4']);
   });
 
   it('nothing new to ask keeps the flights clause: the browser worker still reads them (20.9 review finding 7)', () => {
@@ -393,7 +397,12 @@ describe('estimateSentence: the notes under it', () => {
       'searchapi',
       "Google Flights via SearchApi is not used: over this search's spending limit a run",
     ],
-    ['provider-execution', 'camoufox', 'The browser worker is not used: over its page allowance for one run'],
+    // why: design 2026-11-08 §4.8: the browser has no per-run page or flight allowance left to name
+    [
+      'provider-execution',
+      'camoufox',
+      'The browser worker is not used: a limit on its pages stops it this run',
+    ],
     ['provider-month', 'searchapi', 'Google Flights via SearchApi is not used: no calls left this month'],
     ['provider-lifetime', 'searchapi', 'Google Flights via SearchApi is not used: no trial searches left'],
     [

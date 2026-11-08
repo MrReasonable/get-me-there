@@ -174,7 +174,8 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(156);
     expect(ex.status).toBe('completed');
     expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(156);
-  });
+    // why: 156 pages through the whole engine took just over the default 5 s on the Windows runner twice (PRs 51, 54)
+  }, 15_000);
   it('the engine fills airportNames from the airports repository', async () => {
     const s = stubCamoufox({ cells: 1 });
     await engineWith([s]).runToEnd();

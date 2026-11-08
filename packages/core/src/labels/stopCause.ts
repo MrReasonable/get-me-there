@@ -28,6 +28,11 @@ export interface StopTextFacts {
   mode: 'native' | 'container' | 'dev';
   /** `isScheduled(def)` read now: only a scheduled search is promised an automatic resume or a next scheduled run. */
   scheduled: boolean;
+  /**
+   * Design 2026-11-08 §5.5: the run's flight step read an open-ended queue (confirm mode), so "of N" would name a plan it
+   * never had; a budget stop then says only how many dates were read. Absent reads as false (the planned count stands).
+   */
+  confirm?: boolean;
 }
 
 type Fix = NonNullable<StopText['fix']>;
@@ -271,8 +276,13 @@ function sourceFix(s: Source, f: StopTextFacts, at: (i: IsoDateTime) => string):
 /** A budget stop: the cap's sentence, then (when the flight-list step ran after it) the flights read of planned. */
 function budgetText(c: Budget, f: StopTextFacts, at: (i: IsoDateTime) => string): StopText {
   const { head, fix: action } = budgetHead(c, f, at);
+  const { flights: n } = c;
   const flights =
-    c.flights === null ? '' : `; flights were read for ${c.flights.read} of ${c.flights.planned} date pairs`;
+    n === null
+      ? ''
+      : f.confirm === true
+        ? `; flights were read for ${n.read} date${n.read === 1 ? '' : 's'}`
+        : `; flights were read for ${n.read} of ${n.planned} date pairs`;
   return { sentence: `${head}${flights}.`, fix: action };
 }
 

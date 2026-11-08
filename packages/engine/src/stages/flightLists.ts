@@ -1,12 +1,16 @@
 /**
  * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
  * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
- * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, CAMOUFOX_PAGES_AT_ONCE at
- * a time, on an allowance of its own (the snapshot's `flightListPages`, 20 pages; a browser page counts against no
- * free-call cap). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
- * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
- * limits sent with it, an outbound-only request instead when the window cannot hold that, and no further
- * return phase (or booking read) after one ends transient.
+ * reads flight lists of the search's cheapest date pairs, one request each, CAMOUFOX_PAGES_AT_ONCE at a time (a browser
+ * page counts against no free-call cap, and since design 2026-11-08 §4.8 against no per-run flight allowance either).
+ *
+ * Design 2026-11-08 (confirm the cheapest trips) §4.2–§4.7: when the worker last reported `RETURN_SELECT_VERIFIED` (and
+ * `BOOKING_SELECT_VERIFIED`) the step is in confirm mode: it reads each pair's return leg (and the shown pairing's
+ * booking options), the search's limits sent with it, up to 2 pages a request, through an open-ended queue of the
+ * calendar's cheapest pairs (`confirmQueue`) until core's rule A stops it (`patienceSpent`), the queue is empty, returns
+ * stop part-way, or one of the run's own stops ends it. Reused lists and fresh verified figures fill the standings first
+ * and spend no patience. With the flag off, or not yet read, the step reads as it did: the first `FLIGHT_LIST_COUNT`
+ * pairs, outbound only. Either way it stores a summary (`FlightListsState.confirm`).
  *
  * The step has its own error table (below), its own gate (`flightPageGate`) and its own intake; it never routes a page
  * through discovery's `onFailure`, `pageGate`'s `leaveLane` or the shared budget handler, so no flight page changes a
@@ -15,12 +19,16 @@
  */
 import {
   AbortedError,
+  applyCheck,
   BOOKING_TRANSIENT,
   BudgetExceeded,
-  type BudgetScopeKind,
   type CellKey,
+  type Check,
+  type ConfirmSummary,
   cellKeyString,
+  checkOfRead,
   cooldownNoticeKey,
+  EMPTY_STANDINGS,
   FLIGHT_LIST_COUNT,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   type FlightLimits,
@@ -30,12 +38,16 @@ import {
   type FlightListsState,
   flightLimitsOf,
   flightPagesPerPair,
+  listFresh,
   ProviderError,
   type ProviderId,
+  patienceSpent,
   type ReturnRead,
+  type Standings,
   type StopDetail,
+  uncheckedCheaper,
 } from '@gmt/core';
-import type { FlightListInsert } from '@gmt/db';
+import type { FlightListInsert, NewestFlightList } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
 import { lineKey } from '../lines.js';
@@ -44,7 +56,7 @@ import { disableProvider, type RunState, stopRun } from '../run.js';
 import { toStopDetail } from '../stopCause.js';
 import { airportNamesOf, cellAirportNames } from './discovery.js';
 import { flightPageGate, windowSecondsLeft } from './flightLists/gate.js';
-import { newestListOf, type ReusePlan, selectFlightPairs } from './flightLists/select.js';
+import { confirmQueue, newestListOf, type ReusePlan, selectFlightPairs } from './flightLists/select.js';
 import { refreshHoursOf } from './reuse.js';
 
 /** The one provider whose flight lists the step reads (spec §2: the browser worker's own pages). */
@@ -60,7 +72,8 @@ function capabilityOf(ctx: EngineContext): FlightListCapability | undefined {
  * catch-up or a child; never when camoufox's discovery lane left past
  * its browser window (a pass's gate, or a resume's check b, sets `windowOut`) or stopped at a monthly, lifetime or
  * global cap; never when camoufox is disabled for the run or its discovery line was blocked for budget before the pass;
- * never on a snapshot without `flightListPages`, a cabin the capability does not read (economy only), without a
+ * never on a snapshot without `flightListPages` (the step's on-switch, design 2026-11-08 §4.8: no longer an allowance),
+ * a cabin the capability does not read (economy only), without a
  * flight-list capability, or without the board's ranking (EngineOptions.rankedDatePairs).
  */
 export function flightStepEntry(ctx: EngineContext, run: RunState): boolean {
@@ -90,10 +103,12 @@ type PageOutcome =
   /** Cancel, SIGTERM or a fatal stop aborted the run's controller: no row; the stop propagates. */
   | { kind: 'abort' };
 
-/** Spec rev 55 §8.1 error table, BudgetExceeded row: the reason word and the `ended` word of a cap. */
-function budgetOutcome(scope: BudgetScopeKind): PageOutcome {
-  if (scope === 'provider-execution')
-    return { kind: 'failed', reason: 'execution-cap', end: true, ended: 'stopped' };
+/**
+ * Spec rev 55 §8.1 error table, BudgetExceeded row: the reason word and the `ended` word of a cap. Design 2026-11-08
+ * §4.8 withdrew the run's flight allowance, the one cap that gave `execution-cap` (`provider-execution`), so every scope
+ * a flight page can still meet gives `free-call-cap`.
+ */
+function budgetOutcome(): PageOutcome {
   return { kind: 'failed', reason: 'free-call-cap', end: true, ended: 'stopped' };
 }
 
@@ -149,10 +164,10 @@ interface RequestPlan {
 
 /**
  * Reads one page under the step's error table. The lease is awaited first (an on-demand read in flight), then the
- * request is shaped (`requestOf`: the window as it is after that wait, 21.6 review M1), then
- * the step's own allowance is checked against the request's pages (`used + pages > flightListPages`, so a request it
- * cannot hold is refused at `provider-execution` before any call), then the capability reads with the run's controller
- * signal and the step's gate held to the request's own seconds.
+ * request is shaped (`requestOf`: the window as it is after that wait, 21.6 review M1; in confirm mode a window that
+ * cannot hold a return-phase read ends the step `window` here, before any call), then the capability reads with the
+ * run's controller signal and the step's gate held to the request's own seconds. No allowance is checked: design
+ * 2026-11-08 §4.8 withdrew it (rule A bounds the step).
  */
 async function readPage(
   ctx: EngineContext,
@@ -166,22 +181,9 @@ async function readPage(
   try {
     await ctx.lease.whenFree(run.controller.signal);
     const req = requestOf(ctx, run, planNow());
-    const allowance = ctx.budget.usage({
-      kind: 'provider-execution',
-      executionId: run.executionId,
-      providerId: FLIGHT_LIST_PROVIDER,
-    }).flightLists;
-    // why: fail closed: a guard that states no flight allowance gives none (the guard itself reads an absent one as 0)
-    const pages = allowance?.cap ?? 0;
-    const used = allowance?.calls ?? 0;
-    if (used + req.pages > pages)
-      throw new BudgetExceeded({
-        scope: 'provider-execution',
-        providerId: FLIGHT_LIST_PROVIDER,
-        cap: pages,
-        current: used,
-        requested: req.pages,
-      });
+    // why: design 2026-11-08 §4.6: an outbound-only read cannot confirm a trip, so confirm mode never sends one for want
+    // of window; the step ends as the gate would end it
+    if (req === null) return { kind: 'window' };
     const query: FlightListQuery = {
       cell,
       airportNames: cellAirportNames(names, run.snapshot.resolved, cell.origin, cell.destination),
@@ -198,7 +200,7 @@ async function readPage(
     // why: a cancel, SIGTERM or fatal stop aborts the run's controller; whatever the page then threw, nothing is written
     if (run.controller.signal.aborted) return { kind: 'abort' };
     if (err instanceof AbortedError) return { kind: 'window' };
-    if (err instanceof BudgetExceeded) return budgetOutcome(err.scope);
+    if (err instanceof BudgetExceeded) return budgetOutcome();
     if (err instanceof ProviderError) return errorOutcome(run, err);
     // why: ruling R-dberror — anything else (the database itself failing) is fatal, as everywhere else in a pass
     throw err;
@@ -297,35 +299,95 @@ const cellOf = (c: CellKey): CellKey => ({
 
 /**
  * Spec rev 56 §8.1 "The plan": the return phase a fresh plan reads, from the worker's last reported flags (none read:
- * outbound-only) and the snapshot's allowance, which must hold `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages for every pair
- * that could be planned (an older snapshot, with 10, plans outbound-only); the booking read only with returns.
+ * outbound-only); the booking read only with returns. Design 2026-11-08 §4.8: the snapshot's `flightListPages` is no
+ * longer an allowance the phase must fit (it is only the step's on-switch, read by `flightStepEntry`), so a run whose
+ * stored snapshot still carries the old 20 (or 10) plans returns all the same.
  */
 export function returnPhaseOf(
   ctx: Pick<EngineContext, 'workerFlags'>,
-  snapshot: RunState['snapshot'],
-  pairs: number,
+  _snapshot: RunState['snapshot'],
 ): { returns: boolean; booking: boolean } {
   const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
-  const returns =
-    flightPagesPerPair(flags) === FLIGHT_LIST_PAGES_PER_PAIR_MAX &&
-    (snapshot.budget.flightListPages ?? 0) >= pairs * FLIGHT_LIST_PAGES_PER_PAIR_MAX;
+  const returns = flightPagesPerPair(flags) === FLIGHT_LIST_PAGES_PER_PAIR_MAX;
   return { returns, booking: returns && flags?.BOOKING_SELECT_VERIFIED === true };
 }
 
+/** Design 2026-11-08 §4.3: a check that learnt nothing about the pair's flights. */
+const UNREAD: Check = { kind: 'unread' };
+
 /**
- * The plan this pass works from, and the cells it still reads. A resumed pass keeps the stored plan (`planned`,
- * `cells`, `returns` and `booking` fixed) and reads only planned cells with no row of this execution, skipping (no row)
- * one that has departed; a pass with no stored plan selects one from the board's ranking (`selectFlightPairs`, reuse
- * judged under the return phase it plans) and writes it once, before its first page, only when at least one date pair
- * was selected to read or reuse.
+ * What a confirm-mode pass carries beside its plan (design 2026-11-08 §4.3–§4.5): the standings so far (patience at 0:
+ * a resumed pass starts it again), this run's unread reads so far, and for each pair still to read its calendar price
+ * (for the unchecked count) and its newest stored list as it stood at planning (the end of the step counts a pair read
+ * recently enough to lead as checked), under the limits and the refresh the run reads with.
  */
-function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; toRead: CellKey[] } | null {
-  const today = ctx.clock.todayLondon();
+interface ConfirmPass {
+  standings: Standings;
+  unread: number;
+  prices: ReadonlyMap<string, number>;
+  newest: ReadonlyMap<string, NewestFlightList>;
+  limits: FlightLimits;
+  refreshHours: number;
+}
+
+/** The plan a pass works from, the cells it reads, and (in confirm mode) what rule A works from. */
+interface PassPlan {
+  plan: FlightListsState;
+  toRead: CellKey[];
+  confirm: ConfirmPass | null;
+}
+
+/**
+ * Design 2026-11-08 §4.7: a confirm-mode step that finished (a stop of rule A, returns lost part-way, or an ending
+ * error) reads nothing on a later pass of the same run, such as a resume after a verification pause; one interrupted
+ * (the run's window, a cool-down, a crash) resumes.
+ */
+export function confirmFinished(p: FlightListsState): boolean {
+  return (
+    (p.confirm?.stop ?? null) !== null ||
+    p.returnsStopped !== null ||
+    (p.ended !== null && p.ended !== 'window')
+  );
+}
+
+/**
+ * The plan this pass works from, and the cells it still reads. Design 2026-11-08: a plan that reads returns is in
+ * confirm mode (`confirmPlanOf`, fresh or resumed), whatever its stored summary says (a plan stored before the change
+ * has none); a fresh plan without returns, and a resumed one, read as `outboundPlanOf` says.
+ */
+function planOf(ctx: EngineContext, run: RunState): PassPlan | null {
   const stored = ctx.repos.executions.get(run.executionId)?.flightLists ?? null;
+  if (stored !== null) {
+    if (!stored.returns) return outboundPlanOf(ctx, run, stored);
+    return confirmFinished(stored) ? null : confirmPlanOf(ctx, run, stored);
+  }
+  const phase = returnPhaseOf(ctx, run.snapshot);
+  if (phase.returns) return confirmPlanOf(ctx, run, null);
+  // why: design 2026-11-08 §4.6, §7: `flags-unread` when no flags had been read as the step planned, so the page can
+  // say the browser had not yet said what it can read; `outbound-only` when they were read and lack returns
+  const mode = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) === null ? 'flags-unread' : 'outbound-only';
+  return outboundPlanOf(ctx, run, null, mode);
+}
+
+/**
+ * Spec rev 56 §8.1 "The plan", outbound only (design 2026-11-08 §4.6: the fallback when returns are off or unread). A
+ * resumed pass keeps the stored plan (`planned`, `cells`, `returns` and `booking` fixed) and reads only planned cells
+ * with no row of this execution, skipping (no row) one that has departed; a pass with no stored plan selects the first
+ * `FLIGHT_LIST_COUNT` of the board's ranking (`selectFlightPairs`, reuse judged with no return phase) and writes it
+ * once, before its first page, only when at least one date pair was selected to read or reuse, with a summary that
+ * names the mode and counts nothing (rule A does not apply).
+ */
+function outboundPlanOf(
+  ctx: EngineContext,
+  run: RunState,
+  stored: FlightListsState | null,
+  mode: ConfirmSummary['mode'] = 'outbound-only',
+): PassPlan | null {
+  const today = ctx.clock.todayLondon();
   if (stored !== null) {
     const done = new Set(ctx.repos.flightLists.cellsOfExecution(run.executionId).map(cellKeyString));
     const toRead = stored.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today);
-    return { plan: stored, toRead };
+    return { plan: stored, toRead, confirm: null };
   }
   const reader = ctx.rankedDatePairs;
   if (reader === undefined) return null;
@@ -339,7 +401,7 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
   });
   // why: only the first 10 not departed can be chosen, so only their newest lists are read (one statement)
   const candidates = ranked.filter((p) => p.departureDate > today).slice(0, FLIGHT_LIST_COUNT);
-  const phase = returnPhaseOf(ctx, run.snapshot, candidates.length);
+  const phase = { returns: false, booking: false };
   const reuse: ReusePlan = { ...phase, current: flightLimitsOf(run.snapshot.constraints) };
   const newest = new Map(
     ctx.repos.flightLists
@@ -369,33 +431,159 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
     ...phase,
     returnsStopped: null,
     bookingStopped: null,
+    confirm: { mode, confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+    endedReason: null,
   };
   ctx.repos.executions.patch(run.executionId, { flightLists: plan });
-  return { plan, toRead: plan.cells };
+  return { plan, toRead: plan.cells, confirm: null };
+}
+
+/**
+ * Design 2026-11-08 §4.2, §4.3, §4.7: a confirm-mode pass, fresh (`stored` null) or resumed. The queue is rebuilt from
+ * the calendar as it stands (`confirmQueue`, departed pairs out). Fresh, current verified figures enter the standings by
+ * reuse; every cell with a row of this execution, whatever its status, is a read already made: it is left out of the
+ * read split, its check fills the standings' prices (never patience, never `reused`) and an unread one counts in
+ * `unread` again (so the count equals what was stored, a crash between a row and its count included). The rest is split
+ * by `selectFlightPairs` with no count; each reused pair's stored list is checked by reuse. So `reused` is rebuilt on a
+ * resume from the same lists the first pass reused (never added to what it stored, which already held them and the
+ * recently read pairs its own end counted); a resume keeps the stored `returns`, `booking`, `returnsStopped`,
+ * `bookingStopped` and the started `cells` (those with a row), never recomputed from the flags. The plan is written
+ * before the first read, with the counts as they stand and no stop; a fresh pass with nothing to read or reuse writes
+ * none.
+ */
+function confirmPlanOf(ctx: EngineContext, run: RunState, stored: FlightListsState | null): PassPlan | null {
+  const reader = ctx.rankedDatePairs;
+  if (reader === undefined) return null;
+  const today = ctx.clock.todayLondon();
+  const now = ctx.clock.now();
+  const limits = flightLimitsOf(run.snapshot.constraints);
+  const refreshHours = refreshHoursOf(run.snapshot, FLIGHT_LIST_PROVIDER);
+  const pointOfSale = ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER);
+  const phase =
+    stored === null ? returnPhaseOf(ctx, run.snapshot) : { returns: stored.returns, booking: stored.booking };
+  const live = reader({
+    definitionId: run.definitionId,
+    space: run.snapshot.resolved,
+    cabin: run.snapshot.cabin,
+    maxJourneyMinutes: run.snapshot.constraints.maxJourneyMinutes ?? null,
+    now,
+  }).filter((p) => p.departureDate > today);
+  let standings = EMPTY_STANDINGS;
+  let reused = 0;
+  const own = ctx.repos.flightLists.cellsOfExecution(run.executionId);
+  const ownKeys = new Set(own.map(cellKeyString));
+  // why: §4.3: an itinerary price the latest search saw, within its age, is a confirmed trip already: no page. A pair
+  // this run already read is counted once, as that read (§4.7): verification may price it after a step that ended
+  // `window`, and counting it again would inflate "Checked N", the trips and the 5th price
+  for (const p of live)
+    if (p.current && p.basis === 'verified' && !p.stale && !ownKeys.has(cellKeyString(p))) {
+      standings = applyCheck(standings, { kind: 'confirmed', pricePence: p.pricePence }, 'reuse');
+      reused += 1;
+    }
+  let unread = 0;
+  // why: §4.7: this run's own lists count as reads already made, not as reuse; their patience is not carried over
+  const ownLists =
+    own.length === 0
+      ? []
+      : ctx.repos.flightLists.newestOfCells(run.definitionId, own, run.snapshot.cabin, pointOfSale, {
+          executionIds: [run.executionId],
+        });
+  for (const l of ownLists) {
+    const c = l.status === 'read' ? checkOfRead(l.returns, l.flights, limits) : UNREAD;
+    if (c.kind === 'unread') unread += 1;
+    standings = applyCheck(standings, c, 'reuse');
+  }
+  const rest = confirmQueue(live).filter((p) => !ownKeys.has(cellKeyString(p)));
+  const lists = new Map(
+    ctx.repos.flightLists
+      .newestPerCell(run.definitionId, rest.map(cellOf), run.snapshot.cabin, pointOfSale)
+      .map((l) => [cellKeyString(l), l]),
+  );
+  const sel = selectFlightPairs(
+    rest,
+    new Map([...lists].map(([k, l]) => [k, newestListOf(l)])),
+    now,
+    refreshHours,
+    today,
+    { ...phase, current: limits },
+    Number.POSITIVE_INFINITY,
+  );
+  // why: §4.2, §4.4: a reusable list is checked at once, filling the standings with no page and no patience spent
+  for (const p of sel.reused) {
+    const l = lists.get(cellKeyString(p));
+    const check = l === undefined ? UNREAD : checkOfRead(l.returns, l.flights, limits);
+    standings = applyCheck(standings, check, 'reuse');
+    reused += 1;
+    // why: final whole-branch review I3: a pair reused as finished after two transient reads (R-retry,
+    // `transientStreak` 2), or one read under other limits, learnt nothing for today's limits, so it is unread as
+    // well as reused; rebuilt on a resume from the same lists, so the stored count is never added to twice
+    if (check.kind === 'unread') unread += 1;
+  }
+  if (stored === null && sel.read.length === 0 && reused === 0) return null;
+  const cells = (stored?.cells ?? []).filter((c) => ownKeys.has(cellKeyString(c)));
+  const plan: FlightListsState = {
+    planned: cells.length + reused,
+    cells,
+    reused,
+    ended: stored?.ended ?? null,
+    ...phase,
+    returnsStopped: stored?.returnsStopped ?? null,
+    bookingStopped: stored?.bookingStopped ?? null,
+    endedReason: stored?.endedReason ?? null,
+    confirm: {
+      mode: 'confirm',
+      confirmed: standings.prices.length,
+      unread,
+      uncheckedCheaper: 0,
+      stop: null,
+    },
+  };
+  ctx.repos.executions.patch(run.executionId, { flightLists: plan });
+  return {
+    plan,
+    toRead: sel.read.map(cellOf),
+    confirm: {
+      standings,
+      unread,
+      prices: new Map(sel.read.map((p) => [cellKeyString(p), p.pricePence])),
+      newest: lists,
+      limits,
+      refreshHours,
+    },
+  };
 }
 
 /**
  * A pass that may not run the step because its browser lane left past the window (a resume past the run's window, or
  * the lane's own gate) leaves the stored plan's unread cells unread: the plan says so (`ended 'window'`), so the page
- * words the early end from what was stored (ruling A14).
+ * words the early end from what was stored (ruling A14). Design 2026-11-08 §4.7: a confirm-mode step that has not
+ * finished (no stop of its own, no end) always has dates left to check, so it is marked whatever its rows; other plans
+ * keep the rule of an unread planned cell.
  */
 function markLeftByWindow(ctx: EngineContext, run: RunState): void {
   const lane = run.lanes.get(`discovery|${FLIGHT_LIST_PROVIDER}`);
   if (lane === undefined || lane.windowOut === null || run.isCatchUp || run.isChild) return;
   const stored = ctx.repos.executions.get(run.executionId)?.flightLists ?? null;
   if (stored === null || stored.ended !== null) return;
-  const done = new Set(ctx.repos.flightLists.cellsOfExecution(run.executionId).map(cellKeyString));
-  if (stored.cells.some((c) => !done.has(cellKeyString(c))))
+  const mark = () =>
     ctx.repos.executions.patch(run.executionId, { flightLists: { ...stored, ended: 'window' } });
+  if (stored.confirm?.mode === 'confirm') {
+    if (stored.confirm.stop === null) mark();
+    return;
+  }
+  const done = new Set(ctx.repos.flightLists.cellsOfExecution(run.executionId).map(cellKeyString));
+  if (stored.cells.some((c) => !done.has(cellKeyString(c)))) mark();
 }
 
 /**
  * Spec rev 56 §8.1 "Each request": the next request's shape. The plan's return phase is sent (the current limits, and
  * `booking` until `bookingStopped`) while the plan reads returns and `returnsStopped` is null, unless the run's window
- * no longer holds a return-phase request's seconds (R-window, cost-r3-007): then an outbound-only request of 1 page,
- * `returnsStopped` left null.
+ * no longer holds a return-phase request's seconds (R-window, cost-r3-007). Design 2026-11-08 §4.6: a plan reading
+ * returns is in confirm mode, where an outbound-only read confirms nothing, so that shortfall gives null (the step ends
+ * `window`, sending nothing); outbound-only plans send 1 page, and a request shaped after returns stopped (one that had
+ * started waiting on the lease) reads outbound-only.
  */
-function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): RequestPlan {
+function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): RequestPlan | null {
   const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
   const outboundOnly: RequestPlan = {
     returnLimits: null,
@@ -406,9 +594,7 @@ function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): R
   if (!plan.returns || plan.returnsStopped !== null) return outboundOnly;
   const booking = plan.booking && plan.bookingStopped === null;
   const phaseSeconds = (booking ? seconds?.booking : seconds?.returnsOnly) ?? 0;
-  // why: a window that cannot hold the return phase may still hold an outbound-only read (one that holds neither is
-  // refused by the gate, ending the step `window`)
-  if (windowSecondsLeft(ctx, run) < phaseSeconds) return outboundOnly;
+  if (windowSecondsLeft(ctx, run) < phaseSeconds) return null;
   return {
     returnLimits: flightLimitsOf(run.snapshot.constraints),
     booking,
@@ -446,9 +632,19 @@ export function bookingStopOf(r: ReturnRead | null): string | null {
 
 /**
  * Spec revision 56 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs as many at a time as
- * the browser loads pages at once (CAMOUFOX_PAGES_AT_ONCE) under the error table, each request shaped by `requestOf`, stops the pass's return phases (or booking
- * reads) after a transient end. A failure outside the error table (the database itself) stops the run fatal
- * (R-dberror).
+ * the browser loads pages at once (CAMOUFOX_PAGES_AT_ONCE) under the error table, each request shaped by `requestOf`,
+ * stops the pass's return phases (or booking reads) after a transient end. A failure outside the error table (the
+ * database itself) stops the run fatal (R-dberror).
+ *
+ * Design 2026-11-08 §4.3–§4.5, §7, in confirm mode: each read that finishes is checked (`checkOfRead`; a failed read
+ * that does not end the step is unread) and applied to the standings in the order reads finish; the step starts no
+ * new read once `patienceSpent` (stop `patience`) or once returns stopped (`returns-stopped`), reads in flight finishing
+ * and kept. `cells` grows as each read starts and the counts are stored as each finishes, so the page's running line
+ * and a crash both see them; a pair whose read sent no page (the window, an abort) leaves `cells` again. An ending error
+ * writes no row for the pairs not started (their last real trip keeps leading). After the pool: `queue-empty` when
+ * every queued pair was read and nothing stopped the step; then each pair not started whose newest list is within the
+ * refresh and holds a trip counts as checked (reused, §4.3), and the rest below the 5th confirmed price as unchecked
+ * (`uncheckedCheaper`, §4.5).
  */
 export async function runFlightLists(ctx: EngineContext, run: RunState): Promise<void> {
   if (!flightStepEntry(ctx, run)) {
@@ -461,13 +657,15 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
   try {
     const p = planOf(ctx, run);
     if (p === null) return;
-    const { toRead } = p;
+    const { toRead, confirm } = p;
     let plan = p.plan;
-    // why: a resumed pass that reads again what an earlier pass left clears that pass's early end; it sets its own
-    if (toRead.length > 0 && plan.ended !== null) {
-      plan = { ...plan, ended: null };
+    const store = (next: FlightListsState): void => {
+      plan = next;
       ctx.repos.executions.patch(run.executionId, { flightLists: plan });
-    }
+    };
+    // why: a resumed pass that reads again what an earlier pass left clears that pass's early end; it sets its own. A
+    // confirm-mode pass always does: it reads on from a rebuilt queue, and an empty one is the queue's own end
+    if ((toRead.length > 0 || confirm !== null) && plan.ended !== null) store({ ...plan, ended: null });
     log.info(
       {
         planned: plan.planned,
@@ -482,63 +680,138 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     const intake = new AbortController();
     const gate = flightPageGate(ctx, run);
     let ended: FlightListsState['ended'] = null;
-    // why: the first stop the step meets (an abort, the window, or an ending error) decides how the step ends, as it did
-    // one page at a time; a page already in flight then writes its own row and stops nothing more
+    // why: the first stop the step meets (an abort, the window, an ending error, or in confirm mode rule A or returns
+    // lost) decides how the step ends, as it did one page at a time; a page already in flight then writes its own row
+    // and stops nothing more
     let stopped = false;
-    // why: an ending error met first; the pairs no lane had started yet fail with its reason, no request sent
+    // why: an ending error met first; in outbound-only mode the pairs no lane had started yet fail with its reason
     let ending: Extract<PageOutcome, { kind: 'failed' }> | null = null;
+    let endedReason: StopDetail | null = null;
     const started = new Set<number>();
-    // why: as many pages at once as the worker loads (CAMOUFOX_PAGES_AT_ONCE); the guard reserves each request's pages
-    // against the allowance as it is sent, so pages in flight together never overspend it
+    // why: the pairs that wrote a row this pass (read, or failed); the rest were never read (design §4.5)
+    const written = new Set<number>();
+    let standings = confirm?.standings ?? EMPTY_STANDINGS;
+    let unread = confirm?.unread ?? 0;
+    let stop: ConfirmSummary['stop'] = null;
+    const summary = (): ConfirmSummary | null =>
+      confirm === null || plan.confirm === null
+        ? plan.confirm
+        : { ...plan.confirm, confirmed: standings.prices.length, unread, stop };
+    const withCells = (cells: CellKey[]): FlightListsState => ({
+      ...plan,
+      cells,
+      planned: cells.length + plan.reused,
+    });
+    // why: as many pages at once as the worker loads (CAMOUFOX_PAGES_AT_ONCE)
     await runPool(toRead, ctx.limitsOf(FLIGHT_LIST_PROVIDER).concurrency, intake.signal, async (cell, i) => {
       started.add(i);
+      const key = cellKeyString(cell);
+      // why: design §7: `cells` is the pairs this run started reading, so the running line counts a read as it starts
+      if (confirm !== null && !plan.cells.some((c) => cellKeyString(c) === key))
+        store(withCells([...plan.cells, cellOf(cell)]));
       const o = await readPage(ctx, run, cap, cell, () => plan, gate);
-      if (o.kind === 'abort') {
-        stopped = true;
-        intake.abort();
-        return;
-      }
-      if (o.kind === 'window') {
-        if (!stopped) ended = 'window';
+      if (o.kind === 'abort' || o.kind === 'window') {
+        // why: no page was answered and no row written: the pair was not read, so it is not counted as one
+        if (confirm !== null) store(withCells(plan.cells.filter((c) => cellKeyString(c) !== key)));
+        if (o.kind === 'window' && !stopped) ended = 'window';
         stopped = true;
         intake.abort();
         return;
       }
       writeRow(ctx, run, cell, o);
+      written.add(i);
       if (o.kind === 'read') {
         // why: Review Focus 2 — a wrong return or booking view is not repeated: no further request carries one (a
         // request already in flight was shaped before it, and reads as it was sent)
         const returnsStopped = plan.returnsStopped ?? returnsStopOf(o.list.returns);
         const bookingStopped = plan.bookingStopped ?? bookingStopOf(o.list.returns);
         if (returnsStopped !== plan.returnsStopped || bookingStopped !== plan.bookingStopped) {
-          plan = { ...plan, returnsStopped, bookingStopped };
-          ctx.repos.executions.patch(run.executionId, { flightLists: plan });
+          store({ ...plan, returnsStopped, bookingStopped });
           log.info(
             { returnsStopped, bookingStopped },
             'flight lists: a transient end stops the rest of the pass',
           );
         }
       }
+      if (confirm !== null) {
+        // why: §4.3: a failed read that does not end the step learnt nothing (unread); an ending one is no check at all
+        const check =
+          o.kind === 'read'
+            ? checkOfRead(o.list.returns, o.list.flights, confirm.limits)
+            : o.end
+              ? null
+              : UNREAD;
+        if (check !== null) {
+          standings = applyCheck(standings, check, 'read');
+          if (check.kind === 'unread') unread += 1;
+        }
+        // why: §4.6: returns lost part-way starts no new read (no read after it could confirm a trip); §4.4: nor does
+        // a 12th finished read in a row that did not improve the standings. Reads in flight finish and are kept
+        const now: ConfirmSummary['stop'] =
+          plan.returnsStopped !== null ? 'returns-stopped' : patienceSpent(standings) ? 'patience' : null;
+        if (now !== null && !stopped) {
+          stop = now;
+          stopped = true;
+          intake.abort();
+          log.info({ stop, confirmed: standings.prices.length }, 'flight lists: no more reads');
+        }
+      }
       if (o.kind === 'failed' && o.end) {
         if (!stopped) {
           ending = o;
-          ended = o.ended;
+          // why: design §4.5, §4.7: in confirm mode the pairs not started get no row, so the plan itself must say an
+          // ending error stopped the step (`stopped`, as a cap does), or a later pass would read on; outbound-only mode
+          // keeps today's end (its failed rows say why)
+          ended = o.ended ?? (confirm === null ? null : 'stopped');
+          // why: design §5.5 — the ending page's own detail is the stop's reason; a read in flight that fails later (a
+          // parse, the network) never replaces it, because only the first stop the step meets is recorded here
+          if (ended === 'stopped') endedReason = o.reason;
         }
         stopped = true;
         intake.abort();
       }
+      if (confirm !== null) store({ ...plan, confirm: summary() });
     });
-    if (ending !== null) {
+    if (ending !== null && confirm === null) {
       const o = ending;
       // why: the rest fail with the same reason and no request is sent (the error table's "the rest" column); a page
-      // already in flight wrote its own row
+      // already in flight wrote its own row. Design §4.5: in confirm mode the pairs not started keep what they had
       toRead.forEach((rest, i) => {
         if (!started.has(i)) writeRow(ctx, run, rest, o);
       });
     }
-    if (ended !== null) ctx.repos.executions.patch(run.executionId, { flightLists: { ...plan, ended } });
+    if (confirm !== null) {
+      const unstarted = toRead.filter((_, i) => !written.has(i));
+      if (!stopped && unstarted.length === 0) stop = 'queue-empty';
+      // why: §4.3: a pair not reached whose newest list is within the refresh and holds a trip still leads its date:
+      // it is checked (counted reused, its trip in the standings), never unchecked
+      const now = ctx.clock.now();
+      const remaining: number[] = [];
+      let reused = plan.reused;
+      for (const c of unstarted) {
+        const k = cellKeyString(c);
+        const l = confirm.newest.get(k);
+        const check =
+          l !== undefined && l.status === 'read' && listFresh(l.fetchedAt, now, confirm.refreshHours)
+            ? checkOfRead(l.returns, l.flights, confirm.limits)
+            : UNREAD;
+        if (check.kind === 'confirmed') {
+          standings = applyCheck(standings, check, 'reuse');
+          reused += 1;
+        } else remaining.push(confirm.prices.get(k) ?? 0);
+      }
+      const last = summary();
+      store({
+        ...plan,
+        reused,
+        planned: plan.cells.length + reused,
+        ended: ended ?? plan.ended,
+        endedReason: endedReason ?? plan.endedReason,
+        confirm: last === null ? null : { ...last, uncheckedCheaper: uncheckedCheaper(remaining, standings) },
+      });
+    } else if (ended !== null) store({ ...plan, ended, endedReason: endedReason ?? plan.endedReason });
     const counts = ctx.repos.flightLists.forExecution(run.executionId, plan.cells);
-    log.info({ ...counts, reused: plan.reused, ended }, 'flight lists: step done');
+    log.info({ ...counts, reused: plan.reused, ended, confirm: plan.confirm }, 'flight lists: step done');
   } catch (err) {
     // why: ruling R-dberror (20.9 review) — a failure of the step's own writes is the run's fatal stop, with its cause,
     // as a failure anywhere else in the pass is; it is never logged and completed

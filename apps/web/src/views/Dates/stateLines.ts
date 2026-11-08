@@ -232,6 +232,8 @@ type Flights = ExecutionResponse['flights'];
  */
 function flightsClause(f: Flights, c: PageCopy): string | null {
   if (f === null) return null;
+  // why: design 2026-11-08 §5.5 — in confirm mode the confirm line under the board owns what was checked and how it ended
+  if (f.confirm?.mode === 'confirm') return null;
   const P = c.searchPage;
   if (f.planned === 0) return f.ended === 'disabled' ? P.flightsNotRead : null;
   const done = f.read + f.reused;
@@ -300,8 +302,19 @@ export function stateLine(d: {
     if (run.status === 'running' && run.stage === 'verification')
       return { kind: 'checking', text: P.checkingFares };
     const reading = readingCount(run.flights);
-    if (run.status === 'running' && run.flights !== null && reading !== null)
-      return { kind: 'reading', text: P.readingFlights(reading, run.flights.planned, left) };
+    if (run.status === 'running' && run.flights !== null && reading !== null) {
+      // why: design 2026-11-08 §5.5 — confirm mode uses the confirm line's running words (no "of N")
+      const k = run.flights.confirm;
+      const words =
+        k?.mode === 'confirm'
+          ? d.c.datesView.confirm.running(reading, d.c.datesView.confirm.trips(k.confirmed))
+          : P.readingFlights(reading, run.flights.planned, left);
+      // why: the running words end in a full stop; the time left joins them before it ("… read · about 8m left")
+      return {
+        kind: 'reading',
+        text: k?.mode === 'confirm' && left !== null ? `${words.replace(/\.$/, '')} · ${left}` : words,
+      };
+    }
     return {
       kind: 'searching',
       text: d.c.searchesView.searching(d.whole.searched, d.whole.total, left),

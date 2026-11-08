@@ -3,6 +3,7 @@ import {
   type DecodedDatePairs,
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
+  rankTierOf,
   type StartRefusalCode,
 } from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -24,7 +25,9 @@ import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
 import { BoardTable } from './BoardTable.js';
 import { type BoardModel, boardModel, isSyntheticRead, PAGE_SIZE } from './board.js';
+import { ConfirmLine } from './ConfirmLine.js';
 import { CoverageSection } from './CoverageSection.js';
+import { confirmStepGoing } from './confirmWords.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
@@ -196,9 +199,16 @@ function DatesOf({
   }, [model]);
 
   const data = shown?.data ?? null;
-  // why: spec §11 Rings: the board's shown rows are ringed on the overview
+  // why: spec §11 Rings, as changed by design 2026-11-08 §5.2: of the board's shown rows only the trips with flights
+  // read are outlined on the overview (a calendar price alone is not), the legend saying so
   const ringed = useMemo(
-    () => new Set((model?.rows ?? []).slice(0, visible).map((p) => p.index)),
+    () =>
+      new Set(
+        (model?.rows ?? [])
+          .slice(0, visible)
+          .filter((p) => p.figure !== null && rankTierOf(p.figure) < 2)
+          .map((p) => p.index),
+      ),
     [model, visible],
   );
   return (
@@ -252,6 +262,18 @@ function DatesOf({
           />
         )}
       />
+      {/* why: design 2026-11-08 §5.5 — under the board: how checking flights ended (nothing for a run with no summary) */}
+      {data !== null && run?.flights != null ? (
+        <ConfirmLine
+          confirm={run.flights.confirm}
+          ended={run.flights.ended}
+          stopCause={run.flights.stopCause}
+          // why: final whole-branch review: only a running run reads pages (a pending one is queued or waiting to
+          // resume), the rule stateLines and the card's words apply
+          running={run.status === 'running' && confirmStepGoing(run.flights)}
+          planned={run.flights.planned}
+        />
+      ) : null}
       {data !== null && model !== null ? (
         <Overview
           definition={definition}

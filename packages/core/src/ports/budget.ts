@@ -6,8 +6,8 @@ import type { ProviderId } from '../types/provenance.js';
 export type BudgetScope =
   | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
   /**
-   * A provider's own pages within one execution (camoufox: its pages, and its flight-list pages against the run's
-   * flight allowance, spec §8.1); labelled `provider-execution:<provider>`.
+   * A provider's own pages within one execution (camoufox: its pages, and beside them its flight-list pages, spec §8.1,
+   * with no cap on either: design 2026-11-08 §4.8); labelled `provider-execution:<provider>`.
    */
   | { kind: 'provider-execution'; executionId: string; providerId: ProviderId }
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
@@ -35,11 +35,11 @@ export interface Usage {
   windowStart: IsoDateTime | null;
   windowEnd: IsoDateTime | null;
   /**
-   * Spec rev 55 §8.1 (ruling A32): on a `provider-execution` scope, the flight-list pages spent against the run's own
-   * flight allowance (`ExecutionBudget.flightListPages`; `cap` 0 when the snapshot sets none). `calls` above counts the
-   * grid or list pages only, with no cap on them (`cap` null). Absent on every other scope.
+   * Spec rev 55 §8.1 (ruling A32): on a `provider-execution` scope, the flight-list pages the run spent. Design
+   * 2026-11-08 §4.8 withdrew the per-run flight allowance, so they have no cap (rule A bounds the step). `calls` above
+   * counts the grid or list pages only, with no cap on them (`cap` null). Absent on every other scope.
    */
-  flightLists?: { calls: number; cap: number };
+  flightLists?: { calls: number };
 }
 
 /**
@@ -82,8 +82,7 @@ export interface ReserveParams {
   scrolls?: number;
   /**
    * Spec rev 56 §5.1: the planned page count (default 1; `FLIGHT_LIST_PAGES_PER_PAIR_MAX` for a flights request with a
-   * return phase), checked against the run's flight allowance; a camoufox page scope's `calls` in `usage()` is the
-   * page sum.
+   * return phase); a camoufox page scope's `calls` in `usage()` is the page sum.
    */
   pages?: number;
 }

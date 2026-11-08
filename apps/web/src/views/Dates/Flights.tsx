@@ -219,7 +219,7 @@ function LowerFareLine({ list }: { list: FlightList }) {
 
 /**
  * The block's head, one sentence (spec rev 56 §11; 21.7 ui-003/004): for a list with a pairing, the outbound it used,
- * and that the first Back price is a seller's stated price only when one is shown (prov-001); after a limit edit the
+ * and that the first Back price is a seller's stated price only when one is shown (prov-001: complete offers read); after a limit edit the
  * outbound "selected under your limits when read" (or "which was over your limits when read"), as the section head
  * says it, never "within your limits" (code I2, M13); else WP20's "Outbound flights only · …", which never mentions
  * return flights.
@@ -228,7 +228,10 @@ function headOf(list: FlightList, p: PairingView | null, now: ReturnType<typeof 
   if (p === null) return headLine(list, now, COPY);
   const ago = COPY.agoOf(list.ageHours);
   const when = londonDaysAgo(list.fetchedAt, now) === 0 ? null : readAt(list.fetchedAt, now, COPY);
-  const seller = p.offer !== null;
+  // why: final whole-branch review I1, design 2026-11-08 §4.1: the first Back price is a seller's only when complete
+  // offers were read (`pairingPrice`'s rule, as PairingSection's Back line and the board row apply it); an incomplete
+  // booking leads with Google's "from" price, so the head names no seller's price then
+  const seller = p.offer?.complete === true;
   if (!p.selectedNow || !p.underCurrentLimits)
     return F.headPairingWhenRead(p.outboundFits ? p.which : 'over', seller, ago, when);
   return p.outboundFits

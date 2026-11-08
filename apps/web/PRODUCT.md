@@ -96,9 +96,11 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   one or two outbounds' returns, not every pairing, and booking stays on Google (the app opens no
   seller). Return flights and sellers are read only on worker machines whose recording session
   set the flags (the operator's Mac at present). Coverage and the buckets never change. Each read
-  counts against the browser's page allowance: up to 2 pages a date pair (a second outbound loads
-  the page again), 20 a run on an allowance of its own. Without the worker the page says flight
-  times need it.
+  loads up to 2 pages a date pair (a second outbound loads the page again). A run reads the
+  cheapest date pairs first, down the calendar, until more reading stops finding cheaper trips (five
+  trips with flights read wanted, twelve reads in a row without an improvement ends it), with no page
+  allowance; a pair read recently is reused, and a line under the table says how checking ended.
+  Without the worker the page says flight times need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
   - Google Flights via SearchApi: paid per call; date grid and itinerary search with booking

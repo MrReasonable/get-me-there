@@ -84,7 +84,14 @@ export function stateLine(card: SearchCard, now: IsoDateTime): StateLine {
     // why: ruling R-reading — the page's rule (`readingCount`): lists in hand, read now or reused
     const reading = readingCount(run.flights);
     if (run.status === 'running' && run.flights !== null && reading !== null)
-      return { kind: 'flights', words: S.readingFlights(reading, run.flights.planned) };
+      // why: design 2026-11-08 §5.5 — confirm mode has no planned total to name: dates checked, trips with flights read
+      return {
+        kind: 'flights',
+        words:
+          run.flights.confirm?.mode === 'confirm'
+            ? S.readingFlightsConfirm(reading, run.flights.confirm.confirmed)
+            : S.readingFlights(reading, run.flights.planned),
+      };
     return {
       kind: 'searching',
       words: S.searching(run.datePairsSearched, run.datePairs, leftWords(run.estimatedFinishAt, now)),

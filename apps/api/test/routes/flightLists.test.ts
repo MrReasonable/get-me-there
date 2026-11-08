@@ -282,18 +282,147 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
         booking: false,
         returnsStopped: null,
         bookingStopped: null,
+        confirm: null,
+        endedReason: null,
       },
     });
     for (const [i, c] of planned.entries())
       list(x, def, c, { fetchedAt: at(-1), executionId: id, failed: i === 0 });
     const res = await x.request(`/api/executions/${id}`);
     const e = apiContract.executionResponseSchema.parse(await res.json());
-    expect(e.flights).toEqual({ planned: 10, read: 8, reused: 1, failed: 1, ended: null });
-    // why: the 20.8 ruling — the browser worker's run scope states its flight pages beside the page cap (calls are the
-    // `/v1/flights` page rows: none were ledgered here; the seeded snapshot froze no allowance, read as 0)
+    expect(e.flights).toEqual({
+      planned: 10,
+      read: 8,
+      reused: 1,
+      failed: 1,
+      ended: null,
+      confirm: null,
+      stopCause: null,
+    });
+    // why: the 20.8 ruling — the browser worker's run scope states its flight pages beside its pages (calls are the
+    // `/v1/flights` page rows: none were ledgered here); design 2026-11-08 §4.8 withdrew their allowance: no cap
     expect(e.budget.find((u) => u.scope.startsWith('provider-execution'))?.flightLists).toEqual({
       calls: 0,
-      cap: 0,
+    });
+  });
+
+  // Design 2026-11-08 §7, §5.5: the stored summary travels on `flights.confirm` unchanged; null for a plan stored before it
+  it('passes the stored confirm summary through unchanged, and null for a run stored before the change', async () => {
+    const { x, s } = await setup();
+    const summary = {
+      mode: 'confirm',
+      confirmed: 7,
+      unread: 2,
+      uncheckedCheaper: 31,
+      stop: 'patience',
+    } as const;
+    const id = s.id('E');
+    x.ports.repos.executions.patch(id, {
+      flightLists: {
+        planned: 18,
+        cells: [],
+        reused: 0,
+        ended: null,
+        returns: true,
+        booking: true,
+        returnsStopped: null,
+        bookingStopped: null,
+        confirm: summary,
+        endedReason: null,
+      },
+    });
+    const res = await x.request(`/api/executions/${id}`);
+    const e = apiContract.executionResponseSchema.parse(await res.json());
+    expect(e.flights?.confirm).toEqual(summary);
+  });
+
+  // Design 2026-11-08 §5.5: the reason the step stopped early, for the line under the board (never a cause's text)
+  describe('flights.stopCause', () => {
+    const plan = (ended: 'stopped' | 'window' | null) => ({
+      planned: 3,
+      cells: [],
+      reused: 0,
+      ended,
+      returns: true,
+      booking: true,
+      returnsStopped: null,
+      bookingStopped: null,
+      confirm: { mode: 'confirm', confirmed: 1, unread: 0, uncheckedCheaper: 5, stop: null } as const,
+      endedReason: null,
+    });
+    const flightsOfRun = async (x: Harness, id: string) =>
+      apiContract.executionResponseSchema.parse(await (await x.request(`/api/executions/${id}`)).json())
+        .flights;
+
+    it("an ending error's detail is the one the plan stored, whatever failed after it", async () => {
+      const { x, def, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: { ...plan('stopped'), endedReason: 'quota' } });
+      // a read in flight failed later with another reason: it is never named as the stop's
+      list(x, def, A, { fetchedAt: at(-1), executionId: id, failed: true, reason: 'network' });
+      expect((await flightsOfRun(x, id))?.stopCause).toEqual({ kind: 'detail', detail: 'quota' });
+    });
+
+    it.each([
+      ['cancelled', { kind: 'cancelled' }, 'cancelled'],
+      ['fatal', { kind: 'fatal' }, 'fatal'],
+      [
+        'budget',
+        {
+          kind: 'budget',
+          scope: 'provider-execution',
+          providerId: 'camoufox',
+          unit: 'pages',
+          cap: 100,
+          resumeAfter: null,
+          resetsAt: null,
+          flights: { read: 3, planned: 3 },
+        },
+        'budget',
+      ],
+      ['limiter-timeout', { kind: 'limiter-timeout', providerId: 'camoufox', resumeAfter: null }, 'other'],
+    ] as const)('a run stopped by a %s cause reads %s', async (_n, cause, kind) => {
+      const { x, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: plan(null) });
+      x.ports.repos.executions.setStatus(id, 'paused_error', { stopCause: cause, errorText: 'x' });
+      expect((await flightsOfRun(x, id))?.stopCause).toEqual({ kind });
+    });
+
+    it("words a budget stop's flights with no denominator in confirm mode (stopText's confirm fact)", async () => {
+      const { x, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: plan(null) });
+      x.ports.repos.executions.setStatus(id, 'paused_budget', {
+        stopCause: {
+          kind: 'budget',
+          scope: 'provider-execution',
+          providerId: 'camoufox',
+          unit: 'pages',
+          cap: 100,
+          resumeAfter: null,
+          resetsAt: null,
+          flights: { read: 3, planned: 3 },
+        },
+        errorText: 'x',
+      });
+      const res = await x.request(`/api/executions/${id}`);
+      const e = apiContract.executionResponseSchema.parse(await res.json());
+      expect(e.stop?.sentence).toContain('flights were read for 3 dates.');
+    });
+
+    it('is null for a run nothing stopped', async () => {
+      const { x, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: plan(null) });
+      expect((await flightsOfRun(x, id))?.stopCause).toBeNull();
+    });
+
+    it('is null for a plan that stored no confirm summary', async () => {
+      const { x, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: { ...plan(null), confirm: null } });
+      expect((await flightsOfRun(x, id))?.stopCause).toBeNull();
     });
   });
 });

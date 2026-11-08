@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { asIsoDate } from '@gmt/core';
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CELL_FOCUS } from '../../../src/views/Dates/OverviewMonth.js';
 import { at, DATES_SPACE, type DatesOptions, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
+import { flightPair } from '../../fixtures.searches.js';
+import { serveFlightLists } from '../../msw/searchesHandlers.js';
+import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
 import { findBoard, renderDates } from './render.js';
 
@@ -163,5 +168,55 @@ describe('Tab order across the view (spec §11 Accessibility)', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(seen.filter((s) => s === 'overview')).toHaveLength(1);
     expect(screen.getAllByRole('link', { name: /^Open \d/ })).toHaveLength(10);
+  });
+});
+
+// Design 2026-11-08 §5.3: a row's flights open with a keyboard-operable button.
+describe('a row’s flights button (design 2026-11-08 §5.3)', () => {
+  async function renderOne() {
+    server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
+    const r = renderDates({
+      body: {
+        discoveryProviders: ['travelpayouts', 'camoufox'],
+        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(90_000)) },
+      },
+    });
+    await findBoard();
+    const button = await screen.findByRole('button', { name: /^Show flights/ });
+    return { ...r, button };
+  }
+
+  it('is a real button in the tab order, after the row’s link', async () => {
+    const { user, button } = await renderOne();
+    const link = screen.getByRole('link', { name: /^Open 14 Mar 2027/ });
+    link.focus();
+    await user.tab();
+    expect(button).toHaveFocus();
+    expect(button.tagName).toBe('BUTTON');
+    expect(button).not.toHaveAttribute('tabindex', '-1');
+  });
+
+  it.each([
+    ['Enter', '{Enter}'],
+    ['Space', ' '],
+  ])('opens with %s and closes with it again, keeping focus', async (_name, key) => {
+    const { user, button } = await renderOne();
+    button.focus();
+    expect(document.querySelector('[data-flights-for]')).toBeNull();
+    await user.keyboard(key);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull();
+    expect(button).toHaveFocus();
+    await user.keyboard(key);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('[data-flights-for]')).toBeNull();
+  });
+
+  // why: jsdom computes no focus ring; the rule that draws it is the stylesheet's, on every focusable element
+  it('carries no rule that hides its focus ring: the page-wide :focus-visible outline is the one that draws it', async () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/styles/world.css'), 'utf8');
+    expect(css).toMatch(/:focus-visible\s*\{[^}]*outline/);
+    const { button } = await renderOne();
+    expect(button.className).not.toMatch(/outline-none|focus:outline-0/);
   });
 });

@@ -7,6 +7,7 @@ import { formatIsoDate } from '../../format.js';
 import { coverageLineText } from '../../lib/coverageLine.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { pairingKindOf } from '../Dates/board.js';
 
 /**
  * Line 1 (spec §11): "cheapest found £X · destination dates · basis · class" with the price through
@@ -95,12 +96,18 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
           COPY.datesView.airports(figure.origin, figure.destination),
           // why: spec rev 56 §6.9, §11 (arch-r3-003): a pairing figure is named for what it is, the cheapest of the
           // sellers read, not checked with the airline (it opens the detail on the calendar basis, resultBasisOf)
-          COPY.basisName[figure.basis],
+          figure.basis === 'pairing' && figure.pairing !== null
+            ? COPY.basisKindName[pairingKindOf(figure.pairing)]
+            : COPY.basisName[figure.basis],
         )}
       </span>
       {/* why: 21.7 prov-002: a pairing figure is a seller's offer from a flight list, never one of these rows, so it
       differs for what it is; the recency reason is for a verified or calendar figure */}
-      <span className="w-full text-fg-2">{figure.basis === 'pairing' ? D.boardPairing : D.boardDiffers}</span>
+      <span className="w-full text-fg-2">
+        {figure.basis === 'pairing' && figure.pairing !== null
+          ? D.boardPairing[pairingKindOf(figure.pairing)]
+          : D.boardDiffers}
+      </span>
     </div>
   );
 }

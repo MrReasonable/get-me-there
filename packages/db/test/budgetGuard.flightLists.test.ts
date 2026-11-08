@@ -6,8 +6,9 @@ import { freshDb, T0 } from './helpers/db.js';
 import { budgetConfig, limits } from './helpers/factories.js';
 import { guardFor, guardWithDb, guardWithLedger } from './helpers/guard.js';
 
-// Spec revision 55 §8.1 (ruling A32): a flight-list page (`/v1/flights`) is a browser page with an allowance of its own
-// in the run (`budget.flightListPages`); the provider's grid and list pages have no cap (spec rev 65), nor its month.
+// Spec revision 55 §8.1 (ruling A32): a flight-list page (`/v1/flights`) is a browser page counted on its own in the run.
+// Design 2026-11-08 §4.8 withdrew its per-run allowance (`budget.flightListPages` is only the step's on-switch now), as
+// spec rev 65 withdrew the cap on the provider's grid and list pages: no camoufox page has a run cap, nor a month cap.
 
 const page = (executionId: string | null, endpointPath: string, tileIndex: number | null = null) => ({
   providerId: 'camoufox' as const,
@@ -35,25 +36,22 @@ beforeEach(() => {
 });
 
 describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
-  it('flightListPages 10: ten /v1/flights pages pass and the eleventh is refused at provider-execution', () => {
+  // why: design 2026-11-08 §4.8: a run stored with the 20-page figure still reads on past it; rule A bounds the step
+  it('a snapshot holding flightListPages 20: 30 two-page /v1/flights requests are all reserved, the usage stating no cap', () => {
     const g = guardFor({
       snapshotCaps: { e1: { camoufox: 100 } },
-      snapshotFlightPages: { e1: 10 },
+      snapshotFlightPages: { e1: 20 },
     });
-    for (let i = 0; i < 10; i++) g.reserve(flights('e1')).finalise(done);
-    const e = (() => {
-      try {
-        g.reserve(flights('e1'));
-      } catch (err) {
-        return err;
-      }
-      return undefined;
-    })();
-    expect(e).toBeInstanceOf(BudgetExceeded);
-    expect(e).toMatchObject({ scope: 'provider-execution', cap: 10, current: 10, providerId: 'camoufox' });
+    for (let i = 0; i < 30; i++)
+      expect(
+        scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 })),
+      ).toBe(undefined);
+    expect(
+      g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists,
+    ).toEqual({ calls: 60 });
   });
 
-  it('grid pages never count toward the flight allowance, and are never refused however many the run has loaded', () => {
+  it('grid pages are never refused however many the run has loaded, and flight pages after them neither', () => {
     const g = guardFor({
       snapshotCaps: { e1: { camoufox: 2 } },
       snapshotFlightPages: { e1: 10 },
@@ -62,7 +60,7 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     expect(() => g.reserve(flights('e1'))).not.toThrow();
   });
 
-  it('usage(provider-execution) reports grid pages with no cap and, as a second entry, flight pages against the flight allowance', () => {
+  it('usage(provider-execution) reports grid pages with no cap and, as a second entry, flight pages with none either', () => {
     const g = guardFor({
       snapshotCaps: { e1: { camoufox: 7 } },
       snapshotFlightPages: { e1: 10 },
@@ -72,11 +70,11 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' })).toMatchObject({
       calls: 3,
       cap: null,
-      flightLists: { calls: 4, cap: 10 },
+      flightLists: { calls: 4 },
     });
   });
 
-  it('a no-page flight row counts toward neither allowance', () => {
+  it('a no-page flight row counts as no flight page', () => {
     const g = guardFor({
       snapshotCaps: { e1: { camoufox: 100 } },
       snapshotFlightPages: { e1: 1 },
@@ -89,14 +87,19 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
         pageClass: 'no-page',
       });
     expect(() => g.reserve(flights('e1'))).not.toThrow();
+    expect(
+      g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists,
+    ).toEqual({ calls: 1 });
   });
 
-  it('a snapshot without flightListPages refuses the first /v1/flights reserve (cap 0, fail closed)', () => {
+  // why: design 2026-11-08 §4.8: the snapshot's figure is no allowance, so a snapshot without it refuses nothing either
+  // (the step itself does not run without it: the engine's entry predicate)
+  it('a snapshot without flightListPages reserves a /v1/flights request and reports its pages with no cap', () => {
     const g = guardFor({ snapshotCaps: { e1: { camoufox: 100 } } });
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' })).toMatchObject({
-      flightLists: { calls: 0, cap: 0 },
+      flightLists: { calls: 0 },
     });
-    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-execution');
+    expect(scopeOf(() => g.reserve(flights('e1')))).toBeUndefined();
     expect(() => g.reserve(grid('e1', 0))).not.toThrow();
   });
 
@@ -109,8 +112,8 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     });
   });
 
-  // why: spec rev 65: the browser's pages count against no per-run call cap; only the flight allowance bounds them
-  it('flight pages never count against execution-free-calls: only the flight allowance stops them', () => {
+  // why: spec rev 65: the browser's pages count against no per-run call cap; design 2026-11-08 §4.8: nor a flight one
+  it('flight pages never count against execution-free-calls, and no cap stops them', () => {
     const g = guardFor({
       maxFreeCalls: 1,
       snapshotCaps: { e1: { camoufox: 100 } },
@@ -118,7 +121,7 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     });
     g.reserve(grid('e1', 0)).finalise(done);
     for (let i = 0; i < 3; i++) g.reserve(flights('e1')).finalise(done);
-    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-execution');
+    expect(scopeOf(() => g.reserve(flights('e1')))).toBeUndefined();
     expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(0);
   });
 });
@@ -224,20 +227,15 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     );
   });
 
-  it('flightListPages 20, nine rows finalised at 2: a reserve of 2 passes at 18 and the next, at 20, is refused at provider-execution', () => {
+  it('flightListPages 20, nine rows finalised at 2 and one pending: reserves past 20 pass, the pending plan counted', () => {
     const g = guardFor(caps);
     for (let i = 0; i < 9; i++) g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
-    expect(() => g.reserve({ ...flights('e1'), pages: 2 })).not.toThrow();
-    let refused: unknown;
-    try {
-      g.reserve({ ...flights('e1'), pages: 2 });
-    } catch (e) {
-      refused = e;
-    }
-    expect(refused).toBeInstanceOf(BudgetExceeded);
-    expect(refused).toMatchObject({ scope: 'provider-execution', cap: 20, current: 20, requested: 2 });
-    // one page still fits nowhere: the pending reserve of 2 counts its plan
-    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-execution');
+    g.reserve({ ...flights('e1'), pages: 2 });
+    expect(scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }))).toBeUndefined();
+    expect(scopeOf(() => g.reserve(flights('e1')))).toBeUndefined();
+    expect(
+      g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists?.calls,
+    ).toBe(23);
   });
 
   it('usage reports the page sums: a row of 0 counts 0, of 2 counts 2, NULL counts 1, a no-page row 0', () => {
@@ -254,7 +252,7 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     g.reserve(grid('e1', 1)).finalise(done);
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' })).toMatchObject({
       calls: 2,
-      flightLists: { calls: 3, cap: 20 },
+      flightLists: { calls: 3 },
     });
     expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(5);
     // a pending reserve counts its plan in both
@@ -291,9 +289,6 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     // a grid page cut off the same way still counts as a run page (only the flight allowance leaves it out)
     g.reserve(grid('e1', 0)).finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'page' });
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).calls).toBe(1);
-    // the check reads the same sum: 8 more requests of 2 fit 20 with the cancelled one left out (ten pairs answered)
-    for (let i = 0; i < 8; i++) g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
-    expect(scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }))).toBe('provider-execution');
   });
 
   it('the rows’ scroll counts are unchanged by page counts', () => {

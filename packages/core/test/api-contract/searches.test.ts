@@ -23,6 +23,7 @@ describe("a card's cheapest figure takes the board's three bases (spec rev 56 §
   it("accepts basis 'pairing' (an offer's price, the flight list's provenance), refuses another word", () => {
     const pairing = cardCheapest({
       basis: 'pairing',
+      priceKind: 'seller',
       pricePence: 118_000,
       provenance: {
         providerId: 'camoufox',
@@ -45,6 +46,12 @@ describe("a card's cheapest figure takes the board's three bases (spec rev 56 §
       return r.success ? [] : r.error.issues.map((i) => i.path.join('.'));
     };
     expect(paths({ ...pairing, stale: 'refresh' })).toEqual([]);
+    // why: design 2026-11-08 §5.6: the price kind exactly on a pairing figure, any of the three kinds
+    for (const priceKind of ['seller', 'google-unread', 'google-incomplete'])
+      expect(paths({ ...pairing, priceKind })).toEqual([]);
+    expect(paths({ ...pairing, priceKind: null })).toEqual(['cheapest.priceKind']);
+    expect(paths({ ...pairing, priceKind: 'offer' })).toContain('cheapest.priceKind');
+    expect(paths({ ...cardCheapest(), priceKind: 'seller' })).toEqual(['cheapest.priceKind']);
     expect(paths({ ...pairing, provenance: cardCheapest().provenance })).toEqual(['cheapest.provenance']);
   });
 });
@@ -99,7 +106,18 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
   it('carries the run’s flight counts as the execution read does, and refuses more in hand than planned (R-reading)', () => {
     const f = (x: Record<string, unknown>) =>
       searchCard({
-        latestRun: latestRun({ flights: { planned: 10, read: 3, reused: 2, failed: 1, ended: null, ...x } }),
+        latestRun: latestRun({
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 2,
+            failed: 1,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+            ...x,
+          },
+        }),
       });
     expect(searchCardSchema.safeParse(f({})).success).toBe(true);
     expect(searchCardSchema.safeParse(f({ ended: 'window' })).success).toBe(true);

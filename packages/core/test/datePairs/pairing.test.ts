@@ -7,7 +7,9 @@ import {
   listFresh,
   PAIRING_READ,
   type PairingCandidate,
+  pairingKindOf,
   pairingLeads,
+  pairingOffer,
   pairingReadOf,
   resultBasisOf,
 } from '../../src/datePairs/pairing.js';
@@ -335,7 +337,44 @@ describe('cheapestOffer (spec rev 56 §6.9: the lowest stated price of a read or
   });
 });
 
-describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-lead with R-sellers)', () => {
+// design 2026-11-08 §4.1: the offer moved here from the api's candidateOf; its api tests pin it through the candidate,
+// this pins it directly
+describe('pairingOffer (the booking read counts only for the pairing it was read for)', () => {
+  const { flights, returns } = PAIRING_FIXTURE;
+  it("is the booking's cheapest offer, complete, for the pairing the worker booked", () => {
+    expect(pairingOffer(returns, flights, PAIRING_CHEAPEST)).toEqual({
+      offer: PAIRING_OFFER.offer,
+      complete: true,
+    });
+  });
+  it('is no offer for another pairing, even of the same list', () => {
+    expect(pairingOffer(returns, flights, { ...PAIRING_CHEAPEST, attempt: 0, returnIndex: 0 })).toEqual({
+      offer: null,
+      complete: false,
+    });
+    expect(pairingOffer(returns, flights, { ...PAIRING_CHEAPEST, returnIndex: 1 })).toEqual({
+      offer: null,
+      complete: false,
+    });
+  });
+  it('is no offer without a booking read', () => {
+    expect(pairingOffer({ ...returns, booking: null }, flights, PAIRING_CHEAPEST)).toEqual({
+      offer: null,
+      complete: false,
+    });
+  });
+  it('has an offer, not complete, when the offers may be missing one cheaper than the return', () => {
+    const booking = returns.booking;
+    if (booking === null) throw new Error('the fixture has a booking read');
+    // why: a "more options" control left unexpanded means a cheaper seller may not have been read
+    const r = { ...returns, booking: { ...booking, status: 'expand-failed' as const, expanded: false } };
+    const got = pairingOffer(r, flights, { ...PAIRING_CHEAPEST, fromMinor: 100_000 });
+    expect(got.offer).toEqual(PAIRING_OFFER.offer);
+    expect(got.complete).toBe(false);
+  });
+});
+
+describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; design 2026-11-08 §4.1: no complete offers needed)', () => {
   const candidate = (over: Partial<PairingCandidate>): PairingCandidate => ({
     fromMinor: 118_000,
     offer: { seller: 'QQ Travel', fare: null, priceMinor: 118_000 },
@@ -343,6 +382,7 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     complete: true,
     which: 'next-cheapest',
     times: { departOut: '07:15', arriveOut: '18:05', departBack: '14:20', arriveBack: '06:25' },
+    journeyMinutes: 1_615,
     mismatch: false,
     provenance: {
       providerId: 'camoufox',
@@ -368,7 +408,8 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
   const LATER = asIsoDateTime('2027-03-01T10:00:00.000Z');
   // why: spec rev 62/63 (Ian, 2026-11-06): its age alone never stops it leading; an older one gives way only to a grid
   // price read after it for the same cell
-  it('leads only with fits, under current limits, complete and an offer, and fresh or not outdated (every combination)', () => {
+  // why: design 2026-11-08 §4.1: a pairing with no offer, or with incomplete offers, leads at the return's "from" price
+  it('leads only with fits, under current limits, and fresh or not outdated, whatever its offers (every combination)', () => {
     for (const fits of flags)
       for (const fresh of flags)
         for (const underCurrentLimits of flags)
@@ -382,7 +423,7 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
                   complete,
                   ...(hasOffer ? {} : { offer: null }),
                 });
-                const want = fits && underCurrentLimits && complete && hasOffer && (fresh || grid !== LATER);
+                const want = fits && underCurrentLimits && (fresh || grid !== LATER);
                 expect(
                   pairingLeads(c, grid),
                   JSON.stringify({ fits, fresh, underCurrentLimits, complete, hasOffer, grid }),
@@ -391,12 +432,10 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
               }
   });
   // why: final review B-I1: the web's block reads the same predicate from the facts it holds (an offer of its own shape)
-  it('pairingLeads reads only the six facts and the grid time, so the block and the api share it', () => {
+  it('pairingLeads reads only the four facts and the grid time, so the block and the api share it', () => {
     const facts = {
       fits: true,
       underCurrentLimits: true,
-      offer: { seller: 'QQ Travel' },
-      complete: true,
       fresh: false,
       fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
     };
@@ -406,8 +445,8 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     expect(pairingLeads(facts, facts.fetchedAt)).toBe(true);
     expect(pairingLeads(facts, LATER)).toBe(false);
     expect(pairingLeads({ ...facts, fresh: true }, LATER)).toBe(true);
-    expect(pairingLeads({ ...facts, offer: null }, null)).toBe(false);
-    expect(pairingLeads({ ...facts, complete: false }, null)).toBe(false);
+    expect(pairingLeads({ ...facts, fits: false }, null)).toBe(false);
+    expect(pairingLeads({ ...facts, underCurrentLimits: false }, null)).toBe(false);
   });
   // why: final review B-M1: one elapsed-time rule for the list's stale mark and the pairing's freshness
   it('listFresh: within the refresh by elapsed milliseconds, never whole hours', () => {
@@ -431,10 +470,12 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     expect(pairingReadOf(candidate({ fresh: false }), EARLIER)).toBe('within');
     expect(pairingReadOf(candidate({ fresh: false }), LATER)).toBe('within-older');
     expect(pairingReadOf(candidate({}), LATER)).toBe('within');
-    expect(pairingReadOf(candidate({ fresh: false, offer: null }), null)).toBe('within-older');
-    expect(pairingReadOf(candidate({ fresh: false, complete: false }), null)).toBe('within-older');
-    expect(pairingReadOf(candidate({ offer: null, complete: false }), null)).toBe('sellers-not-read');
-    expect(pairingReadOf(candidate({ complete: false }), null)).toBe('offers-incomplete');
+    // why: design 2026-11-08 §4.1: no offer, or incomplete offers, lead at the "from" price, so 'sellers-not-read' and
+    // 'offers-incomplete' are never produced (their wire codes stay)
+    expect(pairingReadOf(candidate({ fresh: false, offer: null }), null)).toBe('within');
+    expect(pairingReadOf(candidate({ fresh: false, complete: false }), LATER)).toBe('within-older');
+    expect(pairingReadOf(candidate({ offer: null, complete: false }), null)).toBe('within');
+    expect(pairingReadOf(candidate({ complete: false }), null)).toBe('within');
     expect(pairingReadOf(candidate({}), null)).toBe('within');
   });
   it('PAIRING_READ is pinned: its order is the wire code (ruling R-sparse); FIGURE_BASES its three', () => {
@@ -464,5 +505,19 @@ describe('resultBasisOf (spec rev 56 §6.9: a pairing figure opens the detail on
     expect(() => resultBasisOf(JSON.parse('"offer"'))).toThrow(
       new RangeError('resultBasisOf: no basis offer'),
     );
+  });
+});
+
+describe('pairingKindOf (design 2026-11-08 §4.1: whose price a pairing shows)', () => {
+  it.each([
+    ['a seller offer when the price is not a "from" price', { isFrom: false, offersRead: 3 }, 'seller'],
+    ['google-unread when a "from" price read no offers', { isFrom: true, offersRead: 0 }, 'google-unread'],
+    [
+      'google-incomplete when a "from" price read some offers',
+      { isFrom: true, offersRead: 2 },
+      'google-incomplete',
+    ],
+  ] as const)('is %s', (_name, group, kind) => {
+    expect(pairingKindOf(group)).toBe(kind);
   });
 });

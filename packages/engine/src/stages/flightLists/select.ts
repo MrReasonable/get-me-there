@@ -108,9 +108,26 @@ export function cellKeyOf(p: RankedDatePair): string {
 }
 
 /**
+ * Design 2026-11-08 §4.2, §4.3 (confirm the cheapest trips): the step's queue, in calendar price order, cheapest first:
+ * every pair whose figure is current (a calendar price not superseded, a verified one the latest search saw) and is not
+ * a fresh verified figure. A fresh verified figure is a confirmed trip already (an itinerary price), so it enters the
+ * standings by reuse instead; a stale one is queued and read like a calendar price. Departed pairs are already out of
+ * `rankedPairsFor`.
+ */
+export function confirmQueue(ranked: readonly RankedDatePair[]): RankedDatePair[] {
+  // why: design 2026-11-08 §4.2 (controller ruling on the final whole-branch review): the step reads the cheapest
+  // dates first, so a stale verified figure the shared ranking holds in a later tier queues at its own price; the sort
+  // is stable, so equal prices keep the ranking's order (the board's tie order). The estimate builds this same queue.
+  return ranked
+    .filter((p) => p.current && !(p.basis === 'verified' && !p.stale))
+    .sort((a, b) => a.pricePence - b.pricePence);
+}
+
+/**
  * Spec revision 56 §8.1: the first `count` (FLIGHT_LIST_COUNT, 10) date pairs of `ranked` that depart after
  * `todayLondon`, in the ranking's order, split into those to `read` and those `reused` (`listReusable` of the newest
- * list for the pair's cell under `plan`). `read.length + reused.length ≤ count`.
+ * list for the pair's cell under `plan`). `read.length + reused.length ≤ count`. Design 2026-11-08 §4.2: the step in
+ * confirm mode splits its whole queue (`count` Infinity); only the outbound-only fallback keeps the 10.
  */
 export function selectFlightPairs(
   ranked: readonly RankedDatePair[],

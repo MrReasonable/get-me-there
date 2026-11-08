@@ -342,6 +342,32 @@
   }
 }
 
+/* Design 2026-11-08 §5.1–§5.3: a calendar price in the secondary style ("calendar £565"), the labelled break before the
+   dates whose flights were never read, and the button that opens a row's flights. Words and weight, never colour alone. */
+@layer components {
+  .board .price-secondary {
+    display: block;
+    font-weight: 400;
+    color: var(--flap-ink-2);
+  }
+  .board .price-secondary .calendar-word {
+    font: 600 12.5px / 1.4 var(--font-ui);
+    text-transform: lowercase;
+  }
+  .board tbody tr.tier-break,
+  .board tbody tr.tier-break:hover {
+    cursor: auto;
+    background: none;
+  }
+  .board tbody tr.tier-break > td {
+    padding-top: 14px;
+    padding-bottom: 4px;
+    font: 600 13.5px / 1.4 var(--font-ui);
+    color: var(--flap-ink-2);
+    border-top: 2px solid currentColor;
+  }
+}
+
 @media (max-width: 899px) {
   .board .card-flights {
     grid-column: 1 / -1;
@@ -357,5 +383,17 @@
   }
   .flight-outcome {
     justify-content: flex-end;
+  }
+  /* design 2026-11-08 §5.2: the labelled break is one full-width line between the cards, never a card of its own */
+  .board tbody tr.tier-break {
+    display: block;
+    padding: 10px 2px 0;
+  }
+  .board tbody tr.tier-break > td {
+    display: block;
+    padding: 8px 0 0;
+  }
+  .board tbody tr.tier-break + tr {
+    border-top: 0;
   }
 }

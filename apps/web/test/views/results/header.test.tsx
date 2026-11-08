@@ -1,3 +1,4 @@
+import type { DatePairPairing } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
@@ -11,7 +12,7 @@ import { renderWithProviders } from '../../render.js';
 // "cheapest of the sellers read, not checked with the airline", never "verified".
 
 /** The board's pairing figure as the scoped `/results` read sends it (the contract's per-figure rules hold). */
-const pairingFigure = () => {
+const pairingFigure = (group: Partial<DatePairPairing> = {}) => {
   const list = provFlightList();
   return datePairFigure({
     price: { pricePence: 118_000, provenance: list, stale: false, ageHours: 4, truncated: false },
@@ -39,6 +40,7 @@ const pairingFigure = () => {
       provenance: list,
       stale: false,
       ageHours: 4,
+      ...group,
     },
     pairingRead: 'within',
   });
@@ -54,7 +56,8 @@ describe("the detail's header with a pairing board figure (spec rev 56 §6.9; ar
     expect(within(board).getByTestId('price-cell')).toHaveTextContent('£1,180');
     expect(within(board).getByTestId('provenance')).toHaveTextContent('constraints not checked');
     expect(board.className).toMatch(/border-dashed/);
-    expect(board).toHaveTextContent(`LHR → JFK · ${COPY.basisName.pairing}`);
+    // why: design 2026-11-08 §4.1: the figure's own pairing group (a complete offer here) says whose price it is
+    expect(board).toHaveTextContent(`LHR → JFK · ${COPY.basisKindName.seller}`);
     expect(board).not.toHaveTextContent(/verified/i);
     // why: 21.7 prov-002: a pairing figure differs because it is a seller's offer from a flight list, never by recency
     expect(board).toHaveTextContent(
@@ -62,4 +65,32 @@ describe("the detail's header with a pairing board figure (spec rev 56 §6.9; ar
     );
     expect(board).not.toHaveTextContent('the board prefers a price the latest search returned');
   });
+
+  // why: design 2026-11-08 §4.1: a Google round-trip price is never described as a seller's offer
+  it.each([
+    [0, "Google's price, sellers not read, not checked with the airline", 'with no seller read'],
+    [2, "Google's price, not every seller read, not checked with the airline", 'with not every seller read'],
+  ])(
+    "a Google price (%i offers read) is worded as Google's, not a seller's offer",
+    (offersRead, basis, tail) => {
+      const data = resultsResponse({
+        rows: [calendarRow()],
+        datePairFigure: pairingFigure({
+          isFrom: true,
+          seller: null,
+          fare: null,
+          complete: false,
+          offersRead,
+        }),
+      });
+      renderWithProviders(
+        <ResultsHeader data={data} filteredFirst={data.rows[0] ?? null} coveragePatch={{}} />,
+      );
+      const board = screen.getByTestId('board-figure');
+      expect(board).toHaveTextContent(`LHR → JFK · ${basis}`);
+      expect(board).toHaveTextContent("It is Google's round-trip price for one outbound and one return");
+      expect(board).toHaveTextContent(tail);
+      expect(board).not.toHaveTextContent("seller's offer");
+    },
+  );
 });

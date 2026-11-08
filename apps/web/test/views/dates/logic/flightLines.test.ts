@@ -1,16 +1,26 @@
-import { asIsoDateTime, flightLimitsOf } from '@gmt/core';
+import {
+  asIsoDateTime,
+  type DatePair,
+  type DatePairFigure,
+  decodeDatePairs,
+  flightLimitsOf,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { FlightList } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
+import { boardModel } from '../../../../src/views/Dates/board.js';
 import {
+  boardGroups,
   datesShort,
   headLine,
   hoursText,
   legMarks,
   limitsOf,
+  ranksInOrder,
   readButtonWords,
 } from '../../../../src/views/Dates/flightLines.js';
 import { londonDaysAgo } from '../../../../src/views/Dates/stateLines.js';
+import { at, datesResponse, figurePairing, pairingFig, priced, pricedPair } from '../../../fixtures.dates.js';
 import { definition } from '../../../fixtures.js';
 import { flightList, listedFlight, listedReturn } from '../../../fixtures.searches.js';
 import { NOW } from '../../../render.js';
@@ -165,5 +175,65 @@ describe('readButtonWords (ruling D3, prov-008: the pages from the response, nev
   it('the planned pages as the response states them', () => {
     expect(readButtonWords(2, F)).toBe('Read flights for this date (free, up to 2 pages)');
     expect(readButtonWords(1, F)).toBe('Read flights for this date (free, 1 page)');
+  });
+});
+
+// Design 2026-11-08 §5.2, §5.4: tie groups never mix a trip with flights read and a calendar price, and the ranks in a
+// tie follow the order the rows are shown in.
+describe('tiers and ranks in a tie', () => {
+  /** Rows of the board for these figures, in rank order, all on distinct departures. */
+  function rowsOf(figures: readonly DatePairFigure[]) {
+    const pairs: Record<string, ReturnType<typeof pricedPair>> = {};
+    figures.forEach((f, i) => {
+      pairs[at(`2027-03-${String(14 + i).padStart(2, '0')}`, 12)] = pricedPair(f);
+    });
+    const decoded: DatePair[] = decodeDatePairs(datesResponse({ pairs })).pairs;
+    const m = boardModel(
+      decoded,
+      { nights: null, bestPerWeek: false, sort: { key: 'price', dir: 'asc' } },
+      NOW,
+    );
+    const rows = m.rows.flatMap((p) => (p.figure === null ? [] : [{ ...p, figure: p.figure }]));
+    return { rows, rankOf: m.rankOf };
+  }
+  const trip = (pence: number, stale: 'refresh' | false = false) =>
+    pairingFig({
+      pairing: figurePairing({ pricePence: pence, fromPence: pence, stale }),
+      price: { ...pairingFig().price, pricePence: pence, stale },
+    });
+
+  it('a trip with flights read and a calendar price at one price are not one tie group', () => {
+    const { rows } = rowsOf([trip(56_400), priced(56_400), priced(56_400)]);
+    expect(boardGroups(rows, true).map((g) => g.map((r) => r.figure.basis))).toEqual([
+      ['pairing'],
+      ['calendar', 'calendar'],
+    ]);
+  });
+
+  it('a fresh trip and an older trip at one price are not one tie group either', () => {
+    const { rows } = rowsOf([trip(56_400), trip(56_400, 'refresh')]);
+    expect(boardGroups(rows, true).map((g) => g.length)).toEqual([1, 1]);
+  });
+
+  it('each row is its own group when not sorted by price', () => {
+    const { rows } = rowsOf([priced(56_400), priced(56_400)]);
+    expect(boardGroups(rows, false).map((g) => g.length)).toEqual([1, 1]);
+  });
+
+  it('three tied pairs reordered by their flights take ranks 1, 2, 3 top to bottom', () => {
+    const { rows, rankOf } = rowsOf([priced(56_400), priced(56_400), priced(56_400)]);
+    const [a, b, c] = rows;
+    if (a === undefined || b === undefined || c === undefined) throw new Error('rows');
+    // the flights put the third pair first, then the first, then the second
+    const ranks = ranksInOrder([[c, a, b]], rankOf);
+    expect([c, a, b].map((r) => ranks.get(r.index))).toEqual([1, 2, 3]);
+  });
+
+  it('a group of one, and groups after a tie, keep their price ranks', () => {
+    const { rows, rankOf } = rowsOf([priced(56_400), priced(56_400), priced(60_000)]);
+    const [a, b, c] = rows;
+    if (a === undefined || b === undefined || c === undefined) throw new Error('rows');
+    const ranks = ranksInOrder([[b, a], [c]], rankOf);
+    expect([b, a, c].map((r) => ranks.get(r.index))).toEqual([1, 2, 3]);
   });
 });

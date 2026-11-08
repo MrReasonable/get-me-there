@@ -208,9 +208,10 @@ describe('a search’s header (spec rev 55 §11)', () => {
       },
     });
     const rows = boardRows(await findBoard());
-    expect(rows[0]).toHaveTextContent('from the Aviasales cache, constraints not checked');
-    expect(rows[1]).toHaveTextContent("from Google's date grid, constraints not checked");
-    expect(rows[2]).toHaveTextContent('checked fares, verified');
+    // why: design 2026-11-08 §5.1: the fresh verified figure ranks first, before the cheaper calendar prices
+    expect(rows[0]).toHaveTextContent('checked fares, verified');
+    expect(rows[1]).toHaveTextContent('from the Aviasales cache, constraints not checked');
+    expect(rows[2]).toHaveTextContent("from Google's date grid, constraints not checked");
   });
 });
 
@@ -293,7 +294,7 @@ describe('no main-path jargon on a search’s page, in any state (spec rev 55 §
       { status: 'running' as const },
       {
         status: 'running' as const,
-        flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+        flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null, confirm: null, stopCause: null },
       },
       { status: 'running' as const, stage: 'verification' as const },
     ]) {

@@ -5,7 +5,7 @@
  * offer of its booking read (`cheapestOffer`), and when it leads a date pair's figure (`pairingLeads`, `pairingReadOf`).
  */
 import { compareReturns, type FlightLimits, fitsLimits } from '../flights/choose.js';
-import { cheapestOffer, type Offer, type ReturnRead } from '../flights/returns.js';
+import { cheapestOffer, type Offer, offersComplete, type ReturnRead } from '../flights/returns.js';
 import type { ListedFlight, ListedReturn } from '../flights/types.js';
 import type { StaleMark } from '../labels/age.js';
 import type { IsoDateTime } from '../types/ids.js';
@@ -151,10 +151,64 @@ export function bookingReturnOf(
 }
 
 /**
+ * The cheapest offer of the booking read that names `p`, and whether it is complete (design 2026-11-08 §4.1; moved from
+ * the api's `candidateOf`): the booking's offers count only when its `attempt` and `returnIndex` are `bookingReturnOf`'s
+ * and the pairing's (R-sellers); otherwise there is no offer.
+ */
+export function pairingOffer(
+  r: ReturnRead,
+  flights: readonly ListedFlight[],
+  p: Pairing,
+): { offer: Offer | null; complete: boolean } {
+  const booked = bookingReturnOf(r, flights);
+  const b = r.booking;
+  const forPairing =
+    b !== null &&
+    booked !== null &&
+    b.attempt === booked.attempt &&
+    b.returnIndex === booked.returnIndex &&
+    b.attempt === p.attempt &&
+    b.returnIndex === p.returnIndex;
+  const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
+  return { offer, complete: offer !== null && b !== null && offersComplete(b, p.fromMinor) };
+}
+
+/** Whose price a pairing's figure carries: a seller's complete offer, or Google's round-trip price. */
+export type PairingPriceKind = 'seller' | 'google';
+
+/** Whose price a pairing's group shows, in the board's words (design 2026-11-08 §4.1, §5.1). */
+export const PAIRING_KINDS = ['seller', 'google-unread', 'google-incomplete'] as const;
+export type PairingKind = (typeof PAIRING_KINDS)[number];
+
+/**
+ * The kind of a pairing's price from its group alone: `isFrom` says whether it is the return's "from" price (Google's),
+ * and `offersRead` then says whether any seller was read (`google-incomplete`) or none (`google-unread`). A seller's
+ * price (`isFrom` false) is of complete offers. The one place the kind is derived: the board, the detail and the card
+ * (whose contract carries it as `priceKind`) all read it.
+ */
+export function pairingKindOf(g: { isFrom: boolean; offersRead: number }): PairingKind {
+  if (!g.isFrom) return 'seller';
+  return g.offersRead === 0 ? 'google-unread' : 'google-incomplete';
+}
+
+/**
+ * The one price of a pairing (design 2026-11-08 §4.1): the cheapest seller offer when the booking read kept complete
+ * offers, else Google's round-trip "from" price for the paired outbound and return.
+ */
+export function pairingPrice(c: {
+  offer: { priceMinor: number } | null;
+  complete: boolean;
+  fromMinor: number;
+}): { pricePence: number; kind: PairingPriceKind } {
+  if (c.offer !== null && c.complete) return { pricePence: c.offer.priceMinor, kind: 'seller' };
+  return { pricePence: c.fromMinor, kind: 'google' };
+}
+
+/**
  * What the api attaches per cell for the pairing figure (spec rev 56 §6.9, §10): the return's "from" price, the
  * cheapest offer of the booking read that names the pairing (`cheapestOffer`; null when none kept offers), how many
  * offers were read, whether they are complete (`offersComplete`), which outbound the pairing used (`cheapest`: the first
- * attempt's, within the limits; `next-cheapest`: the second attempt's; `over-limit`), the two legs' local times, whether
+ * attempt's, within the limits; `next-cheapest`: the second attempt's; `over-limit`), the two legs' local times and journey time, whether
  * the cheapest offer differs from the "from" price (`mismatch`), the flight list's provenance, stale mark and age, and
  * the four facts `pairingLeads` reads.
  */
@@ -165,6 +219,11 @@ export interface PairingCandidate {
   complete: boolean;
   which: 'cheapest' | 'next-cheapest' | 'over-limit';
   times: { departOut: string; arriveOut: string; departBack: string; arriveBack: string };
+  /**
+   * The trip's journey time: its outbound's and its return's durations as the list states them, summed as a verified
+   * figure's two legs are (final whole-branch review I2), so a pairing figure's Journey column and its sort read it
+   */
+  journeyMinutes: number;
   mismatch: boolean;
   provenance: Provenance;
   stale: StaleMark;
@@ -195,18 +254,13 @@ export function listFresh(fetchedAt: IsoDateTime, now: IsoDateTime, refreshHours
  * The facts the lead rule reads (final review B-I1): a `PairingCandidate`'s, or the search page's own (the web's
  * pairing with an offer of its own shape), so the board and the block share one predicate.
  */
-export type LeadFacts = Pick<
-  PairingCandidate,
-  'fits' | 'underCurrentLimits' | 'complete' | 'fresh' | 'fetchedAt'
-> & {
-  offer: object | null;
-};
+export type LeadFacts = Pick<PairingCandidate, 'fits' | 'underCurrentLimits' | 'fresh' | 'fetchedAt'>;
 
 /**
- * R-lead with R-sellers (spec rev 63 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
- * current limits, the list was read under the current limits, a booking read of it kept offers that are complete (A8:
- * an expand-failed booking only when its cheapest offer equals the return's "from" price, which `offersComplete`
- * decides), and it is not outdated. Its age alone does not stop it leading (Ian, 2026-11-06: a date keeps its last real
+ * R-lead (spec rev 63 §6.9 "When it leads", as changed by design 2026-11-08 §4.1): the pairing leads its date pair
+ * exactly when it fits the current limits, the list was read under the current limits, and it is not outdated. It no
+ * longer needs a complete booking read: a pairing with no offer, or with incomplete offers, leads at the return's
+ * "from" price (`pairingPrice`), which the figure words as Google's price. Its age alone does not stop it leading (Ian, 2026-11-06: a date keeps its last real
  * round trip rather than falling back to the grid's price; a list older than the refresh carries its stale mark onto
  * the figure), but a list older than the refresh gives way once a newer grid price was read for its cell (`gridFetchedAt`,
  * the calendar price it would replace; null when there is none to compare): a later search re-priced the date, so the
@@ -214,25 +268,25 @@ export type LeadFacts = Pick<
  */
 export function pairingLeads(p: LeadFacts, gridFetchedAt: IsoDateTime | null): boolean {
   const outdated = gridFetchedAt !== null && Date.parse(p.fetchedAt) < Date.parse(gridFetchedAt);
-  return p.fits && p.underCurrentLimits && p.offer !== null && p.complete && (p.fresh || !outdated);
+  return p.fits && p.underCurrentLimits && (p.fresh || !outdated);
 }
 
 /**
  * Spec rev 62 §6.9 (the 21.1 concern-2 ruling; final review B-M2): the candidate-based `pairingRead`, the first that
  * holds in the spec's order: `within-other-limits` (read under other limits, over today's or not: the board then words
  * the limit edit as the search's page block does), `over-limit`, `within` (exactly when `pairingLeads`, at any age
- * unless outdated by a newer grid price), `within-older` (older than the refresh and not leading: no complete offers, or
- * outdated), `sellers-not-read`, else `offers-incomplete`. The
+ * unless outdated by a newer grid price), else `within-older` (older than the refresh and outdated by a newer grid
+ * price). `sellers-not-read` and `offers-incomplete` are never produced since design 2026-11-08 (a pairing without
+ * complete offers leads at its "from" price; the seller detail comes from the candidate's `offer` and `complete`); they
+ * stay in `PAIRING_READ` for their wire codes. The
  * three list-based values (`not-read`, `outbound-only`, `no-pairing-read`) come before these and are the api's to tell
  * apart, from the newest list, where there is no candidate.
  */
 export function pairingReadOf(p: PairingCandidate, gridFetchedAt: IsoDateTime | null): PairingRead {
   if (!p.underCurrentLimits) return 'within-other-limits';
   if (!p.fits) return 'over-limit';
-  if (pairingLeads(p, gridFetchedAt)) return 'within';
-  if (!p.fresh) return 'within-older';
-  if (p.offer === null) return 'sellers-not-read';
-  return 'offers-incomplete';
+  // why: fitting and under current limits, a pairing fails to lead only when outdated, which needs `!fresh`
+  return pairingLeads(p, gridFetchedAt) ? 'within' : 'within-older';
 }
 
 /**

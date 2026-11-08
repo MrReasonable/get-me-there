@@ -135,10 +135,11 @@ export const usageSchema = z.object({
   windowStart: isoDateTimeSchema.nullable(),
   windowEnd: isoDateTimeSchema.nullable(),
   /**
-   * Spec rev 55 §8.1 (the 20.8 ruling): on a `provider-execution` scope, the flight-list pages beside the page cap,
-   * counted against the run's own flight allowance (`calls` are its `/v1/flights` rows, never read as grid pages).
+   * Spec rev 55 §8.1 (the 20.8 ruling): on a `provider-execution` scope, the flight-list pages beside the grid or list
+   * pages (`calls` are its `/v1/flights` rows, never read as grid pages). Design 2026-11-08 §4.8: the per-run flight
+   * allowance is withdrawn, so no cap is stated (rule A bounds the step).
    */
-  flightLists: z.strictObject({ calls: count, cap: count }).exactOptional(),
+  flightLists: z.strictObject({ calls: count }).exactOptional(),
 });
 export const cellKeySchema = z.object({
   origin: iataSchema,

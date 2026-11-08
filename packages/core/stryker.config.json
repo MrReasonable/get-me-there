@@ -34,6 +34,7 @@
     "src/status/rules.ts",
     "src/status/time.ts",
     "src/datePairs/space.ts",
+    "src/datePairs/confirm.ts",
     "src/datePairs/figure.ts",
     "src/datePairs/rank.ts",
     "src/datePairs/bands.ts",

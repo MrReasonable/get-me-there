@@ -75,8 +75,9 @@ export function rankedFigures(
 /**
  * Spec revision 56 §8.1: the engine's `RankedDatePairsReader` (Task 20.9 passes it through `EngineOptions`): the board's
  * ranking of the search over the asked space, cabin and journey limit by the calendar figures alone (no pairings: the
- * step's candidates stay the 10 cheapest calendar figures), departed pairs out, each with its figure's airport pair and
- * source. An unknown or deleted search has none.
+ * step's queue is the calendar's order, so which pairs it reads does not drift as pairings land), departed pairs out,
+ * each with its figure's airport pair and source. Design 2026-11-08 §4.2: and the figure's basis, whether it is current
+ * (not superseded, seen in the latest search) and whether its price is stale. An unknown or deleted search has none.
  */
 export function rankedPairsFor(ports: Ports, q: Parameters<RankedDatePairsReader>[0]): RankedDatePair[] {
   const def = ports.repos.definitions.get(q.definitionId);
@@ -89,5 +90,8 @@ export function rankedPairsFor(ports: Ports, q: Parameters<RankedDatePairsReader
     pricePence: p.figure.price.pricePence,
     providerId: p.figure.price.provenance.providerId,
     sourceKind: p.figure.price.provenance.sourceKind,
+    basis: p.figure.basis,
+    current: !p.figure.superseded && p.figure.notSeenInLatest === null,
+    stale: p.figure.price.stale !== false,
   }));
 }

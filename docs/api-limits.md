@@ -108,8 +108,11 @@ window's start and end with calls and cost so far.
 - Caps: none of its own on pages or scrolls, a run's or a month's: a run loads a page for every day pair (list) or block
   (grid) it has to read, and the Providers page shows the calendar month's pages, with no cap on them. Its pages count
   against no per-run call cap (neither `EXECUTION_MAX_FREE_CALLS` nor a search's own limit of free calls); its
-  flight-list pages have their own allowance of 20 a run. A run stopped at the per-run page cap an earlier version had is never resumed: Search again starts a
-  fresh run that reuses the prices already found.
+  flight-list pages have none either. A run's flight-list step stops when reading more stops finding cheaper trips
+  (twelve reads in a row that leave the five cheapest trips with flights read unchanged), when it has no more dates to
+  read, when the return or booking reads stop, or at the browser window's end or an ending error. A run stopped at the
+  per-run page cap an earlier version had is never resumed: Search again starts a fresh run that reuses the prices
+  already found.
 - Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600) from the start of one page to the start of the
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and

@@ -51,11 +51,12 @@ export function withoutDiscovery(s: DefinitionSnapshot, out: readonly ProviderId
 }
 
 /**
- * The execution's budget: the definition's, plus, with camoufox in discovery, the flight-list step's own allowance
- * (`flightListPages` = FLIGHT_LIST_COUNT × FLIGHT_LIST_PAGES_PER_PAIR_MAX, 20: spec revision 56 §2, §8.1, 10 requests
- * at up to 2 pages each). Frozen at creation, and refreshed only where a manual resume refreshes the rest of the
- * budget; the guard reads it from the snapshot, never from config, so a value the definition itself carries is stripped
- * (the 20.8 note: the guard trusts the snapshot).
+ * The execution's budget: the definition's, plus, with camoufox in discovery, `flightListPages` (= FLIGHT_LIST_COUNT ×
+ * FLIGHT_LIST_PAGES_PER_PAIR_MAX, 20: spec revision 56 §2, §8.1). Design 2026-11-08 §4.8 withdrew it as an allowance:
+ * nothing counts pages against it (rule A bounds the step); it is only the flight-list step's on-switch
+ * (`flightStepEntry` runs no step on a snapshot without it). The figure is kept so stored snapshots and new ones read
+ * alike. Frozen at creation, and refreshed only where a manual resume refreshes the rest of the budget; a value the
+ * definition itself carries is stripped (the 20.8 note: the snapshot, not the definition, says whether the step runs).
  */
 export function snapshotBudget(
   budget: SearchDefinition['budget'],

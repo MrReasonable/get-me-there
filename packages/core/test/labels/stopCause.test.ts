@@ -278,6 +278,21 @@ const ROWS: Row[] = [
     'This search stopped at its limit of browser pages for one run; flights were read for 10 of 10 date pairs.',
     CARRY_ON,
   ],
+  // Design 2026-11-08 §5.5: in confirm mode the step reads an open-ended queue, so the count has no denominator
+  [
+    'the per-run page limit with flights read in confirm mode (no denominator)',
+    budget({ flights: { read: 9, planned: 9 } }),
+    { confirm: true },
+    'This search stopped at its limit of browser pages for one run; flights were read for 9 dates.',
+    CARRY_ON,
+  ],
+  [
+    'the per-run page limit with one date read in confirm mode (singular)',
+    budget({ flights: { read: 1, planned: 1 } }),
+    { confirm: true },
+    'This search stopped at its limit of browser pages for one run; flights were read for 1 date.',
+    CARRY_ON,
+  ],
   [
     'the per-run page limit when the flight step did not run',
     budget({ flights: null }),

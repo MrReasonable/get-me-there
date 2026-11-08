@@ -149,6 +149,8 @@ describe('ExecutionsRepo stop causes (spec revision 55 §7)', () => {
       booking: false,
       returnsStopped: null,
       bookingStopped: null,
+      confirm: null,
+      endedReason: null,
       note: 'free text',
     };
     expect(() => repo.patch(id, { flightLists: plan })).toThrow(RowRejected);
@@ -174,5 +176,56 @@ describe('ExecutionsRepo stop causes (spec revision 55 §7)', () => {
       .prepare('UPDATE search_executions SET stop_cause_json = ? WHERE id = ?')
       .run('{"kind":"cancelled","note":"vendor said no"}', id);
     expect(() => repo.get(id)).toThrow(RowCorrupt);
+  });
+});
+
+// Design 2026-11-08 §7: the step's summary (`confirm`) rides in flight_lists_json; the reader rebuilds the plan field by
+// field, so it passes `confirm` through and reads a plan stored before the change (no key) as null.
+describe('ExecutionsRepo flight-list plan summary (design 2026-11-08 §7)', () => {
+  const base = {
+    planned: 20,
+    cells: [],
+    reused: 2,
+    ended: null,
+    returns: true,
+    booking: true,
+    returnsStopped: null,
+    bookingStopped: null,
+    endedReason: null,
+  };
+
+  it('a stored confirm reads back as written, and a null one as null', () => {
+    const { repo, id } = setup();
+    const confirm = {
+      mode: 'confirm' as const,
+      confirmed: 16,
+      unread: 1,
+      uncheckedCheaper: 3,
+      stop: 'patience' as const,
+    };
+    repo.patch(id, { flightLists: { ...base, confirm } });
+    expect(repo.get(id)?.flightLists).toEqual({ ...base, confirm });
+    repo.patch(id, { flightLists: { ...base, confirm: null } });
+    expect(repo.get(id)?.flightLists).toEqual({ ...base, confirm: null });
+  });
+
+  // Design 2026-11-08 §5.5: the ending page's stop detail is stored on the plan and read back; absent reads as null
+  it('a stored endedReason reads back as written, and an absent one as null', () => {
+    const { repo, id } = setup();
+    repo.patch(id, { flightLists: { ...base, ended: 'stopped', confirm: null, endedReason: 'quota' } });
+    expect(repo.get(id)?.flightLists).toMatchObject({ ended: 'stopped', endedReason: 'quota' });
+  });
+
+  it('a plan stored before the change, with no confirm key, reads with confirm null', () => {
+    const { db, repo, id } = setup();
+    db.raw
+      .prepare('UPDATE search_executions SET flight_lists_json = ? WHERE id = ?')
+      .run('{"planned":10,"cells":[],"reused":0,"ended":null,"returns":true,"booking":true}', id);
+    expect(repo.get(id)?.flightLists).toMatchObject({
+      planned: 10,
+      returns: true,
+      confirm: null,
+      endedReason: null,
+    });
   });
 });

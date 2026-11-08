@@ -123,6 +123,7 @@ export const readStopCause = (column: string, text: string): StopCause =>
 /**
  * Spec revision 55 §7 `flight_lists_json`: the run's flight-list plan. Revision 56 §7: a plan stored before WP21 has
  * no return or booking flags and no stops; it reads back outbound-only (false, false, null, null), so the type is total.
+ * Design 2026-11-08 §7: the step's summary is passed through, and read as null when absent.
  */
 export const readFlightLists = (column: string, text: string): FlightListsState => {
   const p = parseWith(column, apiContract.flightListsStateSchema, readJson(column, text));
@@ -135,6 +136,9 @@ export const readFlightLists = (column: string, text: string): FlightListsState 
     booking: p.booking ?? false,
     returnsStopped: p.returnsStopped ?? null,
     bookingStopped: p.bookingStopped ?? null,
+    // why: design 2026-11-08 §7: a plan stored before the change has no summary; null says so (the page shows no line)
+    confirm: p.confirm ?? null,
+    endedReason: p.endedReason ?? null,
   };
 };
 
