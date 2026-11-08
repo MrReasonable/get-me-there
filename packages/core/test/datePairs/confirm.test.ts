@@ -234,4 +234,48 @@ describe('checkOfRead', () => {
     const r = readOf({ booking });
     expect(checkOfRead(r, flights, NO_LIMITS)).toEqual(conf(118_000));
   });
+  it('a no-outbound read under other limits is unread; under the same limits it stays none', () => {
+    const noOutbound = (limits: FlightLimits) =>
+      returnReadSchema.parse({
+        limits,
+        status: 'no-outbound',
+        rule: null,
+        attempts: [],
+        triedAll: true,
+        booking: null,
+      });
+    expect(checkOfRead(noOutbound({ ...NO_LIMITS, maxStops: 1 }), [], NO_LIMITS)).toEqual(UNREAD);
+    expect(checkOfRead(noOutbound(NO_LIMITS), [], NO_LIMITS)).toEqual(NONE);
+  });
+  const readBooking = (over: Record<string, unknown>) => ({
+    status: 'read',
+    rule: null,
+    attempt: 0,
+    returnIndex: 0,
+    offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 117_000 }],
+    moreControl: false,
+    grouped: 0,
+    unparsed: 0,
+    nonGbp: 0,
+    expanded: false,
+    offersStated: null,
+    ...over,
+  });
+  it('a complete booking of the pairing confirms at the cheapest seller offer', () => {
+    const r = readOf({ booking: readBooking({}) });
+    expect(checkOfRead(r, flights, NO_LIMITS)).toEqual(conf(117_000));
+  });
+  it('a booking that names a different return is not the pairing: confirmed at the from price', () => {
+    // why: returns 1180 (index 0, the pairing) and 1300 (index 1); the booking read return 1 with a 900 offer
+    const r = readOf(
+      {
+        booking: readBooking({
+          returnIndex: 1,
+          offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 90_000 }],
+        }),
+      },
+      [back(1180), back(1300)],
+    );
+    expect(checkOfRead(r, flights, NO_LIMITS)).toEqual(conf(118_000));
+  });
 });

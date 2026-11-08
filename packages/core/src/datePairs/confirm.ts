@@ -65,8 +65,8 @@ export function uncheckedCheaper(remaining: readonly number[], s: Standings): nu
 }
 
 /**
- * Check one stored flight read (§4.1, §4.3): `unread` with no read, a return status other than `read`/`no-outbound`,
- * or limits other than today's; `none` for `no-outbound` or no pairing within the limits; otherwise `confirmed` at the
+ * Check one stored flight read (§4.1, §4.3): `unread` with no read, limits other than today's, or a return status other than
+ * `read`/`no-outbound`; `none` for `no-outbound` or no pairing within the limits; otherwise `confirmed` at the
  * pairing's one price (a booking that ended transient is priced at Google's figure: sellers are not required).
  */
 export function checkOfRead(
@@ -75,9 +75,10 @@ export function checkOfRead(
   limits: FlightLimits,
 ): Check {
   if (r === null) return { kind: 'unread' };
+  // why: a read under other limits, a no-outbound one included, says nothing about today's limits (controller ruling)
+  if (!sameFlightLimits(r.limits, limits)) return { kind: 'unread' };
   if (r.status === 'no-outbound') return { kind: 'none' };
   if (r.status !== 'read') return { kind: 'unread' };
-  if (!sameFlightLimits(r.limits, limits)) return { kind: 'unread' };
   const p = cheapestPairing(r, flights, limits);
   if (p === null || !p.outboundFits || !p.returnFits) return { kind: 'none' };
   const { offer, complete } = pairingOffer(r, flights, p);
