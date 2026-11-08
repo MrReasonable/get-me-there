@@ -10,7 +10,7 @@ import { serveDates } from '../../msw/datesHandlers.js';
 import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
-import { addAirport } from './formSupport.js';
+import { addAirport, pickDate } from './formSupport.js';
 import { airportRows } from './support.js';
 
 // Review Focus 1 end to end (WP20 Task 20.5, fix round 1 finding 13): an install with no price source at all. The
@@ -81,8 +81,8 @@ describe('Search now with no price source set up (Review Focus 1)', () => {
     );
     await addAirport(user, PLAN_COPY.from, 'BHX');
     await addAirport(user, PLAN_COPY.to, 'FRA');
-    await user.type(screen.getByLabelText(PLAN_COPY.earliest), '10 Jan 2027');
-    await user.type(screen.getByLabelText(PLAN_COPY.latest), '31 Mar 2027');
+    pickDate(PLAN_COPY.earliest, '2027-01-10');
+    pickDate(PLAN_COPY.latest, '2027-03-31');
     await act(() => vi.advanceTimersByTimeAsync(ESTIMATE_DEBOUNCE_MS));
     const press = screen.getByRole('button', { name: /^Search now/ });
     await vi.waitFor(() => expect(press).not.toHaveAttribute('aria-disabled'));

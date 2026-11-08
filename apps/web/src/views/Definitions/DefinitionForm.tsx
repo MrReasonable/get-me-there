@@ -190,7 +190,6 @@ export function DefinitionForm({
           wait={form.wait}
           pending={saveAndSearch.isPending}
           ids={IDS}
-          onBlocked={form.judgeDates}
           onPress={(covers) => {
             if (form.body === null || pending || sending.current) return;
             sending.current = true;
@@ -206,7 +205,6 @@ export function DefinitionForm({
           aria-disabled={form.reason === null ? undefined : true}
           aria-describedby={form.reason === null ? undefined : IDS.reason}
           onClick={() => {
-            if (form.body === null) form.judgeDates();
             if (form.body === null || pending) return;
             setNotice(null);
             save.mutate(form.body);

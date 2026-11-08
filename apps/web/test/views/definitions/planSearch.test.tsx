@@ -14,6 +14,7 @@ import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
 import { API, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
+import { pickDate } from '../searches/formSupport.js';
 
 type Row = AirportsResponse[number];
 const row = (iata: string, name: string, city: string, country: string, metro: string | null): Row => ({
@@ -115,8 +116,8 @@ describe('Plan a search (the new-search form)', () => {
     await vi.waitFor(() => expect(chipCodes('From')).toEqual(['LGW', 'LHR']));
     await pickPlace(user, 'To', 'new y');
     await vi.waitFor(() => expect(chipCodes('To')).toEqual(['EWR', 'JFK']));
-    await user.type(screen.getByLabelText(PLAN_COPY.earliest), '1 Mar 2027');
-    await user.type(screen.getByLabelText(PLAN_COPY.latest), '30 Apr 2027');
+    pickDate(PLAN_COPY.earliest, '2027-03-01');
+    pickDate(PLAN_COPY.latest, '2027-04-30');
     await user.clear(screen.getByLabelText(PLAN_COPY.shortest));
     await user.type(screen.getByLabelText(PLAN_COPY.shortest), '7');
     await user.clear(screen.getByLabelText(PLAN_COPY.longest));
@@ -182,8 +183,8 @@ describe('Plan a search (the new-search form)', () => {
     const { user } = renderWithProviders(<NewSearchForm providers={providersResponse()} debounceMs={0} />);
     await user.type(screen.getByLabelText('From'), 'LHR{Enter}');
     await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
-    await user.type(screen.getByLabelText(PLAN_COPY.earliest), '1 Mar 2027');
-    await user.type(screen.getByLabelText(PLAN_COPY.latest), '30 Apr 2027');
+    pickDate(PLAN_COPY.earliest, '2027-03-01');
+    pickDate(PLAN_COPY.latest, '2027-04-30');
     await screen.findByText(`${field}: bad`);
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
     field = 'name';

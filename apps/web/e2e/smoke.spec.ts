@@ -50,8 +50,8 @@ test('fixture mode: a new search, Search now, then Dates, the date pair detail a
   await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
   await addAirport(page, PLAN_COPY.from, 'LHR');
   await addAirport(page, PLAN_COPY.to, 'JFK');
-  await page.locator('#w-from').fill('14 Mar 2027');
-  await page.locator('#w-to').fill('15 Mar 2027');
+  await page.locator('#w-from').fill('2027-03-14');
+  await page.locator('#w-to').fill('2027-03-15');
   await page.locator('#n-min').fill('10');
   await page.locator('#n-max').fill('11');
   // why: the provider checkboxes sit behind More options, below the short form.

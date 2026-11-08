@@ -18,9 +18,8 @@ export const PLAN_COPY = {
   to: 'To',
   fromPlaceholder: 'City, airport or code',
   toPlaceholder: 'City, airport or code',
-  // WP20 Task 20.5 (spec rev 55 §11): the new-search form's dates, shown and entered as "10 Jan 2027"
+  // spec rev 67 §11: the new-search form's dates, two browser date fields
   leaveBetween: 'Leave between',
-  datePlaceholder: '10 Jan 2027',
   rollingDates: (from: string, to: string) =>
     `Rolling dates: ${from} to ${to} as of today. Change them under More options.`,
   rollingSwitch: 'Rolling dates instead of fixed ones',
