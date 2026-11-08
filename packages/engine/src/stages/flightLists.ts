@@ -482,7 +482,10 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     const intake = new AbortController();
     const gate = flightPageGate(ctx, run);
     let ended: FlightListsState['ended'] = null;
-    // why: the first ending error; the pairs no lane had started yet fail with its reason, no request sent
+    // why: the first stop the step meets (an abort, the window, or an ending error) decides how the step ends, as it did
+    // one page at a time; a page already in flight then writes its own row and stops nothing more
+    let stopped = false;
+    // why: an ending error met first; the pairs no lane had started yet fail with its reason, no request sent
     let ending: Extract<PageOutcome, { kind: 'failed' }> | null = null;
     const started = new Set<number>();
     // why: as many pages at once as the worker loads (CAMOUFOX_PAGES_AT_ONCE); the guard reserves each request's pages
@@ -491,11 +494,13 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
       started.add(i);
       const o = await readPage(ctx, run, cap, cell, () => plan, gate);
       if (o.kind === 'abort') {
+        stopped = true;
         intake.abort();
         return;
       }
       if (o.kind === 'window') {
-        ended ??= 'window';
+        if (!stopped) ended = 'window';
+        stopped = true;
         intake.abort();
         return;
       }
@@ -515,10 +520,11 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
         }
       }
       if (o.kind === 'failed' && o.end) {
-        if (ending === null) {
+        if (!stopped) {
           ending = o;
-          ended ??= o.ended;
+          ended = o.ended;
         }
+        stopped = true;
         intake.abort();
       }
     });
