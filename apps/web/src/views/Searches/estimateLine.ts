@@ -1,5 +1,6 @@
 import {
   BUDGET_SCOPE_KINDS,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   groupThousands,
   mainPathSource,
   microGbpToPence,
@@ -68,23 +69,26 @@ export function plainDuration(seconds: number, c: Copy = ESTIMATE_COPY): string 
 }
 
 /**
- * The flight-list step's clause (spec rev 56 §8.1 "Estimate", R-estimate; ruling 20.5 concern 2), or none when it reads
- * no date pair: the date pairs from `pairs` (never the pages); out and back, the typical pages and time and the bound
- * ("at most", the typical figures when an older line states no bound); outbound only, the time alone.
+ * The flight-list step's clause (design 2026-11-08 §6; spec rev 56 §8.1 "Estimate"), or none when it reads no date pair.
+ * Out and back the step reads until more reading stops finding cheaper trips, so the clause is the typical time and
+ * the dates read go in a note ("usually about 15 dates, at most 290", the at-most figure being `pagesMax / 2` reads);
+ * outbound only, the first date pairs and the time.
  */
 function flightsClause(f: NonNullable<EstimateResponse['estimate']['flightLists']>, c: Copy): string[] {
   if (f.pairs === 0) return [];
-  const pairs = groupThousands(f.pairs);
-  if (!f.returns) return [c.flights(pairs, aboutDuration(f.seconds, c))];
-  return [
-    c.flightsOutAndBack(
-      pairs,
-      groupThousands(f.pages),
-      plainDuration(f.seconds, c),
-      groupThousands(f.pagesMax ?? f.pages),
-      plainDuration(f.secondsMax ?? f.seconds, c),
-    ),
-  ];
+  if (!f.returns) return [c.flights(groupThousands(f.pairs), aboutDuration(f.seconds, c))];
+  return [c.flightsChecking(aboutDuration(f.seconds, c))];
+}
+
+/** The note under the sentence for an out-and-back flight line: how many dates it usually reads and at most. */
+function flightsNote(f: NonNullable<EstimateResponse['estimate']['flightLists']>, c: Copy): string[] {
+  if (f.pairs === 0 || !f.returns) return [];
+  // why: the response carries the at-most reads as pages (2 a read out and back, the engine's FLIGHT_LIST_PAGES_PER_PAIR_MAX)
+  const most =
+    f.pagesMax === undefined
+      ? f.pairs
+      : Math.max(f.pairs, Math.ceil(f.pagesMax / FLIGHT_LIST_PAGES_PER_PAIR_MAX));
+  return [c.flightsDates(groupThousands(f.pairs), groupThousands(most))];
 }
 
 /** The first letter in capitals: the sentence starts with whichever clause comes first. */
@@ -141,9 +145,9 @@ function askedClause(e: EstimateResponse, schedule: SentenceSchedule | null, c: 
  *   date pairs (prov-int-014);
  * - each billable-plan source's calls against what its window has left ("uses about 120 of the 9,880 SearchApi
  *   searches left this month", "…left on your trial" for a lifetime window);
- * - "+ flights for up to 10 date pairs, about 12 minutes" when the browser worker reads flights (ruling 20.5 concern 2),
- *   or with the return leg "+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at
- *   most 20 pages and 50 minutes" (spec rev 56 §8.1, R-estimate).
+ * - "+ flights for up to 10 date pairs, about 12 minutes" when the browser worker reads flights without the return leg
+ *   (ruling 20.5 concern 2), or with it "then about 2 minutes checking flights, longer if prices are close together"
+ *   and, under the sentence, "usually about 15 dates, at most 290" (design 2026-11-08 §6).
  *
  * The notes: each source a budget cap blocks with why and its cost as not included, and the soft confirmation the press
  * gives ("This costs about £1.20, above your £1.00 check; pressing Search now confirms it").
@@ -214,6 +218,7 @@ export function estimateSentence(
     button: tag === null ? press : L.withTag(press, tag),
     tag,
     notes: [
+      ...(fl === undefined ? [] : flightsNote(fl, c)),
       ...notUsedNotes(lines, c, money),
       ...(e.softConfirm === null
         ? []

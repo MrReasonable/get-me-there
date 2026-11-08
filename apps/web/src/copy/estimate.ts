@@ -18,7 +18,7 @@ export const ESTIMATE_COPY = {
   // why: "about 1 hour", "about 1½ hours": a half takes the plural, as it is read aloud
   aboutHours: (whole: number, half: boolean) =>
     `about ${whole}${half ? '½' : ''} ${whole === 1 && !half ? 'hour' : 'hours'}`,
-  // the same lengths without "about", for a clause that says "usually about" once before two figures
+  // the same lengths without "about" (kept for callers that word a length after their own "about")
   minutes: (n: number) => `${n} ${noun(n, 'minute', 'minutes')}`,
   hours: (whole: number, half: boolean) =>
     `${whole}${half ? '½' : ''} ${whole === 1 && !half ? 'hour' : 'hours'}`,
@@ -40,15 +40,12 @@ export const ESTIMATE_COPY = {
   // why: ruling 20.5 concern 2 (spec rev 55 §11): the browser worker's flight lists after the first pass
   flights: (pairs: string, duration: string) =>
     `+ flights for up to ${pairs} date ${noun(pairs, 'pair', 'pairs')}, ${duration}`,
-  // spec rev 56 §8.1 "Estimate" (R-estimate): with the return leg, the typical pages and time and the bound
-  flightsOutAndBack: (
-    pairs: string,
-    pages: string,
-    duration: string,
-    pagesMax: string,
-    durationMax: string,
-  ) =>
-    `+ flights, out and back, for up to ${pairs} date ${noun(pairs, 'pair', 'pairs')}: usually about ${pages} ${noun(pages, 'page', 'pages')} and ${duration}, at most ${pagesMax} ${noun(pagesMax, 'page', 'pages')} and ${durationMax}`,
+  // design 2026-11-08 §6: with the return leg the step reads flights until more reading stops finding cheaper trips, so
+  // the line says how long that takes, not how many pages; the dates read are a range in a note under the sentence
+  flightsChecking: (duration: string) =>
+    `then ${duration} checking flights, longer if prices are close together`,
+  flightsDates: (typical: string, most: string) =>
+    `usually about ${typical} ${noun(typical, 'date', 'dates')}, at most ${most}`,
   billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime') =>
     window === 'month'
       ? `uses about ${calls} of the ${left} ${name} searches left this month`

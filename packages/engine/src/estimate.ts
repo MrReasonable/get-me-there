@@ -1,6 +1,8 @@
 import {
   type Cell,
   type CellKey,
+  CONFIRM_PATIENCE,
+  CONFIRM_TARGET,
   cellKeyString,
   type DefinitionSnapshot,
   type DiscoveryCapability,
@@ -12,10 +14,7 @@ import {
   flightLimitsOf,
   microGbpToPence,
   type ProviderId,
-  RETURN_PHASE_SECONDS_MAX,
   RETURN_SECOND_OUTBOUND_RATE,
-  RETURN_SPACED_LOADS,
-  RETURN_STEP_SECONDS,
   type SourceKind,
   type Stage,
 } from '@gmt/core';
@@ -24,7 +23,7 @@ import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
 import { type PlannedTile, planTiles } from './stages/discovery.js';
-import { newestListOf, selectFlightPairs } from './stages/flightLists/select.js';
+import { confirmQueue, newestListOf, selectFlightPairs } from './stages/flightLists/select.js';
 import { confirmFinished, FLIGHT_LIST_PROVIDER, returnPhaseOf } from './stages/flightLists.js';
 import { refreshHoursOf, reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
@@ -71,6 +70,8 @@ const FLIGHT_NOTE = '+ flights';
 const isFlightNote = (a: string): boolean =>
   a.startsWith(FLIGHT_NOTE) || /^flights for \d+ date pairs?\b/.test(a);
 
+/** "1 date", "15 dates". */
+const dates = (n: number): string => `${n} date${n === 1 ? '' : 's'}`;
 /** "1 date pair", "4 date pairs". */
 const datePairs = (n: number): string => `${n} date pair${n === 1 ? '' : 's'}`;
 /** Whole minutes of `seconds`, rounded, with their noun ("41 minutes", "1 minute"). */
@@ -91,20 +92,44 @@ function flightsApply(ctx: EngineContext, snapshot: DefinitionSnapshot): boolean
 }
 
 /**
- * The date pairs a fresh step would read for a saved search (`wanted`): the first 10 of the space less those whose
- * newest list is reusable (the step's own selection over the board's ranking, under the return phase it would plan);
- * an unsaved search, or an engine without the ranking, reuses none. `own` leaves out the cells a resumed confirm-mode
- * pass has already read (design 2026-11-08 §4.7: its queue is rebuilt without them).
+ * The flight reads a step would make, typical and at most (design 2026-11-08 §6). Out and back the step reads an
+ * open-ended queue until its stopping rule ends it, so the count is a range, not a cap.
+ */
+interface FlightReads {
+  typical: number;
+  max: number;
+}
+
+/**
+ * The reads a fresh step would make for a saved search. Out and back (design 2026-11-08 §4.1, §6): the confirm queue
+ * (`confirmQueue` over the board's ranking), the step's own reuse split over all of it; at most every unreused pair,
+ * typically `max(min(unreused, CONFIRM_PATIENCE), min(queue, CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA)
+ * - reusable among those)`, capped at the unreused count. Why: a typical run reads the first pairs until the target
+ * is held and the patience has run out, with a few more for reads that improve on it; each reusable pair among them is
+ * a read not made. Outbound-only keeps its first 10 less the reusable ones. An unsaved search, or an engine without the
+ * ranking, reuses none. `own` leaves out the cells a resumed confirm-mode pass has already read (§4.7: its queue is
+ * rebuilt without them).
  */
 function flightPairsWanted(
   ctx: EngineContext,
   snapshot: DefinitionSnapshot,
   definitionId: string | null,
+  phase: FlightPhase,
   own: ReadonlySet<string> = new Set(),
-): number {
-  const most = Math.min(FLIGHT_LIST_COUNT, datePairCount(snapshot.resolved));
+): FlightReads {
+  const space = datePairCount(snapshot.resolved);
   const reader = ctx.rankedDatePairs;
-  if (definitionId === null || reader === undefined) return most;
+  const count = phase.returns ? Number.POSITIVE_INFINITY : FLIGHT_LIST_COUNT;
+  const queueTop = CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA;
+  const reads = (queue: number, unreused: number, reusableInTop: number): FlightReads => {
+    if (!phase.returns) return { typical: unreused, max: unreused };
+    const typical = Math.max(Math.min(unreused, CONFIRM_PATIENCE), Math.min(queue, queueTop) - reusableInTop);
+    return { typical: Math.min(typical, unreused), max: unreused };
+  };
+  if (definitionId === null || reader === undefined) {
+    const queue = phase.returns ? space : Math.min(FLIGHT_LIST_COUNT, space);
+    return reads(queue, queue, 0);
+  }
   const now = ctx.clock.now();
   const today = ctx.clock.todayLondon();
   const ranked = reader({
@@ -113,26 +138,25 @@ function flightPairsWanted(
     cabin: snapshot.cabin,
     maxJourneyMinutes: snapshot.constraints.maxJourneyMinutes ?? null,
     now,
-  })
-    .filter((p) => p.departureDate > today && !own.has(cellKeyString(p)))
-    .slice(0, FLIGHT_LIST_COUNT);
+  }).filter((p) => p.departureDate > today && !own.has(cellKeyString(p)));
+  const queue = (phase.returns ? confirmQueue(ranked) : ranked).slice(0, count);
   const newest = new Map(
     ctx.repos.flightLists
-      .newestPerCell(definitionId, ranked, snapshot.cabin, ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER))
+      .newestPerCell(definitionId, queue, snapshot.cabin, ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER))
       .map((l) => [cellKeyString(l), newestListOf(l)]),
   );
-  const reused = selectFlightPairs(
-    ranked,
+  const split = selectFlightPairs(
+    queue,
     newest,
     now,
     refreshHoursOf(snapshot, FLIGHT_LIST_PROVIDER),
     today,
-    {
-      ...estimatePhaseOf(ctx, snapshot),
-      current: flightLimitsOf(snapshot.constraints),
-    },
-  ).reused;
-  return Math.max(0, most - reused.length);
+    { ...phase, current: flightLimitsOf(snapshot.constraints) },
+    count,
+  );
+  const top = new Set(queue.slice(0, queueTop).map(cellKeyString));
+  const reusableInTop = split.reused.filter((p) => top.has(cellKeyString(p))).length;
+  return reads(queue.length, split.read.length, reusableInTop);
 }
 
 /** The return phase a flight line plans (spec rev 56 §8.1): from the worker's flags, or a stored plan's. */
@@ -154,29 +178,20 @@ function estimatePhaseOf(ctx: EngineContext, snapshot: DefinitionSnapshot): Flig
 }
 
 /**
- * A flight list's first view and its Cheapest flow, after the spacing: measured 2026-11-07 over ten outbound-only reads
- * at spacing 0, 19–28.5 s (23.5 s on average).
+ * One flight read, after the spacing: measured 2026-11-07 over ten reads with the return leg and the booking read,
+ * 19–29 s each (design 2026-11-08 §6). It replaces the earlier per-step costing, which took 23.5 s for the outbound
+ * view alone and added the return steps on top.
  */
-const FLIGHT_VIEW_SECONDS = 25;
+export const FLIGHT_READ_SECONDS = 25;
 
 /**
- * Spec rev 56 §8.1 "Estimate" (R-estimate): one pair's seconds and pages, typical and at most. Out and back: the first
- * view (spacing + `FLIGHT_VIEW_SECONDS`), the return steps (`RETURN_STEP_SECONDS` × 3 with the booking read, × 1
- * without) and, for the share of pairs needing the second outbound, its spaced reload and two steps; at most the phase's
- * own bound and the one spaced reload. Outbound-only: the first view, 1 page.
+ * The estimate's allowance for reads beyond the target that still improve on it (design 2026-11-08 §6): a typical run
+ * reads about `CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA` pairs.
  */
-function perPair(spacing: number, booking: boolean) {
-  const view = spacing + FLIGHT_VIEW_SECONDS;
-  return {
-    outbound: view,
-    typical:
-      view +
-      RETURN_STEP_SECONDS * (booking ? 3 : 1) +
-      RETURN_SECOND_OUTBOUND_RATE * (spacing + 2 * RETURN_STEP_SECONDS),
-    bound:
-      view + RETURN_PHASE_SECONDS_MAX[booking ? 'booking' : 'returnsOnly'] + RETURN_SPACED_LOADS * spacing,
-  };
-}
+export const CONFIRM_TYPICAL_EXTRA = 8;
+
+/** Seconds one read takes at the line's spacing (design 2026-11-08 §6: `FLIGHT_READ_SECONDS` a read). */
+const perRead = (spacing: number): number => spacing + FLIGHT_READ_SECONDS;
 
 /**
  * CAMOUFOX_PAGES_AT_ONCE: `pairs` requests of `each` seconds read that many at a time, so in waves of that many, each
@@ -194,42 +209,39 @@ function inWaves(
 }
 
 /**
- * Spec revision 56 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `pairs` is the date
- * pairs the step would read (its pages count against no free-call cap, spec rev 65; the step's own allowance holds
- * them). With the return leg every pair goes out and back; without it, outbound-only. `pages` and `seconds` are the
- * typical figures (1.5 pages and 230 s a pair out and back at the defaults; 1 page and spacing + 25 s outbound-only),
- * `pagesMax` and `secondsMax` the bound (2 pages and 285 s), the pairs read CAMOUFOX_PAGES_AT_ONCE at a time
- * (`inWaves`). The assumptions say so.
+ * Adds the flight-list step's line to an assembled estimate (design 2026-11-08 §6; spec rev 56 §8.1). `wanted` is the
+ * reads it would make, typical and at most (its pages count against no free-call cap, spec rev 65). `pairs`, `pages`
+ * and `seconds` are the typical reads, `pagesMax` and `secondsMax` the at-most reads, each read costing
+ * `FLIGHT_READ_SECONDS` after the spacing, CAMOUFOX_PAGES_AT_ONCE at a time (`inWaves`). Out and back a read is 1.5
+ * pages typically (the share needing the second outbound) and 2 at most. Outbound-only, a read is 1 page. The
+ * assumptions say so.
  */
-function withFlights(ctx: EngineContext, est: Estimate, wanted: number, phase: FlightPhase): Estimate {
-  const pairs = Math.max(0, wanted);
+function withFlights(ctx: EngineContext, est: Estimate, wanted: FlightReads, phase: FlightPhase): Estimate {
+  const typical = Math.max(0, wanted.typical);
+  const most = Math.max(typical, wanted.max);
   const l = ctx.limitsOf(FLIGHT_LIST_PROVIDER);
-  const per = perPair(l.minSpacingSeconds ?? 0, phase.booking);
-  const outAndBack = phase.returns ? pairs : 0;
-  const outbound = phase.returns ? 0 : pairs;
-  const pagesMax = outAndBack * FLIGHT_LIST_PAGES_PER_PAIR_MAX + outbound;
-  const pages = Math.min(Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound, pagesMax);
-  // why: a plan is all out and back or all outbound-only, so one of the two terms is always 0 (no pairs, no seconds)
-  const seconds = Math.ceil(
-    inWaves(outAndBack, per.typical, pages, l) + inWaves(outbound, per.outbound, outbound, l),
-  );
-  const secondsMax = Math.ceil(
-    inWaves(outAndBack, per.bound, pagesMax, l) + inWaves(outbound, per.outbound, outbound, l),
-  );
+  const each = perRead(l.minSpacingSeconds ?? 0);
+  const perReadMax = phase.returns ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
+  const pagesMax = most * perReadMax;
+  const pages = phase.returns
+    ? Math.min(Math.ceil(typical * (1 + RETURN_SECOND_OUTBOUND_RATE)), pagesMax)
+    : typical;
+  const pagesTypical = Math.min(pages, pagesMax);
+  const seconds = Math.ceil(inWaves(typical, each, pagesTypical, l));
+  const secondsMax = Math.ceil(inWaves(most, each, pagesMax, l));
   // why: no "+ flights" clause when no date pair is read (20.9 review finding 6)
   const notes =
-    pairs === 0
+    typical === 0
       ? []
-      : outAndBack > 0
+      : phase.returns
         ? [
-            `${FLIGHT_NOTE}, out and back, for up to ${datePairs(pairs)}: usually about ${pages} pages and ${minutes(seconds)}, at most ${pagesMax} pages and ${minutes(secondsMax)}`,
+            `${FLIGHT_NOTE}, out and back: usually about ${dates(typical)}, at most ${most}: about ${minutes(seconds)}, at most ${minutes(secondsMax)}`,
           ]
-        : [`${FLIGHT_NOTE} for up to ${datePairs(pairs)}, about ${minutes(seconds)}`];
-  // why: 21.7 code I1: `returns` says a pair goes out and back (at least one candidate gets a return phase); the bound
-  // stays whenever the plan reads the return leg
+        : [`${FLIGHT_NOTE} for up to ${datePairs(typical)}, about ${minutes(seconds)}`];
+  // why: 21.7 code I1: `returns` says a pair goes out and back; the bound stays whenever the plan reads the return leg
   const flightLists = phase.returns
-    ? { pairs, pages, seconds, pagesMax, secondsMax, returns: outAndBack > 0 }
-    : { pairs, pages, seconds, returns: false };
+    ? { pairs: typical, pages: pagesTypical, seconds, pagesMax, secondsMax, returns: typical > 0 }
+    : { pairs: typical, pages: pagesTypical, seconds, returns: false };
   return {
     ...est,
     seconds: est.seconds + seconds,
@@ -550,12 +562,8 @@ export function estimateStart(
   if (snapshot.windowClamped) notes.push('window clamped to start tomorrow');
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
   if (!flightsApply(ctx, snapshot)) return est;
-  return withFlights(
-    ctx,
-    est,
-    flightPairsWanted(ctx, snapshot, definitionId),
-    estimatePhaseOf(ctx, snapshot),
-  );
+  const phase = estimatePhaseOf(ctx, snapshot);
+  return withFlights(ctx, est, flightPairsWanted(ctx, snapshot, definitionId, phase), phase);
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -609,13 +617,10 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const plan = exec.flightLists;
   const today = ctx.clock.todayLondon();
   const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
-  if (plan === null)
-    return withFlights(
-      ctx,
-      est,
-      flightPairsWanted(ctx, snapshot, exec.definitionId),
-      estimatePhaseOf(ctx, snapshot),
-    );
+  if (plan === null) {
+    const fresh = estimatePhaseOf(ctx, snapshot);
+    return withFlights(ctx, est, flightPairsWanted(ctx, snapshot, exec.definitionId, fresh), fresh);
+  }
   // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
   const phase = {
     returns: plan.returns && plan.returnsStopped === null,
@@ -625,11 +630,13 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   // reads left out, and reads it as a fresh selection would (the estimate's fresh figure for now); a finished one reads
   // nothing more
   if (plan.returns) {
-    const wanted = confirmFinished(plan) ? 0 : flightPairsWanted(ctx, snapshot, exec.definitionId, done);
+    const wanted = confirmFinished(plan)
+      ? { typical: 0, max: 0 }
+      : flightPairsWanted(ctx, snapshot, exec.definitionId, phase, done);
     return withFlights(ctx, est, wanted, phase);
   }
-  const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
-  return withFlights(ctx, est, wanted, phase);
+  const left = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
+  return withFlights(ctx, est, { typical: left, max: left }, phase);
 }
 
 type FlightLine = NonNullable<Estimate['flightLists']>;
