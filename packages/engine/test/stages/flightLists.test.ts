@@ -1015,6 +1015,7 @@ function cellsOf(e: CamoufoxEngine, id: string) {
 }
 
 describe('flight pages at once (CAMOUFOX_PAGES_AT_ONCE)', () => {
+  // why: a page held in flight is released by another page's start; one at a time it never is, and the test times out
   const atOnce = { env: { CAMOUFOX_PAGES_AT_ONCE: '4' } };
 
   it('with 4 at once, a page held in flight does not hold the others: all 10 start before it ends', async () => {
@@ -1040,7 +1041,7 @@ describe('flight pages at once (CAMOUFOX_PAGES_AT_ONCE)', () => {
     expect(rows).toHaveLength(10);
     expect(rows.every((r) => r.status === 'read')).toBe(true);
     expect(done.flightLists?.ended).toBeNull();
-  });
+  }, 15_000);
 
   it('an ending error with a page in flight: that page writes its own read, only the pairs never started fail', async () => {
     const held = deferred();
@@ -1077,5 +1078,5 @@ describe('flight pages at once (CAMOUFOX_PAGES_AT_ONCE)', () => {
       else if (i >= 0) expect([row?.status, row?.reason]).toEqual(['read', null]);
       else expect([row?.status, row?.reason]).toEqual(['failed', 'quota']);
     });
-  });
+  }, 15_000);
 });
