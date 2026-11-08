@@ -7,10 +7,8 @@
  * `offersComplete`), and the stored limits against today's (`sameFlightLimits`). A list never changes coverage.
  */
 import {
-  bookingReturnOf,
   type CellKey,
   cellKeyString,
-  cheapestOffer,
   cheapestPairing,
   type DatePairPairing,
   type FlightLimits,
@@ -18,10 +16,10 @@ import {
   hoursSince,
   type IsoDateTime,
   listFresh,
-  offersComplete,
   type PairingCandidate,
   type PairingOf,
   type Provenance,
+  pairingOffer,
   RETURN_FINISHED,
   type SearchDefinition,
   sameFlightLimits,
@@ -76,16 +74,8 @@ export function candidateOf(
   const outbound = attempt === undefined ? undefined : l.flights[attempt.outboundIndex];
   const ret = p === null ? undefined : attempt?.returns[p.returnIndex];
   if (p === null || outbound === undefined || ret === undefined) return null;
-  const booked = bookingReturnOf(r, l.flights);
   const b = r.booking;
-  const forPairing =
-    b !== null &&
-    booked !== null &&
-    b.attempt === booked.attempt &&
-    b.returnIndex === booked.returnIndex &&
-    b.attempt === p.attempt &&
-    b.returnIndex === p.returnIndex;
-  const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
+  const { offer, complete } = pairingOffer(r, l.flights, p);
   const ageHours = hoursSince(l.fetchedAt, now);
   // why: prov-007: freshness is judged on the elapsed milliseconds, as the engine's reuse rule is; `hoursSince` floors to
   // whole hours and is for display only (a list 168 h 59 m old under refresh 168 is past it); core's one rule, which
@@ -96,7 +86,7 @@ export function candidateOf(
     fromMinor: p.fromMinor,
     offer,
     offersRead: offer === null || b === null ? 0 : b.offers.length,
-    complete: offer !== null && b !== null && offersComplete(b, p.fromMinor),
+    complete,
     which: !fits ? 'over-limit' : p.attempt > 0 ? 'next-cheapest' : 'cheapest',
     times: {
       departOut: outbound.departsLocal,

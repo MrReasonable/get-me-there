@@ -5,7 +5,7 @@
  * offer of its booking read (`cheapestOffer`), and when it leads a date pair's figure (`pairingLeads`, `pairingReadOf`).
  */
 import { compareReturns, type FlightLimits, fitsLimits } from '../flights/choose.js';
-import { cheapestOffer, type Offer, type ReturnRead } from '../flights/returns.js';
+import { cheapestOffer, type Offer, offersComplete, type ReturnRead } from '../flights/returns.js';
 import type { ListedFlight, ListedReturn } from '../flights/types.js';
 import type { StaleMark } from '../labels/age.js';
 import type { IsoDateTime } from '../types/ids.js';
@@ -148,6 +148,45 @@ export function bookingReturnOf(
   if (last === undefined) return null;
   const p = pick([{ at, a: last }], flights, r.limits);
   return p === null ? null : { attempt: p.attempt, returnIndex: p.returnIndex };
+}
+
+/**
+ * The cheapest offer of the booking read that names `p`, and whether it is complete (design 2026-11-08 §4.1; moved from
+ * the api's `candidateOf`): the booking's offers count only when its `attempt` and `returnIndex` are `bookingReturnOf`'s
+ * and the pairing's (R-sellers); otherwise there is no offer.
+ */
+export function pairingOffer(
+  r: ReturnRead,
+  flights: readonly ListedFlight[],
+  p: Pairing,
+): { offer: Offer | null; complete: boolean } {
+  const booked = bookingReturnOf(r, flights);
+  const b = r.booking;
+  const forPairing =
+    b !== null &&
+    booked !== null &&
+    b.attempt === booked.attempt &&
+    b.returnIndex === booked.returnIndex &&
+    b.attempt === p.attempt &&
+    b.returnIndex === p.returnIndex;
+  const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
+  return { offer, complete: offer !== null && b !== null && offersComplete(b, p.fromMinor) };
+}
+
+/** Whose price a pairing's figure carries: a seller's complete offer, or Google's round-trip price. */
+export type PairingPriceKind = 'seller' | 'google';
+
+/**
+ * The one price of a pairing (design 2026-11-08 §4.1): the cheapest seller offer when the booking read kept complete
+ * offers, else Google's round-trip "from" price for the paired outbound and return.
+ */
+export function pairingPrice(c: {
+  offer: { priceMinor: number } | null;
+  complete: boolean;
+  fromMinor: number;
+}): { pricePence: number; kind: PairingPriceKind } {
+  if (c.offer !== null && c.complete) return { pricePence: c.offer.priceMinor, kind: 'seller' };
+  return { pricePence: c.fromMinor, kind: 'google' };
 }
 
 /**
