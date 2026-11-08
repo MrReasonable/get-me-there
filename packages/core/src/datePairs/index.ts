@@ -62,7 +62,7 @@ export {
   pairingReadOf,
   resultBasisOf,
 } from './pairing.js';
-export { bestPerWeek, rankDatePairs } from './rank.js';
+export { bestPerWeek, rankDatePairs, rankTierOf } from './rank.js';
 export {
   type DatePairSpace,
   datePairAt,

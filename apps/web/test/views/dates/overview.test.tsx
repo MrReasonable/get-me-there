@@ -133,7 +133,9 @@ describe('the readout and the cell’s names (spec §11 Overview)', () => {
   it('a cell’s accessible name gives its dates, nights and rank or mark in words, and its description is the readout', async () => {
     renderDates({ body: workedDates() });
     await findBoard();
-    expect(cell('2027-03-14', 10)).toHaveAccessibleName('14 Mar 2027–24 Mar 2027, 10 nights: rank 1');
+    // why: design 2026-11-08 §5.1: the fresh verified figure (14 → 25 Mar) is rank 1, the cheaper calendar price rank 2
+    expect(cell('2027-03-14', 11)).toHaveAccessibleName('14 Mar 2027–25 Mar 2027, 11 nights: rank 1');
+    expect(cell('2027-03-14', 10)).toHaveAccessibleName('14 Mar 2027–24 Mar 2027, 10 nights: rank 2');
     expect(cell('2027-03-17', 10)).toHaveAccessibleName('17 Mar 2027–27 Mar 2027, 10 nights: no price shown');
     const described = cell('2027-03-14', 10).getAttribute('aria-describedby');
     expect(described).toBe(readout().id);
@@ -142,23 +144,50 @@ describe('the readout and the cell’s names (spec §11 Overview)', () => {
   });
 });
 
-describe('rings both ways (spec §11 Rings)', () => {
-  it('the board’s shown rows are ringed by an outline; hovering a row lights its cell and a ringed cell lights its row; nothing scrolls', async () => {
+describe('rings both ways (spec §11 Rings; design 2026-11-08 §5.2)', () => {
+  /** Ten board rows: seven calendar prices and three trips with flights read (fresh verified figures). */
+  const readTrips = new Set([16, 18, 20]);
+  const mixed: DatesOptions = {
+    rest: { no_data: 4 },
+    pairs: Object.fromEntries(
+      Array.from({ length: 10 }, (_x, i) => {
+        const day = 14 + i;
+        return [
+          at(`2027-03-${day}`, 10),
+          pricedPair(priced(30_000 + i * 1_000, readTrips.has(day) ? { basis: 'verified' } : {})),
+        ];
+      }),
+    ),
+  };
+  // why: design 2026-11-08 §5.2: the overview outlines only the board's trips with flights read, not every shown row
+  it('with 3 trips with flights read among 10 board rows, only those 3 are outlined, and the legend says so', async () => {
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
-    renderDates({ body: workedDates() });
+    renderDates({ body: mixed });
     const table = await findBoard();
+    expect(boardRows(table)).toHaveLength(10);
     const ringed = [...overview().querySelectorAll('[data-ringed]')];
-    expect(ringed).toHaveLength(10);
+    expect(ringed.map((c) => c.getAttribute('data-cell'))).toEqual([
+      '2027-03-16|10',
+      '2027-03-18|10',
+      '2027-03-20|10',
+    ]);
     expect(ringed[0]?.className).toContain('shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]');
-    // the 11th-ranked date pair (not seen, 20 Mar) is not on the shown board
-    expect(cell('2027-03-20', 10)).not.toHaveAttribute('data-ringed');
+    // a calendar price on the board is not outlined
+    expect(cell('2027-03-14', 10)).not.toHaveAttribute('data-ringed');
+    expect(screen.getByTestId('dates-legend')).toHaveTextContent('outlined: trips with flights read');
+    // hovering a row lights its cell and a ringed cell lights its row; nothing scrolls
     fireEvent.pointerEnter(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-14', 10)).toHaveAttribute('data-lit');
+    expect(cell('2027-03-16', 10)).toHaveAttribute('data-lit');
     fireEvent.pointerLeave(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-14', 10)).not.toHaveAttribute('data-lit');
-    fireEvent.pointerOver(cell('2027-03-15', 10));
+    expect(cell('2027-03-16', 10)).not.toHaveAttribute('data-lit');
+    fireEvent.pointerOver(cell('2027-03-18', 10));
     expect(boardRows(table)[1]).toHaveAttribute('data-lit');
     expect(scroll).not.toHaveBeenCalled();
+  });
+  it('a board of calendar prices alone outlines nothing', async () => {
+    renderDates({ body: twelve });
+    await findBoard();
+    expect(overview().querySelectorAll('[data-ringed]')).toHaveLength(0);
   });
 });
 
@@ -213,7 +242,13 @@ describe('folded bands (spec §11 Folded bands)', () => {
   });
 
   it('a ring on a date pair inside a closed band rings the band', async () => {
-    renderDates({ body: wide });
+    // why: design 2026-11-08 §5.2: only a trip with flights read is outlined, so the date pair in the band is one
+    renderDates({
+      body: {
+        ...wide,
+        pairs: { ...wide.pairs, [at('2027-03-14', 13)]: pricedPair(priced(30_000, { basis: 'verified' })) },
+      },
+    });
     await findBoard();
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-ringed');
   });

@@ -3,6 +3,7 @@ import {
   type DecodedDatePairs,
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
+  rankTierOf,
   type StartRefusalCode,
 } from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -196,9 +197,16 @@ function DatesOf({
   }, [model]);
 
   const data = shown?.data ?? null;
-  // why: spec §11 Rings: the board's shown rows are ringed on the overview
+  // why: spec §11 Rings, as changed by design 2026-11-08 §5.2: of the board's shown rows only the trips with flights
+  // read are outlined on the overview (a calendar price alone is not), the legend saying so
   const ringed = useMemo(
-    () => new Set((model?.rows ?? []).slice(0, visible).map((p) => p.index)),
+    () =>
+      new Set(
+        (model?.rows ?? [])
+          .slice(0, visible)
+          .filter((p) => p.figure !== null && rankTierOf(p.figure) < 2)
+          .map((p) => p.index),
+      ),
     [model, visible],
   );
   return (

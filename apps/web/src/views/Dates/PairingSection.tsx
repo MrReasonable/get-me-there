@@ -1,4 +1,11 @@
-import { addDays, type FlightLimits, fitsLimits, type IsoDateTime, pairingLeads } from '@gmt/core';
+import {
+  addDays,
+  type FlightLimits,
+  fitsLimits,
+  type IsoDateTime,
+  pairingLeads,
+  pairingPrice,
+} from '@gmt/core';
 import { useId, useState } from 'react';
 import type { FlightList } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -115,21 +122,27 @@ export function PairingSection({
   // why: 21.7 code M1, prov-010: the counts and more-listed clauses of the view the shown returns come from
   const readNote = returnNote(list, COPY, readNow, p.attempt);
   // why: final review B-I1: the shown seller's price is emphasised as the answer exactly when the board leads with it,
-  // by core's one predicate (within the limits, read under today's limits, complete offers; spec rev 62/63: at any age
-  // unless a grid price was read after an older list)
+  // by core's one predicate (within the limits, read under today's limits; spec rev 62/63: at any age unless a grid
+  // price was read after an older list; design 2026-11-08: whatever its offers, which only decide whose price it is)
   const leads =
     mayLead &&
     pairingLeads(
       {
         fits: p.fits,
         underCurrentLimits: p.underCurrentLimits,
-        offer: p.offer,
-        complete: p.offer?.complete === true,
         fresh: list.stale === false,
         fetchedAt: list.fetchedAt,
       },
       gridFetchedAt,
     );
+  // why: design 2026-11-08 §4.1: the shown pairing leads with the board's price (`pairingPrice`, the one rule): a
+  // seller's when complete offers were read, else Google's "from" price, worded by what was read of the sellers; the
+  // incomplete offer's own price stays in the mismatch line below
+  const priced = pairingPrice({
+    offer: p.offer,
+    complete: p.offer?.complete === true,
+    fromMinor: p.fromMinor,
+  });
   const changed = !p.selectedNow || !p.underCurrentLimits;
   const tried = triedLine(list, changed);
   // why: the price-applies and book lines say what the shown seller's price is for, so they follow its line
@@ -171,9 +184,12 @@ export function PairingSection({
             // why: 21.7 re-review N2, final review B-I1: only the price the board leads with is the lead claim
             lead={ret === p.ret && leads}
             price={
-              ret === p.ret && p.offer !== null
+              ret === p.ret && p.offer !== null && priced.kind === 'seller'
                 ? { kind: 'offer', offer: p.offer }
-                : { kind: 'from', sellersNotRead: ret === p.ret }
+                : {
+                    kind: 'from',
+                    sellers: ret !== p.ret ? null : p.offer === null ? 'unread' : 'incomplete',
+                  }
             }
             after={ret === p.ret ? applies : null}
           />

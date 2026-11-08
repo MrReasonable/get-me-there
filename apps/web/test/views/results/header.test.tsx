@@ -54,7 +54,8 @@ describe("the detail's header with a pairing board figure (spec rev 56 §6.9; ar
     expect(within(board).getByTestId('price-cell')).toHaveTextContent('£1,180');
     expect(within(board).getByTestId('provenance')).toHaveTextContent('constraints not checked');
     expect(board.className).toMatch(/border-dashed/);
-    expect(board).toHaveTextContent(`LHR → JFK · ${COPY.basisName.pairing}`);
+    // why: design 2026-11-08 §4.1: the figure's own pairing group (a complete offer here) says whose price it is
+    expect(board).toHaveTextContent(`LHR → JFK · ${COPY.basisKindName.seller}`);
     expect(board).not.toHaveTextContent(/verified/i);
     // why: 21.7 prov-002: a pairing figure differs because it is a seller's offer from a flight list, never by recency
     expect(board).toHaveTextContent(

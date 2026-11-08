@@ -192,6 +192,9 @@ describe('a search\'s page with the return leg read says no banned word, no set-
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
     expect(jargonIn(mainPathWords())).toEqual([]);
-    expect(renderedCopy()).not.toMatch(/each seller|every seller|verified/i);
+    // why: design 2026-11-08 §4.1: "not every seller read" is the one allowed use of the phrase (a negation)
+    expect(renderedCopy().replace(/not every seller read/gi, '')).not.toMatch(
+      /each seller|every seller|verified/i,
+    );
   });
 });

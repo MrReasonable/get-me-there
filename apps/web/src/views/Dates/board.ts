@@ -199,8 +199,8 @@ function leadOf(
       return D.pairingOtherLimits;
     case 'sellers-not-read':
     case 'offers-incomplete':
-      // why: their words ride on the pairing's own line ("from £X · sellers not read", "a cheaper seller may not have
-      // been read"), beside the price they qualify
+      // why: never produced since design 2026-11-08 (a pairing without complete offers leads at Google's price); their
+      // wire codes stay, and a pairing beneath words itself beside its price
       return null;
     default: {
       const unknownRead: never = read;
@@ -260,6 +260,19 @@ export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
   return q.seller;
 }
 
+/** Whose price a pairing carries, in the board's words (design 2026-11-08 §4.1, §5.1). */
+export type PairingKind = 'seller' | 'google-unread' | 'google-incomplete';
+
+/**
+ * The kind of a pairing's price from its group alone, with no new contract field: `isFrom` says whether it is the
+ * return's "from" price (Google's), and `offersRead` then says whether any seller was read (`google-incomplete`: some
+ * were, not every one) or none (`google-unread`). A seller's price (`isFrom` false) is of complete offers.
+ */
+export function pairingKindOf(g: Pick<DatePairPairing, 'isFrom' | 'offersRead'>): PairingKind {
+  if (!g.isFrom) return 'seller';
+  return g.offersRead === 0 ? 'google-unread' : 'google-incomplete';
+}
+
 /**
  * The board head's seller-price count (21.7 persona coverage): of the date pairs shown, how many carry a seller's price
  * (a pairing figure, or a pairing beneath whose price is an offer's); null when no pairing figure is shown, so a search
@@ -269,9 +282,10 @@ export function sellerCoverage(
   rows: ReadonlyArray<{ figure: DatePairFigure | null }>,
 ): { read: number; shown: number } | null {
   if (!rows.some((p) => p.figure?.basis === 'pairing')) return null;
+  // why: design 2026-11-08 §4.1: only complete offers count; an incomplete one is shown as Google's price
   const read = rows.filter((p) => {
     const q = p.figure?.pairing ?? null;
-    return q !== null && !q.isFrom;
+    return q !== null && !q.isFrom && q.complete;
   }).length;
   return { read, shown: rows.length };
 }

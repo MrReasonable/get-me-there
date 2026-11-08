@@ -1,6 +1,7 @@
 import type { DatePair } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
+import { pairingKindOf } from './board.js';
 
 // Spec §11 "How far checked", from the date pair's own counts, in spec rev 55 §3's main-path words: whether its figure
 // is class verified (checked fares) or a calendar price (and from which source); whether its airport pairs had their
@@ -26,7 +27,9 @@ function figureWords(f: NonNullable<DatePair['figure']>): string {
     case 'calendar':
       return H.calendar(H.calendarFrom[f.price.provenance.providerId]);
     case 'pairing':
-      return H.pairing;
+      // why: the contract gives a pairing figure its pairing group; its kind says whose price the figure is
+      if (f.pairing === null) throw new RangeError('howFarChecked: a pairing figure carries its pairing');
+      return H.pairing[pairingKindOf(f.pairing)];
     default: {
       const unknownBasis: never = f.basis;
       throw new RangeError(`howFarChecked: no basis ${String(unknownBasis)}`);

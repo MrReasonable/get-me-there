@@ -20,6 +20,7 @@ import {
   type PairingOf,
   type Provenance,
   pairingOffer,
+  pairingPrice,
   RETURN_FINISHED,
   type SearchDefinition,
   sameFlightLimits,
@@ -109,7 +110,8 @@ export function candidateOf(
 
 /**
  * Spec rev 56 §10's `pairing` group from a candidate: the cheapest offer's stated price with its seller and fare, or the
- * return's "from" price (`isFrom`, no seller) when no offer was read for it; the return's "from" price itself
+ * return's "from" price (`isFrom`, no seller) when no complete offers were read for it (none read, or not every seller
+ * read: `offersRead` tells which); the return's "from" price itself
  * (`fromPence`, Task 21.7); the offers read, whether complete, which outbound, the four times, the mismatch mark, and the
  * list's provenance, stale mark and age.
  */
@@ -117,19 +119,22 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
   // why: 21.7 code I3 (Ian's ruling 2 for returns): an over-limit pairing keeps the offer read for it, as the search's
   // page block shows it, so the board and the block name the same price; `which: 'over-limit'` marks it, and it never
   // leads (the lead rule needs both legs within the limits)
-  const offer = c.offer;
+  // why: design 2026-11-08 §4.1: `pairingPrice` is the one price rule; incomplete offers are not shown as an offer's
+  // price (a cheaper seller may not have been read), so that group is Google's "from" price with `offersRead` as read
+  const { pricePence, kind } = pairingPrice(c);
+  const offer = kind === 'seller' ? c.offer : null;
   return {
-    pricePence: offer?.priceMinor ?? c.fromMinor,
+    pricePence,
     // why: Task 21.7: the return's "from" price rides beside the offer's, so the board's mismatch mark can name it
     fromPence: c.fromMinor,
-    isFrom: offer === null,
+    isFrom: kind === 'google',
     seller: offer?.seller ?? null,
     fare: offer?.fare ?? null,
-    offersRead: offer === null ? 0 : c.offersRead,
-    complete: offer !== null && c.complete,
+    offersRead: c.offersRead,
+    complete: kind === 'seller',
     which: c.which,
     ...c.times,
-    mismatch: offer !== null && c.mismatch,
+    mismatch: kind === 'seller' && c.mismatch,
     provenance: c.provenance,
     stale: c.stale,
     ageHours: c.ageHours,

@@ -9,7 +9,14 @@ import { formatFlapDate, formatIsoDate, formatIsoDateWords, formatMinutes } from
 import { useNow } from '../../now.js';
 import { detailHref, detailPatch } from '../../state/datesState.js';
 import { navigateTo } from '../../state/urlState.js';
-import { arrival, calendarStyled, flightReadLine, type ListsState, sellerOf } from './board.js';
+import {
+  arrival,
+  calendarStyled,
+  flightReadLine,
+  type ListsState,
+  pairingKindOf,
+  sellerOf,
+} from './board.js';
 import { figureSource } from './flightLines.js';
 import { readAt } from './stateLines.js';
 
@@ -41,9 +48,11 @@ export function FigurePrice({
         pricePence={p.pricePence}
         provenance={p.provenance}
         calendar={calendarStyled(figure.basis)}
-        // why: spec rev 56 §6.9: a pairing figure's source is the browser worker's flight list, the cheapest of the
-        // sellers read for these two flights
-        {...(figure.basis === 'pairing' ? { sourceLabel: D.pairingSource } : {})}
+        // why: spec rev 56 §6.9, design 2026-11-08 §4.1: a pairing figure's source is the browser worker's flight list;
+        // its price is a seller's or Google's, said by the kind of the figure's own pairing group
+        {...(figure.basis === 'pairing' && figure.pairing !== null
+          ? { sourceLabel: D.pairingSource[pairingKindOf(figure.pairing)] }
+          : {})}
         stale={p.stale}
         truncated={p.truncated}
         superseded={figure.superseded}
@@ -139,6 +148,7 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
   if (figure.basis !== 'pairing' || q === null) return null;
   const second = q.which === 'next-cheapest';
   const g = figure.gridPrice;
+  const kind = pairingKindOf(q);
   return (
     // why: a group of the pairing's own lines (R-board); a fieldset is the semantic group element (lint), its
     // form-control styling reset; its name is its own visible lines, so it is said once and seen
@@ -148,9 +158,16 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
       data-testid="pairing-figure"
       className="m-0 mt-1.5 block min-w-0 space-y-0.5 border-0 p-0 text-xs text-fg-2"
     >
-      <span id={`${id}-seller`} data-testid="pairing-seller" className="block">
-        {/* why: seller and fare are page text, rendered as text only; the figure is never a seller link */}
-        {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
+      {kind === 'seller' ? (
+        <span id={`${id}-seller`} data-testid="pairing-seller" className="block">
+          {/* why: seller and fare are page text, rendered as text only; the figure is never a seller link */}
+          {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
+        </span>
+      ) : null}
+      {/* why: design 2026-11-08 §4.1: whose price it is, in words; a "from" price names no seller, so this branch never
+      calls `sellerOf`, and the words are the group's name when there is no seller line */}
+      <span id={kind === 'seller' ? undefined : `${id}-seller`} data-testid="pairing-kind" className="block">
+        {D.priceKind[kind]}
       </span>
       {second ? (
         <span id={`${id}-which`} data-testid="pairing-which" className="block">
@@ -220,10 +237,11 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
             <>
               <span>{D.fromPrice}</span>
               <PairingPrice pairing={q} pence={q.pricePence} staleSaid={said} />
-              {/* why: final review B-M2: every "from" price says no seller was read for it, as the block's Back line */}
+              {/* why: final review B-M2: every "from" price says what was read of the sellers, as the block's Back
+              line; design 2026-11-08: none read, or not every one */}
               <span>
                 {F.separator}
-                {F.sellersNotRead}
+                {q.offersRead === 0 ? F.sellersNotRead : F.notEverySellerRead}
               </span>
             </>
           ) : (

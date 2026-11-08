@@ -118,17 +118,19 @@ describe('sortBoard: the sort changes the order, never the rank (spec §11 Board
   const sorted = (key: 'price' | 'departure' | 'nights' | 'journey', dir: 'asc' | 'desc') =>
     indexes(sortBoard(m.rows, { key, dir }, m.rankOf));
 
+  // why: design 2026-11-08 §5.1: the three fresh verified figures (trips with flights read) rank before the calendar price
+  // at 31000, which ranks last whatever it costs
   it('price ascending is the rank order; a second press reverses it', () => {
     expect(sorted('price', 'asc')).toEqual([
       '2027-03-14/12',
-      '2027-03-15/10',
       '2027-03-16/11',
       '2027-03-17/10',
+      '2027-03-15/10',
     ]);
     expect(sorted('price', 'desc')).toEqual([
+      '2027-03-15/10',
       '2027-03-17/10',
       '2027-03-16/11',
-      '2027-03-15/10',
       '2027-03-14/12',
     ]);
   });
@@ -148,16 +150,16 @@ describe('sortBoard: the sort changes the order, never the rank (spec §11 Board
   });
   it('nights orders by stay length, ties by rank', () => {
     expect(sorted('nights', 'asc')).toEqual([
-      '2027-03-15/10',
       '2027-03-17/10',
+      '2027-03-15/10',
       '2027-03-16/11',
       '2027-03-14/12',
     ]);
     expect(sorted('nights', 'desc')).toEqual([
       '2027-03-14/12',
       '2027-03-16/11',
-      '2027-03-15/10',
       '2027-03-17/10',
+      '2027-03-15/10',
     ]);
   });
   it('journey time orders by minutes, ties by rank, and an unknown journey time sorts last either way', () => {
@@ -474,7 +476,8 @@ describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6
 
 describe('sellerCoverage (21.7 persona coverage: seller prices read for N of the M date pairs shown)', () => {
   const from = figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false });
-  it('null without a pairing figure; else the rows with an offer (leading or beneath) of the rows shown', () => {
+  // why: design 2026-11-08 §4.1: only complete offers count; an incomplete one is Google's price, not a seller's
+  it('null without a pairing figure; else the rows with a complete offer (leading or beneath) of the rows shown', () => {
     expect(sellerCoverage([])).toBeNull();
     expect(
       sellerCoverage([
@@ -495,7 +498,7 @@ describe('sellerCoverage (21.7 persona coverage: seller prices read for N of the
         { figure: calendarFig() },
         { figure: null },
       ]),
-    ).toEqual({ read: 2, shown: 5 });
+    ).toEqual({ read: 1, shown: 5 });
   });
 });
 

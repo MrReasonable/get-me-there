@@ -59,10 +59,14 @@ describe('the board (spec §11 Board)', () => {
     await user.click(screen.getByRole('button', { name: 'Show 1 more' }));
     const rows = boardRows(table);
     expect(rows.map((r) => cellsOf(r)[0])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']);
-    expect(cellsOf(rows[0] ?? table).slice(1, 4)).toEqual(['14 Mar 2027', '24 Mar 2027', '10']);
-    // the superseded (31000) and not-seen (32000) figures are cheaper than most, and rank last
-    expect(rows[9]).toHaveTextContent('superseded by a later search');
-    expect(rows[10]).toHaveTextContent('not seen in latest search (30h ago)');
+    // why: design 2026-11-08 §5.1: the fresh verified figure (a trip with flights read) leads the cheaper calendar prices,
+    // which follow by price
+    expect(cellsOf(rows[0] ?? table).slice(1, 4)).toEqual(['14 Mar 2027', '25 Mar 2027', '11']);
+    expect(cellsOf(rows[1] ?? table).slice(1, 4)).toEqual(['14 Mar 2027', '24 Mar 2027', '10']);
+    // the superseded (31000) and not-seen (32000) figures are cheaper than most, and rank last; between the two, the tier
+    // (design 2026-11-08 §5.1) puts the not-seen verified figure before the superseded calendar price
+    expect(rows[9]).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(rows[10]).toHaveTextContent('superseded by a later search');
   });
 
   it('sorts by departure, nights, price and journey time with aria-sort; a second press reverses; the rank stays', async () => {
@@ -143,7 +147,8 @@ describe('the board (spec §11 Board)', () => {
   it('journey time "not known", and "journey time not known" on a kept row under a journey filter', async () => {
     renderDates({ body: workedDates({ maxJourneyMinutes: 900 }), search: search('&d.journey=900') });
     const table = await findBoard();
-    const calendar = boardRows(table)[0];
+    // why: the first row is now the verified figure (design 2026-11-08 §5.1); the calendar price is the second
+    const calendar = boardRows(table)[1];
     expect(cellsOf(calendar ?? table)[6]).toBe('journey time not known');
   });
 
@@ -161,13 +166,15 @@ describe('the board (spec §11 Board)', () => {
   it('no arrival on a figure whose data does not carry one', async () => {
     renderDates({ body: workedDates() });
     const table = await findBoard();
-    expect(within(boardRows(table)[0] ?? table).queryAllByTestId('arrives')).toEqual([]);
+    // why: the first row is the verified figure, which carries its times; the calendar price is the second
+    expect(within(boardRows(table)[1] ?? table).queryAllByTestId('arrives')).toEqual([]);
   });
 
   it('each row’s dates are a real link to the detail carrying the figure’s basis, and a click on the row follows it', async () => {
     const { user } = renderDates({ body: workedDates(), search: search('&d.to=JFK') });
     const table = await findBoard();
-    const link = within(boardRows(table)[0] ?? table).getByRole('link', {
+    // why: design 2026-11-08 §5.1: the calendar price is the second row, after the verified figure
+    const link = within(boardRows(table)[1] ?? table).getByRole('link', {
       name: 'Open 14 Mar 2027 to 24 Mar 2027',
     });
     const href = new URL(link.getAttribute('href') ?? '', 'http://localhost');
@@ -180,8 +187,8 @@ describe('the board (spec §11 Board)', () => {
       basis: 'calendar',
     });
     const before = window.history.length;
-    // a click on the second row's "how far checked" cell, away from its link
-    await user.click(boardRows(table)[1]?.querySelectorAll('td')[5] ?? table);
+    // a click on the third row's "how far checked" cell, away from its link
+    await user.click(boardRows(table)[2]?.querySelectorAll('td')[5] ?? table);
     expect(window.history.length).toBe(before + 1);
     const p = new URLSearchParams(window.location.search);
     expect([p.get('view'), p.get('depart'), p.get('return')]).toEqual([
@@ -231,7 +238,9 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     expect(boardRows(table)).toEqual(cards);
     for (const c of cards) expect(c).toHaveAttribute('role', 'row');
     expect(cards).toHaveLength(10);
-    const first = cards[0] ?? document.body;
+    // why: design 2026-11-08 §5.1: the first card is the verified figure; the second is the calendar price whose face
+    // says "not checked"
+    const first = cards[1] ?? document.body;
     const link = within(first).getByRole('link');
     expect(link.getAttribute('href')).toContain('depart=2027-03-14');
     const face = within(first).getByTestId('price-cell');
@@ -358,6 +367,40 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     expect(row).not.toHaveTextContent(/verified/i);
   });
 
+  // why: design 2026-11-08 §4.1 (operator ruling 2026-11-08): a pairing leads at the seller's price when complete offers
+  // were read, else at Google's price, and says which; a "from" price names no seller (sellerOf would throw on one)
+  it("a complete pairing words its price as the seller's, with the seller line", async () => {
+    const row = rowOf(await board(pairingFig()));
+    expect(within(row).getByTestId('pairing-kind')).toHaveTextContent("seller's price");
+    expect(within(row).getByTestId('pairing-seller')).toHaveTextContent('QQ Travel');
+  });
+
+  it.each([
+    [0, "Google's price, sellers not read"],
+    [3, "Google's price, not every seller read"],
+  ])(
+    'a pairing leading at the from price (%i offers read) words it %s, with no seller line',
+    async (offersRead, words) => {
+      const pairing = figurePairing({
+        isFrom: true,
+        seller: null,
+        fare: null,
+        complete: false,
+        offersRead,
+        mismatch: false,
+      });
+      const row = rowOf(await board(pairingFig({ pairing })));
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(words);
+      expect(within(row).queryByTestId('pairing-seller')).toBeNull();
+      expect(row).not.toHaveTextContent('cheapest of 3 offers read');
+      const price = within(row).getAllByTestId('price-cell')[0];
+      expect(within(price ?? row).getByTestId('provenance')).toHaveTextContent(
+        "Google's price for these two flights",
+      );
+      expect(row).toHaveTextContent(words);
+    },
+  );
+
   // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip after the refresh, marked older
   it('an older pairing still leads its row, marked older than the refresh, with its seller line', async () => {
     const older = figurePairing({ stale: 'refresh', ageHours: 40 });
@@ -462,7 +505,9 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     expect(within(rowOf(await board(pairingFig()))).queryByTestId('pairing-settings')).toBeNull();
   });
 
-  it('the rank follows the response order: the pairing figure (£1,180) ranks below a cheaper calendar one', async () => {
+  // why: design 2026-11-08 §5.1 (operator ruling 2026-11-08): a pairing figure is a trip with flights read, so it ranks
+  // before a cheaper calendar price; this replaces "ranks below a cheaper calendar one"
+  it('the rank puts the pairing figure (£1,180) before a cheaper calendar one', async () => {
     renderDates({
       body: {
         discoveryProviders: ['travelpayouts', 'camoufox'],
@@ -476,8 +521,8 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     });
     const table = await findBoard();
     expect(boardRows(table).map((r) => [cellsOf(r)[0], cellsOf(r)[1]])).toEqual([
-      ['1', '15 Mar 2027'],
-      ['2', '14 Mar 2027'],
+      ['1', '14 Mar 2027'],
+      ['2', '15 Mar 2027'],
     ]);
   });
 

@@ -653,8 +653,12 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
     expect(F.sellerLine('QQ Travel', null, 3)).not.toMatch(/\bfrom\b/);
   });
   it('never "each seller" or "every seller", nor "lowest seller price" (21.7 persona H1), in any string or template', () => {
-    expect(texts.filter((t) => /each seller|every seller|lowest seller price/i.test(t))).toEqual([]);
-    expect(COPY.basisName.pairing).toBe('cheapest of the sellers read, not checked with the airline');
+    // why: design 2026-11-08 §4.1 (operator ruling): "not every seller read" is the one allowed use, a negation that
+    // claims nothing complete
+    const claims = (t: string) => t.replace(/not every seller read/gi, '');
+    expect(texts.filter((t) => /each seller|every seller|lowest seller price/i.test(claims(t)))).toEqual([]);
+    expect(COPY.basisKindName.seller).toBe('cheapest of the sellers read, not checked with the airline');
+    expect(COPY.basisName.pairing).toBe('flights read, not checked with the airline');
   });
   it('"round trip" is spelt one way on Out, Back and the board: never "round-trip total" or "roundtrip"', () => {
     expect(F.roundTrip).toBe('round trip');

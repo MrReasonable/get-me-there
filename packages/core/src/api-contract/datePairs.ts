@@ -605,13 +605,14 @@ function refineListReason(v: DatePairsBody, reads: ReadonlyMap<number, PairingRe
 /**
  * Final review B-M5: what a pairing shown beneath its figure must say for its read (the api's `pairingReadOf` order):
  * over the limits when it reads `over-limit`, and only then or under other limits (`within-other-limits`, B-M2); stale when it reads `within-older`, fresh when it reads
- * `sellers-not-read` or `offers-incomplete`; a "from" price when no seller was read; an offer that is not complete when
- * the offers may be incomplete. The column breached first, with its message, or null.
+ * `sellers-not-read` or `offers-incomplete`. Design 2026-11-08 §4.1: those two reads are never produced now, and what
+ * the pairing's price is (an offer's, or Google's "from" price) no longer depends on the read, so the price columns are
+ * checked once for every pairing (`pairingCellBreach`). The column breached first, with its message, or null.
  */
 function beneathBreach(
   read: PairingRead,
-  p: { which: string; stale: unknown; isFrom: boolean; complete: boolean },
-): { column: 'which' | 'stale' | 'isFrom' | 'complete'; message: string } | null {
+  p: { which: string; stale: unknown },
+): { column: 'which' | 'stale'; message: string } | null {
   // why: B-M2: a list read under other limits reads within-other-limits whether or not it is over today's limits
   const over = p.which === 'over-limit';
   if (read === 'over-limit' ? !over : over && read !== 'within-other-limits')
@@ -620,13 +621,6 @@ function beneathBreach(
     return { column: 'stale', message: 'a pairing older than the refresh is stale' };
   if ((read === 'sellers-not-read' || read === 'offers-incomplete') && p.stale !== false)
     return { column: 'stale', message: 'a pairing within the refresh is fresh' };
-  if (read === 'sellers-not-read' && !p.isFrom)
-    return { column: 'isFrom', message: 'a pairing whose sellers were not read shows its from price' };
-  if (read === 'offers-incomplete' && (p.isFrom || p.complete))
-    return {
-      column: 'complete',
-      message: 'a pairing whose offers may be incomplete shows an offer not complete',
-    };
   return null;
 }
 
@@ -636,7 +630,8 @@ const isFlightList = (p: Provenance | undefined): boolean =>
 
 /**
  * Spec rev 56 §6.9 "When it leads" (prov-001): a pairing figure's entry `k` (figure `at`) is the leading pairing's own
- * words: an offer's price (never a "from" price), equal to the figure's, of a complete read of at least one offer, within
+ * words (design 2026-11-08 §4.1): either a complete offer's price (not `isFrom`, a seller, at least one offer read) or the
+ * return's "from" price (`isFrom`, no seller), never an incomplete offer's price; equal to the figure's, within
  * the limits, the figure carrying its stale mark (spec rev 62: at any age), and the figure's own flight-list provenance. So a regression in the api's lead rule
  * cannot put a headline seller price on the board that the rules forbid.
  */
@@ -648,18 +643,14 @@ function refineLeading(
   fail: Fail,
 ): void {
   const f = v.figures;
-  if (columnAt(q.isFrom, k)) {
-    fail(
-      'pairingFrom',
-      ['pairing', 'isFrom', k],
-      "a pairing figure's price is an offer's, never a from price",
-    );
-    return;
+  // why: the complete-offer words (a seller, at least one offer read) bind only an offer's price; a "from" price is
+  // refused an incomplete offer's price by `isFrom`'s own rules below (never complete, no seller)
+  if (!columnAt(q.isFrom, k)) {
+    if (!columnAt(q.complete, k))
+      fail('pairingComplete', ['pairing', 'complete', k], "a pairing figure's offers are complete");
+    if (columnAt(q.offersRead, k) < 1)
+      fail('pairingOffers', ['pairing', 'offersRead', k], 'a pairing figure read at least one offer');
   }
-  if (!columnAt(q.complete, k))
-    fail('pairingComplete', ['pairing', 'complete', k], "a pairing figure's offers are complete");
-  if (columnAt(q.offersRead, k) < 1)
-    fail('pairingOffers', ['pairing', 'offersRead', k], 'a pairing figure read at least one offer');
   if (columnAt(q.which, k) === 'over-limit')
     fail('pairingLimits', ['pairing', 'which', k], 'a pairing figure is within the limits');
   // why: spec rev 62: a pairing leads at any age, and the figure carries its list's stale mark, never another
@@ -737,17 +728,11 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
     const breach =
       basis === 'pairing' || read === null
         ? null
-        : beneathBreach(read, {
-            which: columnAt(q.which, k),
-            stale: columnAt(q.stale, k),
-            isFrom,
-            complete: columnAt(q.complete, k),
-          });
+        : beneathBreach(read, { which: columnAt(q.which, k), stale: columnAt(q.stale, k) });
     if (breach !== null) fail('pairingBeneath', ['pairing', breach.column, k], breach.message);
-    // why: prov-001: a "from" price is shown when no offer was read for the pairing, so it counts none and is never
-    // complete
-    if (isFrom && columnAt(q.offersRead, k) !== 0)
-      fail('pairingFromOffers', ['pairing', 'offersRead', k], 'a from price reads no offer');
+    // why: prov-001, design 2026-11-08 §4.1: a "from" price is shown when no complete offers were read for the pairing:
+    // none read, or some read and not complete (`offersRead` says which), so it is never complete itself and an
+    // incomplete offer's price is never shown
     if (isFrom && columnAt(q.complete, k))
       fail('pairingFromComplete', ['pairing', 'complete', k], 'a from price is never complete');
     if (isFrom === (columnAt(q.seller, k) !== null))
@@ -936,8 +921,7 @@ export const datePairFigureSchema = z
     if (p === null) return;
     if (pairingBasis) {
       // why: prov-001: the leading pairing's own words, the board's `refineLeading` figure by figure
-      if (p.isFrom) fail(['pairing', 'isFrom'], "a pairing figure's price is an offer's, never a from price");
-      else {
+      if (!p.isFrom) {
         if (!p.complete) fail(['pairing', 'complete'], "a pairing figure's offers are complete");
         if (p.offersRead < 1) fail(['pairing', 'offersRead'], 'a pairing figure read at least one offer');
       }
@@ -956,7 +940,6 @@ export const datePairFigureSchema = z
       const breach = beneathBreach(read, p);
       if (breach !== null) fail(['pairing', breach.column], breach.message);
     }
-    if (p.isFrom && p.offersRead !== 0) fail(['pairing', 'offersRead'], 'a from price reads no offer');
     if (p.isFrom && p.complete) fail(['pairing', 'complete'], 'a from price is never complete');
     if (p.isFrom === (p.seller !== null))
       fail(['pairing', 'seller'], "a seller exactly when the price is an offer's");

@@ -190,7 +190,9 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     });
   });
 
-  it('A8: an expand-failed booking leads when its cheapest offer equals the "from" price; else offers-incomplete', async () => {
+  // why: design 2026-11-08 §4.1: an expand-failed booking with offers above the "from" price still leads, at Google's
+  // "from" price (never an incomplete offer's), with the offers read counted and no seller named
+  it('A8: an expand-failed booking leads with its offer when it equals the "from" price; else at the "from" price', async () => {
     const equal = await setup();
     store(
       equal.x,
@@ -213,33 +215,42 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       }),
     );
     expect(await figureA(above.x, above.def)).toMatchObject({
-      basis: 'calendar',
-      pairingRead: 'offers-incomplete',
+      basis: 'pairing',
+      price: { pricePence: 118_000 },
+      pairingRead: 'within',
       pairing: {
-        pricePence: 119_500,
-        isFrom: false,
-        seller: 'QQ Fares',
-        fare: 'Economy Basic',
+        pricePence: 118_000,
+        fromPence: 118_000,
+        isFrom: true,
+        seller: null,
+        fare: null,
+        offersRead: 2,
         complete: false,
+        mismatch: false,
       },
     });
   });
 
-  it("a booking of another return than bookingReturnOf's keeps the grid price: sellers-not-read, the from price beneath", async () => {
+  it("a booking of another return than bookingReturnOf's leads at the from price, no sellers read (design 2026-11-08)", async () => {
     const { x, def } = await setup();
     store(x, def, A, fixture({ returnIndex: 1 }));
     expect(await figureA(x, def)).toMatchObject({
-      basis: 'calendar',
-      price: { pricePence: 40_000 },
-      pairingRead: 'sellers-not-read',
+      basis: 'pairing',
+      price: { pricePence: 118_000 },
+      pairingRead: 'within',
       pairing: { ...PAIRING, isFrom: true, seller: null, fare: null, offersRead: 0, complete: false },
     });
   });
 
-  it('R-sellers: a read booking with a further control and its cheapest above the "from" price is offers-incomplete', async () => {
+  it('R-sellers: a read booking with a further control and its cheapest above the "from" price leads at the "from" price', async () => {
     const { x, def } = await setup();
     store(x, def, A, fixture({ moreControl: true, offers: OFFER_FARES }));
-    expect(await figureA(x, def)).toMatchObject({ basis: 'calendar', pairingRead: 'offers-incomplete' });
+    expect(await figureA(x, def)).toMatchObject({
+      basis: 'pairing',
+      price: { pricePence: 118_000 },
+      pairingRead: 'within',
+      pairing: { isFrom: true, seller: null, offersRead: 2, complete: false },
+    });
   });
 
   it('with no control left, a cheapest offer above the "from" price leads with the mismatch mark', async () => {
@@ -457,13 +468,13 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     });
   });
 
-  it("the board's rank follows the pairing's price; the step's ranking (rankedPairsFor) keeps the calendar figures", async () => {
+  it("the board ranks the pairing (trips with flights read) first; the step's ranking (rankedPairsFor) keeps the calendar figures", async () => {
     const { x, def } = await setup();
     store(x, def, A, PAIRING_FIXTURE.returns);
     const board = rankDatePairs((await datesOf(x, def.id)).pairs, x.clock.now());
     expect(board.map((p) => [p.departureDate, p.figure?.price.pricePence])).toEqual([
-      ['2026-11-03', 41_000],
       ['2026-11-02', 118_000],
+      ['2026-11-03', 41_000],
     ]);
     const step = rankedPairsFor(x.ports, {
       definitionId: def.id,
@@ -503,6 +514,24 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       origin: 'LHR',
       destination: 'JFK',
       fromLatestRun: true,
+    });
+  });
+
+  // why: design 2026-11-08 §5.1: the card's cheapest is the board's first-ranked figure, so a read trip (here at Google's
+  // price, no seller read) is the cheapest even beside a cheaper calendar price on another date pair
+  it("the card's cheapest is a fresh pairing at Google's price before a cheaper calendar price on another pair", async () => {
+    const { x, def } = await setup({ bPence: 56_500 });
+    store(x, def, A, fixture(null));
+    const res = await x.request('/api/definitions/cards');
+    const card = apiContract.searchCardsResponseSchema
+      .parse(await res.json())
+      .cards.find((c) => c.id === def.id);
+    expect(card?.cheapest).toMatchObject({
+      pricePence: 118_000,
+      basis: 'pairing',
+      departureDate: '2026-11-02',
+      provenance: listProvenance(1),
+      ageHours: 1,
     });
   });
 

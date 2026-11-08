@@ -391,7 +391,9 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(within(block()).getByTestId('pairing-limits-changed')).toBeInTheDocument();
     expect(leads()).toBe(0);
   });
-  it('offers that may be incomplete: no lead emphasis', async () => {
+  // why: design 2026-11-08 §4.1: offers that may be incomplete lead at Google's price, as the board's row does, so the
+  // shown price is emphasised and says not every seller was read
+  it("offers that may be incomplete: Google's price leads, not every seller read", async () => {
     await renderList(
       withBooking({
         status: 'expand-failed',
@@ -400,10 +402,10 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
         offers: [{ seller: 'QQ Fares', fare: null, priceMinor: 119_500 }],
       }),
     );
-    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent(
-      'a cheaper seller may not have been read',
+    expect(lines('return-line')[0]).toMatch(
+      /^Back: from £1,180 round trip · not every seller read · depart 14:20/,
     );
-    expect(leads()).toBe(0);
+    expect(leads()).toBe(1);
   });
 });
 
@@ -422,16 +424,20 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-mismatch')).toBeNull();
   });
 
-  it('an incomplete booking: "a cheaper seller may not have been read" on the line of the price it qualifies', async () => {
+  it('an incomplete booking: the Back line is Google\'s price, "not every seller read", the offer read in the mismatch line', async () => {
     await renderList(
       withBooking({
         moreControl: true,
         offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
       }),
     );
-    // why: 21.7 prov-006 (L): beside the price, as the board puts it
+    // why: 21.7 prov-006 (L), design 2026-11-08 §4.1: beside the price, as the board puts it; the incomplete offer's own
+    // price is not the headline, it is the mismatch line's detail
     expect(lines('return-line')[0]).toBe(
-      'Back: £1,195 round trip · QQ Fares, Economy Basic · cheapest of 1 offer read · a cheaper seller may not have been read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+      'Back: from £1,180 round trip · not every seller read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+    );
+    expect(plain(within(block()).getByTestId('pairing-mismatch'))).toBe(
+      "the cheapest offer read is £1,195; Google's list showed from £1,180",
     );
     expect(within(block()).queryByTestId('pairing-incomplete')).toBeNull();
   });
@@ -453,8 +459,9 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
     // why: 21.7 prov-001: no seller's price is shown, so the head names none
     expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
-    // why: 21.7 re-review N2: a "from" price is a weaker claim than a seller's stated one: no lead emphasis
-    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
+    // why: design 2026-11-08 §4.1 (replacing 21.7 re-review N2): the board leads with this "from" price, so the block
+    // emphasises it too
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(1);
   });
 
   it('an expansion that failed after some offers keeps its note and its offer', async () => {

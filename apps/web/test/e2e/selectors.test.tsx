@@ -36,17 +36,19 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
     const rows = board.querySelectorAll(SMOKE.boardRow);
     expect(rows.length).toBe(10);
     expect(within(board).getAllByRole('link', { name: SMOKE.rowLink })).toHaveLength(10);
-    expect(within(board).getAllByRole('link')[0]).toHaveAccessibleName('Open 14 Mar 2027 to 24 Mar 2027');
+    expect(within(board).getAllByRole('link')[0]).toHaveAccessibleName('Open 14 Mar 2027 to 25 Mar 2027');
 
     expect(document.querySelectorAll(SMOKE.overviewTabStop)).toHaveLength(1);
     expect(one(SMOKE.overviewTabStop).tagName).toBe('BUTTON');
     expect(document.querySelectorAll(SMOKE.overviewCell).length).toBeGreaterThan(10);
-    expect(document.querySelectorAll(SMOKE.ringedCell)).toHaveLength(10);
+    // why: design 2026-11-08 §5.2: only trips with flights read are outlined; the worked example holds two verified figures
+    expect(document.querySelectorAll(SMOKE.ringedCell)).toHaveLength(2);
     // pointing at the first row lights its ringed cell
     expect(document.querySelector(SMOKE.litCell)).toBeNull();
     fireEvent.pointerEnter(rows[0] ?? board);
     expect(one(SMOKE.litCell)).toHaveAttribute('data-ringed');
-    expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|10');
+    // why: design 2026-11-08 §5.1: the fresh verified figure (14 → 25 Mar) ranks before the cheaper calendar prices
+    expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|11');
     // an unpriced cell carries its glyphs
     expect(one(`${SMOKE.overviewCell}[data-marks~="no-price-shown"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
       COPY.datesView.marks.glyph['no-price-shown'],

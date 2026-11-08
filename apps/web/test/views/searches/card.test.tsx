@@ -43,8 +43,9 @@ describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)
     expect(within(cell).getByTestId('face-age')).toHaveTextContent(COPY.notChecked);
     expect(cell.className).toMatch(/border-dashed/);
     const cheapestLine = card.querySelector('.search-card-cheapest');
-    expect(cheapestLine).toHaveTextContent('cheapest of the sellers read, not checked with the airline');
-    expect(COPY.basisName.pairing).toBe('cheapest of the sellers read, not checked with the airline');
+    // why: design 2026-11-08 §4.1: a card cannot tell a seller's price from Google's, so it says only that flights were read
+    expect(cheapestLine).toHaveTextContent('flights read, not checked with the airline');
+    expect(COPY.basisName.pairing).toBe('flights read, not checked with the airline');
     expect(card).not.toHaveTextContent(/verified/i);
   });
 

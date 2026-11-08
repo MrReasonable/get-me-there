@@ -208,9 +208,10 @@ describe('a search’s header (spec rev 55 §11)', () => {
       },
     });
     const rows = boardRows(await findBoard());
-    expect(rows[0]).toHaveTextContent('from the Aviasales cache, constraints not checked');
-    expect(rows[1]).toHaveTextContent("from Google's date grid, constraints not checked");
-    expect(rows[2]).toHaveTextContent('checked fares, verified');
+    // why: design 2026-11-08 §5.1: the fresh verified figure ranks first, before the cheaper calendar prices
+    expect(rows[0]).toHaveTextContent('checked fares, verified');
+    expect(rows[1]).toHaveTextContent('from the Aviasales cache, constraints not checked');
+    expect(rows[2]).toHaveTextContent("from Google's date grid, constraints not checked");
   });
 });
 

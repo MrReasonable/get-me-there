@@ -176,12 +176,19 @@ export const COPY = {
   classSpoken: 'verdict class:',
   // why: spec rev 56 §6.9, §11 (prov-006; 21.7 persona H1): a pairing figure is the cheapest of the sellers read for one
   // outbound and one return (never "the lowest seller price": only the sellers read are), never checked with the
-  // airline; a card and the detail's header word it so, carrying no seller or count
+  // airline; a card and the detail's header word it so, carrying no seller or count. Design 2026-11-08 §4.1: its price
+  // is a seller's or Google's, which a card cannot tell (no seller, no offer count), so `basisName.pairing` says only
+  // that the flights were read; `basisKindName` words the kind where the figure's own pairing is known
   basisName: {
     verified: 'itinerary-search basis',
     calendar: 'calendar basis',
-    pairing: 'cheapest of the sellers read, not checked with the airline',
+    pairing: 'flights read, not checked with the airline',
   } satisfies Record<FigureBasis, string>,
+  basisKindName: {
+    seller: 'cheapest of the sellers read, not checked with the airline',
+    'google-unread': "Google's price, sellers not read, not checked with the airline",
+    'google-incomplete': "Google's price, not every seller read, not checked with the airline",
+  } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
   basisSwitchLabel: 'Price basis',
   // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
   // under COPY so the catalogue test sweeps it for banned words like every other string.
@@ -892,6 +899,7 @@ export const COPY = {
     sellerLine: (seller: string, fare: string | null, n: number) =>
       `${fare === null ? seller : `${seller}, ${fare}`} · cheapest of ${n} ${noun(n, 'offer', 'offers')} read`,
     sellersNotRead: 'sellers not read',
+    notEverySellerRead: 'not every seller read',
     offersIncomplete: 'a cheaper seller may not have been read',
     priceAppliesTo: 'this price is for the Out: and Back: flights shown',
     // 21.7 persona booking link: the link opens a search, not the flights shown
@@ -1050,7 +1058,18 @@ export const COPY = {
     cachedFrom: 'cached from',
     cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
     // --- spec rev 56 §6.9, §11 Board: the pairing figure and the flight read beneath a calendar figure (Task 21.7) ---
-    pairingSource: `${mainPathSource('camoufox')}'s flight list, the cheapest of the sellers read for these two flights`,
+    // design 2026-11-08 §4.1: the source line says whose price it is, by the kind of the figure's pairing
+    pairingSource: {
+      seller: `${mainPathSource('camoufox')}'s flight list, the cheapest of the sellers read for these two flights`,
+      'google-unread': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
+      'google-incomplete': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
+    // the words beside a pairing figure: whose price it is (design 2026-11-08 §4.1, operator ruling 2026-11-08)
+    priceKind: {
+      seller: "seller's price",
+      'google-unread': "Google's price, sellers not read",
+      'google-incomplete': "Google's price, not every seller read",
+    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
     pairingWhich: {
       cheapest: 'cheapest outbound read within your limits',
       'next-cheapest':
@@ -1086,8 +1105,13 @@ export const COPY = {
     howFar: {
       verified: 'checked fares, verified',
       calendar: (from: string) => `${from}, constraints not checked`,
-      // spec rev 56 §6.9: a pairing figure's price is the cheapest of the sellers read from the browser worker's list
-      pairing: `from ${mainPathSource('camoufox')}'s flight list, not checked with the airline`,
+      // spec rev 56 §6.9, design 2026-11-08 §4.1: a pairing figure's price is a seller's or Google's, from the browser
+      // worker's list, by the kind of its pairing
+      pairing: {
+        seller: `from ${mainPathSource('camoufox')}'s flight list, a seller's price, not checked with the airline`,
+        'google-unread': `from ${mainPathSource('camoufox')}'s flight list, Google's price, sellers not read, not checked with the airline`,
+        'google-incomplete': `from ${mainPathSource('camoufox')}'s flight list, Google's price, not every seller read, not checked with the airline`,
+      } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
       calendarFrom: {
         searchapi: "from Google's date grid",
         camoufox: "from Google's date grid",
@@ -1197,7 +1221,7 @@ export const COPY = {
       notChecked:
         'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
       noAmount: 'The dots print no amount: point at or focus one to read its price beside the legend.',
-      ring: 'outlined: on the board above',
+      ring: 'outlined: trips with flights read',
     },
     // the coverage section (Task 19.5; what the Coverage view held)
     coverageToggle: 'Coverage of the latest run',
