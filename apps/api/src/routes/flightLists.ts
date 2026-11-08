@@ -16,12 +16,13 @@ import type { HandlerTable } from './types.js';
 type Refusal = Extract<FlightReadStart, { ok: false }>;
 
 /** Spec §10: each refusal's status and wire code (`busy` is `browser_busy` on the wire; ruling A33 for the reason). */
-const REFUSED: Record<Refusal['code'], { status: ContentfulStatusCode; code: string; message: string }> = {
+export const FLIGHT_READ_REFUSALS: Record<
+  Refusal['code'],
+  { status: ContentfulStatusCode; code: string; message: string }
+> = {
   busy: { status: 409, code: 'browser_busy', message: API_TEXT.browserBusy },
-  fresh: { status: 409, code: 'fresh', message: API_TEXT.flightsFresh },
   not_available: { status: 409, code: 'not_available', message: API_TEXT.flightsNotAvailable },
   outside_space: { status: 422, code: 'outside_space', message: API_TEXT.datePairOutsideSpace },
-  no_price: { status: 422, code: 'no_price', message: API_TEXT.flightsNoPrice },
   not_found: { status: 404, code: 'definition_not_found', message: API_TEXT.definitionNotFound },
   'shutting-down': { status: 503, code: 'shutting-down', message: API_TEXT.shuttingDown },
 };
@@ -38,9 +39,14 @@ export const flightListHandlers: HandlerTable = {
     { request: apiContract.readFlightListRequestSchema, query: NO_INPUT },
     async (c, input, ctx) => {
       const def = getLiveDefinition(ctx, param(input, 'id'));
-      const r = await ctx.engine.readFlightList(def.id, input.body);
+      // why: the contract holds origin and destination together or not at all; the engine's ask omits them, never undefined
+      const { origin, destination, ...dates } = input.body;
+      const r = await ctx.engine.readFlightList(
+        def.id,
+        origin !== undefined && destination !== undefined ? { ...dates, origin, destination } : dates,
+      );
       if (r.ok) return c.json({ accepted: true as const }, 202);
-      const m = REFUSED[r.code];
+      const m = FLIGHT_READ_REFUSALS[r.code];
       throw new ApiError(
         m.status,
         m.code,

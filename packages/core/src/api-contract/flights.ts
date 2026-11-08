@@ -141,11 +141,10 @@ export const flightListsResponseSchema = z.strictObject({
       list: flightListSchema.nullable(),
       listOtherPair: flightListSchema.nullable(),
       /**
-       * Final review B-I3 (spec rev 56 §10, §11): whether a read of this date pair would go now: flight lists can be
-       * read here, the date pair is the board's and departs after today, and its newest list is none, one the
-       * on-demand read would not refuse as `fresh` (the engine's one rule, `flightListFresh`), and not a failed list a
-       * per-run limit stopped. The read button shows exactly when it is true; the status notes word what
-       * happens next by it.
+       * Whether a read of this date pair would go now: flight lists can be read here, the date pair is the board's and
+       * departs after today, and its newest list is not a failed list a per-run limit stopped. The operator asking is
+       * the reason to read, so a fresh list and a pair with no figure both read. The read button shows exactly when it
+       * is true; the status notes word what happens next by it.
        */
       readNow: z.boolean(),
     }),
@@ -154,9 +153,17 @@ export const flightListsResponseSchema = z.strictObject({
 export type FlightListsResponse = z.infer<typeof flightListsResponseSchema>;
 
 /** `POST /definitions/:id/flight-lists`: read one date pair's list now (spec rev 55 §8.1 "Reading one date pair's flights"). */
-export const readFlightListRequestSchema = z.strictObject({
-  departureDate: isoDateSchema,
-  returnDate: isoDateSchema,
-});
+export const readFlightListRequestSchema = z
+  .strictObject({
+    departureDate: isoDateSchema,
+    returnDate: isoDateSchema,
+    /** The airport pair to read, both or neither (neither: the date pair's figure's, else the search's first pair). */
+    origin: iataSchema.optional(),
+    destination: iataSchema.optional(),
+  })
+  .refine((r) => (r.origin === undefined) === (r.destination === undefined), {
+    message: 'origin and destination are given together or not at all',
+    path: ['origin'],
+  });
 /** Its answer: the read was started (its outcome is read back through the GET). */
 export const readFlightListResponseSchema = z.strictObject({ accepted: z.literal(true) });

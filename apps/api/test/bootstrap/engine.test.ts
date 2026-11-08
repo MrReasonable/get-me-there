@@ -73,8 +73,8 @@ describe('engineFor: the consent check (spec §8.3 consent expiry)', () => {
 });
 
 // Spec revision 55 §8.1 (WP20 Task 20.9 review finding 11): the app's engine is given the board's ranking, which the
-// flight-list step and the on-demand read both read (EngineContext.rankedDatePairs). Without it the read finds no
-// figure (`no_price`); with it the same pair is judged on its newest list (`fresh`).
+// flight-list step and the on-demand read both read (EngineContext.rankedDatePairs): the read takes the figure's airport
+// pair when the ask names none.
 describe('engineFor: the ranking for the flight lists (spec rev 55 §8.1)', () => {
   it('passes rankedDatePairs, so the on-demand read finds the figure the board ranks', async () => {
     const h = await createHarness({
@@ -121,13 +121,25 @@ describe('engineFor: the ranking for the flight lists (spec rev 55 §8.1)', () =
     const app = engineFor(h.ports, silentLog);
     const reader = spy.mock.calls[0]?.[1]?.rankedDatePairs;
     expect(reader).toBeDefined();
-    const pair = { departureDate: one.departureDate, returnDate: one.returnDate };
-    // why: the harness's own engine is built without the ranking; the app's engine is built by engineFor
-    expect(await h.engine.readFlightList(def.id, pair)).toEqual({ ok: false, code: 'no_price' });
-    // why: the worker's flags read (none verified), so the young outbound-only list is fresh; with them unread it is
-    // read again (21.6 re-review N2)
-    app.setWorkerFlags('camoufox', {});
-    expect(await app.readFlightList(def.id, pair)).toEqual({ ok: false, code: 'fresh' });
+    // why: a read now starts whatever the figure (no worker is wanted here), so the ranking is checked at its reader:
+    // the app's engine was handed it and it finds the figure the board ranks for the pair
+    const ranked = reader?.({
+      definitionId: def.id,
+      space: {
+        origins: [LHR],
+        destinations: [JFK],
+        departureFrom: one.departureDate,
+        departureTo: one.departureDate,
+        minNights: 10,
+        maxNights: 10,
+      },
+      cabin: def.cabin,
+      maxJourneyMinutes: null,
+      now: h.ports.clock.now(),
+    });
+    expect(ranked?.map((p) => [p.origin, p.destination, p.departureDate, p.returnDate])).toEqual([
+      [LHR, JFK, one.departureDate, one.returnDate],
+    ]);
     await app.shutdown();
   });
 });

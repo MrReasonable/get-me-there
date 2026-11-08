@@ -13,6 +13,7 @@ import {
 import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { FLIGHT_READ_REFUSALS } from '../../src/routes/flightLists.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
@@ -215,6 +216,34 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
 });
 
 describe('POST /definitions/:id/flight-lists', () => {
+  it('its refusals are exactly the five codes: busy, not_available, outside_space, not_found, shutting-down', () => {
+    expect(Object.keys(FLIGHT_READ_REFUSALS).sort()).toEqual([
+      'busy',
+      'not_available',
+      'not_found',
+      'outside_space',
+      'shutting-down',
+    ]);
+  });
+
+  it('passes a named airport pair to the engine, and refuses one of origin and destination alone with a 400', async () => {
+    const { x, def } = await setup();
+    const read = vi
+      .spyOn(x.engine, 'readFlightList')
+      .mockResolvedValue({ ok: true, done: new Promise(() => undefined) });
+    const named = { ...body, origin: LGW, destination: EWR };
+    expect((await x.request(`/api/definitions/${def.id}/flight-lists`, { json: named })).status).toBe(202);
+    expect(read).toHaveBeenCalledWith(def.id, named);
+    for (const half of [
+      { ...body, origin: LGW },
+      { ...body, destination: EWR },
+    ]) {
+      const res = await x.request(`/api/definitions/${def.id}/flight-lists`, { json: half });
+      expect(res.status).toBe(400);
+    }
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   const body = { departureDate: '2026-11-02', returnDate: '2026-11-12' };
 
   it('answers 202 accepted, after which GET reports the pair being read', async () => {
@@ -237,9 +266,7 @@ describe('POST /definitions/:id/flight-lists', () => {
 
   it.each([
     [{ ok: false, code: 'busy' }, 409, 'browser_busy'],
-    [{ ok: false, code: 'fresh' }, 409, 'fresh'],
     [{ ok: false, code: 'outside_space' }, 422, 'outside_space'],
-    [{ ok: false, code: 'no_price' }, 422, 'no_price'],
     [{ ok: false, code: 'not_found' }, 404, 'definition_not_found'],
     [{ ok: false, code: 'shutting-down' }, 503, 'shutting-down'],
   ] as const)('%o is %i %s', async (refusal, status, code) => {
@@ -470,26 +497,26 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     expect(body.pairs[0]?.list).toMatchObject({ ageHours: 168, stale: 'refresh' });
   });
 
-  // why: final review B-I3: readNow is the on-demand read's own rule (no list, or one it would not refuse as fresh),
-  // less a failed list a per-run limit stopped; false where flight lists cannot be read
-  it('readNow: true with no list, a list the read would not reuse, a failed one; false when fresh or limit-stopped', async () => {
+  // why: the operator asking is the reason to read (design §6.1): readNow is true for a fresh list and for a pair with
+  // no figure; false only where flight lists cannot be read, for a departed pair and for a limit-stopped failed list
+  it('readNow: true with no list, a fresh list, a failed one and a pair with no figure; false when limit-stopped', async () => {
     const { x, def } = await setup();
+    const NO_FIGURE = '2026-11-04_2026-11-14';
     const readNow = async () =>
       apiContract.flightListsResponseSchema
-        .parse(await (await get(x, def.id, PAIRS)).json())
+        .parse(await (await get(x, def.id, `${PAIRS},${NO_FIGURE}`)).json())
         .pairs.map((p) => p.readNow);
-    expect(await readNow()).toEqual([true, true]);
-    // a young list with no return read: read again while the flags are unread (the read may plan the return phase)
+    expect(await readNow()).toEqual([true, true, true]);
     list(x, def, A, { fetchedAt: at(-1) });
     list(x, def, B, { fetchedAt: at(-1), failed: true, reason: 'execution-cap' });
-    expect(await readNow()).toEqual([true, false]);
-    // with the return flag off the young list is fresh
+    expect(await readNow()).toEqual([true, false, true]);
+    // a young list stays readable with the return flag off, as with it on
     x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
-    expect(await readNow()).toEqual([false, false]);
+    expect(await readNow()).toEqual([true, false, true]);
     // why: spec rev 64: a list the withdrawn monthly cap stopped (a row stored before then) may be read again, as any
     // other failed list may
     list(x, def, B, { fetchedAt: at(0), failed: true, reason: 'monthly-cap' });
-    expect(await readNow()).toEqual([false, true]);
+    expect(await readNow()).toEqual([true, true, true]);
   });
   it('pagesPlanned is 2 before the worker is read (prov-008: the read may then load 2), 1 with its flag off, 2 with it on', async () => {
     const { x, def } = await setup();

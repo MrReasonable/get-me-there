@@ -1,5 +1,6 @@
 import {
   BOOKING_REREAD,
+  bookingPageUrl,
   type Cabin,
   type CellKey,
   FLIGHT_LIST_MAX_FLIGHTS,
@@ -34,11 +35,11 @@ const INSERT_LIST_SQL = `
 INSERT INTO flight_lists (definition_id, execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date,
   fetched_at, point_of_sale, currency_native, status, reason, listed, min_minor, tab_minor, cheapest_view, options_unparsed, options_other_cell, results_stated,
   return_status, return_rule, return_limits_json, return_tried_all, booking_status, booking_rule, booking_attempt, booking_return_position,
-  booking_expanded, booking_more_control, booking_grouped, booking_unparsed, booking_non_gbp, booking_offers_stated)
+  booking_expanded, booking_more_control, booking_grouped, booking_unparsed, booking_non_gbp, booking_offers_stated, booking_url)
 VALUES (@definitionId, @executionId, @providerId, @sourceKind, @cabin, @origin, @destination, @departureDate, @returnDate,
   @fetchedAt, @pointOfSale, 'GBP', @status, @reason, @listed, @minMinor, @tabMinor, @cheapestView, @optionsUnparsed, @optionsOtherCell, @resultsStated,
   @returnStatus, @returnRule, @returnLimitsJson, @returnTriedAll, @bookingStatus, @bookingRule, @bookingAttempt, @bookingReturnPosition,
-  @bookingExpanded, @bookingMoreControl, @bookingGrouped, @bookingUnparsed, @bookingNonGbp, @bookingOffersStated)`;
+  @bookingExpanded, @bookingMoreControl, @bookingGrouped, @bookingUnparsed, @bookingNonGbp, @bookingOffersStated, @bookingUrl)`;
 const INSERT_FLIGHT_SQL = `
 INSERT INTO flight_list_flights (list_id, position, departs_local, arrives_local, arrives_day_offset, duration_minutes, stops, carriers_json, operated_by, price_pence)
 VALUES (@listId, @position, @departsLocal, @arrivesLocal, @arrivesDayOffset, @durationMinutes, @stops, @carriersJson, @operatedBy, @pricePence)`;
@@ -202,6 +203,7 @@ interface JoinedRow {
   booking_unparsed: number | null;
   booking_non_gbp: number | null;
   booking_offers_stated: number | null;
+  booking_url: string | null;
   position: number | null;
   departs_local: string | null;
   arrives_local: string | null;
@@ -359,8 +361,9 @@ function readReturns(
           unparsed: first.booking_unparsed,
           nonGbp: first.booking_non_gbp,
           offersStated: first.booking_offers_stated,
-          // why: Task 3 stores the column; until then no stored read has an address
-          bookingUrl: null,
+          // why: a stored address is read back as any string (the schema's length bound still holds); the path rule is
+          // the insert's, and the API's `bookingTargetOf` re-checks it
+          bookingUrl: first.booking_url,
         };
   const returns = parseWith('flight_lists.return_*', returnReadSchema, {
     limits: readJson('flight_lists.return_limits_json', first.return_limits_json ?? 'null'),
@@ -556,6 +559,12 @@ export class FlightListsRepo {
           bookingUnparsed: booking?.unparsed ?? null,
           bookingNonGbp: booking?.nonGbp ?? null,
           bookingOffersStated: booking?.offersStated ?? null,
+          // why: the path rule applies where the address enters: an address that is not the booking page's own is stored
+          // as none (the read is kept, the link is not)
+          bookingUrl:
+            booking?.bookingUrl != null && bookingPageUrl(booking.bookingUrl)?.url === booking.bookingUrl
+              ? booking.bookingUrl
+              : null,
         }).lastInsertRowid,
       );
       const insertFlight = this.db.raw.prepare(INSERT_FLIGHT_SQL);

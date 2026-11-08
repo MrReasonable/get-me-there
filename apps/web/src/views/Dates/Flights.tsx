@@ -74,14 +74,10 @@ export function refusalWords(e: unknown): string {
   switch (e.code) {
     case 'browser_busy':
       return F.busy;
-    case 'fresh':
-      return F.fresh;
     case 'not_available':
       return unavailableWords(e.details?.reason);
     case 'outside_space':
       return F.outsideSpace;
-    case 'no_price':
-      return F.noPrice;
     default:
       return F.readFailed;
   }

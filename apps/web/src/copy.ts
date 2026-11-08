@@ -982,9 +982,7 @@ export const COPY = {
     readNotDone: (dates: string) => `Flights not read for ${dates}`,
     // a refused read, worded from the api's code (and, for not_available, its reason; ruling A33), never its text
     busy: 'The browser worker is busy with a search; try again when it finishes',
-    fresh: "Read within this search's refresh",
     outsideSpace: "These dates are no longer in this search's dates",
-    noPrice: 'This date pair has no price, so there are no airports to read flights for',
     readFailed: "The flights couldn't be read just now; try again later",
     // one line under the list when flight lists cannot be read here
     unavailable: 'Flight times need the browser worker; set it up in Providers',

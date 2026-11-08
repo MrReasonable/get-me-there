@@ -17,6 +17,8 @@ beforeEach(() => {
 });
 
 const TAG = '0012_wp21_return_leg';
+// why: 0013 adds flight_lists.booking_url after this one; a world at 0011 gets it too, NULL on every row
+const NEXT = '0013_booking_url';
 const SEEDED = [
   'search_definitions',
   'search_executions',
@@ -162,7 +164,7 @@ function refusal(fn: () => unknown): string | null {
 /** A database at 0011 with a definition, a completed run, a read list of two flights, a failed list and a camoufox ledger row. */
 function seedAt0011(): Db {
   const db = openTracked(tmpDbPath());
-  applyMigrations(db, migrationsWithout([TAG]));
+  applyMigrations(db, migrationsWithout([TAG, NEXT]));
   db.raw.prepare(DEFINITION).run({ at: T0 });
   db.raw
     .prepare(
@@ -242,11 +244,12 @@ describe('migration 0012 (spec revision 56 §7)', () => {
   it('keeps every row of a world seeded at 0011 byte-equal on its old columns, every new column NULL, and no new row', () => {
     const db = seedAt0011();
     const before = rowsOf(db);
-    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG]);
+    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, NEXT]);
     const after = rowsOf(db);
     for (const t of SEEDED) {
       expect(after[t]?.length, t).toBe(before[t]?.length);
-      const added = Object.fromEntries((ADDED[t] ?? []).map((c) => [c, null]));
+      const since0013 = t === 'flight_lists' ? ['booking_url'] : [];
+      const added = Object.fromEntries([...(ADDED[t] ?? []), ...since0013].map((c) => [c, null]));
       expect(after[t], t).toEqual(before[t]?.map((r) => ({ ...r, ...added })));
     }
     for (const t of NEW_TABLES) expect(countOf(db, t), t).toBe(0);
@@ -495,6 +498,11 @@ describe('migration 0012 (spec revision 56 §7)', () => {
     for (const t of ['flight_lists', ...NEW_TABLES, 'provider_requests'])
       expect(Object.keys(snapshot.tables[t].checkConstraints).sort(), t).toEqual(checksOf(db, t).sort());
     for (const t of ['flight_lists', ...NEW_TABLES, 'provider_requests'])
-      expect(Object.keys(snapshot.tables[t].columns), t).toEqual(columnsOf(db, t).map((c) => c.name));
+      expect(Object.keys(snapshot.tables[t].columns), t).toEqual(
+        columnsOf(db, t)
+          .map((c) => c.name)
+          // why: booking_url is 0013's, pinned by its own test
+          .filter((n) => !(t === 'flight_lists' && n === 'booking_url')),
+      );
   });
 });

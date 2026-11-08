@@ -1,7 +1,8 @@
 /**
  * Spec revision 56 §8.1 "Reading one date pair's flights" (WP20 Task 20.9, WP21 Task 21.6; `POST /definitions/:id/flight-lists`, §10):
- * the figure's airport pair of one date pair of the current space, read on demand by the browser worker outside any
- * execution, one row with `execution_id` NULL.
+ * one airport pair of one date pair of the current space, read on demand by the browser worker outside any execution,
+ * one row with `execution_id` NULL. The pair is the one the ask names, else the date pair's figure's, else the space's
+ * first origin and first destination; the operator asking is the reason to read, so a young list is read again.
  *
  * Every refusal comes before any worker call or ledger row. The busy query and the taking of the browser lease run in
  * one synchronous turn (nothing before `lease.hold` is awaited), so a start admitted in that same turn sees the lease
@@ -21,26 +22,27 @@ import {
   type FlightListQuery,
   flightLimitsOf,
   flightPagesPerPair,
+  type Iata,
   type IsoDate,
   ProviderError,
   resolveSpace,
   type SearchDefinition,
   type StopDetail,
 } from '@gmt/core';
-import type { NewestFlightList } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
 import { airportNamesOf, cellAirportNames } from './stages/discovery.js';
-import { listReusable, newestListOf } from './stages/flightLists/select.js';
 import { FLIGHT_LIST_PROVIDER, type FlightRowBase, failedRowOf, readRowOf } from './stages/flightLists.js';
-import { refreshHoursOf } from './stages/reuse.js';
 import { toStopDetail } from './stopCause.js';
 
 /** One date pair (spec §10: the body of the POST). */
 export interface DatePairAsk {
   departureDate: IsoDate;
   returnDate: IsoDate;
+  /** The airport pair to read (both or neither); each must be one of the search's airports, else `outside_space`. */
+  origin?: Iata;
+  destination?: Iata;
 }
 
 /** Why flight lists cannot be read for a search (spec §10 `unavailableReason`, ruling A33). */
@@ -53,7 +55,7 @@ export type FlightReadUnavailable = 'not-named' | 'not-configured' | 'cabin';
 export type FlightReadStart =
   | { ok: true; done: Promise<void> }
   | { ok: false; code: 'not_available'; reason: FlightReadUnavailable }
-  | { ok: false; code: 'busy' | 'fresh' | 'not_found' | 'outside_space' | 'no_price' | 'shutting-down' };
+  | { ok: false; code: 'busy' | 'not_found' | 'outside_space' | 'shutting-down' };
 
 /** The read in flight, as `GET /definitions/:id/flight-lists` reports it (`reading`). */
 export interface FlightReadMark {
@@ -120,38 +122,6 @@ function phaseOf(
   const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
   if (flightPagesPerPair(flags) !== FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
   return { returnLimits: flightLimitsOf(def.constraints), booking: flags?.BOOKING_SELECT_VERIFIED === true };
-}
-
-/**
- * The return phase the on-demand `fresh` check judges a list by (21.6 re-review N2). With the worker's flags unread (no
- * preflight since the app started) the read's own preflight may report the return flags, so the read is judged as
- * planning the whole return phase, as the read button states 2 pages then (prov-008): a young outbound-only list is
- * read again rather than refused as fresh. With the flags read, the phase the read would send (`phaseOf`).
- */
-function freshPhaseOf(
-  ctx: EngineContext,
-  def: SearchDefinition,
-): Pick<FlightListQuery, 'returnLimits' | 'booking'> {
-  if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return phaseOf(ctx, def);
-  return { returnLimits: flightLimitsOf(def.constraints), booking: true };
-}
-
-/**
- * Spec rev 56 §8.1 (final review B-I3): whether an on-demand read would refuse `newest` as `fresh` now: the step's
- * reuse rule (`listReusable`) under the return phase this read would send (`freshPhaseOf`). The read's own refusal and
- * the api's `readNow` (whether the read button is offered) read this one rule.
- */
-export function flightListFresh(
-  ctx: EngineContext,
-  def: SearchDefinition,
-  newest: NewestFlightList,
-): boolean {
-  const phase = freshPhaseOf(ctx, def);
-  return listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {
-    returns: phase.returnLimits !== undefined,
-    booking: phase.booking === true,
-    current: flightLimitsOf(def.constraints),
-  });
 }
 
 /** The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. */
@@ -240,32 +210,34 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         space.departureFrom <= space.departureTo &&
         datePairIndex(space, pair.departureDate, pair.returnDate) !== null;
       if (!inSpace) return { ok: false, code: 'outside_space' };
-      const figure = ctx
-        .rankedDatePairs?.({
-          definitionId,
-          space,
-          cabin: def.cabin,
-          maxJourneyMinutes: def.constraints.maxJourneyMinutes ?? null,
-          now: ctx.clock.now(),
-        })
-        .find((p) => p.departureDate === pair.departureDate && p.returnDate === pair.returnDate);
-      if (figure === undefined) return { ok: false, code: 'no_price' };
+      // why: the airport pair is the ask's (both or neither, each one of the search's airports), else the date pair's
+      // figure's (the board's cheapest pair), else the space's first origin and first destination
+      let airports: { origin: Iata; destination: Iata } | undefined;
+      if (pair.origin !== undefined && pair.destination !== undefined) {
+        if (!space.origins.includes(pair.origin) || !space.destinations.includes(pair.destination))
+          return { ok: false, code: 'outside_space' };
+        airports = { origin: pair.origin, destination: pair.destination };
+      } else {
+        airports = ctx
+          .rankedDatePairs?.({
+            definitionId,
+            space,
+            cabin: def.cabin,
+            maxJourneyMinutes: def.constraints.maxJourneyMinutes ?? null,
+            now: ctx.clock.now(),
+          })
+          .find((p) => p.departureDate === pair.departureDate && p.returnDate === pair.returnDate);
+        const first = { origin: space.origins[0], destination: space.destinations[0] };
+        if (airports === undefined && first.origin !== undefined && first.destination !== undefined)
+          airports = { origin: first.origin, destination: first.destination };
+      }
+      if (airports === undefined) return { ok: false, code: 'outside_space' };
       const cell: CellKey = {
-        origin: figure.origin,
-        destination: figure.destination,
-        departureDate: figure.departureDate,
-        returnDate: figure.returnDate,
+        origin: airports.origin,
+        destination: airports.destination,
+        departureDate: pair.departureDate,
+        returnDate: pair.returnDate,
       };
-      const [newest] = ctx.repos.flightLists.newestPerCell(
-        definitionId,
-        [cell],
-        def.cabin,
-        ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
-      );
-      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase this read would send (`freshPhaseOf`: the
-      // worker's last reported flags, the whole phase while they are unread), so a young transient, not-verified, other-limit or phase-less list is read; the date pair
-      // departs after today here
-      if (newest !== undefined && flightListFresh(ctx, def, newest)) return { ok: false, code: 'fresh' };
       // Review Focus 2: the busy query and the lease in one synchronous turn
       if (current !== null || browserRunActive(ctx)) return { ok: false, code: 'busy' };
       const abort = new AbortController();

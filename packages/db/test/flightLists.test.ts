@@ -10,6 +10,7 @@ import {
   type ReturnRead,
   returnReadSchema,
 } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { FlightListsRepo } from '../src/repositories/flightLists.js';
@@ -506,6 +507,28 @@ describe('FlightListsRepo.insert with returns (spec rev 56 §7, migration 0012)'
       'GB',
     );
     expect(pair?.returns).toEqual(r);
+  });
+
+  it('stores a booking address that is the booking page’s own and reads it back equal', () => {
+    const { db, repo, list, definitionId } = setup();
+    const r = returnRead({ booking: booking({ bookingUrl: SYNTHETIC_BOOKING_URL }) });
+    repo.insert(list({ returns: r }));
+    expect(db.raw.prepare('SELECT booking_url FROM flight_lists').get()).toEqual({
+      booking_url: SYNTHETIC_BOOKING_URL,
+    });
+    const [cell] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(cell?.returns?.booking?.bookingUrl).toBe(SYNTHETIC_BOOKING_URL);
+  });
+
+  it('stores an address off the booking path as none, and keeps the rest of the read', () => {
+    const { db, repo, list, definitionId } = setup();
+    // why: the contract's own schema takes any string up to its length bound; the insert holds the path rule
+    const offPath = SYNTHETIC_BOOKING_URL.replace('/travel/flights/booking', '/travel/flights');
+    expect(offPath).not.toBe(SYNTHETIC_BOOKING_URL);
+    repo.insert(list({ returns: returnRead({ booking: booking({ bookingUrl: offPath }) }) }));
+    expect(db.raw.prepare('SELECT booking_url FROM flight_lists').get()).toEqual({ booking_url: null });
+    const [cell] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(cell?.returns?.booking).toEqual(booking({ bookingUrl: null }));
   });
 
   it('a return phase that ended with no attempt, and one with a transient booking read, read back whole', () => {

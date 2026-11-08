@@ -111,7 +111,7 @@ export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned' | 'flightListFresh'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
   const today = ports.clock.todayLondon();
@@ -189,17 +189,12 @@ export function assembleFlightLists(
         link,
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
-        // why: final review B-I3: the read button and the status notes' "what happens next" follow the on-demand read's
-        // own rule (`flightListFresh`: the step's reuse rule under the phase the read would send), never a second one
+        // why: the operator asking is the reason to read (design §6.1): a fresh list and a pair with no figure both read;
+        // only a search that cannot read flights, a departed date pair and a list a per-run limit stopped do not
         readNow:
           unavailable === null &&
-          c !== null &&
-          c.departureDate > today &&
-          (list === undefined
-            ? true
-            : list.status === 'failed'
-              ? !NO_READ_AGAIN.has(list.reason ?? '')
-              : !engine.flightListFresh(def, list)),
+          p.departureDate > today &&
+          !(list?.status === 'failed' && NO_READ_AGAIN.has(list.reason ?? '')),
       };
     }),
   };
