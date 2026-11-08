@@ -1,4 +1,4 @@
-import { CONSTRAINT_LABELS } from '@gmt/core';
+import { CONSTRAINT_LABELS, londonDateOf } from '@gmt/core';
 import { screen } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { API, estimate, estimateResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
+import { NOW } from '../../render.js';
 import {
   addAirport,
   field,
@@ -240,6 +241,14 @@ describe('an incomplete form says why, as the button’s accessible description 
       N.reasons.stayOrder,
     ],
     [
+      'a first date before today, typed past the picker',
+      async (user) => {
+        await fill(user);
+        pickDate(PLAN_COPY.earliest, '2026-10-13');
+      },
+      N.reasons.datePast,
+    ],
+    [
       'a last date before the first',
       async (user) => {
         await fill(user);
@@ -272,11 +281,11 @@ describe('Leave between: two browser date fields (spec rev 67 §11)', () => {
 
   it('neither can be picked before today, and the latest not before the earliest once one is picked', () => {
     renderForm();
-    // why: today is the pinned test clock's London date, 14 Oct 2026
-    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', '2026-10-14');
-    expect(field(PLAN_COPY.latest)).toHaveAttribute('min', '2026-10-14');
+    const today = londonDateOf(NOW);
+    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', today);
+    expect(field(PLAN_COPY.latest)).toHaveAttribute('min', today);
     pickDate(PLAN_COPY.earliest, '2027-01-10');
-    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', '2026-10-14');
+    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', today);
     expect(field(PLAN_COPY.latest)).toHaveAttribute('min', '2027-01-10');
   });
 

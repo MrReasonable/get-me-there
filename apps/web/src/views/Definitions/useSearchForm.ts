@@ -41,6 +41,8 @@ export interface SearchForm {
   /** Sets one end of Leave between to the date its picker holds ("2027-01-10"), or '' while it holds none. */
   setDate: (end: DateEnd, value: string) => void;
   today: IsoDate;
+  /** The saved search's first date when it has already passed (Edit), which stays allowed while unchanged; else null. */
+  savedFrom: string | null;
   /** The API's field errors (the estimate's or a save's 422), and the ones under one field. */
   fieldErrors: readonly FieldError[];
   setSaveErrors: (e: readonly FieldError[]) => void;
@@ -90,10 +92,18 @@ export function useSearchForm(
   const w = draft.window;
   const relative = w.kind === 'relative';
   // why: a date field's value is the wire form or '' (a part-typed date reads as ''), so it goes into the draft as is
-  const setDate = (end: DateEnd, value: string) => {
-    const base = draft.window.kind === 'absolute' ? draft.window : EMPTY_ABSOLUTE;
-    setDraft({ ...draft, window: { ...base, [end]: value } });
-  };
+  // why: an updater, so two changes before a render both land (CodeRabbit, PR #51); the name is derived, never stored here
+  const setDate = (end: DateEnd, value: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      window: { ...(prev.window.kind === 'absolute' ? prev.window : EMPTY_ABSOLUTE), [end]: value },
+    }));
+  // why: a saved search whose first date has passed can still be edited; any other earliest date must be today or later
+  const savedFrom =
+    initial.window.kind === 'absolute' && initial.window.from !== '' && initial.window.from < today
+      ? initial.window.from
+      : null;
+  const pastFrom = w.kind === 'absolute' && w.from !== '' && w.from < today && w.from !== savedFrom;
 
   const setRolling = (on: boolean) => {
     if (on === relative) return;
@@ -113,6 +123,7 @@ export function useSearchForm(
   const reasons = [
     ...(draft.origins.length === 0 || draft.destinations.length === 0 ? [R.airports] : []),
     ...(w.kind === 'absolute' && (w.from === '' || w.to === '') ? [R.dates] : []),
+    ...(pastFrom ? [R.datePast] : []),
     ...(w.kind === 'absolute' && w.from !== '' && w.to !== '' && w.to < w.from ? [R.dateOrder] : []),
     ...(blank.some((id) => STAY_BOXES.includes(id)) ? [R.stay] : []),
     ...(draft.minNights > draft.maxNights ? [R.stayOrder] : []),
@@ -162,6 +173,7 @@ export function useSearchForm(
     setNameTouched,
     setDate,
     today,
+    savedFrom,
     fieldErrors,
     setSaveErrors,
     errorsFor: (field) => errorsIn(fieldErrors, field),

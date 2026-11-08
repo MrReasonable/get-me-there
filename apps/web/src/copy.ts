@@ -690,6 +690,7 @@ export const COPY = {
     reasons: {
       airports: 'Enter From and To',
       dates: 'Enter the dates',
+      datePast: 'The first date is before today',
       dateOrder: 'The last date is before the first',
       stay: 'Enter the stay',
       stayOrder: 'The shortest stay is longer than the longest',

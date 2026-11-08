@@ -491,6 +491,26 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
   /** The PUTs and starts, in order, without the estimates asked meanwhile. */
   const sent = (calls: ReturnType<typeof serveEdit>) => calls.filter((c) => c.kind !== 'estimate');
 
+  it('a saved search whose first date has passed can still be saved; changing it to another past date cannot', async () => {
+    serveEdit();
+    // why: the pinned test clock's London date is 14 Oct 2026, so 1 Oct has passed
+    renderEdit(
+      definition({
+        window: { kind: 'absolute', from: '2026-10-01', to: '2026-12-01' },
+        scheduleCron: null,
+        enabled: false,
+      }),
+    );
+    const save = screen.getByRole('button', { name: E.save });
+    expect(save).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByLabelText(PLAN_COPY.earliest)).toHaveAttribute('min', '2026-10-01');
+    pickDate(PLAN_COPY.earliest, '2026-10-05');
+    expect(save).toHaveAttribute('aria-disabled', 'true');
+    expect(save).toHaveAccessibleDescription(COPY.newSearch.reasons.datePast);
+    pickDate(PLAN_COPY.earliest, '2026-10-14');
+    expect(save).not.toHaveAttribute('aria-disabled');
+  });
+
   it('shows the same estimate sentence, and ends with "Save and search again · about £1.20" and "Save"', async () => {
     serveEdit();
     renderEdit(definition({ scheduleCron: null, enabled: false }));

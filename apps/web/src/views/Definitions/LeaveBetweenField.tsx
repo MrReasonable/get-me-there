@@ -54,9 +54,11 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
   const id = `w-${end}`;
   const w = form.draft.window;
   const value = w.kind === 'absolute' ? w[end] : '';
-  // why: the picker greys out what cannot be chosen: the past, and for the latest, anything before the earliest
+  // why: the picker greys out what cannot be chosen: the past (a saved search keeps its own passed first date), and for
+  // the latest, anything before the earliest. A date typed past the picker is refused by the form ("before today")
   const from = w.kind === 'absolute' ? w.from : '';
-  const min = end === 'to' && from > form.today ? from : form.today;
+  const floor = end === 'from' && form.savedFrom !== null ? form.savedFrom : form.today;
+  const min = end === 'to' && from > floor ? from : floor;
   const messages = form.errorsFor(`window.${end}`);
   const noteId = `${id}-note`;
   return (
