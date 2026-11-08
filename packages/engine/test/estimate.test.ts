@@ -530,7 +530,9 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     );
   });
 
-  it('21.6 review M5: an older 10-page snapshot with 5 pairs reused plans outbound-only, as the step plans it', () => {
+  // why: design 2026-11-08 §4.8: an older snapshot's figure is no allowance, so the step plans returns over it and the
+  // estimate does too; with returns planned, the 5 young lists read without a return phase are not reusable
+  it('21.6 review M5: an older 10-page snapshot with 5 pairs read outbound-only plans 10 pairs out and back, as the step plans it', () => {
     const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], { rankedDatePairs: rankedPairs(15) });
     e.ctx.workerFlags.set('camoufox', BOTH);
     const b = buildSnapshot(e.ctx, e.definition);
@@ -567,9 +569,8 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
         flights: [],
         returns: null,
       });
-    // why: the plan judges the allowance over its 10 candidates (10 < 10 × 2: outbound-only), never over the 5 it reads
     const est = estimateStart(e.ctx, snapshot, b.cells, e.definition.id);
-    expect(est.flightLists).toEqual({ pairs: 5, pages: 5, seconds: 275, returns: false });
+    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, returns: true });
   });
 
   it('with the return flag false: outbound-only, 10 pages and 550 s', () => {
@@ -676,6 +677,7 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
       booking: true,
       returnsStopped: null,
       bookingStopped: null,
+      confirm: null,
     };
     expect(flightWindowMarginSeconds(restarted, est, plan)).toBe(780);
     expect(flightWindowMarginSeconds(restarted, est, { ...plan, bookingStopped: 'expand-failed' })).toBe(600);
@@ -717,37 +719,40 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     const done = await e.settled(r.executionId);
     expect(done.flightLists?.returns).toBe(true);
     expect(flightRows(e, r.executionId)).toHaveLength(4);
+    // why: design 2026-11-08 §4.7: the plan reads returns (confirm mode), so its resumed pass rebuilds the queue without
+    // the 4 pairs read: the estimate's fresh figure counts the first 10 of the other 11
     expect(estimateRemainingFor(e.ctx, done, true).flightLists).toEqual({
-      pairs: 6,
-      pages: 9,
-      seconds: 1380,
-      pagesMax: 12,
-      secondsMax: 1710,
+      pairs: 10,
+      pages: 15,
+      seconds: 2300,
+      pagesMax: 20,
+      secondsMax: 2850,
       returns: true,
     });
-    // why: a resumed pass keeps the stored plan's phase less what a transient end stopped, and never counts a planned
-    // cell that departs today
+    // why: a resumed pass keeps the stored plan's phase less what a transient end stopped; returns lost part-way
+    // finished the step (design §4.6, §4.7), so nothing is left to read
     const plan = done.flightLists;
     if (plan === null) throw new Error('a stored plan');
     const resumedWith = (over: Partial<typeof plan>) =>
       estimateRemainingFor(e.ctx, { ...done, flightLists: { ...plan, ...over } }, true).flightLists;
     expect(resumedWith({ returnsStopped: 'not-settled' })).toEqual({
-      pairs: 6,
-      pages: 6,
-      seconds: 330,
+      pairs: 0,
+      pages: 0,
+      seconds: 0,
       returns: false,
     });
     expect(resumedWith({ bookingStopped: 'expand-failed' })).toEqual({
-      pairs: 6,
-      pages: 9,
-      seconds: 900,
-      pagesMax: 12,
-      secondsMax: 1230,
+      pairs: 10,
+      pages: 15,
+      seconds: 1500,
+      pagesMax: 20,
+      secondsMax: 2050,
       returns: true,
     });
-    const first = plan.cells[0];
-    if (first === undefined) throw new Error('a planned cell');
-    const departing = { ...first, departureDate: e.ctx.clock.todayLondon() };
-    expect(resumedWith({ cells: [...plan.cells, departing] })?.pairs).toBe(6);
+    expect(
+      resumedWith({
+        confirm: { mode: 'confirm', confirmed: 0, unread: 4, uncheckedCheaper: 0, stop: 'patience' },
+      })?.pairs,
+    ).toBe(0);
   });
 });

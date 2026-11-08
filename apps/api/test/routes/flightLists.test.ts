@@ -282,6 +282,7 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
         booking: false,
         returnsStopped: null,
         bookingStopped: null,
+        confirm: null,
       },
     });
     for (const [i, c] of planned.entries())
@@ -289,11 +290,10 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
     const res = await x.request(`/api/executions/${id}`);
     const e = apiContract.executionResponseSchema.parse(await res.json());
     expect(e.flights).toEqual({ planned: 10, read: 8, reused: 1, failed: 1, ended: null });
-    // why: the 20.8 ruling — the browser worker's run scope states its flight pages beside the page cap (calls are the
-    // `/v1/flights` page rows: none were ledgered here; the seeded snapshot froze no allowance, read as 0)
+    // why: the 20.8 ruling — the browser worker's run scope states its flight pages beside its pages (calls are the
+    // `/v1/flights` page rows: none were ledgered here); design 2026-11-08 §4.8 withdrew their allowance: no cap
     expect(e.budget.find((u) => u.scope.startsWith('provider-execution'))?.flightLists).toEqual({
       calls: 0,
-      cap: 0,
     });
   });
 });

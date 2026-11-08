@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { workerRuleSchema } from '../camoufox/rule.js';
-import { SKIP_CODES } from '../types/execution.js';
+import { CONFIRM_MODES, CONFIRM_STOPS, SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
 import {
   bucketsSchema,
@@ -37,6 +37,18 @@ export const flightListsStateSchema = z.strictObject({
   // why: spec rev 56 §8.1: the rule that stopped the run's return phases (or its booking reads); absent read as null
   returnsStopped: workerRuleSchema.nullable().exactOptional(),
   bookingStopped: workerRuleSchema.nullable().exactOptional(),
+  // why: design 2026-11-08 §7: the step's summary; absent on a plan stored before that change, read as null (no line).
+  // A null is accepted too, so such a plan read back and stored again (an early end marked on it) still writes
+  confirm: z
+    .strictObject({
+      mode: z.enum(CONFIRM_MODES),
+      confirmed: count,
+      unread: count,
+      uncheckedCheaper: count,
+      stop: z.enum(CONFIRM_STOPS).nullable(),
+    })
+    .nullable()
+    .exactOptional(),
 });
 
 /**

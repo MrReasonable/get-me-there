@@ -25,7 +25,7 @@ import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
 import { type PlannedTile, planTiles } from './stages/discovery.js';
 import { newestListOf, selectFlightPairs } from './stages/flightLists/select.js';
-import { FLIGHT_LIST_PROVIDER, returnPhaseOf } from './stages/flightLists.js';
+import { confirmFinished, FLIGHT_LIST_PROVIDER, returnPhaseOf } from './stages/flightLists.js';
 import { refreshHoursOf, reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
 import type { Estimate } from './types.js';
@@ -93,17 +93,18 @@ function flightsApply(ctx: EngineContext, snapshot: DefinitionSnapshot): boolean
 /**
  * The date pairs a fresh step would read for a saved search (`wanted`): the first 10 of the space less those whose
  * newest list is reusable (the step's own selection over the board's ranking, under the return phase it would plan);
- * an unsaved search, or an engine without the ranking, reuses none. `candidates` is the count the step's plan judges
- * the return phase over (`planOf`: the not-departed first 10 of the ranking, reused ones included; 21.6 review M5).
+ * an unsaved search, or an engine without the ranking, reuses none. `own` leaves out the cells a resumed confirm-mode
+ * pass has already read (design 2026-11-08 §4.7: its queue is rebuilt without them).
  */
 function flightPairsWanted(
   ctx: EngineContext,
   snapshot: DefinitionSnapshot,
   definitionId: string | null,
-): { wanted: number; candidates: number } {
+  own: ReadonlySet<string> = new Set(),
+): number {
   const most = Math.min(FLIGHT_LIST_COUNT, datePairCount(snapshot.resolved));
   const reader = ctx.rankedDatePairs;
-  if (definitionId === null || reader === undefined) return { wanted: most, candidates: most };
+  if (definitionId === null || reader === undefined) return most;
   const now = ctx.clock.now();
   const today = ctx.clock.todayLondon();
   const ranked = reader({
@@ -113,7 +114,7 @@ function flightPairsWanted(
     maxJourneyMinutes: snapshot.constraints.maxJourneyMinutes ?? null,
     now,
   })
-    .filter((p) => p.departureDate > today)
+    .filter((p) => p.departureDate > today && !own.has(cellKeyString(p)))
     .slice(0, FLIGHT_LIST_COUNT);
   const newest = new Map(
     ctx.repos.flightLists
@@ -127,11 +128,11 @@ function flightPairsWanted(
     refreshHoursOf(snapshot, FLIGHT_LIST_PROVIDER),
     today,
     {
-      ...estimatePhaseOf(ctx, snapshot, ranked.length),
+      ...estimatePhaseOf(ctx, snapshot),
       current: flightLimitsOf(snapshot.constraints),
     },
   ).reused;
-  return { wanted: Math.max(0, most - reused.length), candidates: ranked.length };
+  return Math.max(0, most - reused.length);
 }
 
 /** The return phase a flight line plans (spec rev 56 §8.1): from the worker's flags, or a stored plan's. */
@@ -144,12 +145,12 @@ interface FlightPhase {
  * The return phase an estimate counts (final review B-M3; prov-008, 21.6 N2: an estimate never understates): the
  * step's own (`returnPhaseOf`) once the worker's flags are read; while they are unread (no preflight since the app
  * started) the bound, the return phase with the booking read, since the run's own discovery preflight may set them
- * and the step then plans 2 pages a pair, within the run's allowance as ever.
+ * and the step then plans 2 pages a pair. Design 2026-11-08 §4.8: no allowance is judged (the snapshot's figure is only
+ * the step's on-switch).
  */
-function estimatePhaseOf(ctx: EngineContext, snapshot: DefinitionSnapshot, pairs: number): FlightPhase {
-  if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return returnPhaseOf(ctx, snapshot, pairs);
-  const returns = (snapshot.budget.flightListPages ?? 0) >= pairs * FLIGHT_LIST_PAGES_PER_PAIR_MAX;
-  return { returns, booking: returns };
+function estimatePhaseOf(ctx: EngineContext, snapshot: DefinitionSnapshot): FlightPhase {
+  if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return returnPhaseOf(ctx, snapshot);
+  return { returns: true, booking: true };
 }
 
 /**
@@ -549,8 +550,12 @@ export function estimateStart(
   if (snapshot.windowClamped) notes.push('window clamped to start tomorrow');
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
   if (!flightsApply(ctx, snapshot)) return est;
-  const { wanted, candidates } = flightPairsWanted(ctx, snapshot, definitionId);
-  return withFlights(ctx, est, wanted, estimatePhaseOf(ctx, snapshot, candidates));
+  return withFlights(
+    ctx,
+    est,
+    flightPairsWanted(ctx, snapshot, definitionId),
+    estimatePhaseOf(ctx, snapshot),
+  );
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -604,17 +609,26 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const plan = exec.flightLists;
   const today = ctx.clock.todayLondon();
   const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
-  if (plan === null) {
-    const { wanted, candidates } = flightPairsWanted(ctx, snapshot, exec.definitionId);
-    const phase = estimatePhaseOf(ctx, snapshot, candidates);
-    return withFlights(ctx, est, wanted, phase);
-  }
-  const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
+  if (plan === null)
+    return withFlights(
+      ctx,
+      est,
+      flightPairsWanted(ctx, snapshot, exec.definitionId),
+      estimatePhaseOf(ctx, snapshot),
+    );
   // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
   const phase = {
     returns: plan.returns && plan.returnsStopped === null,
     booking: plan.booking && plan.returnsStopped === null && plan.bookingStopped === null,
   };
+  // why: design 2026-11-08 §4.7: a plan that reads returns is in confirm mode: its pass rebuilds the queue, this run's
+  // reads left out, and reads it as a fresh selection would (the estimate's fresh figure for now); a finished one reads
+  // nothing more
+  if (plan.returns) {
+    const wanted = confirmFinished(plan) ? 0 : flightPairsWanted(ctx, snapshot, exec.definitionId, done);
+    return withFlights(ctx, est, wanted, phase);
+  }
+  const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
   return withFlights(ctx, est, wanted, phase);
 }
 

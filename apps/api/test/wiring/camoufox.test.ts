@@ -78,7 +78,7 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
     expect(input.providers.discovery).toContain('camoufox');
     expect(input.providers.verification).not.toContain('camoufox');
   });
-  it('an execution’s budget rows include camoufox’s own page scope (its pages, uncapped, and its flight allowance)', () => {
+  it('an execution’s budget rows include camoufox’s own page scope (its pages and its flight pages, both uncapped)', () => {
     const c = config(ON);
     expect(budgetScopes({ config: c, providers: providersFor(c, deps) }, 'e1')).toContainEqual({
       kind: 'provider-execution',

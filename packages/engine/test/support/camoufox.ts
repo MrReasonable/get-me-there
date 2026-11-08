@@ -138,6 +138,8 @@ export interface FlightStubOptions {
   answer?: (q: FlightListQuery, n: number) => FlightListResult | undefined;
   /** Holds the n-th read after its ledger row is reserved until `until` settles or the signal aborts (AbortedError). */
   holdCall?: { call: number; until: Promise<void> };
+  /** Holds any read as `holdCall` does, until the promise returned for its number settles (undefined: no hold). */
+  holdUntil?: (n: number) => Promise<void> | undefined;
   /** Called as the n-th read starts (before its gate), so a test can act while a page is in flight. */
   onStart?: (n: number) => void;
   /** Called as the n-th read's page settles (its answer about to be returned), so a test can record the order. */
@@ -318,10 +320,11 @@ function stub(
       endpointPath: '/v1/flights',
       pages,
     });
-    if (f.holdCall !== undefined && f.holdCall.call === n) {
+    const until = f.holdCall !== undefined && f.holdCall.call === n ? f.holdCall.until : f.holdUntil?.(n);
+    if (until !== undefined) {
       const signal = pctx.signal;
       await Promise.race([
-        f.holdCall.until,
+        until,
         new Promise<void>((_, reject) => {
           if (signal.aborted) reject(new AbortedError());
           signal.addEventListener('abort', () => reject(new AbortedError()), { once: true });
@@ -794,6 +797,9 @@ export function rankedPairs(
         pricePence: 40_000 + i,
         providerId: 'camoufox',
         sourceKind: 'scraped-self',
+        basis: 'calendar',
+        current: true,
+        stale: false,
       };
     });
   };

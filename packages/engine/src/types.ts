@@ -9,6 +9,7 @@ import type {
   CoverageCheckResponse,
   DefinitionInput,
   Estimate,
+  FigureBasis,
   FlightProvider,
   Iata,
   IsoDate,
@@ -131,7 +132,10 @@ export type VerifyCellOptions = Omit<StartOptions, 'trigger' | 'requireCovered' 
 
 /**
  * Spec revision 55 §8.1 (the flight-list step's candidates) and §10 (a card's cheapest): one date pair of the board's
- * ranking, with the airport pair and source of its figure.
+ * ranking, with the airport pair and source of its figure. Design 2026-11-08 §4.2: the figure's `basis`, whether it is
+ * `current` (a calendar price not superseded, a verified one seen in the latest search) and whether its price is
+ * `stale`, so the step queues current calendar prices and stale verified ones, and counts fresh verified ones as
+ * confirmed trips.
  */
 export interface RankedDatePair {
   departureDate: IsoDate;
@@ -141,6 +145,9 @@ export interface RankedDatePair {
   pricePence: number;
   providerId: ProviderId;
   sourceKind: SourceKind;
+  basis: FigureBasis;
+  current: boolean;
+  stale: boolean;
 }
 /** The board's ranking over a space (the api's `rankedPairsFor`), passed to the engine (Task 20.9) so it never imports the api. */
 export type RankedDatePairsReader = (q: {

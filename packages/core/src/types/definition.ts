@@ -94,9 +94,10 @@ export interface ExecutionBudget {
    */
   providerMaxCalls?: Partial<Record<ProviderId, number>>;
   /**
-   * Spec revision 55 §8.1 (ruling A5): the browser pages one run may spend on flight lists, the top dates' read. Set by
-   * the engine when the execution is created (Task 20.9); optional so a run stored
-   * before WP20 still parses, and a snapshot without it allows no flight page (the guard fails closed).
+   * Spec revision 55 §8.1 (ruling A5): set by the engine when the execution is created (Task 20.9) with camoufox in
+   * discovery. Design 2026-11-08 §4.8 withdrew it as an allowance: nothing counts pages against it; it is only the
+   * flight-list step's on-switch (a snapshot without it, such as a run stored before WP20, runs no step). Optional so
+   * those runs still parse; a stored figure (20) is never read as a limit.
    */
   flightListPages?: number;
 }

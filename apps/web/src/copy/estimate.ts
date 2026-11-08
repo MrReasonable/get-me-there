@@ -63,7 +63,9 @@ export const ESTIMATE_COPY = {
     'execution-calls': "over this search's limit of paid calls a run",
     'execution-free-calls': "over this search's limit of free calls a run",
     'execution-cost': "over this search's spending limit a run",
-    'provider-execution': 'over its page allowance for one run',
+    // why: design 2026-11-08 §4.8: the browser's per-run flight allowance is withdrawn (its page cap was, spec rev 65),
+    // so a stored stop at this scope is named without an allowance
+    'provider-execution': 'a limit on its pages stops it this run',
     'provider-month': 'no calls left this month',
     'provider-lifetime': 'no trial searches left',
     'global-month': "this month's spending limit is reached",

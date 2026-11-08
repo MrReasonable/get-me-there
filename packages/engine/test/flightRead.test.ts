@@ -800,6 +800,9 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
       pricePence: 40_000,
       providerId: 'camoufox',
       sourceKind: 'scraped-self',
+      basis: 'calendar',
+      current: true,
+      stale: false,
     };
     const { e, cam, reader } = setup({}, { rankedDatePairs: () => [ranked] });
     e.ctx.repos.definitions.update(e.definition.id, { minNights: 10, maxNights: 12 });

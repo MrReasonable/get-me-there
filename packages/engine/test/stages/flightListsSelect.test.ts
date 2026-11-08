@@ -17,6 +17,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   cellKeyOf,
+  confirmQueue,
   listReusable,
   type NewestList,
   OUTBOUND_ONLY,
@@ -46,6 +47,9 @@ function pair(i: number, over: Partial<RankedDatePair> = {}): RankedDatePair {
     pricePence: 40_000 + i,
     providerId: 'camoufox',
     sourceKind: 'scraped-self',
+    basis: 'calendar',
+    current: true,
+    stale: false,
     ...over,
   };
 }
@@ -253,5 +257,40 @@ describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reus
     expect(listReusable(n, NOW, 168, BOOKING)).toBe(true);
     expect(listReusable({ ...n, bookingStatus: 'expand-failed' }, NOW, 168, BOOKING)).toBe(false);
     expect(listReusable({ ...n, fetchedAt: ago(151.2) }, NOW, 168, OUTBOUND_ONLY)).toBe(false);
+  });
+});
+
+// Design 2026-11-08 §4.2, §4.3: the step's queue is every current calendar price and every stale verified figure, in the
+// ranking's order; a fresh, current verified figure is a confirmed trip already (it enters the standings by reuse), and a
+// figure that is not current (a superseded calendar price, a verified one the latest search did not see) is neither.
+describe('confirmQueue (design 2026-11-08 §4.2)', () => {
+  it('keeps current calendar prices and stale verified figures in ranking order; drops fresh verified and non-current ones', () => {
+    const calendar = pair(0);
+    const freshVerified = pair(1, { basis: 'verified', pricePence: 30_000, providerId: 'searchapi' });
+    const staleVerified = pair(2, { basis: 'verified', stale: true, providerId: 'searchapi' });
+    const notSeen = pair(3, { basis: 'verified', current: false, providerId: 'searchapi' });
+    const superseded = pair(4, { current: false, pricePence: 20_000 });
+    const staleCalendar = pair(5, { stale: true });
+    const later = pair(6);
+    expect(
+      confirmQueue([freshVerified, calendar, staleVerified, notSeen, superseded, staleCalendar, later]),
+    ).toEqual([calendar, staleVerified, staleCalendar, later]);
+  });
+
+  it('the read split of the queue has no count: all 300 pairs are read or reused', () => {
+    const r = ranked(300);
+    const [first] = r;
+    if (first === undefined) throw new Error('fixture');
+    const out = selectFlightPairs(
+      confirmQueue(r),
+      new Map([[cellKeyOf(first), read(ago(1))]]),
+      NOW,
+      168,
+      TODAY,
+      OUTBOUND_ONLY,
+      Number.POSITIVE_INFINITY,
+    );
+    expect(out.reused).toEqual([first]);
+    expect(out.read).toEqual(r.slice(1));
   });
 });

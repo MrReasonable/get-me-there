@@ -45,8 +45,32 @@ describe('rankedPairsFor (revision 55 §8.1, §10)', () => {
         pricePence: p.figure?.price.pricePence,
         providerId: p.figure?.price.provenance.providerId,
         sourceKind: p.figure?.price.provenance.sourceKind,
+        basis: p.figure?.basis,
+        current: p.figure?.superseded === false && p.figure.notSeenInLatest === null,
+        stale: p.figure?.price.stale !== false,
       })),
     );
+  });
+
+  // why: design 2026-11-08 §4.2: the step queues only current calendar prices and stale verified ones, so the reader says
+  // which each figure is; the seeded world holds a verified figure, a superseded calendar one and current calendar ones
+  it('states each figure basis, whether it is current, and whether its price is stale', async () => {
+    const { x, def } = await world();
+    const ranked = rankedPairsFor(x.ports, {
+      definitionId: def.id,
+      space: currentSpace(def, x.clock.todayLondon()),
+      cabin: def.cabin,
+      maxJourneyMinutes: null,
+      now: x.clock.now(),
+    });
+    const of = (dep: string, ret: string) =>
+      ranked.find((p) => p.departureDate === dep && p.returnDate === ret);
+    // 2 Nov, 10 nights: the fresh verified LHR→JFK figure of the latest run
+    expect(of('2026-11-02', '2026-11-12')).toMatchObject({ basis: 'verified', current: true, stale: false });
+    // 3 Nov, 11 nights: a verified price the latest itinerary search did not return
+    expect(of('2026-11-03', '2026-11-14')).toMatchObject({ basis: 'verified', current: false });
+    // 2 Nov, 11 nights: a calendar price of the latest run
+    expect(of('2026-11-02', '2026-11-13')).toMatchObject({ basis: 'calendar', current: true, stale: false });
   });
 
   it('applies the journey limit as the board does, and leaves out date pairs departing on or before today in London', async () => {

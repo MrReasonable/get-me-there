@@ -86,11 +86,11 @@ WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_eac
 
 /**
  * Spec §2, §5.3 rev 32 `provider-execution`: one provider's page rows in one execution (never cache hits or `no-page`
- * rows). Spec rev 55 §8.1 (ruling A32): the rows are split by endpoint path, `@flights = 0` the grid or list pages (no
- * cap: spec rev 65) and `@flights = 1` the flight-list pages, against the run's allowance (`$.budget.flightListPages`);
- * each keeps the `no-page` filter.
+ * rows). Spec rev 55 §8.1 (ruling A32): the rows are split by endpoint path, `@flights = 0` the grid or list pages and
+ * `@flights = 1` the flight-list pages; neither has a cap (spec rev 65; design 2026-11-08 §4.8 withdrew the flight
+ * allowance), and each keeps the `no-page` filter.
  * Spec rev 56 §7: each row counts its pages (`PAGES`), so a flights request with a return phase counts up to 2.
- * Spec rev 56 §8.1 (21.6 review I2): the flight allowance leaves out a flights request cut off before any answer (a
+ * Spec rev 56 §8.1 (21.6 review I2): the run's flight pages leave out a flights request cut off before any answer (a
  * cancel, a SIGTERM, or a pending row the boot sweep marked: `unknown`, no status, no class word), because its pair has
  * no row and the resumed pass reads it again; a timeout is classified, so it counts.
  */
@@ -101,10 +101,6 @@ WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> '
   AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')
   AND ((endpoint_path = @flightPath) = @flights)
   AND NOT (@flights = 1 AND outcome = 'unknown' AND http_status IS NULL AND error_kind IS NULL)`;
-/** Spec rev 55 §8.1: the execution's flight-list page allowance, from its snapshot like every per-execution cap. */
-const FLIGHT_LIST_CAP_SQL = `
-SELECT json_extract(definition_snapshot_json, '$.budget.flightListPages') AS cap
-FROM search_executions WHERE id = ?`;
 
 /** Plan Budget port: per-execution caps come from the snapshot budget, never from config at reserve time. */
 const EXECUTION_CAPS_SQL = `
@@ -132,7 +128,6 @@ interface GuardStatements {
     { maxCalls: unknown; maxFreeCalls: unknown; maxCostMicroGbp: unknown }
   >;
   providerExecutionUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
-  flightListCap: Database.Statement<[string], { cap: unknown }>;
 }
 function prepareStatements(db: Db): GuardStatements {
   return {
@@ -151,7 +146,6 @@ function prepareStatements(db: Db): GuardStatements {
     providerExecutionUsage: db.raw.prepare<Record<string, unknown>, CallsAndCost>(
       PROVIDER_EXECUTION_USAGE_SQL,
     ),
-    flightListCap: db.raw.prepare<[string], { cap: unknown }>(FLIGHT_LIST_CAP_SQL),
   };
 }
 
@@ -240,19 +234,21 @@ export class SqliteBudgetGuard implements BudgetGuard {
     }
     if (scope.kind === 'provider-execution') {
       const budget = this.budgetFor(scope.providerId);
+      // why: an execution that does not exist is refused, as every execution scope is (the read names no cap)
+      this.executionCaps(scope.executionId);
       const u = this.providerExecutionRows(scope.executionId, scope.providerId, budget);
       return {
         calls: u.calls,
         costMicroGbp: u.cost,
-        // why: spec rev 65: the browser's grid and list pages have no cap; only its flight pages have an allowance
+        // why: spec rev 65: the browser's grid and list pages have no cap
         cap: null,
         windowUsed: true,
         windowStart: null,
         windowEnd: null,
-        // why: spec rev 55 §8.1 (ruling A32): the flight pages are a second entry, counted against their own allowance
+        // why: spec rev 55 §8.1 (ruling A32): the flight pages are a second entry; design 2026-11-08 §4.8 withdrew their
+        // per-run allowance, so they too are reported with no cap (rule A bounds the step)
         flightLists: {
           calls: this.providerExecutionRows(scope.executionId, scope.providerId, budget, true).calls,
-          cap: this.flightListCap(scope.executionId),
         },
       };
     }
@@ -286,12 +282,13 @@ export class SqliteBudgetGuard implements BudgetGuard {
   }
 
   // why: check order is provider (the vendor's hard stop; none for a provider with no cap on its window, camoufox), then
-  // the run's flight-list allowance (camoufox's flight pages), then global (total spend), then the execution's own caps;
-  // one breach is reported and the engine's error table (spec §8.1) acts on its scope.
+  // global (total spend), then the execution's own caps; one breach is reported and the engine's error table (spec §8.1)
+  // acts on its scope. No camoufox page has a run cap: its grid and list pages since spec rev 65, its flight pages since
+  // design 2026-11-08 §4.8.
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
     const callCap = effectiveCallCap(budget);
     // why: spec rev 56 §5.3 (R-reserve): a camoufox request reserves its planned pages, so a return-phase request needs
-    // room for 2 in both page scopes; every other row asks for one call
+    // room for 2 under a provider cap; every other row asks for one call
     const asked = pagesOf(p) ?? 1;
     if (callCap !== null) {
       const prov = this.providerUsage(p.providerId, budget, now, budget.window);
@@ -303,13 +300,6 @@ export class SqliteBudgetGuard implements BudgetGuard {
           asked,
           p.providerId,
         );
-    }
-    // why: spec rev 55 §8.1 (ruling A32): a flight-list page is checked against the run's flight allowance, counting
-    // only that endpoint's rows (`provider-execution`); the browser's grid and list pages have no cap (spec rev 65)
-    if (p.executionId !== null && p.endpointPath === FLIGHT_LIST_ENDPOINT_PATH) {
-      const cap = this.flightListCap(p.executionId);
-      const u = this.providerExecutionRows(p.executionId, p.providerId, budget, true);
-      if (u.calls + asked > cap) throw this.exceeded('provider-execution', cap, u.calls, asked, p.providerId);
     }
     if (budget.billable) {
       const g = this.globalUsage(now);
@@ -383,16 +373,6 @@ export class SqliteBudgetGuard implements BudgetGuard {
       flights: flights ? 1 : 0,
     });
     return { calls: row?.calls ?? 0, cost: row?.cost ?? 0 };
-  }
-
-  /**
-   * Spec rev 55 §8.1: the run's flight-list page allowance from its snapshot. A snapshot without one allows none (0,
-   * fail closed): a run created before WP20, or by a caller that forgot it, can never read a flight list unmetered.
-   */
-  private flightListCap(executionId: string): number {
-    const row = this.sql.flightListCap.get(executionId);
-    if (row === undefined) throw new Error(`execution ${executionId} does not exist; refusing to reserve`);
-    return typeof row.cap === 'number' && Number.isInteger(row.cap) && row.cap >= 0 ? row.cap : 0;
   }
 
   private executionCaps(executionId: string): ExecutionBudget {

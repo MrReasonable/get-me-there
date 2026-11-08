@@ -519,12 +519,12 @@ describe('the flight line: when it applies and which date pairs it counts (spec 
     expect(startOf(e, { saved: true, snapshot: withFlightPages(16) }).flightLists?.returns).toBe(true);
   });
 
-  it('flags unread: an allowance of 10 pages holds no return phase for 10 pairs, so the line is outbound-only', () => {
-    expect(startOf(flightEngine(15, null), { snapshot: withFlightPages(10) }).flightLists).toEqual({
+  // why: design 2026-11-08 §4.8: the snapshot's figure is no allowance, so a 10-page one no longer makes it outbound-only
+  it('flags unread: a stored 10-page figure is no allowance; the return phase with the booking read is still counted', () => {
+    expect(startOf(flightEngine(15, null), { snapshot: withFlightPages(10) }).flightLists).toMatchObject({
       pairs: 10,
-      pages: 10,
-      seconds: 550,
-      returns: false,
+      pagesMax: 20,
+      returns: true,
     });
   });
 
@@ -656,6 +656,8 @@ describe('the flight line on a resume', () => {
     expect('flightLists' in estimateRemainingFor(e.ctx, { ...done, isCatchUp: true }, true)).toBe(false);
   });
 
+  // why: design 2026-11-08 §4.7: a plan with returns is resumed over its rebuilt queue (the 11 pairs not read; the
+  // estimate's fresh figure counts the first 10 of them), the stored booking read as stored
   it('a stored plan without the booking read is estimated without it (150 s a pair, at most 205 s)', async () => {
     const { e, done } = await stoppedAfterFour(BOTH);
     const plan = done.flightLists;
@@ -663,7 +665,7 @@ describe('the flight line on a resume', () => {
     expect(plan).toMatchObject({ returns: true, booking: true });
     expect(
       estimateRemainingFor(e.ctx, { ...done, flightLists: { ...plan, booking: false } }, true).flightLists,
-    ).toEqual({ pairs: 6, pages: 9, seconds: 900, pagesMax: 12, secondsMax: 1230, returns: true });
+    ).toEqual({ pairs: 10, pages: 15, seconds: 1500, pagesMax: 20, secondsMax: 2050, returns: true });
   });
 });
 
