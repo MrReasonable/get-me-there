@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title>
+<meta name="description" content="Mockup: settings">
+<style>
+/* Shared mockup styles (inlined into each file). Tokens first; dark mode redefines them. */
+:root {
+  --bg: #f5f4f0; --surface: #ffffff; --sunk: #f0eee9; --ink: #17191c; --muted: #5c636c; --faint: #858c95;
+  --line: #e2dfd8; --accent: #0a58ca; --accent-hover: #0847a3; --accent-ink: #ffffff;
+  --seller-bg: #e2f1e7; --seller-ink: #17643a;
+  --google-bg: #e5edf8; --google-ink: #1f4a82;
+  --cal-bg: #fbeed2; --cal-ink: #74500a;
+  --cache-bg: #ebe9e4; --cache-ink: #4a5057;
+  --ok: #17643a; --warn: #8f5200; --bad: #b3261e;
+  --heat-1: #0f6b4f; --heat-2: #3f8f6f; --heat-3: #86b9a2; --heat-4: #c9dfd3; --heat-5: #ecf2ee;
+  --heat-ink-dark: #ffffff; --heat-ink-light: #17191c;
+  --radius: 10px; --gutter: 16px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --surface: #1b1e21; --sunk: #16191b; --ink: #eceef0; --muted: #a5acb5; --faint: #7d848d;
+    --line: #2c3035; --accent: #6aa6ff; --accent-hover: #8dbaff; --accent-ink: #0b1220;
+    --seller-bg: #173526; --seller-ink: #8fd6aa;
+    --google-bg: #1a2a40; --google-ink: #9cc0f0;
+    --cal-bg: #3a2c10; --cal-ink: #f0c873;
+    --cache-bg: #2a2d31; --cache-ink: #c3c8ce;
+    --ok: #8fd6aa; --warn: #f0b860; --bad: #ff8a80;
+    --heat-1: #2fae83; --heat-2: #24805f; --heat-3: #1d5a45; --heat-4: #1a3b30; --heat-5: #1a2622;
+    --heat-ink-dark: #0b1210; --heat-ink-light: #dfe5e2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --surface: #1b1e21; --sunk: #16191b; --ink: #eceef0; --muted: #a5acb5; --faint: #7d848d;
+  --line: #2c3035; --accent: #6aa6ff; --accent-hover: #8dbaff; --accent-ink: #0b1220;
+  --seller-bg: #173526; --seller-ink: #8fd6aa; --google-bg: #1a2a40; --google-ink: #9cc0f0;
+  --cal-bg: #3a2c10; --cal-ink: #f0c873; --cache-bg: #2a2d31; --cache-ink: #c3c8ce;
+  --ok: #8fd6aa; --warn: #f0b860; --bad: #ff8a80;
+  --heat-1: #2fae83; --heat-2: #24805f; --heat-3: #1d5a45; --heat-4: #1a3b30; --heat-5: #1a2622;
+  --heat-ink-dark: #0b1210; --heat-ink-light: #dfe5e2; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+h1 { font-size: 24px; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 17px; font-weight: 650; }
+h3 { font-size: 15px; font-weight: 650; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.small { font-size: 13px; }
+.nowrap { white-space: nowrap; }
+
+/* Mockup annotation: not part of the design */
+.note {
+  border: 1px dashed #c06; color: #a0004f; background: #fff0f6; font-size: 12.5px; padding: 8px 10px;
+  border-radius: 6px; margin: 12px 0;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .note { background: #2a1420; color: #ff9cc8; border-color: #ff6fae; } }
+
+/* Top bar */
+.top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-in { max-width: 1120px; margin: 0 auto; padding: 10px var(--gutter); display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.brand { font-weight: 750; letter-spacing: 0.02em; font-size: 15px; color: var(--ink); }
+.brand span { color: var(--accent); }
+.nav { display: flex; gap: 4px; }
+.nav a { color: var(--muted); padding: 6px 10px; border-radius: 6px; font-weight: 550; }
+.nav a[aria-current="page"] { color: var(--ink); background: var(--sunk); }
+.limits { margin-left: auto; display: flex; gap: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.limits b { color: var(--ink); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+.dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px var(--gutter) 64px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.crumb { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 14px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--faint); text-decoration: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--accent); padding: 0 8px; }
+.btn.sm { min-height: 32px; padding: 0 10px; font-size: 13.5px; }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.card + .card { margin-top: 16px; }
+.card-head { padding: 16px 18px 10px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.card-foot { padding: 10px 18px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); }
+.meta { font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+.section { margin-top: 28px; }
+.section > h2 { margin-bottom: 10px; }
+.section-sub { font-size: 13.5px; color: var(--muted); margin: -4px 0 12px; }
+
+/* Price + its one label */
+.price { font-weight: 700; font-size: 17px; color: var(--accent); white-space: nowrap; }
+.price .ext { font-size: 12px; margin-left: 2px; opacity: 0.8; }
+.price.static { color: var(--ink); }
+.lbl { position: relative; display: inline-block; }
+.lbl > summary {
+  list-style: none; cursor: pointer; display: inline-block; font-size: 12px; font-weight: 600; line-height: 1;
+  padding: 4px 7px; border-radius: 999px; white-space: nowrap;
+}
+.lbl > summary::-webkit-details-marker { display: none; }
+.lbl > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.k-seller > summary { background: var(--seller-bg); color: var(--seller-ink); }
+.k-google > summary { background: var(--google-bg); color: var(--google-ink); }
+.k-cal > summary { background: var(--cal-bg); color: var(--cal-ink); }
+.k-cache > summary { background: var(--cache-bg); color: var(--cache-ink); }
+.k-old > summary { background: transparent; color: var(--faint); border: 1px dashed var(--faint); }
+.lbl .pop {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(300px, 80vw);
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px 12px; font-size: 13px; font-weight: 400;
+}
+.lbl .pop p + p { margin-top: 6px; }
+
+/* Trip rows (grid, become cards on phones) */
+.trips { border-top: 1px solid var(--line); }
+.trip {
+  display: grid; grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 1fr) minmax(130px, 1fr) 28px;
+  gap: 4px 14px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line);
+}
+.trip:last-child { border-bottom: 0; }
+.trip-head { padding-top: 8px; padding-bottom: 8px; font-size: 12px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.trip .pc { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.trip .dates b { font-weight: 600; }
+.trip .leg { font-size: 14px; }
+.trip .leg .via { color: var(--muted); font-size: 13px; }
+.trip .go { color: var(--faint); font-size: 20px; text-align: right; }
+.trip .go:hover { color: var(--accent); text-decoration: none; }
+.leg-tag { display: none; }
+@media (max-width: 720px) {
+  .trip-head { display: none; }
+  .trip { grid-template-columns: 1fr auto; grid-template-areas: "dates pc" "out pc" "back go"; padding: 12px 16px; }
+  .trip .dates { grid-area: dates; } .trip .pc { grid-area: pc; align-items: flex-end; }
+  .trip .nights { display: none; }
+  .trip .out { grid-area: out; } .trip .back { grid-area: back; } .trip .go { grid-area: go; align-self: end; }
+  .leg-tag { display: inline-block; width: 38px; color: var(--faint); font-size: 12px; font-weight: 600; text-transform: uppercase; }
+  .trip .nights-inline { display: inline; }
+  .lbl .pop { left: auto; right: 0; }
+}
+.nights-inline { display: none; color: var(--muted); }
+
+/* Status lines */
+.state { display: flex; gap: 10px; align-items: flex-start; padding: 14px 18px; font-size: 14px; }
+.state .ic { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.ic.info { background: var(--google-bg); color: var(--google-ink); }
+.ic.warn { background: var(--cal-bg); color: var(--warn); }
+.ic.bad { background: #fbe3e1; color: var(--bad); }
+.progress { height: 6px; border-radius: 999px; background: var(--sunk); overflow: hidden; margin-top: 8px; }
+.progress > i { display: block; height: 100%; background: var(--accent); }
+
+/* Forms */
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field label, .field .lab { font-size: 13px; font-weight: 600; }
+.field .hint { font-size: 12.5px; color: var(--muted); }
+input[type="text"], input[type="number"], input[type="date"], input[type="email"], input[type="password"], select {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  min-height: 40px; padding: 0 10px; width: 100%;
+}
+input:focus-visible, select:focus-visible, .btn:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.check input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--sunk); border: 1px solid var(--line); font-size: 13.5px; }
+.chip b { font-weight: 650; }
+.chip .x { color: var(--faint); padding: 0 4px; }
+
+details.more > summary { cursor: pointer; font-weight: 600; color: var(--accent); list-style: none; padding: 10px 0; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸"; display: inline-block; width: 16px; color: var(--faint); }
+details.more[open] > summary::before { content: "▾"; }
+
+table.plain { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.plain th { text-align: left; font-size: 12px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.plain td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.table-scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<style>
+  .settings { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; align-items: start; }
+  .side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 2px; }
+  .side a { color: var(--muted); padding: 7px 10px; border-radius: 6px; font-weight: 550; }
+  .side a[aria-current="true"] { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+  .group { margin-bottom: 32px; scroll-margin-top: 16px; }
+  .group > h2 { margin-bottom: 4px; }
+  .group > p { font-size: 13.5px; color: var(--muted); margin-bottom: 12px; }
+  .src { padding: 16px 18px; }
+  .src-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .src-head .meta { margin-top: 2px; }
+  .switch { position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .switch input { appearance: none; width: 40px; height: 24px; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; margin: 0; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { left: 19px; }
+  .src-body { margin-top: 14px; display: grid; gap: 14px; }
+  .kv { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 14px; }
+  .secret { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .secret code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--sunk); border: 1px solid var(--line); padding: 6px 10px; border-radius: 6px; }
+  .inline-num { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .inline-num input, .inline-num select { width: 72px; min-height: 34px; }
+  .inline-num select { width: auto; }
+  .meter { height: 6px; background: var(--sunk); border-radius: 999px; overflow: hidden; margin-top: 6px; max-width: 320px; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .health { list-style: none; margin: 0; padding: 0; }
+  .health li { display: flex; gap: 10px; align-items: baseline; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .health li:last-child { border-bottom: 0; }
+  .health li .what { width: 130px; flex: none; font-weight: 600; }
+  .radio { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .radio label { display: inline-flex; gap: 6px; align-items: center; }
+  .rule { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 14px; }
+  .savebar { display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; }
+  @media (max-width: 800px) {
+    .settings { grid-template-columns: 1fr; gap: 12px; }
+    .side { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+    .side a { white-space: nowrap; }
+    .health li { flex-wrap: wrap; } .health li .what { width: auto; }
+  }
+</style>
+
+<header class="top"><div class="top-in">
+  <div class="brand">get<span>·</span>me<span>·</span>there</div>
+  <nav class="nav" aria-label="Main"><a href="01-searches.html">Trips</a><a href="04-settings.html" aria-current="page">Settings</a></nav>
+  <div class="limits"><span><span class="dot"></span>All working</span><span>SearchApi <b>412</b> credits left</span><span>Spent <b>£0</b> of £35 this month</span></div>
+</div></header>
+
+<main class="wrap">
+  <div class="page-head"><h1>Settings</h1></div>
+  <div class="settings">
+    <nav class="side" aria-label="Settings sections">
+      <a href="#sources" aria-current="true">Price sources</a>
+      <a href="#limits">Limits</a>
+      <a href="#email">Email and alerts</a>
+      <a href="#system">System</a>
+    </nav>
+
+    <div>
+      <section class="group" id="sources" aria-labelledby="h-src">
+        <h2 id="h-src">Price sources</h2>
+        <p>New searches use the sources switched on here. Each search can turn them off for itself.</p>
+
+        <div class="card src">
+          <div class="src-head">
+            <div><h3>Google Flights, in your browser</h3><div class="meta">Free. Reads Google's calendar and flight lists on this machine; a full search takes about 25 min.</div></div>
+            <label class="switch"><input type="checkbox" checked aria-label="Use Google Flights in your browser"> On</label>
+          </div>
+          <div class="src-body">
+            <div class="kv"><span class="dot"></span>Browser ready · Google's cookie choice saved until 18 Nov 2027</div>
+            <div class="inline-num">Read flights for the cheapest dates until <input type="number" value="12" aria-label="Reads in a row"> reads in a row don't improve the <input type="number" value="5" aria-label="Cheapest trips"> cheapest trips</div>
+            <div class="inline-num">Pages at once <input type="number" value="2" aria-label="Pages at once"></div>
+            <div class="inline-num">May run <select aria-label="When the browser may run"><option>only during scheduled searches</option><option>any time</option></select></div>
+            <details class="more"><summary>Advanced</summary>
+              <div class="inline-num">Read a date's calendar price again after <input type="number" value="7"> days</div>
+              <div class="inline-num" style="margin-top:10px">Pause after an unrecognised page for <input type="number" value="1"> hour</div>
+            </details>
+          </div>
+        </div>
+
+        <div class="card src">
+          <div class="src-head">
+            <div><h3>SearchApi</h3><div class="meta">Paid. Checks the cheapest trips with real sellers and their booking links.</div></div>
+            <label class="switch"><input type="checkbox" checked aria-label="Use SearchApi"> On</label>
+          </div>
+          <div class="src-body">
+            <div>
+              <div class="kv"><b>412 credits left</b> <span class="muted">· resets 1 Dec · 1 credit per check</span></div>
+              <div class="meter" aria-hidden="true"><i style="width:41%"></i></div>
+            </div>
+            <div class="field"><span class="lab">API key</span>
+              <div class="secret"><code>saved · ends 3f2a</code><button class="btn sm" type="button">Replace</button><button class="btn sm quiet" type="button">Remove</button></div>
+              <span class="hint">Keys are never shown again once saved.</span></div>
+            <label class="check"><input type="checkbox" checked><span>Check the cheapest trips each search finds</span></label>
+            <label class="check"><input type="checkbox"><span>Also use it for the calendar <span class="muted small">(many credits per search)</span></span></label>
+            <div class="small muted">Credits per search are set under <a href="#limits">Limits</a>.</div>
+          </div>
+        </div>
+
+        <div class="card src">
+          <div class="src-head">
+            <div><h3>Aviasales cache</h3><div class="meta">Free. Prices other people saw on Aviasales in the last 2 days; quick, patchy on less busy routes.</div></div>
+            <label class="switch"><input type="checkbox" checked aria-label="Use the Aviasales cache"> On</label>
+          </div>
+          <div class="src-body">
+            <div class="field"><span class="lab">Travelpayouts token</span>
+              <div class="secret"><code>saved · ends 91c0</code><button class="btn sm" type="button">Replace</button></div></div>
+            <div class="kv muted small">64 calls this month (limit 50,000)</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="limits" aria-labelledby="h-lim">
+        <h2 id="h-lim">Limits</h2>
+        <p>Hard stops. A search stops before it would pass one, and says so on the Trips page.</p>
+        <div class="card src">
+          <div class="src-body" style="margin-top:0">
+            <div><div class="inline-num">Spend at most £<input type="number" value="35" aria-label="Monthly spend cap"> a month</div>
+              <div class="meter" aria-hidden="true"><i style="width:0%"></i></div><span class="small muted">£0 spent this month. The SearchApi plan is paid separately; its credits are its limit.</span></div>
+            <div class="inline-num">SearchApi: at most <input type="number" value="10"> credits per search</div>
+            <div class="savebar"><button class="btn primary" type="button">Save limits</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="email" aria-labelledby="h-em">
+        <h2 id="h-em">Email and alerts</h2>
+        <p>Alerts email you when a search finds a trip, with flights read, under your price.</p>
+        <div class="card src">
+          <div class="radio" role="radiogroup" aria-label="Send email with"><label><input type="radio" name="m" checked> Gmail</label><label><input type="radio" name="m"> Other mail server (SMTP)</label></div>
+          <div class="src-body">
+            <div class="row">
+              <div class="field"><label for="ga">Gmail address</label><input id="ga" type="email" placeholder="you@gmail.com"></div>
+              <div class="field"><label for="gp">App password</label><input id="gp" type="password" placeholder="16 characters"><span class="hint">Make one under Google account → Security → App passwords. Never shown again once saved.</span></div>
+            </div>
+            <div class="field"><label for="to">Send alerts to</label><input id="to" type="email" placeholder="Same as above"></div>
+            <div class="savebar"><button class="btn" type="button">Send a test email</button><button class="btn primary" type="button">Save</button></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-head"><h3>Alerts</h3></div>
+          <div class="rule"><span><b>London → New York</b> · a trip under £400</span><span class="muted small">last sent: never</span><span><button class="btn sm quiet" type="button">Edit</button><button class="btn sm quiet" type="button">Delete</button></span></div>
+          <div class="rule"><span class="muted">Add alerts from a search's page.</span><span class="inline-num small">Don't repeat an alert within <select><option>2 weeks</option><option>1 week</option><option>1 day</option></select></span></div>
+        </div>
+      </section>
+
+      <section class="group" id="system" aria-labelledby="h-sys">
+        <h2 id="h-sys">System</h2>
+        <p>Only needs you when a dot isn't green; the top bar says so too.</p>
+        <div class="card">
+          <ul class="health">
+            <li><span class="dot"></span><span class="what">App</span><span>Running, version 36423b7, up 1h, sign-in on</span></li>
+            <li><span class="dot"></span><span class="what">Database</span><span>156 MB</span></li>
+            <li><span class="dot"></span><span class="what">Browser</span><span>Ready; last page read 3h ago</span></li>
+            <li><span class="dot"></span><span class="what">Schedule</span><span>London → New York repeats weekly; next Sun 15 Nov, 06:00</span></li>
+            <li><span class="dot warn"></span><span class="what">Backups</span><span>Can't be seen from inside the container. <a href="#">How to check your host's backup job</a></span></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </div>
+  <p class="note">Mockup note: Providers, Status and the Alerts page are folded in here. A search's own source switches live on its Edit form, defaulting to what's on here.</p>
+</main>
+
+</body>
+</html>
