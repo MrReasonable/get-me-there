@@ -1,6 +1,7 @@
 import {
   type BlockedPage,
   type BookingRead,
+  bookingPageUrl,
   bookingReturnOf,
   FLIGHT_LIST_MAX_FLIGHTS,
   type FlightLimits,
@@ -501,7 +502,7 @@ async function readBooking(
   const selected = (
     status: BookingRead['status'],
     rule: string | null,
-    o: Partial<OffersRead> & { expanded?: boolean } = {},
+    o: Partial<OffersRead> & { expanded?: boolean; bookingUrl?: string | null } = {},
   ): BookingRead => ({
     status,
     rule,
@@ -514,8 +515,7 @@ async function readBooking(
     unparsed: o.unparsed ?? 0,
     nonGbp: o.nonGbp ?? 0,
     offersStated: o.offersStated ?? null,
-    // why: the booking page's address is read in a later task; none yet
-    bookingUrl: null,
+    bookingUrl: o.bookingUrl ?? null,
   });
   const ended = (e: StepEnd, read: boolean) =>
     e.kind === 'stop'
@@ -547,6 +547,10 @@ async function readBooking(
    */
   const unrecognised = (rule: string, o: OffersRead, expanded: boolean): BookingRead =>
     selected('unrecognised', rule, { ...o, offers: [], offersStated: null, expanded });
+  // why: the normalised address (never the page's raw one), so the answer always passes the worker's schema; null off
+  // the booking path. Taken from this first view only: the expansion's read never replaces it. Only the two statuses
+  // that keep offers carry it (`unrecognised` ends over a view stay null, as every other status).
+  const bookingUrl = bookingPageUrl(facts.url)?.url ?? null;
   const first = readOffers(facts);
   if (!first.allGbp) return { read: unrecognised('currency', first, false), offerGrammar: true };
   if (facts.moreOptions >= 2)
@@ -555,13 +559,13 @@ async function readBooking(
     // why: a view whose every offer the grammar refused read none: no `read` booking without an offer
     o.offers.length === 0
       ? unrecognised('no-offers-read', o, expanded)
-      : selected('read', null, { ...o, expanded });
+      : selected('read', null, { ...o, expanded, bookingUrl });
   if (facts.moreOptions === 0) return { read: finished(first, false), offerGrammar: true };
   // the expansion: kept offers on its failure are the ones read before it (A10)
   const failed = (rule: string): BookingRead =>
     first.offers.length === 0
       ? unrecognised('no-offers-read', first, false)
-      : selected('expand-failed', rule, { ...first, expanded: false });
+      : selected('expand-failed', rule, { ...first, expanded: false, bookingUrl });
   const d2 = budget.nextFor(p.pageTimeoutMs);
   const flow = 'select-more-options';
   // why: final review A-M1: the browser's own error in the expansion or the read after it is the expansion's failure

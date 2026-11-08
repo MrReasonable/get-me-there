@@ -1,6 +1,7 @@
 // Spec revision 56 §2 "The booking read": the offer grammar and the offer reader over a booking view's buttons. Every
 // name here is synthetic (the recorded name form with the synthetic sellers QQ Travel and QQ Fares), never a recording's.
 import { BOOKING_OFFERS_MAX, offerSchema } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { OFFER_GRAMMAR_VERSION, parseOfferName, readOffers } from '../src/offers.js';
 import { currencyOf, minorOf } from '../src/pence.js';
@@ -114,7 +115,7 @@ describe('readOffers (spec rev 56 §2: the offers read, the cheapest kept first)
       null,
       ...gbp.slice(12),
     ];
-    const r = readOffers({ offerNames: names, moreOptions: 1, grouped: 2 });
+    const r = readOffers({ offerNames: names, moreOptions: 1, grouped: 2, url: SYNTHETIC_BOOKING_URL });
     expect(r.offers).toHaveLength(20);
     expect(r.offers.map((o) => o.priceMinor)).toEqual(
       [...r.offers.map((o) => o.priceMinor)].sort((a, b) => a - b),
@@ -139,7 +140,7 @@ describe('readOffers (spec rev 56 §2: the offers read, the cheapest kept first)
     );
     // a 41st offer at the 40th's price, later in page order, is dropped
     names[44] = offer('QQ Seller late', '1,390');
-    const r = readOffers({ offerNames: names, moreOptions: 0, grouped: 0 });
+    const r = readOffers({ offerNames: names, moreOptions: 0, grouped: 0, url: SYNTHETIC_BOOKING_URL });
     expect(r.offers).toHaveLength(BOOKING_OFFERS_MAX);
     expect(r.offers.map((o) => o.seller)).not.toContain('QQ Seller late');
     expect(r.offers.some((o) => o.priceMinor === 200_000)).toBe(false);
@@ -150,6 +151,7 @@ describe('readOffers (spec rev 56 §2: the offers read, the cheapest kept first)
       offerNames: [offer('QQ Travel', '1,180'), offer('QQ Fares', '1,100', undefined, 'Euros')],
       moreOptions: 0,
       grouped: 0,
+      url: SYNTHETIC_BOOKING_URL,
     });
     expect(r.offers).toEqual([{ seller: 'QQ Travel', fare: null, priceMinor: 118_000 }]);
     expect([r.nonGbp, r.allGbp]).toEqual([1, false]);
@@ -158,12 +160,12 @@ describe('readOffers (spec rev 56 §2: the offers read, the cheapest kept first)
     const names = Array.from({ length: BOOKING_OFFERS_MAX }, (_, i) =>
       offer(`QQ Seller ${i}`, String(1000 + i)),
     );
-    const r = readOffers({ offerNames: names, moreOptions: 0, grouped: 0 });
+    const r = readOffers({ offerNames: names, moreOptions: 0, grouped: 0, url: SYNTHETIC_BOOKING_URL });
     expect(r.offers).toHaveLength(BOOKING_OFFERS_MAX);
     expect(r.offersStated).toBeNull();
   });
   it('no button: no offer, nothing dropped', () => {
-    expect(readOffers({ offerNames: [], moreOptions: 0, grouped: 0 })).toEqual({
+    expect(readOffers({ offerNames: [], moreOptions: 0, grouped: 0, url: SYNTHETIC_BOOKING_URL })).toEqual({
       offers: [],
       offersStated: null,
       unparsed: 0,

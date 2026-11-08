@@ -5,6 +5,7 @@
 // and booleans. No page text, price, seller or name appears here.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -135,7 +136,8 @@ function patterns(buttons: readonly string[]) {
  * 2026-11-01, which predate the main-scoped read).
  */
 function bookingFacts(a: z.infer<typeof afterSchema>) {
-  return patterns(a.mainButtonNames ?? a.buttonNames ?? []);
+  // why: the recordings are of the page's buttons; the page's address is not part of what they replay
+  return { ...patterns(a.mainButtonNames ?? a.buttonNames ?? []), url: SYNTHETIC_BOOKING_URL };
 }
 
 beforeEach(() => {
