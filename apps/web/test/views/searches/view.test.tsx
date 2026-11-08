@@ -9,7 +9,13 @@ import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
 import { API, definition as definitionFixture } from '../../fixtures.js';
-import { calendarCheapest, cheapest, latestRun, searchCard } from '../../fixtures.searches.js';
+import {
+  calendarCheapest,
+  cheapest,
+  flightListProvenance,
+  latestRun,
+  searchCard,
+} from '../../fixtures.searches.js';
 import { type CardRequests, serveCards, serveCardsBy } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { controllableViewport } from '../../viewport.js';
@@ -319,6 +325,39 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     );
     renderInShell(<SearchesView />);
     expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent(S.cheapestSoFar);
+  });
+
+  it('words a trip with flights read "cheapest trip with flights read so far" while running, never "cheapest so far"', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
+          cheapest: cheapest(
+            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400 },
+            flightListProvenance('2026-10-14T10:44:00.000Z'),
+          ),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    expect(card).toHaveTextContent(S.cheapestTripSoFar);
+    expect(card).not.toHaveTextContent(/cheapest so far/);
+  });
+
+  it('says nothing of "so far" on a settled card, whatever its figure', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          cheapest: cheapest(
+            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400 },
+            flightListProvenance('2026-10-14T10:44:00.000Z'),
+          ),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    expect(await cardOf('Birmingham → Frankfurt')).not.toHaveTextContent(/so far/);
   });
 
   it('shows the red synthetic banner when any card’s cheapest is the fixture provider’s', async () => {

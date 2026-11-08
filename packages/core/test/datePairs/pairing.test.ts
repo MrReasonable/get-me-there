@@ -7,6 +7,7 @@ import {
   listFresh,
   PAIRING_READ,
   type PairingCandidate,
+  pairingKindOf,
   pairingLeads,
   pairingOffer,
   pairingReadOf,
@@ -504,5 +505,19 @@ describe('resultBasisOf (spec rev 56 §6.9: a pairing figure opens the detail on
     expect(() => resultBasisOf(JSON.parse('"offer"'))).toThrow(
       new RangeError('resultBasisOf: no basis offer'),
     );
+  });
+});
+
+describe('pairingKindOf (design 2026-11-08 §4.1: whose price a pairing shows)', () => {
+  it.each([
+    ['a seller offer when the price is not a "from" price', { isFrom: false, offersRead: 3 }, 'seller'],
+    ['google-unread when a "from" price read no offers', { isFrom: true, offersRead: 0 }, 'google-unread'],
+    [
+      'google-incomplete when a "from" price read some offers',
+      { isFrom: true, offersRead: 2 },
+      'google-incomplete',
+    ],
+  ] as const)('is %s', (_name, group, kind) => {
+    expect(pairingKindOf(group)).toBe(kind);
   });
 });

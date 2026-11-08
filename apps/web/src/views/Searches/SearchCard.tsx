@@ -117,7 +117,13 @@ export function SearchCard({
               {COPY.basisKindName[cheapest.priceKind]}
             </span>
           ) : null}
-          {active ? <span className="text-fg-2">{S.cheapestSoFar}</span> : null}
+          {/* why: a trip with flights read is not "the cheapest so far" while a cheaper calendar price may stand beside it, so
+          its label says what it is; only a calendar or verified figure is worded as the cheapest so far */}
+          {active ? (
+            <span className="text-fg-2">
+              {cheapest.basis === 'pairing' ? S.cheapestTripSoFar : S.cheapestSoFar}
+            </span>
+          ) : null}
         </div>
       )}
       <div data-testid="card-actions" className="search-card-actions">

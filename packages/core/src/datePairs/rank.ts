@@ -27,6 +27,9 @@ export function rankTierOf(f: DatePairFigure): 0 | 1 | 2 {
  * rank after every current one, decision 54; a pairing figure's are the calendar candidate's it replaced); then the tier (`rankTierOf`), then price
  * (a pairing figure's is its offer's, or Google's price); then verified before pairing before calendar (spec rev 56 §6.5); then the
  * fresher (unknown age last); then the index, which orders by departure, then nights.
+ * The first-ranked figure is not always the lowest price shown: a pairing figure ranks in its tier and may be dearer than
+ * a current calendar price, so the search card words a pairing figure "cheapest trip with flights read so far", never
+ * "cheapest so far" (design 2026-11-08).
  */
 export function rankDatePairs(pairs: readonly DatePair[], now: IsoDateTime): DatePair[] {
   // why: each pair's key is computed once (decorate, sort, undecorate): 36,400 pairs re-rank inside the 200 ms limit.

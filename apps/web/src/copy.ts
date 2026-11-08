@@ -657,6 +657,9 @@ export const COPY = {
     neverSearched: (never: number, total: number) =>
       `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,
     cheapestSoFar: 'cheapest so far',
+    // why: while a search runs the card shows the first-ranked figure, which may be a trip with flights read dearer
+    // than a current calendar price; it must not be worded as the cheapest found (spec §11 card)
+    cheapestTripSoFar: 'cheapest trip with flights read so far',
     trip: (departure: string, back: string) => `${departure} → ${back}`,
     // actions
     seeDates: 'See dates',

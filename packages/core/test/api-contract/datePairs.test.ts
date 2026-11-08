@@ -589,6 +589,11 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const incomplete = withPairing();
     pairingAt(incomplete).complete[0] = false;
     expect(issuePaths(incomplete)).toEqual(['pairing.complete.0']);
+    // why: design 2026-11-08 §4.1: an offer shown beneath a calendar figure is of complete offers too, so an
+    // incomplete one (entry 1) is refused by the beneath rule, not the leading one
+    const incompleteBeneath = withPairing();
+    pairingAt(incompleteBeneath).complete[1] = false;
+    expect(issuePaths(incompleteBeneath)).toEqual(['pairing.complete.1']);
     const overLimit = withPairing();
     pairingAt(overLimit).which[0] = 'over-limit';
     expect(issuePaths(overLimit)).toEqual(['pairing.which.0']);

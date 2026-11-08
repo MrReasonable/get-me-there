@@ -365,7 +365,21 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
 
     it.each([
       ['cancelled', { kind: 'cancelled' }, 'cancelled'],
-      ['budget', { kind: 'fatal' }, 'fatal'],
+      ['fatal', { kind: 'fatal' }, 'fatal'],
+      [
+        'budget',
+        {
+          kind: 'budget',
+          scope: 'provider-execution',
+          providerId: 'camoufox',
+          unit: 'pages',
+          cap: 100,
+          resumeAfter: null,
+          resetsAt: null,
+          flights: { read: 3, planned: 3 },
+        },
+        'budget',
+      ],
       ['limiter-timeout', { kind: 'limiter-timeout', providerId: 'camoufox', resumeAfter: null }, 'other'],
     ] as const)('a run stopped by a %s cause reads %s', async (_n, cause, kind) => {
       const { x, s } = await setup();
@@ -397,10 +411,17 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
       expect(e.stop?.sentence).toContain('flights were read for 3 dates.');
     });
 
-    it('is null for a run nothing stopped, and for a plan with no summary', async () => {
+    it('is null for a run nothing stopped', async () => {
       const { x, s } = await setup();
       const id = s.id('E');
       x.ports.repos.executions.patch(id, { flightLists: plan(null) });
+      expect((await flightsOfRun(x, id))?.stopCause).toBeNull();
+    });
+
+    it('is null for a plan that stored no confirm summary', async () => {
+      const { x, s } = await setup();
+      const id = s.id('E');
+      x.ports.repos.executions.patch(id, { flightLists: { ...plan(null), confirm: null } });
       expect((await flightsOfRun(x, id))?.stopCause).toBeNull();
     });
   });
