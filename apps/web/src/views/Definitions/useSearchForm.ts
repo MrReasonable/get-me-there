@@ -5,7 +5,6 @@ import { type DraftEstimate, useEstimateDraft } from '../../api/queries.js';
 import type { AirportsResponse } from '../../api/types.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, parseDateText } from '../../format.js';
 import { useNow } from '../../now.js';
 import { suggestedName, useAirportDetails } from './airports.js';
 import { DEFAULT_RELATIVE, type Draft, type DraftWindow, draftToRequest, EMPTY_ABSOLUTE } from './draft.js';
@@ -28,10 +27,6 @@ const errorsIn = (errors: readonly FieldError[], field: string) =>
 const toggled = (list: readonly string[], id: string, on: boolean): readonly string[] =>
   on ? (list.includes(id) ? list : [...list, id]) : list.includes(id) ? list.filter((x) => x !== id) : list;
 
-/** The text an end of a window shows: its date in the one shown form, or nothing. */
-const shownDate = (w: DraftWindow, end: DateEnd): string =>
-  w.kind === 'absolute' && w[end] !== '' ? formatIsoDate(w[end]) : '';
-
 /** The search form's state and what it derives (see `useSearchForm`). */
 export interface SearchForm {
   draft: Draft;
@@ -43,17 +38,8 @@ export interface SearchForm {
   setRolling: (on: boolean) => void;
   details: ReadonlyMap<string, AirportsResponse[number]>;
   setNameTouched: (touched: boolean) => void;
-  /** The text typed into each end of Leave between, as typed. */
-  dateText: Record<DateEnd, string>;
-  setDateText: (end: DateEnd, text: string) => void;
-  /** The field of this end was left: its date is judged now. */
-  leaveDate: (end: DateEnd) => void;
-  /** The press was tried while the form was not ready: both dates are judged now (on submit). */
-  judgeDates: () => void;
-  /** Per end: "Enter the date as 10 Jan 2027" once its text, read as no date, has been judged (left or pressed). */
-  dateError: Record<DateEnd, string | null>;
-  /** Per end: the date its text was read as, shown beside it when the text is not already that form ("10 Jan"). */
-  dateEcho: Record<DateEnd, string | null>;
+  /** Sets one end of Leave between to the date its picker holds ("2027-01-10"), or '' while it holds none. */
+  setDate: (end: DateEnd, value: string) => void;
   today: IsoDate;
   /** The API's field errors (the estimate's or a save's 422), and the ones under one field. */
   fieldErrors: readonly FieldError[];
@@ -77,9 +63,8 @@ export interface SearchForm {
 
 /**
  * Spec rev 55 §11 (WP20 Task 20.5): the one model behind the new-search form and the Edit page. It holds the draft,
- * the name suggested from the airports until the operator types one, the text of the two date fields (read through
- * `parseDateText`, so "10/01/2027" is refused beside its field and never estimated), the blank number boxes and
- * half-filled time windows, and derives the first reason the form is not complete ("Enter From and To", "Enter the
+ * the name suggested from the airports until the operator types one, the two dates (each from its browser date picker,
+ * so a date is always a whole calendar date or none), the blank number boxes and half-filled time windows, and derives the first reason the form is not complete ("Enter From and To", "Enter the
  * dates", …) and, when it is, the body to estimate, whose estimate it asks for after the debounce. A failed estimate's
  * 422 fields (or a save's) are shown beside the fields they name.
  */
@@ -102,53 +87,13 @@ export function useSearchForm(
   // why: derived, not written back by an effect, so no edit built on an older render can drop the suggested name
   const draft: Draft = nameTouched || suggestion === null ? stored : { ...stored, name: suggestion };
 
-  const [dateText, setText] = useState<Record<DateEnd, string>>(() => ({
-    from: shownDate(initial.window, 'from'),
-    to: shownDate(initial.window, 'to'),
-  }));
   const w = draft.window;
-  const absFrom = w.kind === 'absolute' ? w.from : null;
-  const absTo = w.kind === 'absolute' ? w.to : null;
-  // why: the date boxes follow the draft when it changes elsewhere (Import example, rolling switched off), and keep
-  // what was typed while it already means the draft's date ("10 Jan" for 2027-01-10, or text that reads as none)
-  useEffect(() => {
-    setText((t) => {
-      const next = { ...t };
-      for (const end of ['from', 'to'] as const) {
-        const value = end === 'from' ? absFrom : absTo;
-        if (value !== null && (parseDateText(t[end], today) ?? '') !== value)
-          next[end] = value === '' ? '' : formatIsoDate(value);
-      }
-      return next.from === t.from && next.to === t.to ? t : next;
-    });
-  }, [absFrom, absTo, today]);
-  // why: fix round 1, finding 9 — a date is judged when its field is left (or the press is tried), never at every
-  // keystroke; a change hides the judgement again until the next blur, so typing a date never alerts
-  const [judged, setJudged] = useState<Record<DateEnd, boolean>>({ from: false, to: false });
-  const setDateText = (end: DateEnd, text: string) => {
-    setText((t) => ({ ...t, [end]: text }));
-    setJudged((j) => (j[end] ? { ...j, [end]: false } : j));
-    const base = draft.window.kind === 'absolute' ? draft.window : EMPTY_ABSOLUTE;
-    setDraft({ ...draft, window: { ...base, [end]: parseDateText(text, today) ?? '' } });
-  };
-  const parsed = {
-    from: parseDateText(dateText.from, today),
-    to: parseDateText(dateText.to, today),
-  };
   const relative = w.kind === 'relative';
-  const unread = {
-    from: !relative && dateText.from.trim() !== '' && parsed.from === null,
-    to: !relative && dateText.to.trim() !== '' && parsed.to === null,
+  // why: a date field's value is the wire form or '' (a part-typed date reads as ''), so it goes into the draft as is
+  const setDate = (end: DateEnd, value: string) => {
+    const base = draft.window.kind === 'absolute' ? draft.window : EMPTY_ABSOLUTE;
+    setDraft({ ...draft, window: { ...base, [end]: value } });
   };
-  const dateError = {
-    from: unread.from && judged.from ? COPY.newSearch.dateFormat : null,
-    to: unread.to && judged.to ? COPY.newSearch.dateFormat : null,
-  };
-  const echo = (end: DateEnd) => {
-    const d = parsed[end];
-    return d !== null && formatIsoDate(d) !== dateText[end].trim() ? formatIsoDate(d) : null;
-  };
-  const dateEcho = { from: relative ? null : echo('from'), to: relative ? null : echo('to') };
 
   const setRolling = (on: boolean) => {
     if (on === relative) return;
@@ -167,7 +112,6 @@ export function useSearchForm(
   const R = COPY.newSearch.reasons;
   const reasons = [
     ...(draft.origins.length === 0 || draft.destinations.length === 0 ? [R.airports] : []),
-    ...(unread.from || unread.to ? [R.dateText] : []),
     ...(w.kind === 'absolute' && (w.from === '' || w.to === '') ? [R.dates] : []),
     ...(w.kind === 'absolute' && w.from !== '' && w.to !== '' && w.to < w.from ? [R.dateOrder] : []),
     ...(blank.some((id) => STAY_BOXES.includes(id)) ? [R.stay] : []),
@@ -216,12 +160,7 @@ export function useSearchForm(
     setRolling,
     details,
     setNameTouched,
-    dateText,
-    setDateText,
-    leaveDate: (end) => setJudged((j) => (j[end] ? j : { ...j, [end]: true })),
-    judgeDates: () => setJudged({ from: true, to: true }),
-    dateError,
-    dateEcho,
+    setDate,
     today,
     fieldErrors,
     setSaveErrors,

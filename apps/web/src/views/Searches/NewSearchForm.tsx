@@ -97,7 +97,6 @@ export function NewSearchForm({
           wait={wait}
           pending={create.isPending}
           ids={IDS}
-          onBlocked={form.judgeDates}
           onPress={(covers) => {
             if (form.body === null || sending.current) return;
             sending.current = true;

@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { expect, vi } from 'vitest';
 import type { ProvidersResponse } from '../../../src/api/types.js';
@@ -104,12 +104,20 @@ export async function addAirport(user: User, name: string, code: string) {
   await vi.waitFor(() => expect(chipCodes(name)).toContain(code));
 }
 
+/**
+ * Picks a date in one of Leave between's date fields. A browser date field commits a whole date at once (or '' while it
+ * holds none), so it is changed in one event, as the picker does, never typed into key by key.
+ */
+export function pickDate(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
 /** Fills From, To and Leave between with the second worked example, and lets the airport lookups answer. */
 export async function fill(user: User) {
   await addAirport(user, PLAN_COPY.from, 'BHX');
   await addAirport(user, PLAN_COPY.to, 'FRA');
-  await user.type(field(PLAN_COPY.earliest), '10 Jan 2027');
-  await user.type(field(PLAN_COPY.latest), '31 Mar 2027');
+  pickDate(PLAN_COPY.earliest, '2027-01-10');
+  pickDate(PLAN_COPY.latest, '2027-03-31');
   // why: the airports' lookups answer, so the suggested name joins the draft before the debounce is measured
   await step(0);
 }

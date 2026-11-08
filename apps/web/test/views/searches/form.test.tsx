@@ -1,5 +1,5 @@
 import { CONSTRAINT_LABELS } from '@gmt/core';
-import { screen, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ESTIMATE_DEBOUNCE_MS } from '../../../src/api/queries.js';
@@ -13,6 +13,7 @@ import {
   field,
   fill,
   holdEstimates,
+  pickDate,
   renderForm,
   searchNow,
   step,
@@ -33,13 +34,13 @@ afterEach(() => {
 });
 
 describe('the new-search form: what it shows (spec rev 55 §11)', () => {
-  it('shows From, To, Leave between as two "10 Jan 2027" fields, Stay and Search now; nothing else outside More options', () => {
+  it('shows From, To, Leave between as two date fields, Stay and Search now; nothing else outside More options', () => {
     renderForm();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.to })).toBeInTheDocument();
     const leave = screen.getByRole('group', { name: PLAN_COPY.leaveBetween });
-    const dates = within(leave).getAllByRole('textbox');
-    expect(dates.map((d) => d.getAttribute('placeholder'))).toEqual(['10 Jan 2027', '10 Jan 2027']);
+    const dates = [field(PLAN_COPY.earliest), field(PLAN_COPY.latest)];
+    expect(dates.every((d) => leave.contains(d) && d.type === 'date')).toBe(true);
     expect(dates.map((d) => (d instanceof HTMLInputElement ? d.value : null))).toEqual(['', '']);
     expect(field(PLAN_COPY.shortest).value).toBe('10');
     expect(field(PLAN_COPY.longest).value).toBe('21');
@@ -242,8 +243,7 @@ describe('an incomplete form says why, as the button’s accessible description 
       'a last date before the first',
       async (user) => {
         await fill(user);
-        await user.clear(field(PLAN_COPY.latest));
-        await user.type(field(PLAN_COPY.latest), '1 Jan 2027');
+        pickDate(PLAN_COPY.latest, '2027-01-01');
       },
       N.reasons.dateOrder,
     ],
@@ -258,79 +258,52 @@ describe('an incomplete form says why, as the button’s accessible description 
   });
 });
 
-describe('dates typed the old way (Review Focus 5)', () => {
-  it('"10/01/2027" is refused beside the field once it is left, no estimate is asked past the debounce, and the button names Leave between', async () => {
+describe('Leave between: two browser date fields (spec rev 67 §11)', () => {
+  it('the picked dates are sent as the window, as picked', async () => {
     const held = holdEstimates();
     const { user } = renderForm();
     await fill(user);
-    await user.clear(field(PLAN_COPY.earliest));
-    await user.type(field(PLAN_COPY.earliest), '10/01/2027');
-    // the press waits at once, and says why, while the field is still being typed in
-    expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
-    expect(searchNow()).toHaveAccessibleDescription(N.reasons.dateText);
-    expect(N.reasons.dateText).toContain(PLAN_COPY.leaveBetween);
-    await user.tab();
-    const box = field(PLAN_COPY.earliest);
-    expect(box).toHaveAttribute('aria-invalid', 'true');
-    expect(box).toHaveAccessibleDescription(N.dateFormat);
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(held.bodies).toHaveLength(1));
+    expect(held.bodies[0]).toMatchObject({
+      window: { kind: 'absolute', from: '2027-01-10', to: '2027-03-31' },
+    });
+  });
+
+  it('neither can be picked before today, and the latest not before the earliest once one is picked', () => {
+    renderForm();
+    // why: today is the pinned test clock's London date, 14 Oct 2026
+    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', '2026-10-14');
+    expect(field(PLAN_COPY.latest)).toHaveAttribute('min', '2026-10-14');
+    pickDate(PLAN_COPY.earliest, '2027-01-10');
+    expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', '2026-10-14');
+    expect(field(PLAN_COPY.latest)).toHaveAttribute('min', '2027-01-10');
+  });
+
+  it('a date field emptied again (a part-typed date reads as none) waits with "Enter the dates", and asks no estimate', async () => {
+    const held = holdEstimates();
+    const { user } = renderForm();
+    await fill(user);
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(held.bodies).toHaveLength(1));
+    pickDate(PLAN_COPY.latest, '');
     await step(ESTIMATE_DEBOUNCE_MS * 3);
-    expect(held.bodies).toHaveLength(0);
+    expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
+    expect(searchNow()).toHaveAccessibleDescription(N.reasons.dates);
+    expect(held.bodies).toHaveLength(1);
   });
 
-  it('typing a valid date says nothing against it at any keystroke (fix round 1, finding 9)', async () => {
-    holdEstimates();
-    const { user } = renderForm();
-    const text = '10 Jan 2027';
-    for (const ch of text) {
-      await user.type(field(PLAN_COPY.earliest), ch);
-      expect(screen.queryByText(N.dateFormat)).toBeNull();
-      expect(field(PLAN_COPY.earliest)).not.toHaveAttribute('aria-invalid', 'true');
-      expect(
-        within(screen.getByRole('group', { name: PLAN_COPY.leaveBetween })).queryByRole('alert'),
-      ).toBeNull();
-    }
-    expect(field(PLAN_COPY.earliest).value).toBe(text);
-  });
-
-  it('a date refused beside its field is said in a polite region that is there, empty, before it is judged', async () => {
-    holdEstimates();
-    const { user } = renderForm();
-    // why: follow-up 2 — a live region is announced only when its content changes after it is mounted
+  it("each date field has a polite region for the API's error about it, there and empty before one comes", () => {
+    renderForm();
     const region = (end: string) => document.getElementById(`w-${end}-note`);
     for (const end of ['from', 'to']) {
       expect(region(end)).toHaveAttribute('aria-live', 'polite');
       expect(region(end)).toHaveTextContent('');
+      expect(field(end === 'from' ? PLAN_COPY.earliest : PLAN_COPY.latest)).not.toHaveAttribute(
+        'aria-invalid',
+        'true',
+      );
     }
-    const before = region('from');
-    await user.type(field(PLAN_COPY.earliest), '10/01/2027');
-    expect(region('from')).toHaveTextContent('');
-    await user.tab();
-    // the same node, now holding the words, never an alert
-    expect(region('from')).toBe(before);
-    expect(region('from')).toHaveTextContent(N.dateFormat);
-    expect(region('from')?.closest('[role="alert"]')).toBeNull();
-    expect(field(PLAN_COPY.earliest)).toHaveAccessibleDescription(N.dateFormat);
-  });
-
-  it('pressing Search now with a date still unread shows the refusal beside the field (on submit)', async () => {
-    holdEstimates();
-    const { user } = renderForm();
-    await fill(user);
-    await user.clear(field(PLAN_COPY.latest));
-    await user.type(field(PLAN_COPY.latest), '31/03/2027');
-    expect(screen.queryByText(N.dateFormat)).toBeNull();
-    // why: fireEvent-free: the press is a real click, the field keeps its focus until then
-    await user.click(searchNow());
-    expect(field(PLAN_COPY.latest)).toHaveAccessibleDescription(N.dateFormat);
-  });
-
-  it('"10 Jan" with no year is echoed beside the field as its next occurrence, "10 Jan 2027"', async () => {
-    holdEstimates();
-    const { user } = renderForm();
-    await user.type(field(PLAN_COPY.earliest), '10 Jan');
-    const box = field(PLAN_COPY.earliest);
-    expect(box).not.toHaveAttribute('aria-invalid', 'true');
-    expect(box).toHaveAccessibleDescription('10 Jan 2027');
   });
 });
 

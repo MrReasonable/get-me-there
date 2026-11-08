@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 66.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 67.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -4353,12 +4353,12 @@ merged into price.
 - **The new-search form and Search now.** Shown: **From** and **To** (the
   airport search, one or more airports each, ranked by §10's `GET /airports`),
   **Leave between** two dates and **Stay** min to max nights, and the
-  **Search now** button. Dates are shown and entered as "10 Jan 2027" (also
-  "10 january 2027", "10 Sept 2027" and `2027-01-10`); a day and month with
-  no year ("10 Jan", "Jan 10") is their next occurrence on or after today,
-  echoed beside the field as "10 Jan 2027"; a date in another form
-  ("10/01/2027") or one that does not exist is refused beside the field
-  ("Enter the date as 10 Jan 2027"), and no estimate is asked for it. Under
+  **Search now** button. The two dates of Leave between are browser date
+  fields: each is picked from a calendar (on a phone, the phone's own date
+  picker) and shown in the browser's date format; the earliest cannot be
+  picked before today, nor the latest before the earliest. A field holding no
+  whole date counts as empty ("Enter the dates"), and no estimate is asked
+  while either is. Elsewhere the app shows dates as "10 Jan 2027". Under
   **More options**, already filled in from the presets (§8.2): longest journey
   each way (25 h), cabin (economy), rolling instead of fixed dates ("starts in
   N days", "lasts M days"), the sources (every free source the install has
@@ -5699,6 +5699,15 @@ as specified in §5.3; no secrets, no full URLs.
 
 ## 17. Changelog
 
+### Revision 67: Leave between's dates are picked from a calendar (2026-11-08)
+
+Leave between's two dates were text fields taking "10 Jan 2027" (and a few other spellings), refusing another form
+beside the field. They are now browser date fields: the operator picks each date from a calendar, or the phone's own
+date picker, and sees it in the browser's date format. The earliest cannot be picked before today, nor the latest
+before the earliest; a field holding no whole date counts as empty and waits with "Enter the dates". The typed-date
+reader, its refusal ("Enter the date as 10 Jan 2027") and its echo are withdrawn. Dates elsewhere are still shown as
+"10 Jan 2027" (§11).
+
 ### Revision 66: flight lists read pages at once, and the flight line's measured view (2026-11-08)
 
 The flight-list step read its date pairs one at a time while the grid pages around it ran `CAMOUFOX_PAGES_AT_ONCE` at
@@ -5957,7 +5966,8 @@ finished search leads with its cheapest date pairs and, where the browser worker
 once and links every date pair to Google Flights; and the main path's words are plain (§1, §3, §11). The first screen is
 layout B, the searches as the main column and the new-search form beside it, above it on a phone (§11). A removed
 search is soft-deleted after an inline confirm, with an undo line and no modal (§10, §11). Cards list running searches
-first, then by latest run, newest first (§10). Dates are shown and entered as "10 Jan 2027" (§11). The pre-set arrival
+first, then by latest run, newest first (§10). Dates are shown as "10 Jan 2027", and Leave between's two dates are picked
+in browser date fields (§11). The pre-set arrival
 window of 06:00 to 23:00 is removed from the defaults, so a time window applies only when the operator sets one (§8.2).
 A new search names every free source the install has configured and enabled, stored on the search when it is created
 (§2, §8.2). Search again, on a card or a search's page, starts with the search's stored confirmed values and asks a

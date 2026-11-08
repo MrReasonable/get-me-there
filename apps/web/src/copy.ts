@@ -689,14 +689,12 @@ export const COPY = {
     // why: the first reason the form cannot be estimated, as the button's accessible description (spec rev 55 §11)
     reasons: {
       airports: 'Enter From and To',
-      dateText: 'Enter the date in Leave between as 10 Jan 2027',
       dates: 'Enter the dates',
       dateOrder: 'The last date is before the first',
       stay: 'Enter the stay',
       stayOrder: 'The shortest stay is longer than the longest',
       fields: 'Fix the fields marked above',
     },
-    dateFormat: 'Enter the date as 10 Jan 2027',
     estimateFailed: (message: string) => `Couldn't work out the estimate: ${message}`,
     saveFailed: (message: string) => `Couldn't save the search: ${message}`,
   },

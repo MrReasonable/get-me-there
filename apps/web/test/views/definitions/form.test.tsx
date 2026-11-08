@@ -20,6 +20,7 @@ import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
 import { API, airports, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
+import { pickDate } from '../searches/formSupport.js';
 
 // The search form's fields and the Edit page (spec rev 55 §11; WP20 Task 20.5). The new-search form and the Edit page
 // share their fields (`SearchFields`); these tests are not about the estimate's debounce (searches/form.test.tsx steps
@@ -83,8 +84,8 @@ async function complete(user: ReturnType<typeof renderNew>['user']) {
   await user.type(screen.getByLabelText('From'), 'LHR{Enter}');
   await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
   await waitFor(() => expect(chipCodes('To')).toEqual(['JFK']));
-  await user.type(screen.getByLabelText(PLAN_COPY.earliest), '14 Mar 2027');
-  await user.type(screen.getByLabelText(PLAN_COPY.latest), '28 Mar 2027');
+  pickDate(PLAN_COPY.earliest, '2027-03-14');
+  pickDate(PLAN_COPY.latest, '2027-03-28');
 }
 
 /** A paid estimate: 300 SearchApi calls at 120p over 300 of 405 date pairs. */
@@ -211,8 +212,8 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
       }),
     );
     await user.click(screen.getByRole('checkbox', { name: PLAN_COPY.rollingSwitch }));
-    expect(fieldValue(PLAN_COPY.earliest)).toBe('14 Mar 2027');
-    expect(fieldValue(PLAN_COPY.latest)).toBe('28 Mar 2027');
+    expect(fieldValue(PLAN_COPY.earliest)).toBe('2027-03-14');
+    expect(fieldValue(PLAN_COPY.latest)).toBe('2027-03-28');
     await waitFor(() =>
       expect(bodies.at(-1)).toMatchObject({
         window: { kind: 'absolute', from: '2027-03-14', to: '2027-03-28' },

@@ -31,7 +31,7 @@ export function capabilitiesOf(providers: ProvidersResponse): ProviderCapabiliti
 
 /**
  * Spec rev 55 §11 (WP20 Task 20.5; design §4.1): the fields of a search, as the new-search form and the Edit page both
- * show them. In view: From, To (the airport search), Leave between (two "10 Jan 2027" dates) and Stay (shortest to
+ * show them. In view: From, To (the airport search), Leave between (two browser date fields) and Stay (shortest to
  * longest nights). Under More options, already filled in from the presets: the longest journey each way (25 h), the
  * cabin, rolling dates instead of fixed ones, the name (suggested from the airports), the price sources, policy and run
  * budget with their one-line explanations, and the budget-fit table. The time windows are empty, "only if you set one".

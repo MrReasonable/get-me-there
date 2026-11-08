@@ -87,7 +87,6 @@ export function SentenceButton({
   ids,
   onPress,
   primary = true,
-  onBlocked,
 }: {
   verb: string;
   sentence: EstimateSentence | null;
@@ -95,8 +94,6 @@ export function SentenceButton({
   pending: boolean;
   ids: SentenceIds;
   onPress: (covers: EstimateSentence['covers']) => void;
-  /** Told when the press is tried while it waits (the form judges what it has not yet, fix round 1 finding 9). */
-  onBlocked?: () => void;
   primary?: boolean;
 }) {
   const ready = wait === null && sentence !== null;
@@ -112,7 +109,6 @@ export function SentenceButton({
       aria-describedby={pending ? undefined : ready ? ids.line : wait === null ? undefined : ids.reason}
       onClick={() => {
         if (ready && sentence !== null) onPress(sentence.covers);
-        else if (!pending) onBlocked?.();
       }}
     >
       {pending ? COPY.working : label}

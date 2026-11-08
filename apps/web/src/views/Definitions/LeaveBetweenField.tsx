@@ -11,11 +11,10 @@ const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
 ];
 
 /**
- * Spec rev 55 §11 "Leave between" (WP20 Task 20.5; design §4.1): two text fields taking a date as "10 Jan 2027" (also
- * "10 january 2027", "10 Sept 2027", `2027-01-10`; a day and month alone is their next occurrence, echoed beside the
- * field as "10 Jan 2027"). A date typed another way ("10/01/2027") is refused beside its field ("Enter the date as 10
- * Jan 2027": `aria-invalid`, described by a polite note) once the field is left or the press is tried, and no estimate
- * is asked for it meanwhile. While the window rolls (More options) the fields give way to the dates it covers today.
+ * Spec rev 67 §11 "Leave between": two browser date fields, so the operator picks each date from a calendar (the
+ * phone's own date wheel) and it is shown in the browser's own date format. The earliest cannot be picked before
+ * today, nor the latest before the earliest. While the window rolls (More options) the fields give way to the dates
+ * it covers today.
  */
 export function LeaveBetweenField({ form }: { form: SearchForm }) {
   const w = form.draft.window;
@@ -50,15 +49,16 @@ export function LeaveBetweenField({ form }: { form: SearchForm }) {
   );
 }
 
-/** One end of Leave between: the box, then either its refusal or the date it was read as. */
+/** One end of Leave between: the date field, then any field error the API gave for it. */
 function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: string }) {
   const id = `w-${end}`;
-  const error = form.dateError[end];
-  const echo = form.dateEcho[end];
-  const apiErrors = form.errorsFor(`window.${end}`);
-  const messages = [...(error === null ? [] : [error]), ...apiErrors];
+  const w = form.draft.window;
+  const value = w.kind === 'absolute' ? w[end] : '';
+  // why: the picker greys out what cannot be chosen: the past, and for the latest, anything before the earliest
+  const from = w.kind === 'absolute' ? w.from : '';
+  const min = end === 'to' && from > form.today ? from : form.today;
+  const messages = form.errorsFor(`window.${end}`);
   const noteId = `${id}-note`;
-  const echoId = `${id}-echo`;
   return (
     <span className="flex flex-col gap-1">
       <label htmlFor={id} className="field-label">
@@ -66,27 +66,19 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
       </label>
       <input
         id={id}
-        type="text"
-        inputMode="text"
-        autoComplete="off"
+        type="date"
         className={dateInput}
-        placeholder={PLAN_COPY.datePlaceholder}
-        value={form.dateText[end]}
+        value={value}
+        min={min}
         aria-invalid={messages.length > 0}
-        aria-describedby={messages.length > 0 ? noteId : echo !== null ? echoId : undefined}
-        onChange={(e) => form.setDateText(end, e.target.value)}
-        onBlur={() => form.leaveDate(end)}
+        aria-describedby={messages.length > 0 ? noteId : undefined}
+        onChange={(e) => form.setDate(end, e.target.value)}
       />
-      {/* why: fix round 1 finding 9 and follow-up 2 — the note is a polite region kept mounted, empty until the field is
-      judged, so its words are announced when they appear and never as an alert */}
+      {/* why: fix round 1 finding 9 and follow-up 2 — the note is a polite region kept mounted, empty until the API names
+      this field, so its words are announced when they appear and never as an alert */}
       <span id={noteId} aria-live="polite" className="bad-text text-sm">
         {messages.join(' ')}
       </span>
-      {messages.length === 0 && echo !== null ? (
-        <span id={echoId} className="hint">
-          {echo}
-        </span>
-      ) : null}
     </span>
   );
 }
