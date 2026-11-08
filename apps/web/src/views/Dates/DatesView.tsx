@@ -268,7 +268,9 @@ function DatesOf({
           confirm={run.flights.confirm}
           ended={run.flights.ended}
           stopCause={run.flights.stopCause}
-          running={RUNNING.has(run.status) && confirmStepGoing(run.flights)}
+          // why: final whole-branch review: only a running run reads pages (a pending one is queued or waiting to
+          // resume), the rule stateLines and the card's words apply
+          running={run.status === 'running' && confirmStepGoing(run.flights)}
           planned={run.flights.planned}
         />
       ) : null}

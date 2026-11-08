@@ -8,7 +8,6 @@ import {
   type ErrorReason,
   type ExecutionStatus,
   type FigureBasis,
-  FLIGHT_LIST_COUNT,
   formatAgo,
   type MIXED_ERROR_REASON,
   mainPathSource,
@@ -72,11 +71,13 @@ const SELLER_SHOWN = "; the first Back price is a seller's stated price";
 // final review B-M2 (ruling ui-006): the one lead phrase of a limit edit, on the board and the search's page block alike
 const LIMITS_CHANGED = 'your limits have changed since these return flights were read';
 // final review B-I3: what happens to a read that did not finish: tried again while a read would go now (the button
-// shown beside the note; the step reads only the run's FLIGHT_LIST_COUNT cheapest date pairs: final re-review), else
-// once the list is past 0.9 × the refresh, the reuse limit (two transient ends in a row: R-retry)
+// shown beside the note), else once the list is past 0.9 × the refresh, the reuse limit (two transient ends in a row:
+// R-retry). Final whole-branch review I4: in confirm mode the step reads past its first 10 date pairs until its
+// stopping rule ends it (design 2026-11-08 §4.2), so the words name no count: the next search reads the date when it
+// reaches it
 const NEXT_READ = (readNow: boolean): string =>
   readNow
-    ? `tried again at the next search while among its ${FLIGHT_LIST_COUNT} cheapest date pairs, or press Read flights for this date now`
+    ? 'tried again when the next search reaches this date, or press Read flights for this date now'
     : "read again once the read is nearly as old as this search's refresh";
 
 export const COPY = {
@@ -1092,11 +1093,15 @@ export const COPY = {
     readAgo: (hours: number | 'unknown') =>
       hours === 'unknown' ? 'read time not known' : `read ${formatAgo(hours)}`,
     pairingChanges: (out: string, back: string) => `${out} out · ${back} back`,
-    // design 2026-11-08 §5.2: the labelled break before the rows whose flights were never read
-    tierBreak: 'Not checked yet: calendar prices only',
+    // design 2026-11-08 §5.2: the labelled break before the rows led by a calendar price. Controller ruling on the final
+    // whole-branch review: not "Not checked yet", since a row under it can have had its flights read with no trip
+    // within the limits (or a read that did not finish); what they share is that only a calendar price leads them
+    tierBreak: 'Calendar prices only',
     // design 2026-11-08 §5.3: rows are closed; the button opens the row's full flight detail
     flightsToggle: { open: 'Show flights', close: 'Hide flights' },
-    flightsToggleOf: (dep: string, ret: string) => `flights for ${dep} to ${ret}`,
+    // why: final whole-branch review: the hidden part follows the visible "Show flights", so it starts at "for" (the
+    // accessible name once read "Show flights flights for …")
+    flightsToggleOf: (dep: string, ret: string) => `for ${dep} to ${ret}`,
     pairingBeneath: (ago: string) => `return flights read ${ago}, older than this search's refresh:`,
     pairingOtherLimits: `${LIMITS_CHANGED}:`,
     pairingRead: {

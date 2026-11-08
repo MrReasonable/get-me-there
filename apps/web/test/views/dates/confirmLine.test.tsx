@@ -115,4 +115,17 @@ describe('the search page', () => {
     await waitFor(() => expect(screen.getByTestId('state-line')).toHaveTextContent(words.replace(/\.$/, '')));
     expect(screen.getByTestId('state-line')).not.toHaveTextContent(/ of \d+/);
   });
+
+  // why: final whole-branch review: a pending run (queued, or waiting to resume) reads no pages, so the line under the
+  // board does not say "Checking flights"; only a running one does, as the state line and the card decide it
+  it('a pending run with a step still going: the line under the board does not say it is checking flights', async () => {
+    serveRun({
+      status: 'pending',
+      flights: flights({ planned: 9, read: 4, reused: 1, confirm: summary({ confirmed: 3, stop: null }) }),
+    });
+    renderDates({ body: workedDates() });
+    const line = await screen.findByTestId('confirm-line');
+    expect(line).toHaveTextContent('3 trips with flights read');
+    expect(line).not.toHaveTextContent(/Checking flights/);
+  });
 });

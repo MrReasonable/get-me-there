@@ -305,7 +305,7 @@ export function BoardTable(props: BoardProps) {
             const tie = tieAt.get(p.index);
             // why: design 2026-11-08 §5.2 — a labelled break where the current trips with flights read give way to the
             // current dates with only a calendar price (sorted by price). Not-current figures (superseded, not seen)
-            // rank after every current one, so a read trip among them never sits under "Not checked yet", and no break
+            // rank after every current one, so a read trip among them never sits under "Calendar prices only", and no break
             // is drawn for them
             const prev = rows[at - 1];
             const isCurrent = (q: DatePair) =>
@@ -570,7 +570,8 @@ function FlightsToggle({
       onClick={onToggle}
     >
       {open ? D.flightsToggle.close : D.flightsToggle.open}
-      <span className="sr-only"> {D.flightsToggleOf(dep, ret)}</span>
+      {/* why: the space sits outside the hidden span so the accessible name keeps it ("Show flights for …") */}{' '}
+      <span className="sr-only">{D.flightsToggleOf(dep, ret)}</span>
     </button>
   );
 }

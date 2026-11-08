@@ -4104,7 +4104,8 @@ datePairsResponseSchema = {
     origin: number[]; destination: number[];   // indices into scope.origins and scope.destinations
     superseded: boolean[];      // decision 54, calendar and pairing figures only (a pairing's is the calendar candidate's; false on verified)
     notSeenInLatestAgeHours: (number | 'unknown' | null)[];  // decision 54, verified figures only (null on calendar)
-    journeyMinutes: (number | null)[];   // total travel time when the figure's source states it
+    journeyMinutes: (number | null)[];   // total travel time when the figure's source states it (a pairing: its outbound's
+                                // and return's durations as the flight list states them; never the calendar row's)
     fromEarlierSearch: boolean[];   // fetched by an execution created before the latest parent run (a pairing: the list's fetchedAt
                                 // before the latest parent run's startedAt)
   };
@@ -4670,9 +4671,10 @@ merged into price.
     rank after every current figure (the tiers still ordering among them), and one
     caption line says so. **Ranks in a tie** are numbered in the order the rows are
     shown, so rank 2 never sits above rank 1. **The tier break**: a labelled row,
-    "Not checked yet: calendar prices only", sits where a current trip with flights
+    "Calendar prices only", sits where a current trip with flights
     read is followed by a current calendar row, so a superseded or not-seen read
-    trip is never shown under it.
+    trip is never shown under it (not "not checked yet": a row under it can have
+    had its flights read with no trip within the limits).
     **One price per row.** A row with flights read shows its price with its kind
     and when it was read, the outbound and return times, and journey time and changes
     each way ("1 change out · direct back"). A row with a calendar price alone shows
@@ -4867,7 +4869,7 @@ merged into price.
     did not finish says so directly under the block's head, with what
     happens next:
     a transient status (`select-failed`, `not-settled`, `unrecognised`)
-    "return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now" while a read would go now (the response's
+    "return flights not read: tried again when the next search reaches this date, or press Read flights for this date now" while a read would go now (the response's
     `readNow`, with the button shown beside it), else "return flights not
     read: read again once the read is nearly as old as this search's refresh" (two transient
     ends in a row wait for the refresh, R-retry; no button is named),
@@ -4876,7 +4878,7 @@ merged into price.
     yet read on this kind of machine; see the recording session in
     docs/setup.md", and `no-outbound` nothing beyond the outbound's own line;
     a booking read that did not finish likewise: transient "sellers not read:
-    tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now" (or "sellers not read: read again once the read is nearly as old as this search's refresh" without `readNow`), `expand-failed` "sellers read before the list could be expanded;
+    tried again when the next search reaches this date, or press Read flights for this date now" (or "sellers not read: read again once the read is nearly as old as this search's refresh" without `readNow`), `expand-failed` "sellers read before the list could be expanded;
     the cheapest may be missing" (the transient words when it read no offer
     before the expansion failed: one note, never both), `skipped` its rule
     in words,

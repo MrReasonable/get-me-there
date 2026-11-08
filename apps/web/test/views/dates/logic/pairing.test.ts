@@ -314,7 +314,7 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     withReturns({ status: s, rule, attempts: [], booking: null });
   it('each non-read status in words; no-outbound says nothing beyond the outbound line', () => {
     const next =
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now';
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now';
     expect(returnNote(status('select-failed', 'select-outbound:not-found'), COPY, true)).toBe(next);
     expect(returnNote(status('not-settled', 'returns:not-settled'), COPY, true)).toBe(next);
     expect(returnNote(status('unrecognised', 'returns:shape'), COPY, true)).toBe(next);
@@ -405,7 +405,7 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
   const note = (over: Partial<BookingRead>) => bookingNote(withBooking(over), COPY, true);
   it('each of the seven non-read statuses in words; null for read and for no booking read', () => {
     const next =
-      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now';
+      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now';
     expect(note({ status: 'select-failed', rule: 'select-return:not-found', offers: [] })).toBe(next);
     expect(note({ status: 'not-settled', rule: 'booking:not-settled', offers: [] })).toBe(next);
     expect(note({ status: 'unrecognised', rule: 'currency', offers: [] })).toBe(next);

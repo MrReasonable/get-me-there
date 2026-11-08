@@ -160,7 +160,7 @@ export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPair
 
 /**
  * A pairing figure on LHR → JFK (spec rev 56 §6.9): the cheapest offer's £1,180 leads with the flight list's
- * provenance, the £564 date-grid price it replaced beneath. Checked by the scoped `/results` contract's
+ * provenance, the £564 date-grid price it replaced beneath, its journey time its two legs' 26h 55m. Checked by the scoped `/results` contract's
  * `datePairFigureSchema` (the board's per-figure rules), so a figure the api could never send fails here.
  */
 export function pairingFig(over: Partial<DatePairFigure> = {}): DatePairFigure {
@@ -174,6 +174,8 @@ export function pairingFig(over: Partial<DatePairFigure> = {}): DatePairFigure {
       truncated: false,
     },
     basis: 'pairing',
+    // why: final whole-branch review I2: the api sends the trip's own journey time (outbound 14h 50m + return 12h 05m)
+    journeyMinutes: 890 + 725,
     gridPrice: { pricePence: 56_400, provenance: provGrid(), stale: false, truncated: false },
     pairing,
     pairingRead: 'within',

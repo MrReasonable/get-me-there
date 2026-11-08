@@ -16,6 +16,8 @@ import type { FlightList } from '../../../src/api/types.js';
 import {
   at,
   type DatesOptions,
+  figurePairing,
+  pairingFig,
   priced,
   pricedPair,
   provCached,
@@ -34,7 +36,7 @@ import {
 } from '../../fixtures.searches.js';
 import { FLIGHT_LISTS_URL, serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { autoOpenFlights, findBoard, renderDates } from './render.js';
+import { autoOpenFlights, boardRows, findBoard, renderDates } from './render.js';
 
 // Spec rev 56 §11 "Flights" and "The pairing section" (WP21 Task 21.7): a list whose return read is `read` with returns
 // shows the outbound the pairing used, its returns with their "from" prices, the cheapest seller's stated price first on
@@ -451,6 +453,53 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-incomplete')).toBeNull();
   });
 
+  // why: final whole-branch review I1, design 2026-11-08 §4.1: the head, the Back line and the board row say one thing
+  // about whose price leads: Google's when the offers read may be incomplete, a seller's only when they are complete
+  describe('the head, the Back line and the board row agree on whose price leads', () => {
+    /** The board with the date pair's pairing figure, the pairing group as given. */
+    const boardWith = (pairing: ReturnType<typeof figurePairing>): DatesOptions => ({
+      ...BOARD,
+      pairs: { [at('2027-03-14', 10)]: pricedPair(pairingFig({ pairing })) },
+    });
+    const boardRow = async () => {
+      const row = boardRows(await findBoard())[0];
+      if (row === undefined) throw new Error('no board row');
+      return row;
+    };
+
+    it("an incomplete booking: all three say Google's price, none a seller's", async () => {
+      await renderList(
+        withBooking({
+          moreControl: true,
+          offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
+        }),
+        {
+          board: boardWith(
+            figurePairing({ isFrom: true, seller: null, fare: null, complete: false, offersRead: 1 }),
+          ),
+        },
+      );
+      expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
+      expect(lines('return-line')[0]).toMatch(/^Back: from £1,180 round trip · not every seller read/);
+      const row = await boardRow();
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(
+        "Google's price, not every seller read",
+      );
+      expect(within(row).queryByTestId('pairing-seller')).toBeNull();
+    });
+
+    it("a complete booking: all three say a seller's price", async () => {
+      await renderList(FIXTURE, { board: boardWith(figurePairing()) });
+      expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
+        "the first Back price is a seller's stated price",
+      );
+      expect(lines('return-line')[0]).toMatch(/^Back: £1,180 round trip · QQ Travel/);
+      const row = await boardRow();
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent("seller's price");
+      expect(within(row).getByTestId('pairing-seller')).toHaveTextContent('QQ Travel');
+    });
+  });
+
   it('sellers not read (an expansion that failed before any offer): "Back: from £1,180 · sellers not read" with its note', async () => {
     await renderList(
       withBooking({ status: 'expand-failed', rule: 'more-options', expanded: false, offers: [] }),
@@ -462,7 +511,7 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"; final
     // review B-I3: "or press …" only beside the button it names
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
@@ -803,11 +852,11 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
     'no-outbound': null,
     skipped: 'return flights not read: the wait between pages ran past its time',
     'select-failed':
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     'not-settled':
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     unrecognised:
-      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'return flights not read: tried again when the next search reaches this date, or press Read flights for this date now',
     'not-verified':
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
   };
@@ -858,7 +907,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       readNow: true,
     });
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
+      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
   });

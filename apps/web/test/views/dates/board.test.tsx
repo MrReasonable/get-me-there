@@ -811,6 +811,34 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
   };
 
   describe('a trip with flights read', () => {
+    // why: final whole-branch review I2: a read trip's journey time is its own legs' (the api sends it on the figure),
+    // never "not known", and the Journey column sorts it by that value with the verified figures
+    it('shows its journey time in the Journey column', async () => {
+      const { row } = await rowFor(pairingFig());
+      expect(cellsOf(row)[6]).toMatch(/^26h 55m/);
+      expect(row).not.toHaveTextContent('not known');
+    });
+
+    it.each([
+      ['asc', ['14h 10m', '26h 55m', 'not known']],
+      ['desc', ['26h 55m', '14h 10m', 'not known']],
+    ])('sorts by its journey time among the others (%s)', async (dir, order) => {
+      renderDates({
+        body: {
+          discoveryProviders: ['travelpayouts', 'camoufox'],
+          pairs: {
+            [at('2027-03-14', 10)]: pricedPair(pairingFig()),
+            [at('2027-03-15', 10)]: pricedPair(priced(41_200, { basis: 'verified', journeyMinutes: 850 })),
+            [at('2027-03-16', 10)]: pricedPair(priced(30_000)),
+          },
+        },
+        search: search(`&d.sort=journey.${dir}`),
+      });
+      const table = await findBoard();
+      const journeys = boardRows(table).map((r) => cellsOf(r)[6] ?? '');
+      expect(journeys.map((j) => order.find((o) => j.startsWith(o)) ?? j)).toEqual(order);
+    });
+
     it('shows when it was read, in words that need no hover, beside its kind and times', async () => {
       const { row } = await rowFor(pairingFig());
       expect(within(row).getByTestId('read-age')).toHaveTextContent('read 4h ago');
@@ -994,11 +1022,21 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
       await user.click(button);
       expect(document.querySelector('[data-flights-for="0"]')).toHaveTextContent("Google's list: from");
     });
+
+    // why: final whole-branch review: the hidden part follows the visible words, so the name reads once, never
+    // "Show flights flights for …"
+    it("names the row's dates in the button's accessible name, each word once", async () => {
+      const { row, user } = await rowFor(calendarFig({ pairingRead: 'not-read' }), true);
+      const button = await within(row).findByRole('button', { name: /^Show flights/ });
+      expect(button).toHaveAccessibleName('Show flights for 14 Mar 2027 to 24 Mar 2027');
+      await user.click(button);
+      expect(button).toHaveAccessibleName('Hide flights for 14 Mar 2027 to 24 Mar 2027');
+    });
   });
 });
 
-// Design 2026-11-08 §5.2: a labelled break between the trips with flights read and the dates not checked yet; a trip and
-// a calendar price at one price are not one tie.
+// Design 2026-11-08 §5.2: a labelled break between the trips with flights read and the dates led by a calendar price; a
+// trip and a calendar price at one price are not one tie.
 describe('tiers on screen (design 2026-11-08 §5.2)', () => {
   const trip = (pence: number) =>
     pairingFig({
@@ -1024,7 +1062,7 @@ describe('tiers on screen (design 2026-11-08 §5.2)', () => {
     expect(rows.map((r) => (r.classList.contains('tier-break') ? 'break' : (r.dataset.pair ?? '?')))).toEqual(
       ['0', 'break', '3', '6'],
     );
-    expect(tierBreak(table)).toHaveTextContent('Not checked yet');
+    expect(tierBreak(table)).toHaveTextContent(/^Calendar prices only$/);
   });
 
   // a read trip that is not current ranks after every current one, so it can follow the calendar rows: no break there
