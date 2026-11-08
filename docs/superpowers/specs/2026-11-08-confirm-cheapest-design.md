@@ -1,8 +1,8 @@
 # Confirm the cheapest flights automatically: design
 
-Written 2026-11-08. Status: draft for the operator's approval. When approved, the rules here are folded into the main
-design spec (`2026-10-14-flight-price-optimiser-design.md`, §6.9, §8.1, §11) as one revision; this document is the
-brief for that change and the plan that follows it. Choices marked *(my call)* were made by the author, not the
+Written 2026-11-08. Status: folded into the main design spec (`2026-10-14-flight-price-optimiser-design.md`, §6.9, §8.1,
+§10, §11) as revision 68; where this document and the main spec differ, the main spec governs. This document was the
+brief for that change and the plan that followed it. Choices marked *(my call)* were made by the author, not the
 operator; the operator decided the goal, the 5 trips, stopping rule A, the ranking tiers of §5.2 and the wording
 "trips with flights read" (2026-11-08, after the plan's review).
 
