@@ -888,7 +888,9 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
       );
       const { row } = await rowFor(pairingFig());
       await waitFor(() =>
-        expect(within(row).getByTestId('pairing-changes')).toHaveTextContent('14h 50m, 1 change out · 12h 05m, 1 change back'),
+        expect(within(row).getByTestId('pairing-changes')).toHaveTextContent(
+          '14h 50m, 1 change out · 12h 05m, 1 change back',
+        ),
       );
     });
 
@@ -909,7 +911,9 @@ describe('one price per row (design 2026-11-08 §5.1)', () => {
         },
       });
       server.use(
-        serveFlightLists((d, r) => flightPair(d, r, d === '2027-03-14' ? { list: direct } : {}), { pagesPlanned: 2 }),
+        serveFlightLists((d, r) => flightPair(d, r, d === '2027-03-14' ? { list: direct } : {}), {
+          pagesPlanned: 2,
+        }),
       );
       setViewportWidth(375);
       try {

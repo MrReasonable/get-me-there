@@ -1098,8 +1098,10 @@ export const COPY = {
       hours === 'unknown' ? 'read time not known' : `read ${formatAgo(hours)}`,
     // each direction's journey time with its changes ("16h 35m, 1 change out · 16h 50m, direct back"): the search limit
     // is per direction, so the two legs are shown apart rather than added together as the Journey column does
-    pairingChanges: (out: { duration: string; changes: string }, back: { duration: string; changes: string }) =>
-      `${out.duration}, ${out.changes} out · ${back.duration}, ${back.changes} back`,
+    pairingChanges: (
+      out: { duration: string; changes: string },
+      back: { duration: string; changes: string },
+    ) => `${out.duration}, ${out.changes} out · ${back.duration}, ${back.changes} back`,
     // design 2026-11-08 §5.2: the labelled break before the rows led by a calendar price. Controller ruling on the final
     // whole-branch review: not "Not checked yet", since a row under it can have had its flights read with no trip
     // within the limits (or a read that did not finish); what they share is that only a calendar price leads them
