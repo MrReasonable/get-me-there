@@ -6,6 +6,8 @@
  */
 import { z } from 'zod';
 import { workerRuleSchema } from '../camoufox/rule.js';
+import { BOOKING_PAGE_PATH } from '../camoufox/url.js';
+import { LINK_ALLOWLIST, MAX_URL_LENGTH, validateVendorUrl } from '../normalise/vendorUrl.js';
 import { type FlightLimits, fitsLimits, flightLimitsSchema } from './choose.js';
 import { BOOKING_OFFERS_MAX, FLIGHT_LIST_MAX_FLIGHTS, RETURN_ATTEMPTS_MAX } from './limits.js';
 import { flightTextSchema, type ListedReturn, listedReturnSchema } from './types.js';
@@ -129,36 +131,76 @@ export type Offer = z.infer<typeof offerSchema>;
  * buttons dropped (`unparsed`: a name the grammar refuses; `nonGbp`: a price in another currency) and the offer buttons
  * counted before the cut when above it (`offersStated`).
  */
+const bookingShape = {
+  status: z.enum(BOOKING_STATUS),
+  rule: workerRuleSchema.nullable(),
+  attempt: count.nullable(),
+  returnIndex: count.nullable(),
+  expanded: z.boolean(),
+  moreControl: z.boolean(),
+  grouped: count,
+  offers: z.array(offerSchema).max(BOOKING_OFFERS_MAX),
+  unparsed: count,
+  nonGbp: count,
+  offersStated: count.nullable(),
+};
+type BookingFields = z.infer<z.ZodObject<typeof bookingShape>> & { bookingUrl: string | null };
+
+/** The rules a booking read keeps whichever way it arrived (the worker's answer, or read back from the database). */
+function checkBooking(b: BookingFields, ctx: z.RefinementCtx): void {
+  const fail = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+  if (b.status === 'read' && b.offers.length === 0) fail('offers', 'a read booking has at least one offer');
+  if (!BOOKING_WITH_OFFERS.has(b.status) && b.offers.length > 0)
+    fail('offers', 'offers only on a read or expand-failed booking');
+  // why: the address is the booking view's, so only a booking that read its offers has one
+  if (!BOOKING_WITH_OFFERS.has(b.status) && b.bookingUrl !== null)
+    fail('bookingUrl', 'an address only on a read or expand-failed booking');
+  if (BOOKING_RULED.has(b.status) !== (b.rule !== null))
+    fail('rule', 'a rule exactly for skipped, select-failed, not-settled, unrecognised and expand-failed');
+  const selected = BOOKING_SELECTED.has(b.status);
+  if (selected !== (b.attempt !== null))
+    fail('attempt', 'the pairing selected exactly when one was activated');
+  if (selected !== (b.returnIndex !== null))
+    fail('returnIndex', 'the pairing selected exactly when one was activated');
+  if (b.offersStated !== null && b.offersStated <= b.offers.length)
+    fail('offersStated', 'offersStated only when more offers were stated than kept');
+}
+
+/**
+ * The address of the booking page the read saw (design §6.3), null when none was read; at most MAX_URL_LENGTH
+ * characters. The path rule is not here: a stored address is read back as any string, and `bookingPageUrl` re-checks
+ * it where it is used (Ruling 8).
+ */
+const bookingUrlSchema = z.string().max(MAX_URL_LENGTH).nullable();
+
 export const bookingReadSchema = z
-  .strictObject({
-    status: z.enum(BOOKING_STATUS),
-    rule: workerRuleSchema.nullable(),
-    attempt: count.nullable(),
-    returnIndex: count.nullable(),
-    expanded: z.boolean(),
-    moreControl: z.boolean(),
-    grouped: count,
-    offers: z.array(offerSchema).max(BOOKING_OFFERS_MAX),
-    unparsed: count,
-    nonGbp: count,
-    offersStated: count.nullable(),
-  })
-  .superRefine((b, ctx) => {
-    const fail = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
-    if (b.status === 'read' && b.offers.length === 0) fail('offers', 'a read booking has at least one offer');
-    if (!BOOKING_WITH_OFFERS.has(b.status) && b.offers.length > 0)
-      fail('offers', 'offers only on a read or expand-failed booking');
-    if (BOOKING_RULED.has(b.status) !== (b.rule !== null))
-      fail('rule', 'a rule exactly for skipped, select-failed, not-settled, unrecognised and expand-failed');
-    const selected = BOOKING_SELECTED.has(b.status);
-    if (selected !== (b.attempt !== null))
-      fail('attempt', 'the pairing selected exactly when one was activated');
-    if (selected !== (b.returnIndex !== null))
-      fail('returnIndex', 'the pairing selected exactly when one was activated');
-    if (b.offersStated !== null && b.offersStated <= b.offers.length)
-      fail('offersStated', 'offersStated only when more offers were stated than kept');
-  });
+  .strictObject({ ...bookingShape, bookingUrl: bookingUrlSchema })
+  .superRefine(checkBooking);
 export type BookingRead = z.infer<typeof bookingReadSchema>;
+
+/**
+ * A booking page address worth linking (design §6.3): `https:` on google.com with no userinfo or port and at most
+ * MAX_URL_LENGTH characters (`validateVendorUrl`), and the booking page's own path, never the search page's. Null for
+ * anything else.
+ */
+export function bookingPageUrl(raw: string): { url: string; host: string } | null {
+  const v = validateVendorUrl(raw, LINK_ALLOWLIST.camoufox);
+  if (v.kind !== 'get') return null;
+  return new URL(v.url).pathname === BOOKING_PAGE_PATH ? { url: v.url, host: v.host } : null;
+}
+
+/**
+ * The booking read as the worker answers it: the booking page's address must be the booking page's (`bookingPageUrl`),
+ * and an absent key is null, so an answer from a worker built before the field still parses. Only the worker's answer
+ * and the database insert hold the path rule (Ruling 8).
+ */
+export const workerBookingReadSchema = z
+  .strictObject({ ...bookingShape, bookingUrl: bookingUrlSchema.default(null) })
+  .superRefine(checkBooking)
+  .superRefine((b, ctx) => {
+    if (b.bookingUrl !== null && bookingPageUrl(b.bookingUrl)?.url !== b.bookingUrl)
+      ctx.addIssue({ code: 'custom', path: ['bookingUrl'], message: "the booking page's own address" });
+  });
 
 /**
  * The lowest stated price of a `read` or `expand-failed` booking with offers, ties to the lower index (spec rev 56
@@ -218,42 +260,50 @@ const anyFits = (returns: readonly ListedReturn[], l: FlightLimits): boolean =>
  * could not start), the attempts in order made, whether no further outbound within the limits remained untried, and the
  * booking read of the shown pairing (null when the request asked for none).
  */
-export const returnReadSchema = z
-  .strictObject({
-    limits: flightLimitsSchema,
-    status: z.enum(RETURN_STATUS),
-    rule: workerRuleSchema.nullable(),
-    attempts: z.array(returnAttemptSchema).max(RETURN_ATTEMPTS_MAX),
-    triedAll: z.boolean(),
-    booking: bookingReadSchema.nullable(),
-  })
-  .superRefine((r, ctx) => {
-    const fail = (path: Array<string | number>, message: string) =>
-      ctx.addIssue({ code: 'custom', path, message });
-    if ((r.status === 'read') !== r.attempts.length > 0)
-      fail(['attempts'], 'attempts exactly when the return read is read');
-    if (RETURN_RULED.has(r.status) && r.rule === null)
-      fail(['rule'], 'skipped, select-failed, not-settled and unrecognised name their rule');
-    if ((r.status === 'no-outbound' || r.status === 'not-verified') && r.rule !== null)
-      fail(['rule'], 'no-outbound and not-verified carry no rule');
-    const [first, second] = r.attempts;
-    if (first !== undefined && second !== undefined) {
-      // why: an outbound over the limits is selected only when none fits, so no fitting outbound remains to try
-      if (!first.outboundFits)
-        fail(['attempts', 0, 'outboundFits'], 'a second attempt follows a first outbound within the limits');
-      if (!second.outboundFits) fail(['attempts', 1, 'outboundFits'], 'a second outbound fits the limits');
-      if (anyFits(first.returns, r.limits))
-        fail(['attempts', 1], 'a second attempt only when the first has no return within the limits');
-    }
-    const b = r.booking;
-    if (b !== null && b.attempt !== null) {
-      const last = r.attempts.length - 1;
-      if (b.attempt !== last) fail(['booking', 'attempt'], 'the booking read is of the last attempt');
-      const returns = r.attempts[b.attempt]?.returns.length ?? 0;
-      if (b.returnIndex !== null && b.returnIndex >= returns)
-        fail(['booking', 'returnIndex'], "the booking's return is one of its attempt's returns");
-    }
-  });
+const returnReadOf = (bookingSchema: z.ZodType<BookingRead>) =>
+  z
+    .strictObject({
+      limits: flightLimitsSchema,
+      status: z.enum(RETURN_STATUS),
+      rule: workerRuleSchema.nullable(),
+      attempts: z.array(returnAttemptSchema).max(RETURN_ATTEMPTS_MAX),
+      triedAll: z.boolean(),
+      booking: bookingSchema.nullable(),
+    })
+    .superRefine((r, ctx) => {
+      const fail = (path: Array<string | number>, message: string) =>
+        ctx.addIssue({ code: 'custom', path, message });
+      if ((r.status === 'read') !== r.attempts.length > 0)
+        fail(['attempts'], 'attempts exactly when the return read is read');
+      if (RETURN_RULED.has(r.status) && r.rule === null)
+        fail(['rule'], 'skipped, select-failed, not-settled and unrecognised name their rule');
+      if ((r.status === 'no-outbound' || r.status === 'not-verified') && r.rule !== null)
+        fail(['rule'], 'no-outbound and not-verified carry no rule');
+      const [first, second] = r.attempts;
+      if (first !== undefined && second !== undefined) {
+        // why: an outbound over the limits is selected only when none fits, so no fitting outbound remains to try
+        if (!first.outboundFits)
+          fail(
+            ['attempts', 0, 'outboundFits'],
+            'a second attempt follows a first outbound within the limits',
+          );
+        if (!second.outboundFits) fail(['attempts', 1, 'outboundFits'], 'a second outbound fits the limits');
+        if (anyFits(first.returns, r.limits))
+          fail(['attempts', 1], 'a second attempt only when the first has no return within the limits');
+      }
+      const b = r.booking;
+      if (b !== null && b.attempt !== null) {
+        const last = r.attempts.length - 1;
+        if (b.attempt !== last) fail(['booking', 'attempt'], 'the booking read is of the last attempt');
+        const returns = r.attempts[b.attempt]?.returns.length ?? 0;
+        if (b.returnIndex !== null && b.returnIndex >= returns)
+          fail(['booking', 'returnIndex'], "the booking's return is one of its attempt's returns");
+      }
+    });
+
+export const returnReadSchema = returnReadOf(bookingReadSchema);
+/** The return read as the worker answers it: its booking read is `workerBookingReadSchema`. */
+export const workerReturnReadSchema = returnReadOf(workerBookingReadSchema);
 export type ReturnRead = z.infer<typeof returnReadSchema>;
 
 /**

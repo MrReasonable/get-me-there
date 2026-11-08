@@ -465,6 +465,7 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
         unparsed: 0,
         nonGbp: 0,
         offersStated: null,
+        bookingUrl: null,
         ...booking,
       },
       ...over,

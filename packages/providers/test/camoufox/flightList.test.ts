@@ -129,6 +129,7 @@ const RETURNS = returnReadSchema.parse({
     unparsed: 0,
     nonGbp: 0,
     offersStated: null,
+    bookingUrl: null,
   },
 });
 const NEXT_LOAD = '2026-10-14T15:00:30.000Z';

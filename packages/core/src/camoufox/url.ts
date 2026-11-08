@@ -25,3 +25,9 @@ export function pageUrl(req: {
   }).toString();
   return u.href;
 }
+
+/**
+ * The booking page's path (design §6.3), the in-app path the worker's booking view changes to and the only path a
+ * booking address may have; the worker's selectors and `bookingPageUrl` both read it from here.
+ */
+export const BOOKING_PAGE_PATH = '/travel/flights/booking';

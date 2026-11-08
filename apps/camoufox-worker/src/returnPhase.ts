@@ -146,6 +146,7 @@ function bookingOf(status: BookingRead['status'], rule: string | null): BookingR
     unparsed: 0,
     nonGbp: 0,
     offersStated: null,
+    bookingUrl: null,
   };
 }
 
@@ -513,6 +514,8 @@ async function readBooking(
     unparsed: o.unparsed ?? 0,
     nonGbp: o.nonGbp ?? 0,
     offersStated: o.offersStated ?? null,
+    // why: the booking page's address is read in a later task; none yet
+    bookingUrl: null,
   });
   const ended = (e: StepEnd, read: boolean) =>
     e.kind === 'stop'

@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import { flightLimitsSchema } from '../flights/choose.js';
 import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
-import { returnReadSchema, returnsOutboundIssue } from '../flights/returns.js';
+import { returnsOutboundIssue, workerReturnReadSchema } from '../flights/returns.js';
 import { LISTED, listedFlightSchema } from '../flights/types.js';
 import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
@@ -316,7 +316,7 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
       versions: versionsSchema,
       ...pageCounts,
       /** Spec rev 56: the return read, present exactly on an answer to a request that carried `returnLimits`. */
-      returns: returnReadSchema.exactOptional(),
+      returns: workerReturnReadSchema.exactOptional(),
     })
     .superRefine((a, ctx) => {
       // why: `flights` means at least one flight was read; the other two outcomes carry none (spec rev 55 §7 LISTED)

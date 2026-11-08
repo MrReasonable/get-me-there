@@ -12,6 +12,7 @@ import {
 import { workerRuleSchema as leafRule } from '../../src/camoufox/rule.js';
 import { BOOKING_OFFERS_MAX, FLIGHT_LIST_MAX_FLIGHTS } from '../../src/flights/limits.js';
 import { BOOKING_STATUS, RETURN_STATUS } from '../../src/flights/returns.js';
+import { SYNTHETIC_BOOKING_URL } from '../../src/testing/booking.js';
 
 const fields = {
   origin: 'LHR',
@@ -254,6 +255,25 @@ describe("the flights answer's returns (spec rev 56 §5.1)", () => {
       };
       expect(ok(answer({ returns: { ...returnsOf('read'), booking } })), status).toBe(true);
     }
+  });
+  it("the booking's address must be the booking page's own; an answer without the key parses (an older worker)", () => {
+    const withUrl = (bookingUrl: string) => {
+      const booking = {
+        ...NO_BOOKING,
+        status: 'read',
+        attempt: 0,
+        returnIndex: 0,
+        expanded: true,
+        offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 118_000 }],
+        bookingUrl,
+      };
+      return answer({ returns: { ...returnsOf('read'), booking } });
+    };
+    expect(ok(withUrl(SYNTHETIC_BOOKING_URL))).toBe(true);
+    expect(ok(withUrl('https://www.google.com/travel/flights/search?tfs=abc'))).toBe(false);
+    expect(ok(withUrl('https://evil.example/travel/flights/booking'))).toBe(false);
+    // returnsOf's booking has no bookingUrl key
+    expect(ok(answer({ returns: returnsOf('read') }))).toBe(true);
   });
   it('a flights answer at the limits (two attempts of 30 returns, 30 flights, 40 offers) stays under 100 KB', () => {
     const over = Array.from({ length: FLIGHT_LIST_MAX_FLIGHTS }, () => ret(2, true));

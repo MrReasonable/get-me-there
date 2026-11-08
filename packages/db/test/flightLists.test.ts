@@ -387,6 +387,7 @@ function booking(over: Partial<BookingRead> = {}): BookingRead {
     unparsed: 2,
     nonGbp: 1,
     offersStated: 45,
+    bookingUrl: null,
     ...over,
   };
 }

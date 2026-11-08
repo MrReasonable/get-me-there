@@ -425,6 +425,7 @@ describe('the whole phase (spec rev 56 §2: the outbound, its returns, the shown
       grouped: 1,
       moreControl: false,
       offersStated: null,
+      bookingUrl: null,
     });
     // why: R-pick: the worker books exactly the return core's one rule picks
     expect(ret.booking?.returnIndex).toBe(bookingReturnOf(ret, a.flights)?.returnIndex);
@@ -1046,6 +1047,7 @@ describe('the phase’s other ends', () => {
         unparsed: 0,
         nonGbp: 0,
         offersStated: null,
+        bookingUrl: null,
       },
     });
     expect(t.page0().calls.actions).toEqual([]);

@@ -315,6 +315,7 @@ describe('cheapestOffer (spec rev 56 §6.9: the lowest stated price of a read or
       unparsed: 0,
       nonGbp: 0,
       offersStated: null,
+      bookingUrl: null,
       ...over,
     });
   it('ties in price go to the lower index', () => {

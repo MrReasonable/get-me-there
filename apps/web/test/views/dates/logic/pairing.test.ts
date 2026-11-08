@@ -134,6 +134,7 @@ describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as cor
             unparsed: 0,
             nonGbp: 0,
             offersStated: null,
+            bookingUrl: null,
           },
         }),
       });
@@ -177,6 +178,7 @@ describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as cor
       unparsed: 0,
       nonGbp: 0,
       offersStated: null,
+      bookingUrl: null,
     });
     const list = (returnIndex: number) =>
       flightList({

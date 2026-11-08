@@ -359,6 +359,8 @@ function readReturns(
           unparsed: first.booking_unparsed,
           nonGbp: first.booking_non_gbp,
           offersStated: first.booking_offers_stated,
+          // why: Task 3 stores the column; until then no stored read has an address
+          bookingUrl: null,
         };
   const returns = parseWith('flight_lists.return_*', returnReadSchema, {
     limits: readJson('flight_lists.return_limits_json', first.return_limits_json ?? 'null'),

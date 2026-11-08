@@ -14,7 +14,14 @@
  * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked. SOCS stability
  * is verified by the 2026-10-18 socs-stability recording (operator ruling).
  */
-import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } from '@gmt/core';
+import {
+  BOOKING_PAGE_PATH,
+  CAMOUFOX_BUILDS,
+  FLAG_NAMES,
+  type FlagName,
+  flagsFor,
+  type OsArch,
+} from '@gmt/core';
 
 export { FLAG_NAMES, type FlagName };
 
@@ -239,7 +246,7 @@ export const SELECTORS: Selectors = {
     offer: /^Continue to book with .+ for [\d,]+ [A-Za-z ]+$/,
     moreOptions: /^\d+ more booking options?$/,
     // why: observed 2026-11-01 (select-return 1–4): the booking view is an in-app change to this path
-    path: '/travel/flights/booking',
+    path: BOOKING_PAGE_PATH,
     // why: observed 2026-11-01 (select-return 1 and 3): "View <seller>, <seller> <price> <currency> <word>", a button
     // that probably opens that seller's fares; it begins "View", so it can never name an offer or the expansion
     grouped: /^View [^,]+, .+ [\d,]+ [A-Za-z ]+$/,
