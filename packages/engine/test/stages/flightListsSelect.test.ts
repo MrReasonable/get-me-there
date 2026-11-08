@@ -261,8 +261,9 @@ describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reus
 });
 
 // Design 2026-11-08 §4.2, §4.3: the step's queue is every current calendar price and every stale verified figure, in
-// calendar price order (the ranking's order within equal prices); a fresh, current verified figure is a confirmed trip already (it enters the standings by reuse), and a
-// figure that is not current (a superseded calendar price, a verified one the latest search did not see) is neither.
+// calendar price order (the ranking's order within equal prices); a fresh, current verified figure is a confirmed trip
+// already (it enters the standings by reuse), and a figure that is not current (a superseded calendar price, a verified
+// one the latest search did not see) is neither.
 describe('confirmQueue (design 2026-11-08 §4.2)', () => {
   it('keeps current calendar prices and stale verified figures in ranking order; drops fresh verified and non-current ones', () => {
     const calendar = pair(0);
