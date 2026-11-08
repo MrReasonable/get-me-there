@@ -657,9 +657,10 @@ export const COPY = {
     neverSearched: (never: number, total: number) =>
       `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,
     cheapestSoFar: 'cheapest so far',
-    // why: while a search runs the card shows the first-ranked figure, which may be a trip with flights read dearer
-    // than a current calendar price; it must not be worded as the cheapest found (spec §11 card)
-    cheapestTripSoFar: 'cheapest trip with flights read so far',
+    // why: while a search runs the card shows the first-ranked figure, which is not always the cheapest: a fresh trip
+    // with flights read ranks ahead of a cheaper older one, and a verified trip ahead of a cheaper calendar price; so a
+    // pairing or verified figure is "top trip", and only a calendar figure is "cheapest so far" (spec §11 card)
+    topTripSoFar: 'top trip with flights read so far',
     trip: (departure: string, back: string) => `${departure} → ${back}`,
     // actions
     seeDates: 'See dates',

@@ -117,11 +117,13 @@ export function SearchCard({
               {COPY.basisKindName[cheapest.priceKind]}
             </span>
           ) : null}
-          {/* why: a trip with flights read is not "the cheapest so far" while a cheaper calendar price may stand beside it, so
-          its label says what it is; only a calendar or verified figure is worded as the cheapest so far */}
+          {/* why: the first-ranked figure is not always the cheapest: a fresh trip with flights read ranks ahead of a
+          cheaper older one, and a verified trip ahead of a cheaper calendar price. A calendar figure ranks first only
+          when no trip with flights read exists, so it is then the cheapest current calendar price; every other figure is
+          worded as the top trip (design 2026-11-08) */}
           {active ? (
             <span className="text-fg-2">
-              {cheapest.basis === 'pairing' ? S.cheapestTripSoFar : S.cheapestSoFar}
+              {cheapest.basis === 'calendar' ? S.cheapestSoFar : S.topTripSoFar}
             </span>
           ) : null}
         </div>

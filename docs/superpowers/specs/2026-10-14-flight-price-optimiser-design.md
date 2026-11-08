@@ -4404,9 +4404,11 @@ merged into price.
   Jan") **always** through `PriceCell`'s compact face (source mark, short age,
   "not checked" on a calendar price, the stale mark, the truncated note), so its own source and
   age show whichever run fetched it, with "cheapest so far" while running
-  beside a calendar or verified figure and "cheapest trip with flights read so
-  far" beside a pairing figure (the first-ranked figure may be a trip dearer than
-  a current calendar price, so it is never worded as the cheapest found), and
+  beside a calendar figure (it ranks first only when no trip with flights read
+  exists, so it is the cheapest current calendar price) and "top trip with
+  flights read so far" beside a pairing or verified figure (the first-ranked
+  figure is not always the cheapest: a fresh trip ranks ahead of a cheaper older
+  one, and a verified trip ahead of a cheaper calendar price), and
   nothing when there is none; the red synthetic banner when any card's
   cheapest is the fixture provider's or synthetic. Actions: **See dates** (its
   page), **Search again**, **Edit** and **Remove**, visually apart from Search

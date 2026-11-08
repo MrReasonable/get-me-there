@@ -315,11 +315,12 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(within(await cardOf('Whole')).getByTestId('price-cell')).not.toHaveTextContent(COPY.truncatedNote);
   });
 
-  it('says "cheapest so far" while the search is running', async () => {
+  it('says "cheapest so far" beside a calendar figure while the search is running', async () => {
     server.use(
       serveCards([
         searchCard({
           latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
+          cheapest: calendarCheapest(),
         }),
       ]),
     );
@@ -327,21 +328,42 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent(S.cheapestSoFar);
   });
 
-  it('words a trip with flights read "cheapest trip with flights read so far" while running, never "cheapest so far"', async () => {
+  it('words a pairing or verified figure "top trip with flights read so far" while running, never "cheapest so far"', async () => {
     server.use(
       serveCards([
         searchCard({
+          name: 'London → New York',
+          origins: ['LHR', 'LGW'],
+          destinations: ['JFK', 'EWR'],
           latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
           cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400 },
+            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
             flightListProvenance('2026-10-14T10:44:00.000Z'),
           ),
         }),
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    expect(card).toHaveTextContent(S.cheapestTripSoFar);
+    const card = await cardOf('London → New York');
+    expect(card).toHaveTextContent(S.topTripSoFar);
+    expect(card).not.toHaveTextContent(/cheapest so far/);
+  });
+
+  it('words a verified figure "top trip with flights read so far" while running', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          name: 'London → New York',
+          origins: ['LHR', 'LGW'],
+          destinations: ['JFK', 'EWR'],
+          latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
+          cheapest: cheapest({ origin: 'LHR', destination: 'JFK' }),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('London → New York');
+    expect(card).toHaveTextContent(S.topTripSoFar);
     expect(card).not.toHaveTextContent(/cheapest so far/);
   });
 
@@ -349,15 +371,18 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     server.use(
       serveCards([
         searchCard({
+          name: 'London → New York',
+          origins: ['LHR', 'LGW'],
+          destinations: ['JFK', 'EWR'],
           cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400 },
+            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
             flightListProvenance('2026-10-14T10:44:00.000Z'),
           ),
         }),
       ]),
     );
     renderInShell(<SearchesView />);
-    expect(await cardOf('Birmingham → Frankfurt')).not.toHaveTextContent(/so far/);
+    expect(await cardOf('London → New York')).not.toHaveTextContent(/so far/);
   });
 
   it('shows the red synthetic banner when any card’s cheapest is the fixture provider’s', async () => {
