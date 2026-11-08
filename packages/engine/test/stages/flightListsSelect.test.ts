@@ -260,8 +260,8 @@ describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reus
   });
 });
 
-// Design 2026-11-08 §4.2, §4.3: the step's queue is every current calendar price and every stale verified figure, in the
-// ranking's order; a fresh, current verified figure is a confirmed trip already (it enters the standings by reuse), and a
+// Design 2026-11-08 §4.2, §4.3: the step's queue is every current calendar price and every stale verified figure, in
+// calendar price order (the ranking's order within equal prices); a fresh, current verified figure is a confirmed trip already (it enters the standings by reuse), and a
 // figure that is not current (a superseded calendar price, a verified one the latest search did not see) is neither.
 describe('confirmQueue (design 2026-11-08 §4.2)', () => {
   it('keeps current calendar prices and stale verified figures in ranking order; drops fresh verified and non-current ones', () => {
@@ -275,6 +275,26 @@ describe('confirmQueue (design 2026-11-08 §4.2)', () => {
     expect(
       confirmQueue([freshVerified, calendar, staleVerified, notSeen, superseded, staleCalendar, later]),
     ).toEqual([calendar, staleVerified, staleCalendar, later]);
+  });
+
+  // why: design 2026-11-08 §4.2 (controller ruling on the final whole-branch review): the queue is in calendar price
+  // order, cheapest first, not the shared ranking's tier order (which puts a stale verified figure in its own tier)
+  it('orders the queue by price, cheapest first: a stale verified pair at £900 queues after a £300 calendar pair', () => {
+    const staleVerified = pair(0, {
+      basis: 'verified',
+      stale: true,
+      pricePence: 90_000,
+      providerId: 'searchapi',
+    });
+    const calendar = pair(1, { pricePence: 30_000 });
+    expect(confirmQueue([staleVerified, calendar])).toEqual([calendar, staleVerified]);
+  });
+
+  it("keeps the ranking's order within equal prices", () => {
+    const a = pair(0, { pricePence: 30_000 });
+    const b = pair(1, { pricePence: 30_000, stale: true });
+    const c = pair(2, { pricePence: 29_000 });
+    expect(confirmQueue([b, a, c])).toEqual([c, b, a]);
   });
 
   it('the read split of the queue has no count: all 300 pairs are read or reused', () => {

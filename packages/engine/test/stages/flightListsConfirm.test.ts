@@ -427,6 +427,25 @@ describe('what the standings hold before the queue is read (design 2026-11-08 §
     expect(done.flightLists?.cells).toHaveLength(12);
   }, 15_000);
 
+  // why: final whole-branch review I3: a pair reused as finished after two transient reads (R-retry, transientStreak 2)
+  // learnt nothing for today's limits: it counts in reused and in unread, so the queue-empty line says so
+  it('a reused transientStreak-2 list under other limits counts reused and unread; the queue-empty summary carries it', async () => {
+    const ranked = pairs(3, (i) => 30_000 + i);
+    const { e, cam } = confirming({ ranked, reply: (n) => returnsAt(35_000 + n) });
+    const head = ranked[0];
+    if (head === undefined) throw new Error('fixture');
+    const otherLimits = returnReadSchema.parse({ ...NOT_SETTLED, limits: { ...NO_LIMITS, maxStops: 1 } });
+    storeList(e, head, hoursAgo(2), otherLimits);
+    storeList(e, head, hoursAgo(1), otherLimits);
+    const done = await e.settled(await start(e));
+    expect(placesRead(cam)).toEqual([1, 2]);
+    expect(done.flightLists).toMatchObject({
+      planned: 3,
+      reused: 1,
+      confirm: { mode: 'confirm', confirmed: 2, unread: 1, uncheckedCheaper: 0, stop: 'queue-empty' },
+    });
+  }, 15_000);
+
   it('fresh, current verified figures are confirmed trips: not queued, counted reused, setting the 5th price', async () => {
     const verified = { basis: 'verified', providerId: 'searchapi', sourceKind: 'scraped-search' } as const;
     const ranked = [

@@ -511,12 +511,13 @@ function confirmPlanOf(ctx: EngineContext, run: RunState, stored: FlightListsSta
   // why: §4.2, §4.4: a reusable list is checked at once, filling the standings with no page and no patience spent
   for (const p of sel.reused) {
     const l = lists.get(cellKeyString(p));
-    standings = applyCheck(
-      standings,
-      l === undefined ? UNREAD : checkOfRead(l.returns, l.flights, limits),
-      'reuse',
-    );
+    const check = l === undefined ? UNREAD : checkOfRead(l.returns, l.flights, limits);
+    standings = applyCheck(standings, check, 'reuse');
     reused += 1;
+    // why: final whole-branch review I3: a pair reused as finished after two transient reads (R-retry,
+    // `transientStreak` 2), or one read under other limits, learnt nothing for today's limits, so it is unread as
+    // well as reused; rebuilt on a resume from the same lists, so the stored count is never added to twice
+    if (check.kind === 'unread') unread += 1;
   }
   if (stored === null && sel.read.length === 0 && reused === 0) return null;
   const cells = (stored?.cells ?? []).filter((c) => ownKeys.has(cellKeyString(c)));
