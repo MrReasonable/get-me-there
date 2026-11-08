@@ -10,7 +10,7 @@ import {
 import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
 import type { FlightList } from '../../../src/api/types.js';
 import {
@@ -34,7 +34,7 @@ import {
 } from '../../fixtures.searches.js';
 import { FLIGHT_LISTS_URL, serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { findBoard, renderDates } from './render.js';
+import { autoOpenFlights, findBoard, renderDates } from './render.js';
 
 // Spec rev 56 §11 "Flights" and "The pairing section" (WP21 Task 21.7): a list whose return read is `read` with returns
 // shows the outbound the pairing used, its returns with their "from" prices, the cheapest seller's stated price first on
@@ -125,7 +125,16 @@ function plain(el: Element): string {
 }
 const lines = (testid: string) => within(block()).getAllByTestId(testid).map(plain);
 
-afterEach(() => vi.useRealTimers());
+// why: design 2026-11-08 §5.3 — rows are closed by default; these tests read the opened detail, so each row opens the
+// moment its button appears
+let stopOpening: () => void = () => undefined;
+beforeEach(() => {
+  stopOpening = autoOpenFlights();
+});
+afterEach(() => {
+  stopOpening();
+  vi.useRealTimers();
+});
 
 describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', () => {
   it("heads the block in one sentence with the outbound the pairing used and that the first Back price is a seller's", async () => {

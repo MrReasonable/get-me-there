@@ -2,7 +2,7 @@ import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { App } from '../../src/App.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
@@ -34,6 +34,7 @@ import { serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
 import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
+import { autoOpenFlights } from '../views/dates/render.js';
 
 /**
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
@@ -192,6 +193,9 @@ describe('a search\'s page with the return leg read says no banned word, no set-
         { pagesPlanned: 2 },
       ),
     );
+    // why: design 2026-11-08 §5.3 — rows are closed by default; the sweep reads their opened detail too
+    const stopOpening = autoOpenFlights();
+    onTestFinished(stopOpening);
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
     await screen.findByRole('table', { name: /^Best dates/ });
     await waitFor(() => expect(document.querySelector('[data-testid="flights-pairing"]')).not.toBeNull());

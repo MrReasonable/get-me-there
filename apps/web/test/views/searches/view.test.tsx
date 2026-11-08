@@ -179,7 +179,15 @@ describe('what a card shows', () => {
         latestRun: latestRun({
           status: 'running',
           finishedAt: null,
-          flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 0,
+            failed: 0,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
           estimatedFinishAt: '2026-10-14T15:08:00.000Z',
         }),
       },

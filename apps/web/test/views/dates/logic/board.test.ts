@@ -392,13 +392,13 @@ describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6
   it('a pairing figure says nothing here (its own lines are beneath its price)', () => {
     expect(line(pairingFig())).toBeNull();
   });
-  it('not-read: "flights not read" where flight lists are read, nothing where they are not', () => {
-    expect(line(calendarFig())).toEqual({ lead: 'flights not read', pairing: null });
+  it('not-read: "flights not checked" where flight lists are read, nothing where they are not', () => {
+    expect(line(calendarFig())).toEqual({ lead: 'flights not checked', pairing: null });
     expect(line(calendarFig(), 'unavailable')).toBeNull();
   });
   it('21.7 prov-004: "loading flights" while the flight-lists request is pending; the mark kept when it failed', () => {
     expect(line(calendarFig(), 'loading')).toEqual({ lead: 'loading flights', pairing: null });
-    expect(line(calendarFig(), 'failed')).toEqual({ lead: 'flights not read', pairing: null });
+    expect(line(calendarFig(), 'failed')).toEqual({ lead: 'flights not checked', pairing: null });
     // why: a read the date-pairs answer carries says its own words whatever the flight-lists request did
     expect(line(calendarFig({ pairingRead: 'outbound-only' }), 'loading')).toEqual({
       lead: 'return leg not read',

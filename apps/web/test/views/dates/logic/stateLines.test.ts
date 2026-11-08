@@ -273,7 +273,15 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
         latest: run({
           status: 'running',
           stage: 'discovery',
-          flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 0,
+            failed: 0,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
           estimatedFinishAt: t('2026-10-14T15:08:00.000Z'),
         }),
       }),
@@ -286,7 +294,15 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
         latest: run({
           status: 'running',
           stage: 'discovery',
-          flights: { planned: 10, read: 2, reused: 3, failed: 1, ended: null },
+          flights: {
+            planned: 10,
+            read: 2,
+            reused: 3,
+            failed: 1,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
         }),
       }),
     ).toEqual({ kind: 'reading', text: 'Reading flights · 5 of 10 date pairs' });
@@ -295,7 +311,15 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
         latest: run({
           status: 'running',
           stage: 'discovery',
-          flights: { planned: 10, read: 6, reused: 3, failed: 1, ended: null },
+          flights: {
+            planned: 10,
+            read: 6,
+            reused: 3,
+            failed: 1,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
         }),
         pairs: pairs(2, { priced: 4 }),
       }).kind,
@@ -305,7 +329,10 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
   it('a pending run reads Searching whatever stage or flight plan its row still carries (a resumed one, say)', () => {
     for (const over of [
       { stage: 'verification' as const },
-      { stage: 'discovery' as const, flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null } },
+      {
+        stage: 'discovery' as const,
+        flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null, confirm: null, stopCause: null },
+      },
     ])
       expect(state({ latest: run({ status: 'pending', ...over }) }).kind, JSON.stringify(over)).toBe(
         'searching',
@@ -319,7 +346,7 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
           latest: run({
             status: 'running',
             stage: 'discovery',
-            flights: { planned: 10, read: 3, reused: 0, failed: 0, ended },
+            flights: { planned: 10, read: 3, reused: 0, failed: 0, ended, confirm: null, stopCause: null },
           }),
         }).kind,
         ended,
@@ -332,7 +359,15 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
         latest: run({
           status: 'running',
           stage: 'verification',
-          flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 0,
+            failed: 0,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
         }),
       }),
     ).toEqual({ kind: 'checking', text: 'Checking fares for the cheapest date pairs' });
@@ -345,10 +380,83 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
         latest: run({
           status: 'completed',
           ...RUN,
-          flights: { planned: 10, read: 7, reused: 3, failed: 0, ended: null },
+          flights: {
+            planned: 10,
+            read: 7,
+            reused: 3,
+            failed: 0,
+            ended: null,
+            confirm: null,
+            stopCause: null,
+          },
         }),
       }),
     ).toEqual({ kind: 'searched', text: line() });
+  });
+
+  // Design 2026-11-08 §5.5: the confirm line under the board owns what was checked and how it ended
+  it('completed in confirm mode: the flights clause adds nothing, however few lists were read', () => {
+    expect(
+      state({
+        latest: run({
+          status: 'completed',
+          ...RUN,
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 0,
+            failed: 0,
+            ended: 'window',
+            confirm: { mode: 'confirm', confirmed: 2, unread: 0, uncheckedCheaper: 4, stop: null },
+            stopCause: null,
+          },
+        }),
+      }),
+    ).toEqual({ kind: 'searched', text: line() });
+  });
+
+  it('completed in outbound-only mode keeps the flights clause (its plan is the fixed cells)', () => {
+    expect(
+      state({
+        latest: run({
+          status: 'completed',
+          ...RUN,
+          flights: {
+            planned: 10,
+            read: 3,
+            reused: 0,
+            failed: 0,
+            ended: 'window',
+            confirm: { mode: 'outbound-only', confirmed: 0, unread: 0, uncheckedCheaper: 0, stop: null },
+            stopCause: null,
+          },
+        }),
+      }).text,
+    ).toContain('flights read for 3 of 10 date pairs');
+  });
+
+  it("running in confirm mode: the confirm line's words, then the time left", () => {
+    expect(
+      state({
+        latest: run({
+          status: 'running',
+          stage: 'discovery',
+          flights: {
+            planned: 9,
+            read: 4,
+            reused: 1,
+            failed: 0,
+            ended: null,
+            confirm: { mode: 'confirm', confirmed: 3, unread: 0, uncheckedCheaper: 0, stop: null },
+            stopCause: null,
+          },
+          estimatedFinishAt: t('2026-10-14T15:08:00.000Z'),
+        }),
+      }),
+    ).toEqual({
+      kind: 'reading',
+      text: 'Checking flights: 9 dates so far; 3 trips with flights read · about 8m left',
+    });
   });
 
   it('completed with fewer flights read than planned never reads a bare "Searched": each stored end in words', () => {
@@ -366,6 +474,8 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
             reused: f.reused,
             failed: f.failed ?? 0,
             ended: e,
+            confirm: null,
+            stopCause: null,
           },
         }),
       }).text;

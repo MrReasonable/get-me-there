@@ -115,6 +115,38 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     });
   });
 
+  // Design 2026-11-08 §7, §5.5: the card's flights carry the stored confirm summary unchanged, null for an older plan
+  it("a card's latest run carries the stored confirm summary on flights, and null for a plan stored before it", async () => {
+    h = await createHarness();
+    const x = h;
+    const s = seeder(x.ports);
+    const now = x.ports.repos.definitions.create(exampleDefinitionInput({ name: 'now', ...FOUR }));
+    const old = x.ports.repos.definitions.create(exampleDefinitionInput({ name: 'old', ...FOUR }));
+    const summary = { mode: 'confirm', confirmed: 3, unread: 1, uncheckedCheaper: 120, stop: null } as const;
+    for (const [name, def, confirm] of [
+      ['N', now, summary],
+      ['O', old, null],
+    ] as const) {
+      s.execution(name, { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+      x.ports.repos.executions.patch(s.id(name), {
+        flightLists: {
+          planned: 4,
+          cells: [],
+          reused: 4,
+          ended: null,
+          returns: true,
+          booking: true,
+          returnsStopped: null,
+          bookingStopped: null,
+          confirm,
+        },
+      });
+    }
+    const all = await cards(x);
+    expect(cardOf(all, now.id).latestRun?.flights?.confirm).toEqual(summary);
+    expect(cardOf(all, old.id).latestRun?.flights?.confirm).toBeNull();
+  });
+
   // why: decision 36 — the board's figure from a truncated tile is a partial minimum; the card says so as the board does
   it("a cheapest read from a truncated tile carries the board figure's truncated mark", async () => {
     h = await createHarness();

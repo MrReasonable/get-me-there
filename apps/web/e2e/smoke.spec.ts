@@ -397,6 +397,12 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
     });
   });
   await page.goto(`/?view=dates&def=${id}`);
+  // why: design 2026-11-08 §5.3 — rows are closed by default: no flights block until a row's button is pressed
+  const toggle = page.getByRole('button', { name: /^Show flights/ }).first();
+  await expect(toggle).toBeVisible();
+  await expect(page.locator(SMOKE.flightsBlock)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await toggle.click();
   await expect(page.locator(SMOKE.flightsBlock).first()).toBeVisible();
   await expect(page.getByRole('link', { name: OPEN_LINK }).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);

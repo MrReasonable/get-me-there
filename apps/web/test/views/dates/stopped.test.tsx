@@ -224,7 +224,7 @@ describe('a run going: its line with Cancel, and the board filling (persona-001)
 
   it('reading flights: the line with Cancel beside it', async () => {
     running({
-      flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+      flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null, confirm: null, stopCause: null },
       estimatedFinishAt: '2026-10-14T15:08:00.000Z',
     });
     const line = await stateLine();

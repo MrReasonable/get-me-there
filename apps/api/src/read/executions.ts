@@ -44,6 +44,8 @@ export function stopOf(
     tz: e.snapshot.scheduleTz,
     mode: runModeOf(ports.config),
     scheduled: def !== null && isScheduled(def),
+    // why: design 2026-11-08 §5.5: a confirm-mode step has no planned total, so a budget stop names no denominator
+    confirm: e.flightLists?.confirm?.mode === 'confirm',
   });
 }
 
@@ -102,7 +104,42 @@ export function flightsOf(ports: Pick<Ports, 'repos'>, e: Execution): ExecutionR
   // why: `read` and `failed` from the newest row per planned cell of this execution (a resumed pass never writes a
   // pair twice, and a cell read twice counts once), so read + reused + failed never exceeds planned
   const { read, failed } = ports.repos.flightLists.forExecution(e.id, f.cells);
-  return { planned: f.planned, read, reused: f.reused, failed, ended: f.ended };
+  return {
+    planned: f.planned,
+    read,
+    reused: f.reused,
+    failed,
+    ended: f.ended,
+    confirm: f.confirm,
+    stopCause: flightsStopCauseOf(ports, e, f.ended),
+  };
+}
+
+/**
+ * Design 2026-11-08 §5.5: why the flight step stopped before its own rule ended it. An ending page or a cap
+ * (`ended 'stopped'`) is told by the reason of the run's newest failed list (the ending page writes its own failed row);
+ * otherwise the run's own stop cause, as a kind only (cancelled, budget, fatal, any other): no cause text travels.
+ * Null while nothing stopped it.
+ */
+function flightsStopCauseOf(
+  ports: Pick<Ports, 'repos'>,
+  e: Execution,
+  ended: NonNullable<Execution['flightLists']>['ended'],
+): apiContract.FlightsStopCause | null {
+  if (ended === 'stopped') {
+    const detail = ports.repos.flightLists.lastFailureReason(e.id);
+    if (detail !== null) return { kind: 'detail', detail };
+  }
+  const cause = e.stopCause;
+  if (cause === null) return null;
+  switch (cause.kind) {
+    case 'cancelled':
+    case 'budget':
+    case 'fatal':
+      return { kind: cause.kind };
+    default:
+      return { kind: 'other' };
+  }
 }
 
 /**

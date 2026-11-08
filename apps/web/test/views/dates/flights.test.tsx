@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { addDays, asIsoDate, asIsoDateTime, SEARCH_LINK_LABEL } from '@gmt/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
 import { googleFlightsHref } from '../../../src/views/Dates/flightLines.js';
 import {
@@ -32,7 +32,7 @@ import {
 import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
 import { JARGON, mainPathWords } from './jargon.js';
-import { findBoard, renderDates } from './render.js';
+import { autoOpenFlights, findBoard, renderDates } from './render.js';
 
 // Spec rev 55 §11 "Flights" and "Ties", §6.9 (the outcome beside the price and the difference line) and §2 (the
 // provenance note): the flights block of a search's page. The worked example only: LHR, LGW → JFK, EWR over 14 Mar –
@@ -187,7 +187,11 @@ const blockOf = (index: number) => {
   if (b === null) throw new Error(`no flights block for date pair ${index}`);
   return b;
 };
-const outcomeOf = (index: number) => within(rowOf(index)).queryByTestId('flight-outcome');
+// why: design 2026-11-08 §5.1 — Google's list "from" figure moved from beside the price into the opened detail
+const outcomeOf = (index: number) => {
+  const detail = document.querySelector<HTMLElement>(`[data-flights-for="${index}"]`);
+  return detail === null ? null : within(detail).queryByTestId('flight-outcome');
+};
 /** The board's rows by date pair index, top to bottom. */
 const order = () =>
   [...document.querySelectorAll<HTMLElement>('tr[data-pair]')].map((r) => Number(r.dataset.pair));
@@ -202,7 +206,14 @@ async function renderWorked(o: { board?: DatesOptions; over?: Parameters<typeof 
   return { ...r, requests };
 }
 
+// why: design 2026-11-08 §5.3 — rows are closed by default; these tests read the opened detail of the rows shown, so
+// each row opens the moment its button appears
+let stopOpening: () => void = () => undefined;
+beforeEach(() => {
+  stopOpening = autoOpenFlights();
+});
 afterEach(() => {
+  stopOpening();
   vi.useRealTimers();
   setViewportWidth(1280);
 });
@@ -329,7 +340,8 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     expect(within(block).getByTestId('flights-head')).toHaveTextContent(
       /· older than this search's refresh$/,
     );
-    const cell = within(block).getByTestId('price-cell');
+    // why: the opened detail holds Google's list "from" figure first (design 2026-11-08 §5.1), then the flight's price
+    const cell = within(block).getAllByTestId('price-cell').at(-1) ?? block;
     expect(within(cell).getByTestId('stale-glyph')).toBeInTheDocument();
     // why: the words stay with the price for screen readers, but are not printed again on every price
     expect(within(cell).getByText("older than this search's refresh")).toHaveClass('sr-only');
@@ -849,7 +861,7 @@ describe('ties (spec rev 55 §11 Ties)', () => {
             : {},
     );
 
-  it('each tie has its own line, and its date pairs with flights come first, shortest first; the rank stays', async () => {
+  it('each tie has its own line, and its date pairs with flights come first, shortest first; the ranks follow the order shown', async () => {
     server.use(serveFlightLists(tieLists));
     renderDates({ body: TIES });
     await findBoard();
@@ -859,9 +871,11 @@ describe('ties (spec rev 55 §11 Ties)', () => {
       '4 date pairs tie at £86, listed by shortest flight time',
       '2 date pairs tie at £90, in date order',
     ]);
-    // the rank column is the price rank: 17 Mar was fourth by the rank and keeps its 4
+    // why: design 2026-11-08 §5.4 — within a tie the rows are numbered in the order shown (17 Mar was fourth by the
+    // price rank and now leads its tie as 1), so rank 2 never sits above rank 1
     const rank = (i: number) => rowOf(i).querySelector('.row-head .sr-only')?.textContent;
-    expect([9, 3, 0, 6].map(rank)).toEqual(['4', '2', '1', '3']);
+    expect([9, 3, 0, 6].map(rank)).toEqual(['1', '2', '3', '4']);
+    expect([12, 15].map(rank)).toEqual(['5', '6']);
     expect(poundsOutsidePrices()).toEqual([]);
   });
 

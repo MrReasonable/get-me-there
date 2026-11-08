@@ -21,13 +21,13 @@ import {
   workedDates,
 } from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
-import { flightListsResponse, flightPair } from '../../fixtures.searches.js';
+import { flightList, flightListsResponse, flightPair, listedFlight } from '../../fixtures.searches.js';
 import { expectConsoleErrors, poundsOutsidePrices } from '../../guards.js';
 import { askedPairs, FLIGHT_LISTS_URL, serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { NOW, renderWithProviders } from '../../render.js';
 import { setViewportWidth } from '../../viewport.js';
-import { boardRows, cellsOf, findBoard, renderDates } from './render.js';
+import { boardRows, cellsOf, findBoard, renderDates, tierBreak } from './render.js';
 
 // Spec §11 Dates "Board" and "Phone", and §9's provenance rule: every amount through PriceCell.
 
@@ -711,9 +711,11 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     expect(line).not.toHaveTextContent(D.pairingRead['outbound-only']);
   });
 
-  it('not-read: "flights not read" where flight lists are read for this search, nothing where they are not', async () => {
+  it('not-read: "flights not checked" where flight lists are read for this search, nothing where they are not', async () => {
     const row = await figureRow({}, true);
-    await waitFor(() => expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not read'));
+    await waitFor(() =>
+      expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not checked'),
+    );
   });
 
   it('not-read where flight lists are not read here says nothing (once the flight-lists answer says so)', async () => {
@@ -741,14 +743,14 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     try {
       row = await figureRow({});
       expect(within(row).getByTestId('flight-read')).toHaveTextContent('loading flights');
-      expect(within(row).getByTestId('flight-read')).not.toHaveTextContent('flights not read');
+      expect(within(row).getByTestId('flight-read')).not.toHaveTextContent('flights not checked');
     } finally {
       release();
     }
     const shown = row;
     if (shown === null) throw new Error('no row');
     await waitFor(() =>
-      expect(within(shown).getByTestId('flight-read')).toHaveTextContent('flights not read'),
+      expect(within(shown).getByTestId('flight-read')).toHaveTextContent('flights not checked'),
     );
   });
 
@@ -761,7 +763,7 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     const row = await figureRow({});
     const line = await screen.findByTestId('flights-load-failed');
     expect(line).toHaveTextContent("flights couldn't be loaded; prices shown without flights");
-    expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not read');
+    expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not checked');
     // why: above the board: the line comes before the table
     const table = row.closest('table');
     if (table === null) throw new Error('no table');
@@ -779,5 +781,321 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     } finally {
       setViewportWidth(1280);
     }
+  });
+});
+
+// Design 2026-11-08 §5.1: one real price per row. A trip with flights read shows its price, whose it is, when it was read,
+// its times, journey time and changes each way; a calendar price stands in the secondary style, with what is known of
+// its flights; Google's list "from" figure is in the opened detail, not on the closed row.
+describe('one price per row (design 2026-11-08 §5.1)', () => {
+  const D = COPY.datesView;
+  /** One date pair (index 0) with `figure`; flight lists are served so the row's button and changes can appear. */
+  const rowFor = async (figure: ReturnType<typeof calendarFig>, lists = false) => {
+    if (lists) server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
+    const r = renderDates({
+      body: {
+        discoveryProviders: ['travelpayouts', 'camoufox'],
+        pairs: { [at('2027-03-14', 10)]: pricedPair(figure) },
+      },
+    });
+    const table = await findBoard();
+    const row = table.querySelector<HTMLElement>('tr[data-pair="0"]');
+    if (row === null) throw new Error('no row');
+    return { ...r, row, table };
+  };
+
+  describe('a trip with flights read', () => {
+    it('shows when it was read, in words that need no hover, beside its kind and times', async () => {
+      const { row } = await rowFor(pairingFig());
+      expect(within(row).getByTestId('read-age')).toHaveTextContent('read 4h ago');
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent("seller's price");
+      expect(within(row).getByTestId('pairing-times')).toHaveTextContent('Out: 07:15 · Back: 14:20');
+      // a fresh trip carries no older-trip mark
+      expect(within(row).getByTestId('read-age')).not.toHaveAttribute('data-older');
+    });
+
+    it('an older leading trip also shows its age label', async () => {
+      const older = figurePairing({ stale: 'refresh', ageHours: 40 });
+      const { row } = await rowFor(
+        pairingFig({ pairing: older, price: { ...pairingFig().price, stale: 'refresh', ageHours: 40 } }),
+      );
+      const label = within(row).getByTestId('read-age');
+      expect(label).toHaveAttribute('data-older');
+      expect(label).toHaveTextContent(/^read .* ago$/);
+    });
+
+    it.each([
+      [figurePairing(), "seller's price"],
+      [
+        figurePairing({ isFrom: true, seller: null, fare: null, complete: false, offersRead: 0 }),
+        "Google's price, sellers not read",
+      ],
+      [
+        figurePairing({ isFrom: true, seller: null, fare: null, complete: false, offersRead: 3 }),
+        "Google's price, not every seller read",
+      ],
+    ])('says whose price it is (%#): %s', async (pairing, words) => {
+      const { row } = await rowFor(pairingFig({ pairing }));
+      expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(words);
+    });
+
+    it('the phone card says when it was read too', async () => {
+      setViewportWidth(375);
+      try {
+        const { row } = await rowFor(pairingFig());
+        expect(row).toHaveAttribute('data-testid', 'board-card');
+        expect(within(row).getByTestId('read-age')).toHaveTextContent('read 4h ago');
+      } finally {
+        setViewportWidth(1280);
+      }
+    });
+  });
+
+  describe('a calendar row', () => {
+    const calendar = (over: Partial<ReturnType<typeof calendarFig>> = {}) =>
+      calendarFig({
+        price: { ...calendarFig().price, pricePence: 56_500, provenance: provCached() },
+        ...over,
+      });
+
+    it('shows "calendar £565" in the secondary style', async () => {
+      const { row } = await rowFor(calendar());
+      const price = within(row).getByTestId('calendar-price');
+      expect(price).toHaveClass('price-secondary');
+      expect(price.textContent).toMatch(/calendar\s*£565/);
+    });
+
+    it('a trip is not styled as secondary', async () => {
+      const { row } = await rowFor(pairingFig());
+      expect(within(row).queryByTestId('calendar-price')).toBeNull();
+    });
+
+    it('says "flights not checked" for a date whose flights were never read, and only then', async () => {
+      const { row } = await rowFor(calendar({ pairingRead: 'not-read' }), true);
+      await waitFor(() =>
+        expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not checked'),
+      );
+    });
+
+    it.each([
+      ['outbound-only', 'return leg not read'],
+      ['no-pairing-read', 'no return flight read'],
+      ['over-limit', 'no pairing within your limits read'],
+    ] as const)('%s: "%s", never "flights not checked"', async (read, words) => {
+      const over = figurePairing({
+        isFrom: true,
+        seller: null,
+        fare: null,
+        complete: false,
+        offersRead: 0,
+        which: 'over-limit',
+      });
+      const { row } = await rowFor(
+        calendar({ pairingRead: read, ...(read === 'over-limit' ? { pairing: over } : {}) }),
+      );
+      const line = within(row).getByTestId('flight-read');
+      expect(line).toHaveTextContent(words);
+      expect(line).not.toHaveTextContent('flights not checked');
+    });
+
+    it('list-failed: "flights couldn\'t be read: <reason>"', async () => {
+      const { row } = await rowFor(calendar({ pairingRead: 'list-failed', listReason: 'monthly-cap' }));
+      const line = within(row).getByTestId('flight-read');
+      expect(line).toHaveTextContent("flights couldn't be read: ");
+      expect(line).not.toHaveTextContent('flights not checked');
+    });
+
+    it('within-older: the return flights read, older than the refresh', async () => {
+      const older = figurePairing({ stale: 'refresh', ageHours: 216 });
+      const { row } = await rowFor(calendar({ pairingRead: 'within-older', pairing: older }));
+      expect(within(row).getByTestId('flight-read')).toHaveTextContent(
+        "return flights read 9d ago, older than this search's refresh:",
+      );
+    });
+
+    it('within-other-limits: your limits have changed since', async () => {
+      const { row } = await rowFor(
+        calendar({ pairingRead: 'within-other-limits', pairing: figurePairing() }),
+      );
+      expect(within(row).getByTestId('flight-read')).toHaveTextContent(D.pairingOtherLimits);
+    });
+
+    it.each(['sellers-not-read', 'offers-incomplete'] as const)(
+      '%s: the wire codes that are never produced now say nothing',
+      async (read) => {
+        const { row } = await rowFor(calendar({ pairingRead: read, pairing: figurePairing() }));
+        expect(within(row).getByTestId('flight-read')).not.toHaveTextContent('flights not checked');
+      },
+    );
+  });
+
+  describe('the closed row has no Google list figure', () => {
+    it('shows no "Google\'s list: from" until its flights are opened', async () => {
+      server.use(
+        serveFlightLists(
+          (d, r) =>
+            flightPair(d, r, {
+              list: flightList({
+                departureDate: d,
+                returnDate: r,
+                minMinor: 9_200,
+                flights: [listedFlight()],
+              }),
+            }),
+          { pagesPlanned: 2 },
+        ),
+      );
+      const { row, user } = await rowFor(calendarFig({ pairingRead: 'not-read' }));
+      const button = await within(row).findByRole('button', { name: /^Show flights/ });
+      expect(row).not.toHaveTextContent("Google's list: from");
+      expect(document.body).not.toHaveTextContent("Google's list: from");
+      await user.click(button);
+      expect(document.querySelector('[data-flights-for="0"]')).toHaveTextContent("Google's list: from");
+    });
+  });
+});
+
+// Design 2026-11-08 §5.2: a labelled break between the trips with flights read and the dates not checked yet; a trip and
+// a calendar price at one price are not one tie.
+describe('tiers on screen (design 2026-11-08 §5.2)', () => {
+  const trip = (pence: number) =>
+    pairingFig({
+      pairing: figurePairing({ pricePence: pence, fromPence: pence }),
+      price: { ...pairingFig().price, pricePence: pence },
+    });
+  const render = async (pairs: Record<string, ReturnType<typeof pricedPair>>) => {
+    renderDates({ body: { discoveryProviders: ['travelpayouts', 'camoufox'], pairs } });
+    return findBoard();
+  };
+
+  it('puts a labelled break between the read trips and the rows not checked yet', async () => {
+    const table = await render({
+      [at('2027-03-14', 10)]: pricedPair(trip(118_000)),
+      [at('2027-03-15', 10)]: pricedPair(
+        priced(90_000, { price: { ...priced(90_000).price, provenance: provCached() } }),
+      ),
+      [at('2027-03-16', 10)]: pricedPair(
+        priced(95_000, { price: { ...priced(95_000).price, provenance: provCached() } }),
+      ),
+    });
+    const rows = [...table.querySelectorAll<HTMLElement>('tbody > tr')];
+    expect(rows.map((r) => (r.classList.contains('tier-break') ? 'break' : (r.dataset.pair ?? '?')))).toEqual(
+      ['0', 'break', '3', '6'],
+    );
+    expect(tierBreak(table)).toHaveTextContent('Not checked yet');
+  });
+
+  it('has no break when every row is a trip, or when none is', async () => {
+    const trips = await render({
+      [at('2027-03-14', 10)]: pricedPair(trip(118_000)),
+      [at('2027-03-15', 10)]: pricedPair(trip(119_000)),
+    });
+    expect(tierBreak(trips)).toBeNull();
+  });
+
+  it('no break when none is a trip', async () => {
+    const table = await render({
+      [at('2027-03-14', 10)]: pricedPair(priced(90_000)),
+      [at('2027-03-15', 10)]: pricedPair(priced(95_000)),
+    });
+    expect(tierBreak(table)).toBeNull();
+  });
+
+  it('a read trip and a calendar row at the same price are not one tie group', async () => {
+    const table = await render({
+      [at('2027-03-14', 10)]: pricedPair(trip(90_000)),
+      [at('2027-03-15', 10)]: pricedPair(priced(90_000)),
+      [at('2027-03-16', 10)]: pricedPair(priced(90_000)),
+    });
+    // the two calendar rows are a tie of two; the trip beside them at the same price is not part of it
+    const lines = [...table.querySelectorAll('tr.tie-row')];
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toHaveTextContent(/^2 /);
+  });
+});
+
+// Design 2026-11-08 §5.3: rows are closed by default (10 rows were a 14,000 px page); a keyboard-operable button opens a
+// row's detail.
+describe('closed rows (design 2026-11-08 §5.3)', () => {
+  const ten = () => {
+    const pairs: Record<string, ReturnType<typeof pricedPair>> = {};
+    for (let d = 0; d < 10; d += 1)
+      pairs[at(`2027-03-${String(14 + d).padStart(2, '0')}`, 10)] = pricedPair(priced(90_000 + d * 100));
+    return pairs;
+  };
+  const renderTen = async () => {
+    server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
+    const r = renderDates({ body: { discoveryProviders: ['travelpayouts', 'camoufox'], pairs: ten() } });
+    await findBoard();
+    await screen.findAllByRole('button', { name: /^Show flights/ });
+    return r;
+  };
+
+  it('with 10 rows no flights block renders until its button is pressed', async () => {
+    const { user } = await renderTen();
+    expect(screen.getAllByRole('button', { name: /^Show flights/ })).toHaveLength(10);
+    expect(document.querySelectorAll('[data-flights-for]')).toHaveLength(0);
+    const [first] = screen.getAllByRole('button', { name: /^Show flights/ });
+    if (first === undefined) throw new Error('no button');
+    await user.click(first);
+    expect(document.querySelectorAll('[data-flights-for]')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^Show flights/ })).toHaveLength(9);
+  });
+
+  it('the button says whether its row is open and names the detail it controls', async () => {
+    const { user } = await renderTen();
+    const [button] = screen.getAllByRole('button', { name: /^Show flights/ });
+    if (button === undefined) throw new Error('no button');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    const controls = button.getAttribute('aria-controls');
+    expect(controls).toBeTruthy();
+    expect(document.getElementById(controls ?? '')).toBeNull();
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(button).toHaveTextContent('Hide flights');
+    expect(document.getElementById(controls ?? '')).toBe(document.querySelector('[data-flights-for="0"]'));
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelectorAll('[data-flights-for]')).toHaveLength(0);
+  });
+
+  it('pressing the button is not a click on the row: the detail does not open', async () => {
+    const { user } = await renderTen();
+    const [button] = screen.getAllByRole('button', { name: /^Show flights/ });
+    if (button === undefined) throw new Error('no button');
+    await user.click(button);
+    expect(new URLSearchParams(window.location.search).get('date')).toBeNull();
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('dates');
+  });
+});
+
+// Design 2026-11-08 §5.4: within a tie the rows are numbered in the order shown.
+describe('ranks in a tie (design 2026-11-08 §5.4)', () => {
+  it('three tied pairs reordered by their flights show 1, 2, 3 top to bottom', async () => {
+    const times = ['16:00', '07:00', '10:00'];
+    const pairs: Record<string, ReturnType<typeof pricedPair>> = {};
+    for (const [i] of times.entries())
+      pairs[at(`2027-03-${String(14 + i).padStart(2, '0')}`, 10)] = pricedPair(priced(90_000));
+    server.use(
+      serveFlightLists((d, r) => {
+        const i = Number(d.slice(-2)) - 14;
+        return flightPair(d, r, {
+          list: flightList({
+            departureDate: d,
+            returnDate: r,
+            minMinor: 9_000,
+            flights: [listedFlight({ departsLocal: times[i] ?? '12:00', amountMinor: 9_000 })],
+          }),
+        });
+      }),
+    );
+    renderDates({ body: { discoveryProviders: ['travelpayouts', 'camoufox'], pairs } });
+    const table = await findBoard();
+    // the earliest outbound leads the tie once the lists land: 15 Mar (07:00), 16 Mar (10:00), 14 Mar (16:00)
+    const dated = () => boardRows(table).filter((r) => r.dataset.pair !== undefined);
+    await waitFor(() =>
+      expect(dated().map((r) => cellsOf(r)[1])).toEqual(['15 Mar 2027', '16 Mar 2027', '14 Mar 2027']),
+    );
+    expect(dated().map((r) => cellsOf(r)[0])).toEqual(['1', '2', '3']);
   });
 });

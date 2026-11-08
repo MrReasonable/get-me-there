@@ -637,6 +637,9 @@ export const COPY = {
     searching: (done: number, total: number, left: string | null) =>
       `Searching · ${done} of ${total} date ${noun(total, 'pair', 'pairs')}${left === null ? '' : ` · ${left}`}`,
     readingFlights: (read: number, planned: number) => `Reading flights · ${read} of ${planned}`,
+    // why: design 2026-11-08 §5.5: the confirm step reads an open-ended queue, so the card has no "of N" denominator
+    readingFlightsConfirm: (dates: number, trips: number) =>
+      `Reading flights · ${dates} ${noun(dates, 'date', 'dates')} checked, ${trips} ${noun(trips, 'trip', 'trips')} with flights read`,
     left: (span: string) => `about ${span} left`,
     lessThanAMinuteLeft: 'less than a minute left',
     searchedAgo: (ago: string) => `Searched ${ago}`,
@@ -1084,10 +1087,21 @@ export const COPY = {
     gridShowed: (source: string) => `${source} showed`,
     gridShowedAt: (when: string) => `· ${when}`,
     fromPrice: 'from',
+    // design 2026-11-08 §5.1: a calendar row's price in the secondary style, and a read trip's visible read age
+    calendarPrice: 'calendar',
+    readAgo: (hours: number | 'unknown') =>
+      hours === 'unknown' ? 'read time not known' : `read ${formatAgo(hours)}`,
+    pairingChanges: (out: string, back: string) => `${out} out · ${back} back`,
+    // design 2026-11-08 §5.2: the labelled break before the rows whose flights were never read
+    tierBreak: 'Not checked yet: calendar prices only',
+    // design 2026-11-08 §5.3: rows are closed; the button opens the row's full flight detail
+    flightsToggle: { open: 'Show flights', close: 'Hide flights' },
+    flightsToggleOf: (dep: string, ret: string) => `flights for ${dep} to ${ret}`,
     pairingBeneath: (ago: string) => `return flights read ${ago}, older than this search's refresh:`,
     pairingOtherLimits: `${LIMITS_CHANGED}:`,
     pairingRead: {
-      'not-read': 'flights not read',
+      // why: design 2026-11-08 §5.1: "not checked" only when the date's flights were never read
+      'not-read': 'flights not checked',
       'outbound-only': 'return leg not read',
       'no-pairing-read': 'no return flight read',
       'over-limit': 'no pairing within your limits read',
@@ -1133,6 +1147,42 @@ export const COPY = {
       noneWithin: (limit: string) => `none within ${limit}`,
     },
     // run updates (revision 50, Ian ruled)
+    // --- design 2026-11-08 §5.5: how checking flights ended, in one line under the board. The operator reads "trips with
+    // flights read", never "confirmed" (the price-not-confirmed mark owns that word) ---
+    confirm: {
+      dates: (n: number) => `${n} ${noun(n, 'date', 'dates')}`,
+      trips: (n: number) => `${n} ${noun(n, 'trip', 'trips')} with flights read`,
+      unread: (n: number) => `${n} couldn't be read`,
+      checked: (dates: string, unread: string | null) =>
+        `Checked ${dates}${unread === null ? '' : `, ${unread}`}`,
+      checkedEvery: (unread: string | null) =>
+        `Checked every date with a calendar price${unread === null ? '' : `, ${unread}`}`,
+      // why: fewer than the target of trips: what the other dates' flights were (they are not "unchecked cheaper")
+      fewTrips: "the other dates' flights didn't fit your limits or couldn't be read",
+      cheaperUnchecked: (n: number) =>
+        n === 1
+          ? "1 date looks cheaper on the calendar but wasn't checked."
+          : `${n} dates look cheaper on the calendar but weren't checked.`,
+      cheaperStopped: (n: number) =>
+        n === 1
+          ? "1 date that looks cheaper on the calendar wasn't checked."
+          : `${n} dates that look cheaper on the calendar weren't checked.`,
+      unchecked: (n: number) => (n === 1 ? "1 date wasn't checked." : `${n} dates weren't checked.`),
+      stopped: (dates: string, because: string) =>
+        `Stopped checking flights after ${dates} because ${because}`,
+      because: {
+        window: "the browser's time ran out",
+        returnsStopped: "return flights couldn't be read",
+        cancelled: 'the search was cancelled',
+        budget: 'a spending limit was reached',
+        fatal: 'the app hit an error',
+        other: 'the search stopped',
+      },
+      outboundOnly: "Trips couldn't be checked on this machine: it can't read return flights.",
+      flagsUnread: "Trips couldn't be checked this run: the browser hadn't yet said what it can read.",
+      running: (dates: number, trips: string) =>
+        `Checking flights: ${dates} ${noun(dates, 'date', 'dates')} so far; ${trips}.`,
+    },
     updateBoard: (n: number) => `${n} ${noun(n, 'change', 'changes')} · Update board`,
     updated: 'Best dates updated',
     pendingChanges: (n: number) =>

@@ -25,7 +25,9 @@ import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
 import { BoardTable } from './BoardTable.js';
 import { type BoardModel, boardModel, isSyntheticRead, PAGE_SIZE } from './board.js';
+import { ConfirmLine } from './ConfirmLine.js';
 import { CoverageSection } from './CoverageSection.js';
+import { confirmStepGoing } from './confirmWords.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
@@ -260,6 +262,16 @@ function DatesOf({
           />
         )}
       />
+      {/* why: design 2026-11-08 §5.5 — under the board: how checking flights ended (nothing for a run with no summary) */}
+      {data !== null && run?.flights != null ? (
+        <ConfirmLine
+          confirm={run.flights.confirm}
+          ended={run.flights.ended}
+          stopCause={run.flights.stopCause}
+          running={RUNNING.has(run.status) && confirmStepGoing(run.flights)}
+          planned={run.flights.planned}
+        />
+      ) : null}
       {data !== null && model !== null ? (
         <Overview
           definition={definition}

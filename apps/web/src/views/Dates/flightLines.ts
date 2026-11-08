@@ -12,6 +12,7 @@ import {
   mainPathSource,
   orderWithinTie,
   type Provenance,
+  rankTierOf,
   type ShownFlights,
   type StaleMark,
   tieGroups,
@@ -64,10 +65,15 @@ export function shownOf(
   return chooseFlightsToShow(list.flights, limits);
 }
 
-/** A row's tie key (spec rev 55 §11 Ties): its figure's price, and whether it is current (not superseded, still seen). */
+/**
+ * A row's tie key (spec rev 55 §11 Ties): its figure's price, whether it is current (not superseded, still seen) and,
+ * design 2026-11-08 §5.2, its rank tier: a trip with flights read, an older one and a calendar price at one price are
+ * three groups, never one tie.
+ */
 const tieKey = (p: Row) => ({
   pricePence: p.figure.price.pricePence,
   current: !p.figure.superseded && p.figure.notSeenInLatest === null,
+  tier: rankTierOf(p.figure),
 });
 
 /**
@@ -76,6 +82,23 @@ const tieKey = (p: Row) => ({
  */
 export function boardGroups(rows: readonly Row[], byPrice: boolean): Row[][] {
   return byPrice ? tieGroups(rows, tieKey) : rows.map((p) => [p]);
+}
+
+/**
+ * Design 2026-11-08 §5.4: the ranks as shown. A tie group takes the ranks its members held (the price ranks of the
+ * group, in ascending order) in the order the group is shown, so within a tie the rows read 1, 2, 3 top to bottom after
+ * the flights reorder them; rank 2 never sits above rank 1. A group of one keeps its own rank.
+ */
+export function ranksInOrder(
+  ordered: readonly Row[][],
+  rankOf: ReadonlyMap<number, number>,
+): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const g of ordered) {
+    const held = g.map((p) => rankOf.get(p.index) ?? 0).sort((a, b) => a - b);
+    for (const [i, p] of g.entries()) out.set(p.index, held[i] ?? 0);
+  }
+  return out;
 }
 
 /**

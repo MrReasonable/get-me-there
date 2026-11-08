@@ -1,4 +1,10 @@
-import { type DatePair, type DatePairFigure, type DatePairPairing, stopDetailClause } from '@gmt/core';
+import {
+  type DatePair,
+  type DatePairFigure,
+  type DatePairPairing,
+  rankTierOf,
+  stopDetailClause,
+} from '@gmt/core';
 import { type ReactNode, useId } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
@@ -39,7 +45,7 @@ export function FigurePrice({
   notes: DefinitionResponse['destinationNotes'];
   face?: boolean;
   /** On the board: the amount on flap cells that flip in this slot. */
-  flapSlot?: string;
+  flapSlot?: string | undefined;
 }) {
   const p = figure.price;
   return (
@@ -64,6 +70,30 @@ export function FigurePrice({
         flapSlot={flapSlot}
       />
     </PriceBoundary>
+  );
+}
+
+/**
+ * Design 2026-11-08 §5.1: a calendar price stands in the secondary style, said as "calendar £565", so a date whose
+ * flights were never read does not look like a trip. Other bases show their figure as it is.
+ */
+export function RowPrice({
+  figure,
+  notes,
+  face = false,
+  flapSlot,
+}: {
+  figure: DatePairFigure;
+  notes: DefinitionResponse['destinationNotes'];
+  face?: boolean;
+  flapSlot?: string | undefined;
+}) {
+  const price = <FigurePrice figure={figure} notes={notes} face={face} flapSlot={flapSlot} />;
+  if (figure.basis !== 'calendar') return price;
+  return (
+    <span data-testid="calendar-price" className="price-secondary">
+      <span className="calendar-word">{D.calendarPrice}</span> {price}
+    </span>
   );
 }
 
@@ -141,7 +171,16 @@ function PairingPrice({
  * (`settings`). The group is named by its visible seller and outbound lines, said once (21.7 code M3), and described by
  * the long words of which outbound it used, which the search's page block says in full. Null on another basis.
  */
-export function PairingFigureLines({ figure, settings }: { figure: DatePairFigure; settings: boolean }) {
+export function PairingFigureLines({
+  figure,
+  settings,
+  changes = null,
+}: {
+  figure: DatePairFigure;
+  settings: boolean;
+  /** The pairing's changes each way, from the flight list the board asked for, or null while there is none. */
+  changes?: { out: number; back: number } | null;
+}) {
   const now = useNow();
   const id = useId();
   const q = figure.pairing;
@@ -177,9 +216,23 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
       <span hidden id={`${id}-long`}>
         {D.pairingWhich[q.which]}
       </span>
+      {/* why: design 2026-11-08 §5.1: when it was read, visible without hover; an older trip that still leads shows it as
+      a mark (its age label), so it is never taken for a fresh one */}
+      <span
+        data-testid="read-age"
+        data-older={rankTierOf(figure) === 1 ? '' : undefined}
+        className={rankTierOf(figure) === 1 ? 'tag tag-warn block w-fit' : 'block'}
+      >
+        {D.readAgo(figure.price.ageHours)}
+      </span>
       <span data-testid="pairing-times" className="block">
         {D.pairingTimes(q.departOut, q.departBack)}
       </span>
+      {changes !== null ? (
+        <span data-testid="pairing-changes" className="block">
+          {D.pairingChanges(F.changes(changes.out), F.changes(changes.back))}
+        </span>
+      ) : null}
       {q.mismatch ? (
         <span data-testid="pairing-mismatch" className="flex flex-wrap items-baseline gap-1">
           <span>{D.mismatchMark}</span>
@@ -386,8 +439,9 @@ function StateGlyph({ state }: { state: RowState }) {
  * and the price lead (PriceCell's phone face: provider mark, destination, short age, "not checked" on a calendar
  * price, "≈" on a converted one), then how far checked ("cheapest of the rows read" on a truncated figure), then
  * journey time and arrivals, then airports. Its dates are the link to the detail; a tap anywhere on the card follows
- * it. Point of sale is not on the card (it is not a face item). WP20 Task 20.10: the flight read's outcome sits beside
- * the price (`outcome`) and the date pair's flights block is the card's last part (`flights`), spec rev 55 §11.
+ * it. Point of sale is not on the card (it is not a face item). Design 2026-11-08 §5.3: the date pair's flights are the
+ * card's last part (`flights`) and show only once the card's button (`toggle`) opens them; the flight read's outcome
+ * ("Google's list: from …") sits in that detail, not on the closed card.
  */
 export function BoardCard({
   pair,
@@ -398,10 +452,11 @@ export function BoardCard({
   journeyFiltered,
   lit,
   onLight,
-  outcome = null,
   flights = null,
+  toggle = null,
   lists = 'unavailable',
   settings = false,
+  changes = null,
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
@@ -411,10 +466,12 @@ export function BoardCard({
   journeyFiltered: boolean;
   lit: boolean;
   onLight: (index: number | null) => void;
-  /** The flight read's outcome beside the price (spec rev 55 §6.9), or null. */
-  outcome?: ReactNode;
-  /** The date pair's flights block (spec rev 55 §11), or null when there is none. */
+  /** The date pair's flights detail (spec rev 55 §11), shown only once opened (design 2026-11-08 §5.3), or null. */
   flights?: ReactNode;
+  /** The button that opens and closes the flights detail, or null when there is none to open. */
+  toggle?: ReactNode;
+  /** The pairing's changes each way (design 2026-11-08 §5.1), or null. */
+  changes?: { out: number; back: number } | null;
   /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
   lists?: ListsState;
   /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
@@ -455,10 +512,10 @@ export function BoardCard({
         </span>
       </th>
       <td className="card-price">
-        <FigurePrice figure={f} notes={notes} face />
-        <PairingFigureLines figure={f} settings={settings} />
+        <RowPrice figure={f} notes={notes} face />
+        <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />
-        {outcome}
+        {toggle}
       </td>
       <td className="card-rest">
         <StateFlap state={state} />

@@ -171,8 +171,10 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
         flightPair(dep, ret, { list: flightList({ departureDate: dep, returnDate: ret }) }),
       ),
     );
-    renderDates({ body: workedDates() });
+    const { user } = renderDates({ body: workedDates() });
     await findBoard();
+    // why: design 2026-11-08 §5.3 — rows are closed by default; the first row's button opens its flights
+    await user.click((await screen.findAllByRole('button', { name: /^Show flights/ }))[0] ?? document.body);
     await waitFor(() => expect(document.querySelector(SMOKE.flightsBlock)).not.toBeNull());
     expect(screen.getAllByRole('link', { name: /^Open in Google Flights/ }).length).toBeGreaterThan(0);
   });
@@ -183,8 +185,10 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
         flightPair(dep, ret, { list: pairingList({ departureDate: dep, returnDate: ret }) }),
       ),
     );
-    renderDates({ body: workedDates() });
+    const { user } = renderDates({ body: workedDates() });
     await findBoard();
+    // why: design 2026-11-08 §5.3 — rows are closed by default; the first row's button opens its flights
+    await user.click((await screen.findAllByRole('button', { name: /^Show flights/ }))[0] ?? document.body);
     await waitFor(() => expect(document.querySelector(SMOKE.pairing)).not.toBeNull());
     expect(document.querySelector(SMOKE.flightsBlock)?.contains(one(SMOKE.pairing))).toBe(true);
   });

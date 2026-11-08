@@ -294,7 +294,7 @@ describe('no main-path jargon on a search’s page, in any state (spec rev 55 §
       { status: 'running' as const },
       {
         status: 'running' as const,
-        flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
+        flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null, confirm: null, stopCause: null },
       },
       { status: 'running' as const, stage: 'verification' as const },
     ]) {
