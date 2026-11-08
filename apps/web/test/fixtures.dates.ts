@@ -154,6 +154,7 @@ export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPair
     provenance: provFlightList(),
     stale: false,
     ageHours: 4,
+    bookingUrl: null,
     ...over,
   };
 }

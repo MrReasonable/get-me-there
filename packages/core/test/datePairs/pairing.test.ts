@@ -401,6 +401,7 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; des
     underCurrentLimits: true,
     fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
     executionId: 'ex-2',
+    bookingUrl: null,
     ...over,
   });
   const flags = [true, false];

@@ -134,6 +134,17 @@ JOIN flight_lists l ON l.id = (
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
 ORDER BY a.ord, f.position`;
 
+// why: design 2026-11-08 §6.1: every list of one date pair (any airport pair, run or by-hand read, any status), newest
+// first by the order NEWEST reads; `ord` is the list's id, so the fold keeps each list's flights together. One date pair
+// holds a handful of airport pairs and one list per run each, so no index beyond the cell index is needed.
+const FOR_DATE_PAIR_SQL = `
+SELECT l.id AS ord, l.*, ${FLIGHT_COLUMNS}
+FROM flight_lists l
+LEFT JOIN flight_list_flights f ON f.list_id = l.id
+WHERE l.definition_id = @definitionId AND l.departure_date = @departureDate AND l.return_date = @returnDate
+  AND l.cabin = @cabin AND l.point_of_sale = @pointOfSale
+ORDER BY l.fetched_at DESC, l.id DESC, f.position`;
+
 // why: spec rev 56 §7: one probe of each primary key for the lists a lookup chose (no new index), ordered so each list's
 // attempts, and each attempt's returns, arrive in order; an attempt with no return (listed none-for-cell) has one row
 const ATTEMPTS_SQL = `
@@ -696,6 +707,27 @@ export class FlightListsRepo {
       cabin,
       pointOfSale,
       executionIds: scope === null ? null : JSON.stringify(scope.executionIds),
+    }).map((l) => l.list);
+  }
+
+  /**
+   * Design 2026-11-08 §6.1 (the Trip page's log and its list): every list of this definition for one date pair, of any
+   * airport pair, execution (on-demand ones included) and status, for one cabin and point of sale, newest first
+   * (`fetched_at`, then the later row), each with its returns and offers. Three statements in one transaction.
+   */
+  forDatePair(
+    definitionId: string,
+    departureDate: IsoDate,
+    returnDate: IsoDate,
+    cabin: Cabin,
+    pointOfSale: PointOfSale,
+  ): StoredFlightList[] {
+    return this.lookup<JoinedRow>(FOR_DATE_PAIR_SQL, {
+      definitionId,
+      departureDate,
+      returnDate,
+      cabin,
+      pointOfSale,
     }).map((l) => l.list);
   }
 

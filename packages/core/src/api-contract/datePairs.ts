@@ -4,6 +4,7 @@ import { provenanceKey } from '../datePairs/encode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
 import { stayCount } from '../datePairs/space.js';
 import { flightTextSchema } from '../flights/types.js';
+import { MAX_URL_LENGTH } from '../normalise/vendorUrl.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
@@ -64,6 +65,11 @@ const hhmm = z.string().regex(HHMM);
 /** Page text (a seller's, a fare's) held to the flight list's rule (spec rev 56 §5.1), rendered as text only. */
 const pageText = flightTextSchema;
 const WHICH = ['cheapest', 'next-cheapest', 'over-limit'] as const;
+/**
+ * Ruling 6: a pairing's booking page address, any string up to MAX_URL_LENGTH (the booking read's own rule); the path
+ * rule is applied where the address enters and again by `bookingTargetOf` where it is used (Ruling 8).
+ */
+const bookingUrl = z.string().max(MAX_URL_LENGTH).nullable();
 
 /** One entry per date pair, in index order: the six buckets over the airport pairs in scope and the cell counts. */
 const pairsSchema = z.strictObject({
@@ -229,6 +235,8 @@ const pairingGroupSchema = z.strictObject({
   provenance: counts,
   stale: z.array(staleMarkSchema),
   ageHours: z.array(ageHoursSchema),
+  /** Ruling 6: the booking page's address, exactly when the list's booking read is this pairing's (Ruling 5) */
+  bookingUrl: z.array(bookingUrl),
 });
 const PAIRING_COLUMNS = [
   'figure',
@@ -248,6 +256,7 @@ const PAIRING_COLUMNS = [
   'provenance',
   'stale',
   'ageHours',
+  'bookingUrl',
 ] as const satisfies ReadonlyArray<keyof typeof pairingGroupSchema.shape>;
 
 /**
@@ -857,6 +866,7 @@ const pairingCellSchema = z.strictObject({
   provenance: provenanceSchema,
   stale: staleMarkSchema,
   ageHours: ageHoursSchema,
+  bookingUrl,
 });
 
 /**

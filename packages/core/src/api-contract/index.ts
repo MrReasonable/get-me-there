@@ -58,6 +58,7 @@ import {
   toolRunResponseSchema,
   toolSmokeRequestSchema,
 } from './system.js';
+import { tripQuerySchema, tripResponseSchema } from './trip.js';
 
 export { barSummary, STATE_ORDER, sortChecks } from '../status/report.js';
 export * from './airports.js';
@@ -71,6 +72,7 @@ export * from './results.js';
 export * from './searches.js';
 export * from './stopCause.js';
 export * from './system.js';
+export * from './trip.js';
 
 export interface RouteDef {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -134,6 +136,8 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema, { query: datePairsQuerySchema }),
   // why: spec revision 55 §10 — the flights on a search's page, and one date pair's read on demand
   route('GET', '/definitions/:id/flight-lists', flightListsResponseSchema, { query: flightListsQuerySchema }),
+  // why: design 2026-11-08 §6.1: one trip's dates in one call; its query is the scope's wire form, parsed by the api
+  route('GET', '/definitions/:id/trip', tripResponseSchema, { query: tripQuerySchema }),
   route('POST', '/definitions/:id/flight-lists', readFlightListResponseSchema, {
     request: readFlightListRequestSchema,
   }),

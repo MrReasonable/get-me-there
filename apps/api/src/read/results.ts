@@ -1,19 +1,12 @@
 /** Spec §6.5, §6.9, §10 `/results`: the date pair detail's source, and the basis rule every view shares. */
-import {
-  type apiContract,
-  datePairIndex,
-  dedupByItinerary,
-  rankRows,
-  type SearchDefinition,
-} from '@gmt/core';
+import { type apiContract, dedupByItinerary, rankRows, type SearchDefinition } from '@gmt/core';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { datePairFigures } from './datePairs.js';
+import { datePairFigureOf } from './datePairs.js';
 import { executionSummary } from './executions.js';
 import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
-import { pairingsFor } from './pairings.js';
 import type { Basis } from './rows.js';
 import { classifyCells, parentFacts, parseScope, summariseCells } from './scope.js';
 import { currentSpace } from './space.js';
@@ -116,15 +109,14 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
   );
   let datePairFigure: ResultsResponse['datePairFigure'] = null;
   if (scope.datePair !== null) {
-    const index = datePairIndex(scope.space, scope.datePair.departureDate, scope.datePair.returnDate);
-    // why: spec rev 56 §6.9: the board's one pairings map, so the detail and the board agree on the figure
-    const figure =
-      index === null
-        ? undefined
-        : datePairFigures(loaded, scope, loaded.rc, (asked) =>
-            pairingsFor(ports, def, loaded.executionIds, asked),
-          ).figures.get(index);
-    if (figure !== undefined) {
+    // why: plan Task 5: the one composition the Trip page reads too, under this read's execution scope (prov-002)
+    const { figure } = datePairFigureOf(
+      def,
+      q,
+      ports,
+      q.executionId === undefined ? undefined : [q.executionId],
+    );
+    if (figure !== null) {
       const { airportPair: _airportPair, ...rest } = figure;
       datePairFigure = rest;
     }

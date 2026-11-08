@@ -1,0 +1,209 @@
+/**
+ * Design 2026-11-08 §6.1 (plan Task 5): `GET /definitions/:id/trip`, the Trip page's one read. Its figure is the
+ * board's, through the one composition the date pair detail reads too (`datePairFigureOf`), so the card and the search
+ * page's row never disagree; the flight list is the figure's own cell's newest (Ruling 3: the read cell's when there is
+ * no figure), its booking address the list's chosen pairing's (Ruling 5); the cells, the calendar and cached prices and
+ * the log are read over the same filtered scope. Every price carries its provenance.
+ *
+ * why: the api process is the only writer and better-sqlite3 is synchronous, so no engine write lands between these
+ * reads; an await here would break that snapshot.
+ */
+import {
+  type apiContract,
+  type CellKey,
+  cheapestPairing,
+  datePairIndex,
+  daysBetween,
+  flightLimitsOf,
+  type IsoDate,
+  isoDateSchema,
+  priceLabelKind,
+  type SearchDefinition,
+} from '@gmt/core';
+import { type Engine, FLIGHT_LIST_PROVIDER, flightReadUnavailable, refreshHoursOf } from '@gmt/engine';
+import type { z } from 'zod';
+import { ApiError, fieldsDetail } from '../errors.js';
+import { API_TEXT } from '../text.js';
+import type { Ports } from '../wiring.js';
+import { datePairFigureOf } from './datePairs.js';
+import { readNow, toFlightList } from './flightLists.js';
+import { safeSearchLink } from './links.js';
+import { partiallyVerifiedCells } from './load.js';
+import { pairingBookingUrl } from './pairings.js';
+import { verificationConfigured } from './results.js';
+import { priceOf, type ResultRow } from './rows.js';
+import { classifyCells, parentFacts } from './scope.js';
+import { currentSpace } from './space.js';
+import { tripLog } from './tripLog.js';
+
+export type TripQuery = z.infer<typeof apiContract.tripQuerySchema>;
+export type TripResponse = z.infer<typeof apiContract.tripResponseSchema>;
+
+/** A calendar date of the query, else the scope parser's own 422 (`invalid_date_pair`, on that field). */
+function dateOf(raw: string, field: 'departureDate' | 'returnDate'): IsoDate {
+  const d = isoDateSchema.safeParse(raw);
+  if (d.success) return d.data;
+  throw new ApiError(
+    422,
+    'invalid_date_pair',
+    API_TEXT.invalidDatePair,
+    fieldsDetail([{ field, message: API_TEXT.invalidDatePair }]),
+  );
+}
+
+/** The newest of `rows` by fetch time (ties: the first), as a price with whether a later search found it gone. */
+function newestOf(rows: readonly ResultRow[]): TripResponse['calendar'] {
+  let best: ResultRow | null = null;
+  for (const r of rows)
+    if (best === null || Date.parse(r.provenance.fetchedAt) > Date.parse(best.provenance.fetchedAt)) best = r;
+  // why: decision 54: a newer search found the cell empty, so the price is "not seen again"
+  return best === null ? null : { ...priceOf(best), notSeenAgain: best.superseded };
+}
+
+export function assembleTrip(
+  def: SearchDefinition,
+  q: TripQuery,
+  ports: Ports,
+  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned'>,
+): TripResponse {
+  const departureDate = dateOf(q.departureDate, 'departureDate');
+  const returnDate = dateOf(q.returnDate, 'returnDate');
+  if (returnDate < departureDate)
+    throw new ApiError(
+      422,
+      'invalid_date_pair',
+      API_TEXT.invalidDatePair,
+      fieldsDetail([{ field: 'returnDate', message: API_TEXT.invalidDatePair }]),
+    );
+  const today = ports.clock.todayLondon();
+  const space = currentSpace(def, today);
+  const unavailable = flightReadUnavailable(
+    { providers: new Map(ports.providers.map((p) => [p.id, p])) },
+    def,
+  );
+  const refreshHours = refreshHoursOf(def, FLIGHT_LIST_PROVIDER);
+  const limits = flightLimitsOf(def.constraints);
+  const pagesPlanned = engine.flightPagesPlanned();
+  const pair = { departureDate, returnDate };
+  const always = {
+    departureDate,
+    returnDate,
+    nights: daysBetween(departureDate, returnDate),
+    verificationConfigured: verificationConfigured(def),
+    refreshHours,
+    limits,
+  };
+  // why: Ruling 4: the board's window test (the current space always starts tomorrow, so a departed pair is outside
+  // it), before the scope is parsed, so an old link to departed dates, or to dates the search no longer covers, is a 200
+  const inWindow =
+    space.departureFrom <= space.departureTo && datePairIndex(space, departureDate, returnDate) !== null;
+  if (!inWindow)
+    return {
+      ...always,
+      inWindow: false,
+      figure: null,
+      journeyLeftOut: 0,
+      listFailure: null,
+      cells: [],
+      flightList: null,
+      bookingUrl: null,
+      searchLink: null,
+      booking: null,
+      calendar: null,
+      cached: null,
+      log: [],
+      reading: false,
+      read: { available: unavailable === null, unavailableReason: unavailable, wouldGo: false, pagesPlanned },
+    };
+
+  const { figure, journeyLeftOut, scope, loaded, chosen } = datePairFigureOf(
+    def,
+    {
+      departureDate: q.departureDate,
+      returnDate: q.returnDate,
+      origins: q.origins,
+      destinations: q.destinations,
+      maxJourneyMinutes: q.maxJourneyMinutes,
+    },
+    ports,
+  );
+  const inScope = (c: { origin: string; destination: string }) =>
+    scope.space.origins.some((o) => o === c.origin) &&
+    scope.space.destinations.some((d) => d === c.destination);
+  // why: Ruling 3, Review Focus 3: the figure's own cell; with none, the read cell, which is the one a read with no pair
+  // named takes (the search's first origin and destination, in its own order), kept inside the filtered scope
+  const readOrigin = space.origins.find((o) => scope.space.origins.includes(o));
+  const readDestination = space.destinations.find((d) => scope.space.destinations.includes(d));
+  const cell: CellKey | null =
+    figure !== null
+      ? { origin: figure.origin, destination: figure.destination, ...pair }
+      : readOrigin === undefined || readDestination === undefined
+        ? null
+        : { origin: readOrigin, destination: readDestination, ...pair };
+  const pointOfSale = ports.config.pointOfSale;
+  const list =
+    cell === null
+      ? undefined
+      : ports.repos.flightLists.newestPerCell(def.id, [cell], def.cabin, pointOfSale)[0];
+  const chosenPairing = list?.returns == null ? null : cheapestPairing(list.returns, list.flights, limits);
+  const classes = classifyCells(
+    scope.space,
+    parentFacts(ports, loaded.latestParent),
+    ports.repos.cells.childVerificationRollUps(def.id),
+    { partiallyVerified: partiallyVerifiedCells(loaded) },
+  );
+  // why: the core rule that names a calendar price's label (`cached` only for the Aviasales cache)
+  const isCached = (r: ResultRow) =>
+    priceLabelKind({ kind: 'calendar', providerId: r.provenance.providerId }, false) === 'cached';
+  const mark = engine.flightReadInFlight();
+  // why: the wire's figure is the board's less its airport-pair index (`datePairFigureSchema`), as `/results` sends it
+  let figureOut: TripResponse['figure'] = null;
+  if (figure !== null) {
+    const { airportPair: _airportPair, ...rest } = figure;
+    figureOut = rest;
+  }
+  return {
+    ...always,
+    inWindow: true,
+    figure: figureOut,
+    journeyLeftOut,
+    listFailure:
+      list?.status === 'failed' && list.reason !== null ? { at: list.fetchedAt, cause: list.reason } : null,
+    cells: classes.map((c) => ({
+      origin: c.cell.origin,
+      destination: c.cell.destination,
+      bucket: c.bucket,
+      skipReason: c.skipReason,
+    })),
+    flightList: list === undefined ? null : toFlightList(list, loaded.rc.now, refreshHours),
+    bookingUrl: list === undefined || chosenPairing === null ? null : pairingBookingUrl(list, chosenPairing),
+    searchLink: cell === null ? null : safeSearchLink(FLIGHT_LIST_PROVIDER, cell, def, null, pointOfSale),
+    // why: a verified figure's own booking, re-validated when its row was read (`verifiedRow` through `safeBooking`)
+    booking: figure?.basis === 'verified' && chosen !== null ? chosen.booking : null,
+    calendar: newestOf(loaded.calendar.filter((r) => !isCached(r))),
+    cached: newestOf(loaded.calendar.filter(isCached)),
+    log: tripLog({
+      executions: loaded.all,
+      prices: ports.repos.calendarPrices
+        .perExecutionForDatePair(def.id, departureDate, returnDate)
+        .filter((p) => p.price.cabin === def.cabin && inScope(p.price.cell)),
+      lists: ports.repos.flightLists
+        .forDatePair(def.id, departureDate, returnDate, def.cabin, pointOfSale)
+        .filter(inScope),
+      rc: loaded.rc,
+      limits,
+      refreshHours,
+    }),
+    reading:
+      mark !== null &&
+      mark.definitionId === def.id &&
+      mark.departureDate === departureDate &&
+      mark.returnDate === returnDate,
+    read: {
+      available: unavailable === null,
+      unavailableReason: unavailable,
+      wouldGo: readNow(unavailable, today, space, pair, list ?? null),
+      pagesPlanned,
+    },
+  };
+}

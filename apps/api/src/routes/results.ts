@@ -1,4 +1,4 @@
-/** Spec §10 read routes over a definition's executions: results, the date pairs, the views, and the cell detail. */
+/** Spec §10 read routes over a definition's executions: results, the date pairs, a trip, the views, the cell detail. */
 import { apiContract, type CellKey, iataSchema, isoDateSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
 import { assembleCalendarGap } from '../read/calendarGap.js';
@@ -6,6 +6,7 @@ import { assembleCellDetail } from '../read/cell.js';
 import { assembleCoverage } from '../read/coverageView.js';
 import { assembleDatePairs } from '../read/datePairs.js';
 import { assembleResults } from '../read/results.js';
+import { assembleTrip } from '../read/trip.js';
 import { API_TEXT } from '../text.js';
 import { NO_INPUT, plain, route } from './define.js';
 import { getLiveDefinition, param } from './shared.js';
@@ -33,6 +34,12 @@ export const resultHandlers: HandlerTable = {
     { request: NO_INPUT, query: apiContract.datePairsQuerySchema },
     (c, input, ctx) =>
       c.json(assembleDatePairs(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
+  ),
+  // why: design 2026-11-08 §6.1: one trip's dates; the query arrives as strings and the api answers its own 422s
+  'GET /api/definitions/:id/trip': route(
+    { request: NO_INPUT, query: apiContract.tripQuerySchema },
+    (c, input, ctx) =>
+      c.json(assembleTrip(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports, ctx.engine)),
   ),
   'GET /api/definitions/:id/coverage': plain((c, input, ctx) =>
     c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),

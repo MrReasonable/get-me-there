@@ -108,8 +108,14 @@ const BOOKING_SELECTED: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
   'unrecognised',
   'expand-failed',
 ]);
-/** The booking statuses that may keep offers (test-r3-001: an expand-failed read keeps the offers read before it). */
-const BOOKING_WITH_OFFERS: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['read', 'expand-failed']);
+/**
+ * The booking statuses that may keep offers (test-r3-001: an expand-failed read keeps the offers read before it), and
+ * the only ones whose read saw the booking page's address (design §6.3; Ruling 5 reads it there).
+ */
+export const BOOKING_WITH_OFFERS: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
+  'read',
+  'expand-failed',
+]);
 
 /**
  * One seller's offer on the booking view (spec rev 56 §2): "Continue to book with <seller>[, <fare>] for <price> British

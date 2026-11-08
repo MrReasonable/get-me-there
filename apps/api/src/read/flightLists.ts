@@ -17,6 +17,7 @@ import {
   isoDateSchema,
   listFresh,
   MAX_FLIGHT_LIST_PAIRS,
+  type ResolvedSpace,
   type SearchDefinition,
 } from '@gmt/core';
 import type { StoredFlightList } from '@gmt/db';
@@ -107,6 +108,29 @@ function googleLink(
  */
 const NO_READ_AGAIN: ReadonlySet<string> = new Set(['execution-cap']);
 
+/**
+ * Whether a read of a date pair would go now (spec rev 55 §10 `readNow`; the Trip page's `read.wouldGo`): flight lists
+ * can be read here, the pair departs after today and is inside the search's current dates (the engine's own window
+ * test, flightRead.ts, so the button never offers a read it refuses), and its newest list is not a failed list a
+ * per-run limit stopped. why: the operator asking is the reason to read (design §6.1): a fresh list and a pair with no
+ * figure both read.
+ */
+export function readNow(
+  unavailable: string | null,
+  today: IsoDate,
+  space: ResolvedSpace,
+  pair: DatePairAsk,
+  list: Pick<StoredFlightList, 'status' | 'reason'> | null,
+): boolean {
+  return (
+    unavailable === null &&
+    pair.departureDate > today &&
+    space.departureFrom <= space.departureTo &&
+    datePairIndex(space, pair.departureDate, pair.returnDate) !== null &&
+    !(list?.status === 'failed' && NO_READ_AGAIN.has(list.reason ?? ''))
+  );
+}
+
 /** Spec revision 55 §10: the GET's answer over `def` for the asked `pairs`, in the order asked. */
 export function assembleFlightLists(
   def: SearchDefinition,
@@ -190,15 +214,7 @@ export function assembleFlightLists(
         link,
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
-        // why: the operator asking is the reason to read (design §6.1): a fresh list and a pair with no figure both read;
-        // only a search that cannot read flights, a departed date pair, one outside the search's current dates and a list a per-run limit stopped do not
-        readNow:
-          unavailable === null &&
-          p.departureDate > today &&
-          // why: the engine's own window test (flightRead.ts), so the button never offers a read it refuses
-          space.departureFrom <= space.departureTo &&
-          datePairIndex(space, p.departureDate, p.returnDate) !== null &&
-          !(list?.status === 'failed' && NO_READ_AGAIN.has(list.reason ?? '')),
+        readNow: readNow(unavailable, today, space, p, list ?? null),
       };
     }),
   };

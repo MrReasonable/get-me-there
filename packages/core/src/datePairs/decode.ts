@@ -161,6 +161,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
         provenance: columnAt(r.provenances, columnAt(q.provenance, k)),
         stale: columnAt(q.stale, k),
         ageHours: columnAt(q.ageHours, k),
+        bookingUrl: columnAt(q.bookingUrl, k),
       };
   return {
     executionId: r.executionId,

@@ -8,6 +8,7 @@ import {
   daysBetween,
   type HistoryPoint,
   type Iata,
+  type IsoDate,
   type IsoDateTime,
   type PointOfSale,
   type ProviderId,
@@ -148,6 +149,21 @@ SELECT ranked.*, CAST(julianday(ranked.return_date) - julianday(ranked.departure
 FROM ranked LEFT JOIN cell_outcomes src ON src.execution_id = ranked.execution_id AND src.origin = ranked.origin AND src.destination = ranked.destination
   AND src.departure_date = ranked.departure_date AND src.return_date = ranked.return_date AND src.stage = 'discovery' AND src.provider_id = ranked.provider_id
 WHERE ranked.rn = 1 ORDER BY ranked.provider_id, ranked.fetched_at, ranked.id`;
+
+/**
+ * Design 2026-11-08 §6.1 (the Trip page's log): every price the definition's executions fetched for one date pair
+ * (reused copies left out: the copying run did not search the cell), newest execution first by (created_at, rowid),
+ * then by id, each with its discovery outcome's `last_error` for truncation (decisions 36, 47).
+ */
+const PER_EXECUTION_FOR_DATE_PAIR_SQL = `
+SELECT p.*, src.last_error AS source_last_error
+FROM calendar_prices p
+JOIN search_executions e ON e.id = p.execution_id
+LEFT JOIN cell_outcomes src ON src.execution_id = p.execution_id AND src.origin = p.origin AND src.destination = p.destination
+  AND src.departure_date = p.departure_date AND src.return_date = p.return_date AND src.stage = 'discovery' AND src.provider_id = p.provider_id
+WHERE e.definition_id = @definitionId AND p.departure_date = @departureDate AND p.return_date = @returnDate
+  AND p.reused_from_execution_id IS NULL
+ORDER BY e.created_at DESC, e.rowid DESC, p.id`;
 
 const spaceParams = (space: ResolvedSpace | null) => ({
   spaced: space === null ? 0 : 1,
@@ -367,6 +383,26 @@ export class CalendarPricesRepo {
       .prepare<Record<string, unknown>, MarkedDbRow>(LATEST_HELD_BY_SQL)
       .all({ ids: JSON.stringify(executionIds), cabin, ...spaceParams(space) })
       .map(toMarkedRow);
+  }
+
+  /**
+   * Design 2026-11-08 §6.1: every price an execution of the definition fetched itself for the date pair, newest
+   * execution first, with the `last_error` of the discovery outcome that fetched it. One statement.
+   */
+  perExecutionForDatePair(
+    definitionId: string,
+    departureDate: IsoDate,
+    returnDate: IsoDate,
+  ): Array<{ executionId: string; price: CalendarPriceRow; sourceLastError: string | null }> {
+    return this.db.raw
+      .prepare<Record<string, unknown>, CalendarPriceDbRow & { source_last_error: string | null }>(
+        PER_EXECUTION_FOR_DATE_PAIR_SQL,
+      )
+      .all({ definitionId, departureDate, returnDate })
+      .map((r) => {
+        const price = toCalendarPriceRow(r);
+        return { executionId: price.executionId, price, sourceLastError: r.source_last_error };
+      });
   }
 
   /** Calendar-gap source (spec §10): latest calendar prices strictly below the cheapest verified price. */

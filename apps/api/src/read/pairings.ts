@@ -7,6 +7,8 @@
  * `offersComplete`), and the stored limits against today's (`sameFlightLimits`). A list never changes coverage.
  */
 import {
+  BOOKING_WITH_OFFERS,
+  bookingReturnOf,
   type CellKey,
   cellKeyString,
   cheapestPairing,
@@ -23,6 +25,7 @@ import {
   pairingPrice,
   RETURN_FINISHED,
   type SearchDefinition,
+  type StopDetail,
   sameFlightLimits,
 } from '@gmt/core';
 import type { StoredFlightList } from '@gmt/db';
@@ -54,6 +57,29 @@ export function flightListProvenance(
     pointOfSale: l.pointOfSale,
     cabin: 'economy',
   };
+}
+
+/**
+ * Ruling 5: the booking page's address the list's booking read saw, only when that read is `pairing`'s: its attempt
+ * and return are `bookingReturnOf`'s (the one return-pick rule the worker books) and the pairing's, and it is a read that
+ * reached the booking page (`BOOKING_WITH_OFFERS`). The rule `pairingOffer` holds for the offers, so an address is never
+ * shown for a pairing it was not read for; otherwise null, and the price links to the Google Flights search.
+ */
+export function pairingBookingUrl(
+  list: StoredFlightList,
+  pairing: { attempt: number; returnIndex: number },
+): string | null {
+  const r = list.returns;
+  const b = r?.booking ?? null;
+  if (r === null || b === null || !BOOKING_WITH_OFFERS.has(b.status)) return null;
+  const booked = bookingReturnOf(r, list.flights);
+  const forPairing =
+    booked !== null &&
+    b.attempt === booked.attempt &&
+    b.returnIndex === booked.returnIndex &&
+    b.attempt === pairing.attempt &&
+    b.returnIndex === pairing.returnIndex;
+  return forPairing ? b.bookingUrl : null;
 }
 
 /**
@@ -108,6 +134,7 @@ export function candidateOf(
     underCurrentLimits: sameFlightLimits(r.limits, limits),
     fetchedAt: l.fetchedAt,
     executionId: l.executionId,
+    bookingUrl: pairingBookingUrl(l, p),
   };
 }
 
@@ -141,6 +168,8 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
     provenance: c.provenance,
     stale: c.stale,
     ageHours: c.ageHours,
+    // why: Ruling 6: the board's group carries the address, so a read trip's price is its booking link on every row
+    bookingUrl: c.bookingUrl,
   };
 }
 
@@ -177,12 +206,31 @@ export function pairingsFor(
   );
   return (cell) => {
     const l = newest.get(cellKeyString(cell));
-    if (l === undefined) return NOT_READ;
-    // why: a list has a reason exactly when it failed (flight_lists_failed_reason_ck)
-    if (l.reason !== null) return { read: 'list-failed', reason: l.reason, candidate: null };
-    if (l.returns === null || !RETURN_FINISHED.has(l.returns.status))
-      return { read: 'outbound-only', candidate: null };
-    const candidate = candidateOf(l, limits, now, refreshHours);
-    return candidate === null ? { read: 'no-pairing-read', candidate: null } : { candidate };
+    return l === undefined ? NOT_READ : listReadOf(l, limits, now, refreshHours);
   };
+}
+
+/** What a stored list read: never `not-read` (that is a cell with no list). */
+export type ListRead =
+  | { read: 'outbound-only' | 'no-pairing-read'; candidate: null }
+  | { read: 'list-failed'; reason: StopDetail; candidate: null }
+  | { candidate: PairingCandidate };
+
+/**
+ * What one stored list read (spec rev 56 §6.9), the board's per-cell rule and the Trip log's per-run one: a failed list
+ * is `list-failed` with its reason (the 21.6 ruling: it read nothing, the outbound included); a list with no finished
+ * return phase is `outbound-only`; a finished one gives its candidate under `limits`, or `no-pairing-read`.
+ */
+export function listReadOf(
+  l: StoredFlightList,
+  limits: FlightLimits,
+  now: IsoDateTime,
+  refreshHours: number,
+): ListRead {
+  // why: a list has a reason exactly when it failed (flight_lists_failed_reason_ck)
+  if (l.reason !== null) return { read: 'list-failed', reason: l.reason, candidate: null };
+  if (l.returns === null || !RETURN_FINISHED.has(l.returns.status))
+    return { read: 'outbound-only', candidate: null };
+  const candidate = candidateOf(l, limits, now, refreshHours);
+  return candidate === null ? { read: 'no-pairing-read', candidate: null } : { candidate };
 }

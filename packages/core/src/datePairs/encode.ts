@@ -36,6 +36,11 @@ export interface DatePairPairing {
   provenance: Provenance;
   stale: StaleMark;
   ageHours: number | 'unknown';
+  /**
+   * Ruling 6: the booking page's address the list's booking read saw, exactly when that read is this pairing's (Ruling
+   * 5); else null. Any string up to MAX_URL_LENGTH: the web re-checks it through `bookingTargetOf` (Ruling 8).
+   */
+  bookingUrl: string | null;
 }
 
 /**
@@ -217,6 +222,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     provenance: [],
     stale: [],
     ageHours: [],
+    bookingUrl: [],
   };
   const cheaper: DatePairsResponse['cheaperCached'] = {
     figure: [],
@@ -321,6 +327,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairing.provenance.push(entry(q.provenance));
       pairing.stale.push(q.stale);
       pairing.ageHours.push(q.ageHours);
+      pairing.bookingUrl.push(q.bookingUrl);
     }
   }
   const { space, scope } = d;

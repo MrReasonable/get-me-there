@@ -236,6 +236,11 @@ export interface PairingCandidate {
   underCurrentLimits: boolean;
   fetchedAt: IsoDateTime;
   executionId: string | null;
+  /**
+   * The booking page's address the list's booking read saw, only when that read is this pairing's (Ruling 5, the rule
+   * `pairingOffer` holds for offers); null otherwise. Stored as any string: `bookingTargetOf` re-checks it (Ruling 8).
+   */
+  bookingUrl: string | null;
 }
 
 /** The hour in milliseconds. */

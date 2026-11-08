@@ -40,6 +40,7 @@ const pairingFigure = (group: Partial<DatePairPairing> = {}) => {
       provenance: list,
       stale: false,
       ageHours: 4,
+      bookingUrl: null,
       ...group,
     },
     pairingRead: 'within',

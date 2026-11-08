@@ -99,6 +99,8 @@ function fill(path: string, ids: { def: string; exec: string; alert: string }): 
     .replace(':departureDate', '2026-11-02')
     .replace(':returnDate', '2026-11-12');
   if (p === '/api/airports') return `${p}?q=LHR`;
+  // why: design 2026-11-08 §6.1 — the trip read answers for the dates asked
+  if (p.endsWith('/trip')) return `${p}?departureDate=2026-11-02&returnDate=2026-11-12`;
   // why: spec revision 55 §10 — the flight lists answer for the date pairs asked (the POST refuses the query anyway)
   return p.endsWith('/flight-lists') ? `${p}?pairs=2026-11-02_2026-11-12` : p;
 }
