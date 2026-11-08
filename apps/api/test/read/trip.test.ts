@@ -324,6 +324,30 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     expect(t.read).toMatchObject({ wouldGo: false, origin: 'LHR', destination: 'JFK' });
   });
 
+  // fix round 2: the board asked the calendar cell and found no list there; the card says the same, never the
+  // verified figure's own cell's list
+  it('a stale verified figure whose best calendar cell has no list: no list fields, the read names the calendar cell', async () => {
+    const { x, def } = await harness({ STALE_AFTER_HOURS: '24' });
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-40), finishedAt: at(-39) });
+    s.cells('E', [A, G], { selected: [{ cell: G, reason: 'top_n' }] });
+    s.tile('E', A, { status: 'priced', fetchedAt: at(-40), pricePence: 40_000 });
+    s.verified('E', G, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-30) }]);
+    store(x, def, G, { hoursAgo: 2, returns: oneSeller({ bookingUrl: LGW_BOOKING_URL }) });
+    const t = await tripOf(x, def.id, Q);
+    expect(t.figure).toMatchObject({
+      basis: 'verified',
+      origin: 'LGW',
+      price: { stale: 'setting' },
+      pairingRead: 'not-read',
+    });
+    expect(t.flightList).toBeNull();
+    expect(t.bookingUrl).toBeNull();
+    expect(t.listFailure).toBeNull();
+    expect(t.searchLink).toEqual(safeSearchLink('camoufox', A, def, null, 'GB'));
+    expect(t.read).toMatchObject({ wouldGo: true, origin: 'LHR', destination: 'JFK' });
+  });
+
   // Review Focus 4: an old alert link for departed dates, and dates outside the search's current dates, answer 200
   it.each([
     ['departed dates', 'departureDate=2026-10-12&returnDate=2026-10-22', 10],

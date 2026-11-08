@@ -154,14 +154,15 @@ export function assembleTrip(
   const inScope = (c: { origin: string; destination: string }) =>
     scope.space.origins.some((o) => o === c.origin) &&
     scope.space.destinations.some((d) => d === c.destination);
-  // why: the controller's ruling (goal 4: the card agrees with the board): the cell whose flight read the figure carries
-  // (a stale verified figure's is its date pair's best calendar cell, maybe another airport pair); else the figure's own
+  // why: the controller's ruling (goal 4: the card agrees with the board): the cell whose flight read the board asked,
+  // even when it found no list there (a stale verified figure's is its date pair's best calendar cell, maybe another
+  // airport pair; a fresh verified figure asks none); else the figure's own
   // cell (Review Focus 3); with no figure, the read cell (Ruling 3), the one a read with no pair named takes (the
   // search's first origin and destination, in its own order), kept inside the filtered scope
   const readOrigin = space.origins.find((o) => scope.space.origins.includes(o));
   const readDestination = space.destinations.find((d) => scope.space.destinations.includes(d));
   const cell: CellKey | null =
-    figure !== null && figure.pairingRead !== 'not-read' && pairingCell !== null
+    figure !== null && pairingCell !== null
       ? pairingCell
       : figure !== null
         ? { origin: figure.origin, destination: figure.destination, ...pair }
