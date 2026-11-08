@@ -3049,10 +3049,12 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   `no-outbound` and a clean `read` stop nothing. The step reads its date
   pairs `CAMOUFOX_PAGES_AT_ONCE` at a time (one at the default), in the
   plan's order; a request already sent when another sets `returnsStopped`
-  or `bookingStopped` keeps the phase it was sent with, and when a result
-  ends the step (the error table's "the rest" column) a page already in
-  flight writes its own row and only the pairs no page had started fail
-  with that reason, with no request. Each page carries the run's own
+  or `bookingStopped` keeps the phase it was sent with. The first stop the
+  step meets (a cancel, the window, or a result that ends the step: the
+  error table's "the rest" column) decides how it ends; a page already in
+  flight then writes its own row and stops nothing more, and after an
+  ending result only the pairs no page had started fail with that reason,
+  with no request. Each page carries the run's own
   cancel signal (cancel, SIGTERM, a fatal error) with an intake of its own,
   never a lane's intake or the run's discovery intake, which a budget stop
   has already aborted; and before every page it passes a gate of its own that
@@ -5701,8 +5703,9 @@ as specified in §5.3; no secrets, no full URLs.
 
 The flight-list step read its date pairs one at a time while the grid pages around it ran `CAMOUFOX_PAGES_AT_ONCE` at
 a time. It now reads them that many at a time too, in the plan's order: a request already sent keeps the return phase
-it was sent with when another sets `returnsStopped` or `bookingStopped`, and when a result ends the step a page
-already in flight writes its own row while only the pairs not yet started fail with that reason. The allowance is
+it was sent with when another sets `returnsStopped` or `bookingStopped`, and the first stop the step meets (a cancel,
+the window or an ending result) decides how it ends: a page already in flight writes its own row, and after an
+ending result only the pairs not yet started fail with that reason. The allowance is
 unchanged and still held at each request's reservation. The estimate's flight line now takes 25 s for a first view
 after the spacing (it took 40 s), as ten outbound-only reads measured on 2026-11-07 (19–28.5 s, 23.5 s on average),
 and with pages at once counts its pairs in waves of that many, never quicker than its page starts spaced apart. The
