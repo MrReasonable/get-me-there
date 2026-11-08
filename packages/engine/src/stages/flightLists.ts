@@ -469,14 +469,16 @@ function confirmPlanOf(ctx: EngineContext, run: RunState, stored: FlightListsSta
   }).filter((p) => p.departureDate > today);
   let standings = EMPTY_STANDINGS;
   let reused = 0;
-  // why: §4.3: an itinerary price the latest search saw, within its age, is a confirmed trip already: no page
+  const own = ctx.repos.flightLists.cellsOfExecution(run.executionId);
+  const ownKeys = new Set(own.map(cellKeyString));
+  // why: §4.3: an itinerary price the latest search saw, within its age, is a confirmed trip already: no page. A pair
+  // this run already read is counted once, as that read (§4.7): verification may price it after a step that ended
+  // `window`, and counting it again would inflate "Checked N", the trips and the 5th price
   for (const p of live)
-    if (p.current && p.basis === 'verified' && !p.stale) {
+    if (p.current && p.basis === 'verified' && !p.stale && !ownKeys.has(cellKeyString(p))) {
       standings = applyCheck(standings, { kind: 'confirmed', pricePence: p.pricePence }, 'reuse');
       reused += 1;
     }
-  const own = ctx.repos.flightLists.cellsOfExecution(run.executionId);
-  const ownKeys = new Set(own.map(cellKeyString));
   let unread = 0;
   // why: §4.7: this run's own lists count as reads already made, not as reuse; their patience is not carried over
   const ownLists =

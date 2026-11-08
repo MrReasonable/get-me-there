@@ -396,6 +396,58 @@ describe('a resumed confirm-mode step (design 2026-11-08 §4.7)', () => {
     expect(second).toHaveLength(1);
   }, 15_000);
 
+  // why: a step that ended `window` leaves the run going on to verification, which may price a pair the step already
+  // read; the resumed pass counts that pair once, as the read this run made, never again as a verified figure
+  it('a pair this run read that has since a fresh verified figure counts once on the resume, as a read', async () => {
+    let id = '';
+    let verifiedFirst = false;
+    const ranking = rankedPairs(40);
+    const cam = stubCamoufox({
+      cells: 15,
+      flights: {
+        answer: (q) => byPlace(q),
+        onStart: (n) => {
+          if (n !== 4 || verifiedFirst) return;
+          const end = e.ctx.repos.executions.get(id)?.browserWindowEnd ?? null;
+          if (end !== null) e.clock.set(asIsoDateTime(new Date(Date.parse(end) + 1_000).toISOString()));
+        },
+      },
+    });
+    const e: CamoufoxEngine = engineWith([cam], {
+      rankedDatePairs: (q) =>
+        ranking(q).map((p, i) =>
+          verifiedFirst && i === 0
+            ? {
+                ...p,
+                basis: 'verified',
+                pricePence: 30_000,
+                providerId: 'searchapi',
+                sourceKind: 'scraped-search',
+              }
+            : p,
+        ),
+    });
+    e.ctx.workerFlags.set('camoufox', RETURNS_ONLY);
+    id = await start(e);
+    const first = await e.settled(id);
+    expect(first.flightLists).toMatchObject({ ended: 'window', reused: 0, confirm: { confirmed: 2 } });
+    expect(first.flightLists?.cells).toHaveLength(3);
+    // verification has since priced the first pair (read by this run) as a fresh, current itinerary price
+    verifiedFirst = true;
+    e.ctx.repos.executions.patch(id, {
+      browserWindowEnd: asIsoDateTime(new Date(Date.parse(e.clock.now()) + 86_400_000).toISOString()),
+    });
+    await runFlightLists(e.ctx, pass(e, id));
+    const resumed = e.ctx.repos.executions.get(id)?.flightLists;
+    expect(resumed?.cells).toHaveLength(15);
+    expect(resumed).toMatchObject({
+      planned: 15,
+      reused: 0,
+      confirm: { confirmed: 2, unread: 1, stop: 'patience' },
+    });
+    expect(cam.flightCalls.filter((c) => placeOf(c.query) === 0)).toHaveLength(1);
+  }, 15_000);
+
   it('a step that finished at patience reads nothing on a later pass of the run (as after a verification pause)', async () => {
     const { e, cam } = confirming();
     const done = await e.settled(await start(e));
