@@ -132,13 +132,21 @@ function flightPairsWanted(
   }
   const now = ctx.clock.now();
   const today = ctx.clock.todayLondon();
-  const ranked = reader({
+  const raw = reader({
     definitionId,
     space: snapshot.resolved,
     cabin: snapshot.cabin,
     maxJourneyMinutes: snapshot.constraints.maxJourneyMinutes ?? null,
     now,
-  }).filter((p) => p.departureDate > today && !own.has(cellKeyString(p)));
+  });
+  // why: a search that has never run has no ranking (only date pairs with a figure are ranked); its run ranks after
+  // discovery and reads from the whole space, so the estimate counts the space with nothing reused, as an unsaved one
+  // does. A queue the filters empty below (all departed, all read this run) is a genuine 0.
+  if (raw.length === 0) {
+    const queue = phase.returns ? space : Math.min(FLIGHT_LIST_COUNT, space);
+    return reads(queue, queue, 0);
+  }
+  const ranked = raw.filter((p) => p.departureDate > today && !own.has(cellKeyString(p)));
   const queue = (phase.returns ? confirmQueue(ranked) : ranked).slice(0, count);
   const newest = new Map(
     ctx.repos.flightLists

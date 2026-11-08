@@ -257,14 +257,15 @@ describe('one pass of the step, its plan and its pages', () => {
     let ranking: RankedDatePairsReader = rankedPairs(15);
     const e = engineWith([cam], { rankedDatePairs: (q) => ranking(q) });
     await e.settled(await start(e)); // its step reads the 10 cheapest
-    // why: the first five were read by the first run moments ago; the last five of the 15 never were. The ranking is
-    // set before the second run starts: its estimate (design 2026-11-08 §6) sizes the browser window from the queue it
-    // reads, so an empty ranking at start would give the step no time to run in
+    ranking = () => [];
+    const second = await e.settled(await start(e));
+    // why: the first five were read by the first run moments ago; the last five of the 15 never were
     ranking = (q) => {
       const all = rankedPairs(15)(q);
       return [...all.slice(0, 5), ...all.slice(10)];
     };
-    const second = await e.settled(await start(e));
+    const run = newRun(e.ctx, second, { manual: false, fresh: false, blocked: new Set() });
+    await runFlightLists(e.ctx, run);
     expect(row(e, second.id).flightLists).toMatchObject({ planned: 10, reused: 5 });
     const plan = row(e, second.id).flightLists;
     if (plan === null) throw new Error('no plan');

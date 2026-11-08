@@ -874,6 +874,19 @@ describe('the estimate flight line is a range over the confirm queue (design 202
     expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 75, returns: false });
   });
 
+  it('a saved search with an empty ranking (never run) counts the date-pair space, nothing reused; the margin is kept', () => {
+    const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], {
+      rankedDatePairs: () => [],
+      env: AT_ONCE_4,
+    });
+    e.ctx.workerFlags.set('camoufox', BOTH);
+    const b = buildSnapshot(e.ctx, e.definition);
+    const est = estimateStart(e.ctx, b.snapshot, b.cells, e.definition.id);
+    // why: the space is 15 date pairs: typical 15, at most 15, 4 at once at 25 s
+    expect(est.flightLists).toMatchObject({ pairs: 15, seconds: 100, pagesMax: 30, returns: true });
+    expect(flightWindowMarginSeconds(e.ctx, est, null)).toBeGreaterThan(0);
+  });
+
   it('a pair whose verified figure is fresh is left out of the queue (design §4.2)', () => {
     const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], {
       rankedDatePairs: (q) =>
