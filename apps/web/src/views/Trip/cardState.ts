@@ -23,6 +23,7 @@ export type CardState =
   | { kind: 'calendar-only' }
   | { kind: 'gone' }
   | { kind: 'over-journey-limit' }
+  | { kind: 'could-not-read' }
   | { kind: 'no-price' }
   | { kind: 'not-offered' }
   | { kind: 'not-reached' }
@@ -88,8 +89,9 @@ function withoutFigure(r: TripResponse): CardState {
         c.bucket === bucket &&
         (reasons === undefined || (c.skipReason !== null && reasons.includes(c.skipReason))),
     );
-  // why: an error is "couldn't read" (the line sits beside the state), with no price to show
-  if (has('error') || has('empty')) return { kind: 'no-price' };
+  // why: design §3: "couldn't read" must never look like "no price", so an error cell is its own state, before empty
+  if (has('error')) return { kind: 'could-not-read' };
+  if (has('empty')) return { kind: 'no-price' };
   if (has('no_data')) return { kind: 'not-offered' };
   if (has('skipped', ['budget'])) return { kind: 'not-reached' };
   if (has('skipped', ['provider_unavailable', 'scheduled_only'])) return { kind: 'browser-unavailable' };

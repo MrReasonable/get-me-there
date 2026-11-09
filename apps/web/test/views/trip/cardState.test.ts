@@ -215,8 +215,12 @@ describe('no figure: the list, the journey limit, then the cells in order', () =
     });
   });
   it.each<[string, Cell[], CardState['kind']]>([
-    ['an error', [cell('priced'), cell('error')], 'no-price'],
-    ['an error beats an empty cell', [cell('empty'), cell('error')], 'no-price'],
+    ['an error', [cell('priced'), cell('error')], 'could-not-read'],
+    [
+      'an error beats an empty cell (could not read is never no price)',
+      [cell('empty'), cell('error')],
+      'could-not-read',
+    ],
     ['an empty cell', [cell('no_data'), cell('empty')], 'no-price'],
     ['no data', [cell('skipped', 'budget'), cell('no_data')], 'not-offered'],
     ['a budget skip', [cell('skipped', 'provider_unavailable'), cell('skipped', 'budget')], 'not-reached'],
@@ -234,7 +238,7 @@ describe('no figure: the list, the journey limit, then the cells in order', () =
   });
   it("an error's card still carries the failure of the newest list beside it", () => {
     const r = trip({ cells: [cell('error')], listFailure: FAILURE });
-    expect(cardOf(r, false)).toEqual({ state: { kind: 'no-price' }, couldNotRead: FAILURE });
+    expect(cardOf(r, false)).toEqual({ state: { kind: 'could-not-read' }, couldNotRead: FAILURE });
   });
 });
 
@@ -254,6 +258,7 @@ describe('every state of the card is reachable', () => {
     'calendar-only': trip({ figure: calendarFigure({ pairingRead: 'not-read' }) }),
     gone: trip({ figure: { ...datePairFigure(), notSeenInLatest: { ageHours: 3 } } }),
     'over-journey-limit': trip({ journeyLeftOut: 1 }),
+    'could-not-read': trip({ cells: [cell('error')] }),
     'no-price': trip({ cells: [cell('empty')] }),
     'not-offered': trip({ cells: [cell('no_data')] }),
     'not-reached': trip({ cells: [cell('skipped', 'budget')] }),
