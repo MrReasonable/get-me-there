@@ -4,7 +4,8 @@ import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoMonth } from '../../format.js';
 import { useMediaQuery } from '../../hooks/useMediaQuery.js';
-import { type DatesUiState, detailPatch } from '../../state/datesState.js';
+import type { DatesUiState } from '../../state/datesState.js';
+import { tripPatch } from '../../state/tripState.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { PHONE_QUERY } from './BoardTable.js';
 import type { BoardModel } from './board.js';
@@ -180,7 +181,7 @@ export function Overview({ definition, data, model, state, ringed, lit, onLight 
       return;
     }
     const pair = cell.model.pairs[0];
-    if (pair !== undefined) updateSearchParams(detailPatch(pair), 'push');
+    if (pair !== undefined) updateSearchParams(tripPatch(pair), 'push');
   };
   handlers.current.key = (e) => {
     const pos = handlers.current.pos(e.target);

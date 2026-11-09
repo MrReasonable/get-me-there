@@ -10,6 +10,7 @@ import type {
   DefinitionUpdateBody,
   ResultsScope,
   StartExecutionBody,
+  TripQuery,
   VerifyCellBody,
 } from './types.js';
 
@@ -74,6 +75,9 @@ export const api = {
         maxJourneyMinutes: scope.maxJourneyMinutes,
       },
     }),
+  // design 2026-11-08 §6.1: one trip's dates in one call, under the scope names the date-pairs read takes
+  trip: (id: string, query: TripQuery) =>
+    call(c.tripResponseSchema, 'GET', '/api/definitions/:id/trip', { params: { id }, query }),
   coverage: (id: string) =>
     call(c.coverageResponseSchema, 'GET', '/api/definitions/:id/coverage', { params: { id } }),
   calendarGap: (id: string) =>

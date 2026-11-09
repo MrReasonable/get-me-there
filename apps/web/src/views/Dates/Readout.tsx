@@ -2,8 +2,8 @@ import type { DatePair } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
-import { detailHref, detailPatch } from '../../state/datesState.js';
-import { navigateTo } from '../../state/urlState.js';
+import { tripPatch } from '../../state/tripState.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { CheaperCached, FigurePrice } from './BoardCard.js';
 import { howFarChecked } from './howFar.js';
 import type { CellView } from './OverviewMonth.js';
@@ -88,8 +88,8 @@ export function Readout({
       </span>
       {cell !== null && cell.column.from === cell.column.to && cell.model.pairs[0] !== undefined ? (
         <a
-          href={detailHref(cell.model.pairs[0])}
-          onClick={navigateTo(detailPatch(cell.model.pairs[0]))}
+          href={hrefWith(tripPatch(cell.model.pairs[0]))}
+          onClick={navigateTo(tripPatch(cell.model.pairs[0]))}
           className="link"
         >
           {O.openThese}

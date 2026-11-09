@@ -3,13 +3,14 @@ import { oneOf } from './oneOf.js';
 
 /**
  * Every view of spec rev 55 §11 (WP20 Task 20.3): Searches is the first screen and the landing for every URL that
- * names no usable view; `dates` is a search's page (`def=`), `results` the date pair detail and `definitions` the Edit
+ * names no usable view; `dates` is a search's page (`def=`), `results` the date pair detail (until the Trip page replaces it), `trip` one trip's page and `definitions` the Edit
  * page (`edit=`). The last three are opened from a card, a board row or an alert email, never from the nav's Set up.
  */
 export type ViewId =
   | 'searches'
   | 'dates'
   | 'results'
+  | 'trip'
   | 'history'
   | 'definitions'
   | 'providers'
@@ -19,6 +20,7 @@ export const VIEWS: readonly ViewId[] = [
   'searches',
   'dates',
   'results',
+  'trip',
   'history',
   'definitions',
   'providers',

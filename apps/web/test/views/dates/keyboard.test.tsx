@@ -97,11 +97,11 @@ describe('the overview’s keyboard (spec §11)', () => {
     expect(focused()).toBe('2027-04-01|10');
   });
 
-  it('Enter on a cell opens the detail with the date pair in the URL', async () => {
+  it('Enter on a cell opens the Trip page with the date pair in the URL', async () => {
     const { user } = await focusOverview();
     await user.keyboard('{ArrowRight}{Enter}');
     expect([url().get('view'), url().get('depart'), url().get('return')]).toEqual([
-      'results',
+      'trip',
       '2027-03-14',
       '2027-03-25',
     ]);

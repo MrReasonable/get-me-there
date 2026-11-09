@@ -13,8 +13,8 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatFlapDate, formatIsoDate, formatIsoDateWords, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
-import { detailHref, detailPatch } from '../../state/datesState.js';
-import { navigateTo } from '../../state/urlState.js';
+import { tripPatch } from '../../state/tripState.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 import {
   arrival,
   calendarStyled,
@@ -488,7 +488,7 @@ export function BoardCard({
 }) {
   const f = pair.figure;
   const state = rowState(f);
-  const open = navigateTo(detailPatch(pair));
+  const open = navigateTo(tripPatch(pair));
   return (
     <tr
       data-pair={pair.index}
@@ -504,7 +504,7 @@ export function BoardCard({
         <span className="flex items-center gap-2">
           <RankFlaps rank={rank} state={state} digits={digits} />
           <a
-            href={detailHref(pair)}
+            href={hrefWith(tripPatch(pair))}
             onClick={open}
             onFocus={() => onLight(pair.index)}
             onBlur={() => onLight(null)}

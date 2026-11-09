@@ -1,15 +1,13 @@
 import { apiContract, DETAIL_LINK_PARAMS, type Iata } from '@gmt/core';
 import { datesPatch } from './datesState.js';
-import { BACK_TO_DATES, BASIS_PARAM, parseBasis, parseDetailPair, parseSelectedRow } from './resultsState.js';
+import { BACK_TO_DATES, parseDetailPair } from './resultsState.js';
 import { isView, type ViewId } from './view.js';
 
 /**
  * Where a URL lands (spec §11 URLs, WP19 Task 19.7): a view with the patch that rewrites the URL to it (applied with
- * `replace`; empty when the URL already says it), or a row lookup that needs the whole-space `/results` read first.
+ * `replace`; empty when the URL already says it).
  */
-export type Landing =
-  | { kind: 'view'; view: ViewId; patch: Record<string, string | null> }
-  | { kind: 'row-lookup'; row: string; basis: 'verified' | 'calendar' | null };
+export type Landing = { kind: 'view'; view: ViewId; patch: Record<string, string | null> };
 
 /**
  * The retired Calendar's URL keys (WP10's `CALENDAR_PARAMS`, deleted with the view in WP19 Task 19.8; bookmarks still
@@ -25,20 +23,35 @@ const CAL_DEST = 'cal.dest';
  * search's page, keeping `def=`: `calendar` and `duration` open it as it stands (a Calendar `cal.dest=<IATA>` of the
  * definition becomes the Dates destination filter; every other `cal.*` is removed), `coverage` opens it with its coverage
  * section open (all of them land on Searches when they name no `def=`). `results` with a well-formed date pair is
- * the detail; without one but with `row=` (an alert email sent before revision 48) it is a row lookup; otherwise the
- * search's page. A parameter that no longer applies is ignored, never an error.
+ * the Trip page (Ruling 9); otherwise the search's page. A parameter that no longer applies is ignored, never an error.
  *
- * Format only, no clock: whether the date pair is inside the current resolved space is the server's answer (`/results`'
- * 422 `date_pair_outside_space`, on which the detail replaces the URL with Dates).
+ * Format only, no clock: whether the date pair is inside the current resolved space is the server's answer (the trip read's
+ * `inWindow`).
  */
 export function land(params: URLSearchParams, def: { destinations: readonly Iata[] } | null): Landing {
   // why: an absent view reads as the empty string, which names no view and so lands on Searches like an unknown one
   const v = params.get(DETAIL_LINK_PARAMS.view) ?? '';
   if (v === 'results') {
-    if (parseDetailPair(params) !== null) return { kind: 'view', view: 'results', patch: {} };
-    const row = parseSelectedRow(params);
-    if (row !== null) return { kind: 'row-lookup', row, basis: parseBasis(params.get(BASIS_PARAM)) };
+    // why: design 2026-11-08 Ruling 9: an old detail link (an alert email, a bookmark) with dates opens that trip,
+    // keeping `def`, the dates and the airport and journey filters and dropping what only the Results view used
+    // (`basis`, `row`, the sort, every `f.*`); one with only `row=` (sent before revision 48) opens the search's page
+    if (parseDetailPair(params) !== null && named(params, DEF_PARAM)) {
+      const patch: Record<string, string | null> = {
+        [DETAIL_LINK_PARAMS.view]: 'trip',
+        [DETAIL_LINK_PARAMS.basis]: null,
+        [DETAIL_LINK_PARAMS.row]: null,
+      };
+      for (const key of params.keys()) if (key === 'sort' || key.startsWith('f.')) patch[key] = null;
+      return { kind: 'view', view: 'trip', patch };
+    }
     return dates(params, BACK_TO_DATES);
+  }
+  // why: a trip's page needs its search and a well-formed pair of dates; without the dates it is the search's page
+  if (v === 'trip') {
+    if (!named(params, DEF_PARAM)) return searches();
+    return parseDetailPair(params) !== null
+      ? { kind: 'view', view: 'trip', patch: {} }
+      : dates(params, BACK_TO_DATES);
   }
   if (v === 'calendar' || v === 'duration') return dates(params, calendarPatch(params, def));
   if (v === 'coverage') return dates(params, datesPatch({ coverageOpen: true }));

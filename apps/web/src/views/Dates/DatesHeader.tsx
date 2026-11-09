@@ -16,7 +16,8 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatIsoDate } from '../../format.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
-import { type DatesUiState, detailPatchOf } from '../../state/datesState.js';
+import type { DatesUiState } from '../../state/datesState.js';
+import { tripPatch } from '../../state/tripState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
 import type { BoardModel } from './board.js';
@@ -284,7 +285,7 @@ function DatesGap({
         <ul className="mt-2 space-y-1">
           {cells.map((c) => {
             const { nights: n, ...key } = c.cell;
-            const patch = detailPatchOf(c.cell, 'calendar');
+            const patch = tripPatch(c.cell);
             const label = `${COPY.coverageCheckPair(c.cell.origin, c.cell.destination)} ${COPY.dateRange(
               formatIsoDate(c.cell.departureDate),
               formatIsoDate(c.cell.returnDate),

@@ -16,6 +16,7 @@ import type {
   EstimateResponse,
   ResultsScope,
   StartRefusal,
+  TripQuery,
   VerifyCellBody,
 } from './types.js';
 
@@ -44,6 +45,18 @@ export const qk = {
   datePairs: (id: string, s: DatePairsScope) =>
     ['date-pairs', id, s.origins ?? '', s.destinations ?? '', s.maxJourneyMinutes ?? ''] as const,
   calendarGap: (id: string) => ['calendar-gap', id] as const,
+  // design 2026-11-08 §6.1: the 'trip' prefix of one search is what a flight read invalidates
+  tripOf: (id: string) => ['trip', id] as const,
+  trip: (id: string, q: TripQuery) =>
+    [
+      'trip',
+      id,
+      q.departureDate,
+      q.returnDate,
+      q.origins ?? '',
+      q.destinations ?? '',
+      q.maxJourneyMinutes ?? '',
+    ] as const,
   airports: (q: string) => ['airports', q] as const,
   // WP20 Task 20.5: an unsaved form's estimate, keyed by the very body it was asked for; a saved search's estimate; and
   // a refused Search now's answer, handed from the form to the page it opens (never fetched: see useRefusal)
@@ -241,6 +254,18 @@ export function useExecution(id: string | null) {
     queryFn: id === null ? skipToken : () => api.execution(id),
     refetchInterval: (query) =>
       query.state.data !== undefined && POLLING.has(query.state.data.status) ? POLL_MS : false,
+  });
+}
+
+/**
+ * One trip's page (design 2026-11-08 §6.1): the dates' whole story in one read, re-read every POLL_MS while it says a
+ * read is in flight (`reading`), and when a flight read is started (`useFlightRead` invalidates `qk.tripOf`) or settles.
+ */
+export function useTrip(definitionId: string, query: TripQuery | null) {
+  return useQuery({
+    queryKey: qk.trip(definitionId, query ?? { departureDate: '', returnDate: '' }),
+    queryFn: query === null ? skipToken : () => api.trip(definitionId, query),
+    refetchInterval: (q) => (q.state.data?.reading === true ? POLL_MS : false),
   });
 }
 

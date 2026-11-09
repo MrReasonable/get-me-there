@@ -255,12 +255,12 @@ describe('folded bands (spec §11 Folded bands)', () => {
 });
 
 describe('opening the detail', () => {
-  it('a click on a cell opens the detail with the date pair in the URL', async () => {
+  it('a click on a cell opens the Trip page with the date pair in the URL', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findBoard();
     await user.click(cell('2027-03-17', 10));
     expect([url().get('view'), url().get('depart'), url().get('return')]).toEqual([
-      'results',
+      'trip',
       '2027-03-17',
       '2027-03-27',
     ]);

@@ -1,15 +1,6 @@
-import {
-  apiContract,
-  type DatePair,
-  DETAIL_LINK_PARAMS,
-  type Iata,
-  type IsoDate,
-  type ResultBasis,
-  resultBasisOf,
-} from '@gmt/core';
+import { apiContract, type Iata } from '@gmt/core';
 import { oneOf } from './oneOf.js';
 import { int, nightsRange, type SortDir, sortToken, uniqueIataList } from './parse.js';
-import { hrefWith } from './urlState.js';
 
 /**
  * The Dates view's URL parameters (spec §11 URLs and Filters): the one place their names live. The filters, the sort,
@@ -121,33 +112,4 @@ export function scopeQuery(s: DatesUiState): {
     destinations: joined([...s.to].sort()) ?? undefined,
     maxJourneyMinutes: s.journey === null ? undefined : String(s.journey),
   };
-}
-
-/**
- * The patch that opens a date pair's detail (spec §11 Board, §8.3): the date pair and the basis to open on, names from
- * core's one constant; `row` dropped (it named a row of another date pair). Applied with `hrefWith`, so `def` and every
- * d.* parameter are kept. A null basis leaves the detail to §6.9's default.
- */
-export function detailPatchOf(
-  dates: { departureDate: IsoDate; returnDate: IsoDate },
-  basis: ResultBasis | null,
-): Record<string, string | null> {
-  return {
-    [DETAIL_LINK_PARAMS.view]: 'results',
-    [DETAIL_LINK_PARAMS.depart]: dates.departureDate,
-    [DETAIL_LINK_PARAMS.return]: dates.returnDate,
-    [DETAIL_LINK_PARAMS.basis]: basis,
-    [DETAIL_LINK_PARAMS.row]: null,
-  };
-}
-
-/** A date pair's detail patch, opening on its figure's basis (WP19 §5). */
-export function detailPatch(pair: DatePair): Record<string, string | null> {
-  // why: spec rev 56 §6.9: a pairing figure opens its detail on the calendar basis, the row it replaced
-  return detailPatchOf(pair, pair.figure === null ? null : resultBasisOf(pair.figure.basis));
-}
-
-/** The detail's href from the current URL (WP19 §5). */
-export function detailHref(pair: DatePair): string {
-  return hrefWith(detailPatch(pair));
 }

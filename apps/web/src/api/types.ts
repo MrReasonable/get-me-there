@@ -65,3 +65,9 @@ export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;
 /** WP20 Task 20.10 (spec rev 55 §10): a search's page's flight lists, and one stored list. */
 export type FlightListsResponse = z.output<typeof apiContract.flightListsResponseSchema>;
 export type FlightList = z.output<typeof apiContract.flightListSchema>;
+
+/** The trip read's query: the scope's wire form (`tripQuerySchema`). */
+export type TripQuery = z.input<typeof apiContract.tripQuerySchema>;
+
+/** Design 2026-11-08 §6.1: one trip's dates in one call (`GET /definitions/:id/trip`). */
+export type TripResponse = z.output<typeof apiContract.tripResponseSchema>;

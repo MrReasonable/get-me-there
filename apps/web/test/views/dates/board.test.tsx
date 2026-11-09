@@ -176,7 +176,7 @@ describe('the board (spec §11 Board)', () => {
     expect(within(boardRows(table)[1] ?? table).queryAllByTestId('arrives')).toEqual([]);
   });
 
-  it('each row’s dates are a real link to the detail carrying the figure’s basis, and a click on the row follows it', async () => {
+  it('each row’s dates are a real link to the Trip page for its dates, and a click on the row follows it', async () => {
     const { user } = renderDates({ body: workedDates(), search: search('&d.to=JFK') });
     const table = await findBoard();
     // why: design 2026-11-08 §5.1: the calendar price is the second row, after the verified figure
@@ -185,23 +185,19 @@ describe('the board (spec §11 Board)', () => {
     });
     const href = new URL(link.getAttribute('href') ?? '', 'http://localhost');
     expect(Object.fromEntries(href.searchParams)).toMatchObject({
-      view: 'results',
+      view: 'trip',
       def: 'def-0001',
       'd.to': 'JFK',
       depart: '2027-03-14',
       return: '2027-03-24',
-      basis: 'calendar',
     });
+    expect(href.searchParams.has('basis')).toBe(false);
     const before = window.history.length;
     // a click on the third row's "how far checked" cell, away from its link
     await user.click(boardRows(table)[2]?.querySelectorAll('td')[5] ?? table);
     expect(window.history.length).toBe(before + 1);
     const p = new URLSearchParams(window.location.search);
-    expect([p.get('view'), p.get('depart'), p.get('return')]).toEqual([
-      'results',
-      '2027-03-15',
-      '2027-03-25',
-    ]);
+    expect([p.get('view'), p.get('depart'), p.get('return')]).toEqual(['trip', '2027-03-15', '2027-03-25']);
   });
 
   it('the week switch shows one row per departure week and says how many weeks', async () => {

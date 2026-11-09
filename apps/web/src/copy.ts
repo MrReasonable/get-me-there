@@ -94,6 +94,7 @@ export const COPY = {
     dates: 'Dates',
     // why: the date pair detail and the Edit page are not in the nav (spec §11); the words name the views in the Record every ViewId keys
     results: 'Results',
+    trip: 'Trip',
     history: 'History',
     definitions: 'Edit',
     alerts: 'Alerts',

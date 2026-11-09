@@ -40,10 +40,13 @@ import { autoOpenFlights } from '../views/dates/render.js';
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
  * showed nothing but an error or a skeleton (neither carries a banned word or a "£").
  */
-const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
+// why: the Trip page renders from Task 7 of the trip-page plan (its state and routing land first), which adds its entry;
+// every Results link now lands on the Trip page (Ruling 9), so the retired Results view is no longer reachable to sweep
+type Swept = Exclude<(typeof VIEWS)[number], 'trip' | 'results'>;
+const SWEPT = VIEWS.filter((v): v is Swept => v !== 'trip' && v !== 'results');
+const CONTENT: Record<Swept, () => Promise<HTMLElement>> = {
   searches: () => screen.findByRole('list', { name: COPY.searchesView.listLabel }),
   dates: () => screen.findByRole('table', { name: /^Best dates/ }),
-  results: () => screen.findByRole('table', { name: 'Round trips found' }),
   // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
   history: async () => {
     const figure = await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle });
@@ -57,7 +60,7 @@ const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
 };
 
 describe('rendered views contain no banned word, and no "£" outside a price or a cost (spec §11, §9 item 6)', () => {
-  for (const view of VIEWS) {
+  for (const view of SWEPT) {
     it(`view=${view}`, async () => {
       server.use(
         http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))),
@@ -85,12 +88,10 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       );
       // why: core's filterRows hides failed rows by default (spec §6.9); every class is in the URL so every row's copy is swept.
       const classes = 'f.class=verified,partially-verified,failed,unchecked';
-      // why: Results is the date pair detail (WP19 Task 19.6): its URL names the date pair
-      const pair = view === 'results' ? '&depart=2027-03-14&return=2027-03-28' : '';
       // why: the Edit page needs `edit=` (spec rev 55 §11 URLs); the first screen's sweep covers the new-search form
       const edit = view === 'definitions' ? '&edit=def-0001' : '';
       const { user } = renderWithProviders(<App />, {
-        search: `?view=${view}&def=def-0001&${classes}${pair}${edit}`,
+        search: `?view=${view}&def=def-0001&${classes}${edit}`,
       });
       await screen.findByRole('navigation', { name: 'Views' });
       await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
@@ -98,10 +99,6 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       await CONTENT[view]();
       expect(screen.queryByText(/^Could not load:/)).toBeNull();
       expect(screen.queryByText(/^Provider status unknown/)).toBeNull();
-      if (view === 'results') {
-        for (const b of screen.getAllByRole('button', { name: /Show details/ })) await user.click(b);
-        expect(screen.getAllByRole('button', { name: /Hide details/ })).toHaveLength(4);
-      }
       if (view === 'definitions') await user.click(await screen.findByText(PLAN_COPY.moreOptions));
       const hits = findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST);
       expect(hits.map((h) => h.word)).toEqual([]);

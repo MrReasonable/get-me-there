@@ -411,7 +411,7 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
     expect(
       Object.fromEntries(new URL(links[0]?.getAttribute('href') ?? '', 'http://x').searchParams),
     ).toMatchObject({
-      view: 'results',
+      view: 'trip',
       depart: '2027-03-20',
       return: '2027-04-01',
       'd.to': 'JFK',

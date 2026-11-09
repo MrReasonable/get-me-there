@@ -16,14 +16,9 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatFlapDate, formatIsoDate } from '../../format.js';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
-import {
-  type DatesSortKey,
-  type DatesUiState,
-  datesPatch,
-  detailHref,
-  detailPatch,
-} from '../../state/datesState.js';
-import { navigateTo, updateSearchParams } from '../../state/urlState.js';
+import { type DatesSortKey, type DatesUiState, datesPatch } from '../../state/datesState.js';
+import { tripPatch } from '../../state/tripState.js';
+import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.js';
 import {
   BoardCard,
   CheaperCached,
@@ -488,7 +483,7 @@ function BoardRow({
   const state = rowState(f);
   const dep = formatIsoDate(pair.departureDate);
   const ret = formatIsoDate(pair.returnDate);
-  const open = navigateTo(detailPatch(pair));
+  const open = navigateTo(tripPatch(pair));
   // why: spec §11: a click anywhere on the row follows its link; the link and the buttons inside keep their own
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
     if (e.target instanceof Element && e.target.closest('a, button') !== null) return;
@@ -508,7 +503,7 @@ function BoardRow({
       </td>
       <td className="nowrap">
         <a
-          href={detailHref(pair)}
+          href={hrefWith(tripPatch(pair))}
           onClick={open}
           onFocus={() => onLight(pair.index)}
           onBlur={() => onLight(null)}
