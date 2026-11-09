@@ -71,6 +71,12 @@ export interface PriceCellProps {
    * words kept for screen readers and in the title, instead of repeating the words on every price of the group.
    */
   staleSaid?: boolean;
+  /**
+   * Design 2026-11-08 §5.1: the amount alone (with "≈" when converted), for a price whose one label (`PriceLabel`)
+   * sits beside it and says its kind and age, its provenance and full age one tap away in the label's detail. The
+   * provenance is validated all the same, so a price without one is withheld.
+   */
+  bare?: boolean;
 }
 
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
@@ -101,6 +107,21 @@ export function PriceCell(props: PriceCellProps) {
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];
+  if (props.bare === true) {
+    return (
+      <span data-testid="price-cell" data-bare="" className="figure whitespace-nowrap">
+        {fxTitle !== null ? (
+          <>
+            <span aria-hidden="true" title={fxTitle}>
+              {COPY.fxApprox}
+            </span>
+            <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
+          </>
+        ) : null}
+        {formatPence(props.pricePence)}
+      </span>
+    );
+  }
   if (props.face === true) {
     const G = COPY.priceMarkGlyph;
     const marks = [

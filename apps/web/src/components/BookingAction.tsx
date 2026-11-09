@@ -1,4 +1,5 @@
 import { type Booking, LINK_ALLOWLIST, type ProviderId, validateVendorUrl } from '@gmt/core';
+import type { ReactNode } from 'react';
 import { COPY } from '../copy.js';
 
 /**
@@ -9,6 +10,35 @@ import { COPY } from '../copy.js';
 export function safeVendorUrl(url: string, statedHost: string, providerId: ProviderId): string | null {
   const v = validateVendorUrl(url, LINK_ALLOWLIST[providerId]);
   return v.kind === 'get' && v.host === statedHost ? v.url : null;
+}
+
+/**
+ * A POST booking as a form whose one button opens the seller's page in a new tab (spec §11): its fields hidden, never
+ * submitted on render. `href` must already have passed `safeVendorUrl`. The Trip page's booking link uses it for a
+ * seller's POST booking (design 2026-11-08 §5.3), with its own words in the button.
+ */
+export function BookingForm({
+  href,
+  postData,
+  className = 'btn btn-sm min-h-11',
+  children,
+}: {
+  href: string;
+  postData: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const fields = [...new URLSearchParams(postData).entries()];
+  return (
+    <form method="post" action={href} target="_blank" rel="noopener noreferrer">
+      {fields.map(([name, value], i) => (
+        <input key={`${name}-${i}`} type="hidden" name={name} value={value} />
+      ))}
+      <button type="submit" className={className}>
+        {children}
+      </button>
+    </form>
+  );
 }
 
 /** GET link with host, POST as a form button (never auto-submitted), or "no link" (spec §11). */
@@ -23,38 +53,9 @@ export function BookingAction({ booking, providerId }: { booking: Booking; provi
       </a>
     );
   }
-  const fields = [...new URLSearchParams(booking.postData).entries()];
   return (
-    <form method="post" action={href} target="_blank" rel="noopener noreferrer">
-      {fields.map(([name, value], i) => (
-        <input key={`${name}-${i}`} type="hidden" name={name} value={value} />
-      ))}
-      <button type="submit" className="btn btn-sm min-h-11">
-        {COPY.continueOnForm(booking.host)}
-      </button>
-    </form>
-  );
-}
-
-/**
- * Spec §6.9: the provider's own search link, with core's label as the API sent it (it carries
- * caveats such as "cabin not prefilled"), the host shown; null for synthetic rows.
- */
-export function SearchLink({
-  link,
-  providerId,
-}: {
-  link: { url: string; host: string; label: string } | null;
-  providerId: ProviderId;
-}) {
-  const href = link === null ? null : safeVendorUrl(link.url, link.host, providerId);
-  if (link === null || href === null) return <span>{COPY.noSearchLink}</span>;
-  return (
-    <span className="flex flex-wrap items-center gap-1">
-      <a href={href} target="_blank" rel="noopener noreferrer" className="link">
-        {link.label}
-      </a>
-      <span>{COPY.hostShown(link.host)}</span>
-    </span>
+    <BookingForm href={href} postData={booking.postData}>
+      {COPY.continueOnForm(booking.host)}
+    </BookingForm>
   );
 }

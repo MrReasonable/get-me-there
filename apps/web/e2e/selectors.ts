@@ -4,7 +4,7 @@ const D = COPY.datesView;
 const OVERVIEW = '[data-testid="dates-overview"]';
 
 /**
- * What the Playwright smoke looks for on the Dates view, the date pair detail and the nav, shared with the jsdom test
+ * What the Playwright smoke looks for on the Dates view, the Trip page and the nav, shared with the jsdom test
  * that proves each one matches the markup (test/e2e/selectors.test.tsx; review arch2-001, ui-r2-002): the smoke needs
  * a running api, so it cannot run in `pnpm test`, but its selectors can never drift from the components (WP19 Task
  * 19.9).
@@ -14,7 +14,7 @@ export const SMOKE = {
   boardTable: /^Best dates/,
   /** A board row: each carries its date pair's index. */
   boardRow: 'tr[data-pair]',
-  /** A board row's link to its date pair detail ("Open 14 Mar 2027 to 28 Mar 2027"). */
+  /** A board row's link to its Trip page ("Open 14 Mar 2027 to 28 Mar 2027"). */
   rowLink: /^Open \d{1,2} [A-Z][a-z]{2} \d{4} to \d{1,2} [A-Z][a-z]{2} \d{4}$/,
   /** The overview's one tab stop (roving tabindex). */
   overviewTabStop: `${OVERVIEW} [data-cell][tabindex="0"]`,
@@ -41,11 +41,13 @@ export const SMOKE = {
   nav: COPY.navLabel,
   navTiers: [COPY.navTier.decide, COPY.navTier.setup],
   navCurrent: '[aria-current="page"]',
-  /** The date pair detail: its table, headline, panels and the way back. */
-  detailTable: COPY.resultsTableLabel,
-  detailHeadline: '[data-testid="detail-headline"]',
-  backToDates: '[data-testid="back-to-dates"]',
-  airportPairPanel: '[data-testid="airport-pair-panel"]',
+  /** The Trip page (design 2026-11-08 §6.1): its answer card, named; its breadcrumb back to the search; its folds. */
+  tripPage: '[data-testid="trip-page"]',
+  tripCard: COPY.trip.cardLabel,
+  tripBack: '[data-testid="trip-back"]',
+  priceLabel: '[data-testid="price-label"] > summary',
+  aboutPrice: '[data-testid="about-price"] > summary',
+  searchLog: '[data-testid="search-log"] > summary',
   /** The new-search form (WP20): the form that holds the From picker; at 900 px and narrower it is first in the DOM. */
   newSearchForm: 'form:has(#origins-input)',
   /** The press that starts a search: the new-search form's, a card's and the page's (Search again) share the verb. */

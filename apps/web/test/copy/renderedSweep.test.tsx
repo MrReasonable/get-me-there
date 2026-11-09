@@ -28,6 +28,7 @@ import {
   verifiedRow,
 } from '../fixtures.js';
 import { flightPair, pairingList } from '../fixtures.searches.js';
+import { readTrip, tripBody } from '../fixtures.trip.js';
 import { poundsOutsidePrices, renderedCopy } from '../guards.js';
 import { serveDates } from '../msw/datesHandlers.js';
 import { serveFlightLists } from '../msw/searchesHandlers.js';
@@ -40,11 +41,12 @@ import { autoOpenFlights } from '../views/dates/render.js';
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
  * showed nothing but an error or a skeleton (neither carries a banned word or a "£").
  */
-// why: the Trip page renders from Task 7 of the trip-page plan (its state and routing land first), which adds its entry;
-// every Results link now lands on the Trip page (Ruling 9), so the retired Results view is no longer reachable to sweep
-type Swept = Exclude<(typeof VIEWS)[number], 'trip' | 'results'>;
-const SWEPT = VIEWS.filter((v): v is Swept => v !== 'trip' && v !== 'results');
+type Swept = (typeof VIEWS)[number];
+const SWEPT = VIEWS;
 const CONTENT: Record<Swept, () => Promise<HTMLElement>> = {
+  // why: the Trip page's own sweep runs over every state of its card (test/views/trip/TripView.test.tsx); this one
+  // sweeps it in the shell, its folds closed
+  trip: () => screen.findByRole('region', { name: COPY.trip.cardLabel }),
   searches: () => screen.findByRole('list', { name: COPY.searchesView.listLabel }),
   dates: () => screen.findByRole('table', { name: /^Best dates/ }),
   // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
@@ -85,11 +87,17 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
           ),
         ),
         http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())),
+        http.get(`${API}/definitions/:id/trip`, () => HttpResponse.json(tripBody(readTrip()))),
       );
       // why: core's filterRows hides failed rows by default (spec §6.9); every class is in the URL so every row's copy is swept.
       const classes = 'f.class=verified,partially-verified,failed,unchecked';
       // why: the Edit page needs `edit=` (spec rev 55 §11 URLs); the first screen's sweep covers the new-search form
-      const edit = view === 'definitions' ? '&edit=def-0001' : '';
+      const edit =
+        view === 'definitions'
+          ? '&edit=def-0001'
+          : view === 'trip'
+            ? '&depart=2026-11-11&return=2026-11-28'
+            : '';
       const { user } = renderWithProviders(<App />, {
         search: `?view=${view}&def=def-0001&${classes}${edit}`,
       });

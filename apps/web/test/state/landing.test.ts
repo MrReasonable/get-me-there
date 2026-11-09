@@ -184,11 +184,10 @@ describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the e
 });
 
 describe('the view list and the two-tier nav (spec §11 layout)', () => {
-  it('nine views; anything unknown or absent is Searches', () => {
+  it('eight views (Results retired; its links land on the Trip page); anything unknown or absent is Searches', () => {
     expect(VIEWS).toEqual([
       'searches',
       'dates',
-      'results',
       'trip',
       'history',
       'definitions',
@@ -199,9 +198,10 @@ describe('the view list and the two-tier nav (spec §11 layout)', () => {
     expect(parseView(null)).toBe('searches');
     expect(parseView('calendar')).toBe('searches');
     expect(parseView('history')).toBe('history');
+    expect(parseView('results')).toBe('searches');
   });
 
-  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; Results and Edit are in neither', () => {
+  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; the Trip page and Edit are in neither', () => {
     expect(NAV_TIERS).toEqual([
       { id: 'decide', views: ['searches', 'dates', 'history'] },
       { id: 'setup', views: ['providers', 'alerts', 'status'] },

@@ -42,7 +42,7 @@ async function searchId(page: Page): Promise<string> {
 const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
 const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
 
-test('fixture mode: a new search, Search now, then Dates, the date pair detail and History show synthetic prices with provenance', async ({
+test('fixture mode: a new search, Search now, then Dates, the Trip page and History show synthetic prices with provenance', async ({
   page,
 }) => {
   // (1) the first screen is Searches: fill the new-search form, point both stages at the fixture provider, press Search now
@@ -123,18 +123,22 @@ test('fixture mode: a new search, Search now, then Dates, the date pair detail a
   await expect(lit).toHaveCount(1);
   await expect(lit).toHaveAttribute('data-ringed', '');
 
-  // (3) the first row opens the detail, whose headline names the synthetic source and whose URL carries the date pair;
-  // "Back to dates" returns with the stay filter kept
+  // (3) the first row opens its Trip page (design 2026-11-08 §6.1), whose URL carries the dates and the search page's
+  // filters, and whose card shows the synthetic price beside the red banner; the breadcrumb back keeps the filter
   await first.getByRole('link', { name: SMOKE.rowLink }).click();
-  await expect(page.getByRole('table', { name: SMOKE.detailTable })).toBeVisible();
+  await expect(page.getByRole('region', { name: SMOKE.tripCard })).toBeVisible();
   const url = new URL(page.url());
-  expect(url.searchParams.get('view')).toBe('results');
+  expect(url.searchParams.get('view')).toBe('trip');
   expect(url.searchParams.get('depart')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(url.searchParams.get('return')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(url.searchParams.get('d.nights')).toBe(NIGHTS);
-  await expect(page.locator(SMOKE.detailHeadline)).toContainText(SOURCE_LABELS.synthetic);
-  await expect(page.locator(SMOKE.airportPairPanel).first()).toBeVisible();
-  await page.locator(SMOKE.backToDates).click();
+  await expect(banner(page)).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: SMOKE.tripCard }).getByTestId('price-cell').first(),
+  ).toContainText('£');
+  // why: spec §5.5: a synthetic price never links out of the app
+  await expect(page.locator(`${SMOKE.tripPage} a[target="_blank"]`)).toHaveCount(0);
+  await page.locator(SMOKE.tripBack).click();
   await expect(board(page)).toBeVisible();
   const back = new URL(page.url()).searchParams;
   expect(back.get('view')).toBe('dates');
@@ -239,8 +243,8 @@ test('at 375px Dates shows stacked cards and one month of 24px cells, a tap show
 /** What each view shows only once its data has loaded: a named heading, table or row, never a timeout. */
 const LOADED: Record<string, (page: Page) => Locator> = {
   dates: (p) => p.locator(SMOKE.phoneCard),
-  // why: the detail is reached from the first card's link (its URL carries the date pair)
-  results: (p) => p.getByRole('table', { name: SMOKE.detailTable }),
+  // why: the Trip page is reached from the first card's link (its URL carries the dates)
+  trip: (p) => p.getByRole('region', { name: SMOKE.tripCard }),
   history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
   searches: (p) => p.locator(SMOKE.searchCard),
   definitions: (p) => p.locator(SMOKE.searchCard),
@@ -256,7 +260,7 @@ test('at 375px the nav is one row whose menu opens both tiers of 44px links, and
 }) => {
   const id = await searchId(page);
   for (const [view, loaded] of Object.entries(LOADED)) {
-    if (view === 'results') {
+    if (view === 'trip') {
       await page.goto(`/?view=dates&def=${id}`);
       await page.locator(SMOKE.phoneCard).first().getByRole('link').click();
     } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);

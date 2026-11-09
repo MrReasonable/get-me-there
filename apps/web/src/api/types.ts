@@ -50,9 +50,9 @@ export interface DatePairsScope {
 }
 
 /**
- * `/results`' scope (spec §10, WP19 Task 19.6): the date pair detail's read, scoped to one date pair and to the Dates
- * airport filter and journey limit. Its wire form, every value a string or absent; built by resultsState's
- * `detailScope` from the URL, so one scope is one query key.
+ * `/results`' scope (spec §10, WP19 Task 19.6): one date pair, and the Dates airport filter and journey limit, as the
+ * wire takes it, every value a string or absent. The web view that read it is retired (trip-page plan Task 7); the
+ * route stays for History and the alerts (Ruling 11).
  */
 export interface ResultsScope extends DatePairsScope {
   departureDate: string;

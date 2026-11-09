@@ -4,8 +4,6 @@ import { COPY } from '../../src/copy.js';
 // why: every user-facing count agrees with its noun at 1 and at more than 1 (CodeRabbit finding on copy.ts).
 const buckets = { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0 };
 const cases: ReadonlyArray<[string, string, string]> = [
-  ['showingRows', COPY.showingRows(1, 1), COPY.showingRows(1, 3)],
-  ['excludedByCurrentSpace', COPY.excludedByCurrentSpace(1), COPY.excludedByCurrentSpace(2)],
   [
     'progress',
     COPY.progress({ stage: 's', provider: 'p', buckets, total: 1 }),
@@ -46,20 +44,6 @@ describe('user-facing counts agree with their noun', () => {
   });
 
   it.each([
-    [
-      'showingRows',
-      COPY.showingRows(1, 1),
-      'showing 1 of 1 row (filters active)',
-      COPY.showingRows(1, 3),
-      'showing 1 of 3 rows (filters active)',
-    ],
-    [
-      'excludedByCurrentSpace',
-      COPY.excludedByCurrentSpace(1),
-      '1 row outside the current window and nights range is not shown',
-      COPY.excludedByCurrentSpace(2),
-      '2 rows outside the current window and nights range are not shown',
-    ],
     [
       'coverageCheckCalls',
       COPY.coverageCheckCalls(1),
