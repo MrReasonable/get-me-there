@@ -33,7 +33,7 @@
   "dependencies": {
     "@gmt/core": "workspace:*",
     "bottleneck": "2.19.5",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "msw": "3.0.3",
     "p-retry": "8.0.1",
     "undici": "7.30.1",

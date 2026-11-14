@@ -25,7 +25,7 @@
     "@gmt/engine": "workspace:*",
     "@gmt/providers": "workspace:*",
     "@hono/node-server": "2.1.5",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "pino": "10.4.0",
     "zod": "4.6.7"
   },
