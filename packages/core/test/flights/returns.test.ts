@@ -466,14 +466,21 @@ describe('the booking page address (design §6.3; Ruling 8)', () => {
   });
 
   const wk = (v: unknown) => pathsOf(workerBookingReadSchema, v);
-  it('workerBookingReadSchema refuses an off-path address on a read and accepts the booking path', () => {
-    expect(wk(booking({ bookingUrl: SYNTHETIC_BOOKING_URL }))).toEqual([]);
-    expect(wk(booking({ bookingUrl: 'https://www.google.com/travel/flights/search?x=1' }))).toEqual([
-      'bookingUrl',
-    ]);
-    expect(wk(booking({ bookingUrl: 'https://evil.example/travel/flights/booking' }))).toEqual([
-      'bookingUrl',
-    ]);
+  // why: final review M1: an address that is not the booking page's costs only the link, never the read it came with
+  it.each([
+    ['the search page', 'https://www.google.com/travel/flights/search?x=1'],
+    ['another host', 'https://evil.example/travel/flights/booking'],
+    ['a port', 'https://www.google.com:8443/travel/flights/booking?tfs=x'],
+  ])('workerBookingReadSchema keeps the read and drops an address on %s', (_name, bookingUrl) => {
+    const b = booking({ bookingUrl });
+    expect(wk(b)).toEqual([]);
+    expect(workerBookingReadSchema.parse(b)).toEqual({ ...b, bookingUrl: null });
+  });
+  it("workerBookingReadSchema keeps the booking page's own address as given", () => {
+    expect(workerBookingReadSchema.parse(booking({ bookingUrl: SYNTHETIC_BOOKING_URL })).bookingUrl).toBe(
+      SYNTHETIC_BOOKING_URL,
+    );
+    expect(workerBookingReadSchema.parse(booking({ bookingUrl: null })).bookingUrl).toBeNull();
   });
   it('workerBookingReadSchema parses an answer with no bookingUrl key as null', () => {
     const { bookingUrl: _omit, ...old } = booking();

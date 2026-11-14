@@ -256,7 +256,7 @@ describe("the flights answer's returns (spec rev 56 §5.1)", () => {
       expect(ok(answer({ returns: { ...returnsOf('read'), booking } })), status).toBe(true);
     }
   });
-  it("the booking's address must be the booking page's own; an answer without the key parses (an older worker)", () => {
+  it("the booking's address is kept only when the booking page's own, the answer kept either way; an answer without the key parses (an older worker)", () => {
     const withUrl = (bookingUrl: string) => {
       const booking = {
         ...NO_BOOKING,
@@ -269,9 +269,15 @@ describe("the flights answer's returns (spec rev 56 §5.1)", () => {
       };
       return answer({ returns: { ...returnsOf('read'), booking } });
     };
-    expect(ok(withUrl(SYNTHETIC_BOOKING_URL))).toBe(true);
-    expect(ok(withUrl('https://www.google.com/travel/flights/search?tfs=abc'))).toBe(false);
-    expect(ok(withUrl('https://evil.example/travel/flights/booking'))).toBe(false);
+    const urlOf = (a: unknown) => {
+      const r = workerAnswerSchema.parse(a);
+      const b = r.kind === 'flights' ? r.returns?.booking : undefined;
+      return b === undefined || b === null ? 'no booking' : b.bookingUrl;
+    };
+    expect(urlOf(withUrl(SYNTHETIC_BOOKING_URL))).toBe(SYNTHETIC_BOOKING_URL);
+    // why: final review M1: an address that is not the booking page's drops to null; the page read stays
+    expect(urlOf(withUrl('https://www.google.com/travel/flights/search?tfs=abc'))).toBeNull();
+    expect(urlOf(withUrl('https://evil.example/travel/flights/booking'))).toBeNull();
     // returnsOf's booking has no bookingUrl key
     expect(ok(answer({ returns: returnsOf('read') }))).toBe(true);
   });

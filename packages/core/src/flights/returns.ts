@@ -196,17 +196,21 @@ export function bookingPageUrl(raw: string): { url: string; host: string } | nul
 }
 
 /**
- * The booking read as the worker answers it: the booking page's address must be the booking page's (`bookingPageUrl`),
- * and an absent key is null, so an answer from a worker built before the field still parses. Only the worker's answer
- * and the database insert hold the path rule (Ruling 8).
+ * The booking read as the worker answers it: an address that is not the booking page's own (`bookingPageUrl`) is
+ * dropped to null, and an absent key is null, so an answer from a worker built before the field still parses. Only the
+ * worker's answer and the database insert hold the path rule (Ruling 8).
+ *
+ * why: final review M1: the address is only a link; refusing the answer for it would cost the page read and its
+ * outbound list, so the read is kept and the price says "Find on Google Flights" (the insert re-checks it).
  */
 export const workerBookingReadSchema = z
   .strictObject({ ...bookingShape, bookingUrl: bookingUrlSchema.default(null) })
   .superRefine(checkBooking)
-  .superRefine((b, ctx) => {
-    if (b.bookingUrl !== null && bookingPageUrl(b.bookingUrl)?.url !== b.bookingUrl)
-      ctx.addIssue({ code: 'custom', path: ['bookingUrl'], message: "the booking page's own address" });
-  });
+  .transform((b) =>
+    b.bookingUrl === null || bookingPageUrl(b.bookingUrl)?.url === b.bookingUrl
+      ? b
+      : { ...b, bookingUrl: null },
+  );
 
 /**
  * The lowest stated price of a `read` or `expand-failed` booking with offers, ties to the lower index (spec rev 56
