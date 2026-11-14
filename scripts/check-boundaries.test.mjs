@@ -264,7 +264,9 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
       }),
     );
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/worker tests may import only @gmt\/core and @gmt\/providers\/testing/);
+    expect(r.stderr).toMatch(
+      /worker tests may import only @gmt\/core, @gmt\/core\/testing and @gmt\/providers\/testing/,
+    );
     expect(r.stderr).toMatch(/imports @gmt\/camoufox-worker/);
     expect(
       run(
@@ -311,11 +313,20 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     );
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(
-      /a\.test\.ts imports @gmt\/db; worker tests may import only @gmt\/core and @gmt\/providers\/testing/,
+      /a\.test\.ts imports @gmt\/db; worker tests may import only @gmt\/core, @gmt\/core\/testing and @gmt\/providers\/testing/,
     );
     expect(r.stderr).toMatch(/b\.test\.ts imports @gmt\/engine/);
     expect(
       run(tree({ 'apps/camoufox-worker/test/c.test.ts': "import { asIata } from '@gmt/core';\n" })).status,
+    ).toBe(0);
+    // why: core's test-only synthetic fixture is open to every package's tests (WP21 A20), the worker's included
+    expect(
+      run(
+        tree({
+          'apps/camoufox-worker/test/d.test.ts':
+            "import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';\n",
+        }),
+      ).status,
     ).toBe(0);
   });
   it('WP14: the worker’s @gmt devDependencies are exactly @gmt/providers', () => {

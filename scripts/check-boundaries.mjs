@@ -245,14 +245,15 @@ for (const [name, dir] of Object.entries(dirs)) {
       bad++;
     }
 }
-// why: the worker's tests reach the workspace only through @gmt/core and @gmt/providers' testing export, and
+// why: the worker's tests reach the workspace only through @gmt/core (with core's test-only synthetic fixture,
+// @gmt/core/testing, which any package's tests may take: WP21 A20) and @gmt/providers' testing export, and
 // @gmt/providers is its only @gmt devDependency (WP14 fix round 1, arch M10: every @gmt specifier, not only providers).
-const WORKER_TEST_SPECS = new Set(['@gmt/core', '@gmt/providers/testing']);
+const WORKER_TEST_SPECS = new Set(['@gmt/core', '@gmt/core/testing', '@gmt/providers/testing']);
 for (const f of walk('apps/camoufox-worker/test'))
   for (const spec of importsOf(f, readFileSync(f, 'utf8')))
     if (spec?.startsWith('@gmt/') && !WORKER_TEST_SPECS.has(spec)) {
       console.error(
-        `${f} imports ${spec}; worker tests may import only @gmt/core and @gmt/providers/testing`,
+        `${f} imports ${spec}; worker tests may import only @gmt/core, @gmt/core/testing and @gmt/providers/testing`,
       );
       bad++;
     }
