@@ -1,8 +1,9 @@
 # Show the answer, not the engine: UX redesign
 
-Written 2026-11-08. Status: design for operator approval. Each stage below is folded into the main design spec
-(`2026-10-14-flight-price-optimiser-design.md`, mainly §11 and §3's main-path words) as its own revision when it
-ships; where the two differ, the main spec governs what is built until then. Choices marked *(my call)* were made by
+Written 2026-11-08. Status: stage 1 (the Trip page, the labels and the booking link, §5 and §6) is folded into the
+main design spec (`2026-10-14-flight-price-optimiser-design.md`) as revision 69; the main spec governs what is built.
+Stages 2 to 4 (§7) are folded in as their own revisions when they ship; until then, where the two differ, the main
+spec governs. Choices marked *(my call)* were made by
 the author, not the operator. The operator approved the direction and the mockups on 2026-11-08 ("that's MUCH
 better"); the mockups are in `2026-11-08-ux-redesign-mockups/` (London → New York example data, light and dark,
 375 px and desktop; pink dashed boxes are notes, not design). Where a mockup and this document differ (labels of the other returns, the connecting city), this
@@ -70,9 +71,11 @@ The nav has two items, **Trips** and **Settings**; breadcrumbs sit below it (Tri
 Nov). A top bar shows remaining limits and one health line ("All working"; amber or red "Browser not responding ·
 fix", linking to Settings › System).
 
-Old links keep working: `view=results` (alert emails, bookmarks) lands on `view=trip` with the same `def`, `depart`
-and `return`, dropping `basis`, `row` and the `f.*` filters; `view=history|alerts|providers|status` land on the
-section that replaced them once it exists.
+Old links keep working: `view=results` with dates (alert emails, bookmarks) lands on `view=trip` with the same `def`,
+`depart` and `return`, and keeps the search page's airport and journey filters (`d.from`, `d.to`, `d.journey`); it drops
+`basis`, `row`, `sort` and the `f.*` filters. A `view=results` link with only `row=` (an alert email sent before revision
+48) lands on the search's page. `view=history|alerts|providers|status` land on the section that replaced them once it
+exists.
 
 The mockups show each screen's default content and states; `01-searches.html` (Trips with the new-search panel),
 `02-search.html`, `03-trip.html` (including every state of its top card) and `04-settings.html`.
@@ -140,7 +143,9 @@ The card shows **exactly the figure the Search page's row shows** for these date
 path (`datePairFigures` / `pairingsFor`), not by a second query that can disagree. The Search page's filters that
 change a date's figure (`d.from`, `d.to`, `d.journey`) travel in the Trip link and the breadcrumb back, so the two
 agree with a filter on *(my call)*. Where the figure picks one airport pair among several for these dates, the card
-shows that pair and "About this price" names the other pairs' states in one line each.
+shows that pair and "About this price" names the other pairs' states in one line each. Each price on the page is checked on its own: one whose provenance is inconsistent is
+withheld, and the rest of the page still shows. A label's detail and "About this price" both name the market the price
+was read in ("UK market").
 
 **Actions**: "Read flights again · free, ~2 min" (the existing on-demand read) and, only when SearchApi can run for
 this search, "Check with SearchApi · 1 credit" (the existing verify). An action that can't run isn't shown (§3).
@@ -169,25 +174,35 @@ read: 6 over your 25h limit, 3 dearer. Show them". These rows link out to the Go
 
 **States of the answer card** (the rest of the page stays; most are mocked at the bottom of `03-trip.html`). The
 card's state follows the figure the board gives these dates (its basis and its `pairingRead` result), so the card
-and the row never disagree; the first matching row wins:
+and the row never disagree. It reads the flight list of the cell whose flights the board read for these dates (the
+figure's own cell when the board read none). The first matching row wins:
 
 | Figure / read result | Card says |
 |---|---|
 | Page can't load its data | one red line: "Can't reach the app's server; showing nothing rather than old prices. [Retry]" |
-| A read trip (pairing figure) | The answer card above. Older than the refresh interval: the age turns amber; it stays a Seller or Google price (rev 68 ranks older reads after fresh ones). |
+| The dates are outside the search's dates now (departed, or the search's dates changed; an old alert link) | "These dates are outside this search's dates now." with a link back to the search. The page answers normally; this is not an error. |
 | Reading now (an on-demand read in flight for these dates) | "Reading flights for these dates… about 2 min. The calendar showed £388." A bar runs against the measured read time; it is an estimate, not progress *(my call: no new progress reporting)*. |
-| Flights read, none within the limits (`over-limit`, `within-other-limits`, `within-older`) | "£388 · Calendar · 3h. Flights were read 3h ago: none within your 25h limit each way. The cheapest read was £455, 27h 10m out." [Read flights again] |
+| A read trip (pairing figure) or a verified price | The answer card above. Older than the refresh interval: the age turns amber; it stays a Seller or Google price (rev 68 ranks older reads after fresh ones). A verified price the latest search did not see again is the "Price gone" row. |
+| Calendar price, and an older read trip that does not lead (`within-older`) | "£388 · Calendar · 3h. The trip below was read 3d ago, longer ago than this search's refresh, and doesn't lead." The older trip is shown under it. |
+| Calendar price, flights read under limits other than the search's now (`within-other-limits`) | "£388 · Calendar · 3h. Flights were read 3h ago under different limits from yours now." [Read flights again] |
+| Flights read, none within the limits (`over-limit`) | "£388 · Calendar · 3h. Flights were read 3h ago: none within your 25h limit each way. The cheapest read was £455 · Google list, 27h 10m out." [Read flights again] The limit named is the one every flight failed. |
 | Outbounds read, returns not (`outbound-only`) | "£388 · Calendar · 3h. Outbound flights were read 3h ago, but not their returns." [Read flights] |
 | Read, no return listed (`no-pairing-read`) | "£388 · Calendar · 3h. Flights were read 3h ago, but Google listed no return for the outbounds tried." [Read flights again] |
-| Couldn't read (newest list failed) | "The flights page didn't load at 16:42 (timed out). Nothing was saved." [Try again], above the calendar price card when the figure has one. |
+| Couldn't read (the newest list failed), where the board shows a failed read | "The flights page didn't load at 16:42 (timed out). Nothing was saved." [Try again], above the card below it: the calendar price when the figure has one. An older read trip does not lead past a failed newest list; it shows again once the dates are read again. The line appears only where the board shows the failed read. |
 | Calendar price only (no read) | "£388 · Calendar · 3h. Flights not read yet, so there's nothing to book here. [Read flights · free, ~2 min]" |
 | Price gone (the figure is superseded / not seen in the latest run) | the price greyed, "Not seen again · 5d", and [Read flights] |
-| No price listed | "Google's calendar listed no price for these dates in today's search. That doesn't mean there are no flights. [Read flights]" |
+| No figure, flights read by hand | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The board ranks no such dates: it has no figure for them.) |
+| No figure, every price found is over the journey limit set on the search's page | "Every price found for these dates is over the journey limit set on the search's page." |
+| No figure, a cell errored | "Google's page for these dates couldn't be read in the latest search. Nothing was saved." It is never worded "no price". |
+| No figure, no price listed | "Google's calendar listed no price for these dates in today's search. That doesn't mean there are no flights. [Read flights]" |
+| No figure, the sources had no data | "The price sources had no data for these dates in the latest search. That doesn't mean there are no flights." |
+| No figure, the search stopped at its limit | "These dates weren't reached: the latest search stopped at its limit. They'll be searched next time." |
+| No figure, the browser wasn't available | "These dates weren't searched: the browser wasn't available for the latest search. They'll be searched next time." |
 | Not searched | "These dates weren't searched: the latest search stopped before reaching them. They'll be searched next time." |
 
-A read trip is never "Not seen again": an older read shows its age instead. The plan maps every `pairingRead` value
-and figure basis the API can send to one row of this table, with a test per row; a value with no row is a plan
-defect, not a fallback.
+A read trip is never "Not seen again": an older read shows its age instead. Every `pairingRead` value and figure
+basis the API can send maps to one row of this table, with a test per row; a value with no row is a defect, not a
+fallback.
 
 **Gone from this page**: the run-timestamp paragraph, the basis switch, the filter panel (verdict class, carrier
 codes, "has this constraint unverified", "hide stale rows"), the "Dates board price" box, the default-open outcome
@@ -196,9 +211,16 @@ definition, cell, date pair, basis, discovery, itinerary search, verdict, reused
 
 ### 6.2 Labels and links elsewhere in stage 1
 
-Stage 1 changes the other screens only as far as the new page needs: each trip row and calendar day on the Search
-page, and each trip on a Trips card, links to its Trip page, and a read trip's price there is its booking link
-(§5.3). The rest of those screens changes in stage 2.
+Stage 1 changes the other screens only as far as the new page needs. Each trip row and calendar day on the Search
+page links to its Trip page: the row's date cell is the link, and a click on the row still opens it in place. On a
+Trips card, the trip's price opens that trip's Trip page: the cards' booking targets come with stage 2's card
+redesign, since the cards' read carries no booking inputs today.
+
+A Search page row shows one label for its price (§5.1); the source and age chips it carried are gone. A row's price
+is a link by §5.3's rule: a read trip's price (a Seller or Google price row, and a verified row too) links to the
+booking page its read recorded, else to the Google Flights search for its airports and dates. The search link uses the
+default GB point of sale. A calendar price and a synthetic price are not links. Opening a label's detail pushes the
+content below it down, at every width: no floating panel. The rest of those screens changes in stage 2.
 
 ### 6.3 Recording the booking page's address
 
