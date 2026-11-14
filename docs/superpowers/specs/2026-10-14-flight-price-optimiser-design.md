@@ -4379,9 +4379,14 @@ options is the figure's own (`hasBookingOptions`, from its row's re-validated
 booking), so the board and the Trip page label it alike. Tapping a label opens its detail in the
 flow, pushing the content below it down, at every width, never as a floating
 panel: a short explanation of what the price is and what was and wasn't
-checked, and the market it was read in (the same words as the full price
-displays below). A board row carrying a label has no separate source or age
-chips. A price links to one **booking target** (`core`'s `bookingTargetOf`),
+checked, its full age, its source (the provider by its main-path name, §3),
+the market it was read in (the same words as the full price displays below)
+and, for a converted price, the rate it was converted at; the amount beside
+the label keeps "≈" when converted. A board row carrying a label has no
+separate source or age chips: on every price that carries a label (the board
+rows and every price on the Trip page, its search log and "About this price"
+included) the label is the provenance visible without hover, and a price on
+those surfaces never stands without one. A price links to one **booking target** (`core`'s `bookingTargetOf`),
 best first: the seller's own booking, when SearchApi read the trip's booking
 options ("Book on <host> ↗"); Google's booking page for the two chosen flights,
 when the browser recorded its address and that address is the pairing's own
@@ -5990,7 +5995,8 @@ pair, the trip route) and §11 (the Trip page, the label rule, booking targets, 
   couldn't-read line; the older trip shows again once the dates are read again. The line is set only where the board
   shows a failed read, so a failed newest read under a fresh verified figure is not mentioned.
 - **Ruling (execution): the trip's flight list is the cell whose pairing read the board used**, else the figure's own
-  cell, so a stale verified card's legs and booking come from the calendar cell's list.
+  cell. A stale verified card's "Read flights again" reads that cell's list; its legs and booking come from the
+  figure's own times, booking and airports, never from another airport pair's list.
 - **Ruling (execution): a cell that errored gets its own card state**, `could-not-read`, never "no price": an error
   must not look like an empty answer.
 - **Ruling (execution): each price on the Trip page is withheld on its own** when its provenance is inconsistent; the

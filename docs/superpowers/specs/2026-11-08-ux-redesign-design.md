@@ -96,7 +96,7 @@ never appear on a main surface; they are in the tap detail and in the Trip page'
 | Google's "from" price for an outbound whose returns weren't read (its cheapest return, unknown) | **Google list · 3h** | blue | "Google's 'from' price for this outbound on its flight list. Its returns and sellers weren't read." |
 | Google's date-grid price (browser or SearchApi) | **Calendar · 3h** | amber | "Google's calendar price for these dates. Not a fare: no flights or sellers read, and your journey limit isn't checked." |
 | Aviasales cached price | **Cached · 2d** | grey | "A price an Aviasales user saw up to 2 days ago. Not a fare quote." |
-| A price the latest search didn't see again | **Not seen again · 5d** | outline, price greyed | "Read 5 days ago; today's search didn't find it again. Probably gone." Ranked after current prices. |
+| A price the latest search didn't see again | **Not seen again · 5d** | outline, price greyed | "Read 5 days ago; the latest search didn't find it again. Probably gone." Ranked after current prices. |
 
 States that show no price: **Not searched**; **No price listed** (detail: "not the same as no flights"); **Couldn't
 read** (with Try again); **Not reached: the search stopped at its limit**.
@@ -166,15 +166,16 @@ read: 6 over your 25h limit, 3 dearer. Show them". These rows link out to the Go
 
 **One click down:**
 
-- **About this price**: what it is, when it was read and the market ("Priced for the UK market."), what was checked
+- **About this price**: the card's price with its label, what it is, when it was read and the market ("Priced for the
+  UK market."), what was checked
   (the journey limit each way), what wasn't (the seller, bags, fare rules), and what the calendar and the Aviasales
   cache said for these dates, each with its label: in the card's own airport pair when its price is calendar-based,
   else in the pair whose flights the card reads, which the line names when it is not the card's ("Google's calendar
   showed £395 for these dates on LHR → JFK.").
 - **Search log for these dates**: one row per run that touched these dates, plus on-demand reads ("Today 16:40 ·
   calendar £388 · flights £412 Kiwi.com"; "Tue 3 Nov · couldn't read: page timed out"; "Sat 31 Oct · calendar £395
-  · flights not read"; "Today 18:05 · flights read by hand · £409"), newest first, five shown, the rest behind
-  "Show all N, with each source", where today's per-source detail moves. Why a run didn't read a date's flights
+  · flights not read"; "Today 18:05 · flights read by hand · £409"), each price with its own label beside it,
+  newest first, five shown, the rest behind "Show all N, with each source", where today's per-source detail moves. Why a run didn't read a date's flights
   isn't recorded, so the log says "flights not read" and never guesses a reason *(my call: no new record)*.
 
 **States of the answer card** (the rest of the page stays; most are mocked at the bottom of `03-trip.html`). The
@@ -186,7 +187,7 @@ figure's own cell when the board read none). The first matching row wins:
 |---|---|
 | Page can't load its data | one red line: "Can't reach the app's server; showing nothing rather than old prices. [Retry]" |
 | The dates are outside the search's dates now (departed, or the search's dates changed; an old alert link) | "These dates are outside this search's dates now." with a link back to the search. The page answers normally; this is not an error. |
-| Reading now (an on-demand read in flight for these dates) | "Reading flights for these dates… about 2 min. The calendar showed £388." (the second sentence only for a calendar price, never a verified one). A bar runs against the measured read time; it is an estimate, not progress *(my call: no new progress reporting)*. |
+| Reading now (an on-demand read in flight for these dates) | "Reading flights for these dates… about 2 min. The calendar showed £388 · Calendar · 3h." (the second sentence only for a calendar price, never a verified one, its label beside it). A bar runs against the measured read time; it is an estimate, not progress *(my call: no new progress reporting)*. |
 | A read trip (pairing figure) or a verified price | The answer card above. Older than the refresh interval: the age turns amber; it stays a Seller or Google price (rev 68 ranks older reads after fresh ones). A verified price the latest search did not see again is the "Price gone" row. A verified price links to its own Google Flights search (its own airports) when SearchApi gave no seller's booking; a stale one with a read trip beneath it adds the row's read-trip line ("return flights read 3d ago, older than this search's refresh: £412 Kiwi.com"). |
 | Calendar price, and an older read trip that does not lead (`within-older`) | "£388 · Calendar · 3h. The trip below was read 3d ago, longer ago than this search's refresh, and doesn't lead." The older trip is shown under it. |
 | Calendar price, flights read under limits other than the search's now (`within-other-limits`) | "£388 · Calendar · 3h. Flights were read 3h ago under different limits from yours now." [Read flights again] |
@@ -199,8 +200,9 @@ figure's own cell when the board read none). The first matching row wins:
 | No figure, flights read by hand that yield a trip within the limits | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The board ranks no such dates: it has no figure for them.) |
 | No figure, flights read by hand that yield no trip within the limits | The matching sentence above with no calendar price: outbounds without returns, no return listed, none within the limits, or read under other limits. A failed read by hand falls to the rows below, under its couldn't-read line. |
 | No figure, every price found is over the journey limit set on the search's page | "Every price found for these dates is over the journey limit set on the search's page." |
+| No figure, an airport pair of these dates not run | The "Not searched" sentence below: a partly searched date pair is not searched, as the board's mark reads it (main spec §6.6 row 2), never "no price". |
 | No figure, a cell errored | "Google's page for these dates couldn't be read in the latest search. Nothing was saved." It is never worded "no price". |
-| No figure, no price listed | "Google's calendar listed no price for these dates in today's search. That doesn't mean there are no flights. [Read flights]" |
+| No figure, no price listed | "Google's calendar listed no price for these dates in the latest search. That doesn't mean there are no flights. [Read flights]" |
 | No figure, the sources had no data | "The price sources had no data for these dates in the latest search. That doesn't mean there are no flights." |
 | No figure, the search stopped at its limit | "These dates weren't reached: the latest search stopped at its limit. They'll be searched next time." |
 | No figure, the browser wasn't available | "These dates weren't searched: the browser wasn't available for the latest search. They'll be searched next time." |

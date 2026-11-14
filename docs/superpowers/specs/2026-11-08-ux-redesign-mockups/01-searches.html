@@ -198,6 +198,9 @@ table.plain td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertica
 <body>
 <style>
   .home { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+  /* why: beside the 340px New search column the cards are 724px wide at 1280px; these minima (682px with the gaps and
+     padding) keep each trip row inside its card; phones keep their own two-column rows */
+  @media (min-width: 721px) { .home .trip { grid-template-columns: 130px minmax(150px, 1.3fr) 52px minmax(110px, 1fr) minmax(110px, 1fr) 24px; } }
   .newsearch { position: sticky; top: 16px; padding: 16px 18px 18px; }
   .newsearch h2 { margin-bottom: 12px; }
   .newsearch .field + .field, .newsearch .row + .field, .newsearch .field + .row { margin-top: 12px; }
@@ -289,8 +292,8 @@ table.plain td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertica
       <section class="card" aria-labelledby="s2">
         <div class="card-head">
           <div>
-            <div class="search-title"><h2 id="s2"><a href="02-search.html">New York → London</a></h2></div>
-            <div class="meta">JFK, Newark → Heathrow, Gatwick · leave 1 Dec – 31 Mar · 7–14 nights</div>
+            <div class="search-title"><h2 id="s2"><a href="02-search.html">London → New York, winter</a></h2></div>
+            <div class="meta">Heathrow → JFK · leave 1 Dec – 31 Mar · 7–14 nights</div>
           </div>
         </div>
         <div class="running" role="status">
@@ -332,8 +335,8 @@ table.plain td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertica
       <section class="card" aria-labelledby="s3">
         <div class="card-head">
           <div>
-            <div class="search-title"><h2 id="s3"><a href="02-search.html">London → Boston</a></h2></div>
-            <div class="meta">Heathrow, Gatwick, Stansted → Boston · leave 14 Nov – 14 May · 10–21 nights · searched 8h ago</div>
+            <div class="search-title"><h2 id="s3"><a href="02-search.html">London → New York, long stays</a></h2></div>
+            <div class="meta">Gatwick → Newark · leave 14 Nov – 14 May · 10–21 nights · searched 8h ago</div>
           </div>
         </div>
         <div class="state" style="border-top:1px solid var(--line)">
