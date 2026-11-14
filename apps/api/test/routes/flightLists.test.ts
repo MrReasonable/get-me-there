@@ -521,6 +521,20 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     // other failed list may
     list(x, def, B, { fetchedAt: at(0), failed: true, reason: 'monthly-cap' });
     expect(await readNow()).toEqual([true, true, true]);
+    // why: CodeRabbit PR #58 finding 1: a pair with no figure reads the space's first origin and destination (LHR–JFK),
+    // so a limit-stopped failed list there stops its read; one on another airport pair (shown as listOtherPair) does not
+    list(x, def, cell(LGW, EWR, '2026-11-04', '2026-11-14'), {
+      fetchedAt: at(0),
+      failed: true,
+      reason: 'execution-cap',
+    });
+    expect(await readNow()).toEqual([true, true, true]);
+    list(x, def, cell(LHR, JFK, '2026-11-04', '2026-11-14'), {
+      fetchedAt: at(-1),
+      failed: true,
+      reason: 'execution-cap',
+    });
+    expect(await readNow()).toEqual([true, true, false]);
   });
   it('readNow is false for a future date pair outside the search’s nights range or window', async () => {
     const { x, def } = await setup();

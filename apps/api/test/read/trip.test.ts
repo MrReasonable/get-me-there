@@ -629,6 +629,36 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     expect(board?.hasBookingOptions).toBe(true);
   });
 
+  // why: CodeRabbit PR #58 finding 3: the selected figure's own stored booking is re-validated on the way out, so an
+  // unsafe one on the cheapest confirmed offer goes, its verified price kept
+  it.each([
+    ['plain http', { kind: 'get', url: 'http://www.google.com/travel/flights', host: 'www.google.com' }],
+    [
+      'userinfo and a port',
+      { kind: 'get', url: 'https://user:pw@evil.example:8443/book', host: 'evil.example' },
+    ],
+    [
+      'a post off the allowlist',
+      { kind: 'post', url: 'https://evil.example/book', postData: 'a=1', host: 'evil.example' },
+    ],
+  ] as const)(
+    "the verified figure's own booking with %s is dropped, its price kept",
+    async (_label, booking) => {
+      const { x, def } = await harness();
+      const s = seeder(x.ports);
+      s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+      s.cells('E', [A], { selected: [{ cell: A, reason: 'top_n' }], verification: ['searchapi'] });
+      s.verified('E', A, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-1), booking }], 'searchapi');
+      const t = await tripOf(x, def.id, Q);
+      expect(t.figure).toMatchObject({
+        basis: 'verified',
+        price: { pricePence: 60_000 },
+        hasBookingOptions: false,
+      });
+      expect(t.booking).toEqual({ kind: 'none' });
+    },
+  );
+
   it('a verified figure whose booking is none, or a calendar figure, has no booking options', async () => {
     const { x, def } = await harness();
     const s = seeder(x.ports);

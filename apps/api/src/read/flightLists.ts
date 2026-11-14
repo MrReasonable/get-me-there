@@ -90,6 +90,8 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
   };
 }
 
+type ReadTarget = Pick<StoredFlightList, 'status' | 'reason'> | null;
+
 const pairKey = (p: DatePairAsk): string => `${p.departureDate}|${p.returnDate}`;
 
 /** The contract's link (spec §10): the worker's own page on Google's one host, else none. */
@@ -184,6 +186,29 @@ export function assembleFlightLists(
       .newestPerDatePair(def.id, missing, space, def.cabin, pointOfSale)
       .map((l) => [pairKey(l), l]),
   );
+  // why: CodeRabbit PR #58 finding 1: a read of a pair with no figure goes to the space's first origin and first
+  // destination (the engine's own fallback, flightRead.ts), so its `readNow` weighs that cell's newest list, never
+  // `listOtherPair` (another airport pair's) nor none; the Trip page's `read.wouldGo` weighs the same cell
+  const first = { origin: space.origins[0], destination: space.destinations[0] };
+  const readCellOf = (p: DatePairAsk): CellKey | null =>
+    first.origin === undefined || first.destination === undefined
+      ? null
+      : { origin: first.origin, destination: first.destination, ...p };
+  const readCells = pairs.flatMap((p) => {
+    const c = cellOf(p) === null ? readCellOf(p) : null;
+    return c === null ? [] : [c];
+  });
+  const readTargets = new Map(
+    ports.repos.flightLists
+      .newestPerCell(def.id, readCells, def.cabin, pointOfSale)
+      .map((l) => [cellKeyString(l), l]),
+  );
+  const readTargetOf = (p: DatePairAsk, c: CellKey | null): ReadTarget => {
+    const target = c ?? readCellOf(p);
+    return target === null
+      ? null
+      : (own.get(cellKeyString(target)) ?? readTargets.get(cellKeyString(target)) ?? null);
+  };
   const mark = engine.flightReadInFlight();
   return {
     available: unavailable === null,
@@ -214,7 +239,7 @@ export function assembleFlightLists(
         link,
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
-        readNow: readNow(unavailable, today, space, p, list ?? null),
+        readNow: readNow(unavailable, today, space, p, readTargetOf(p, c)),
       };
     }),
   };

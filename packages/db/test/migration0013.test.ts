@@ -61,22 +61,26 @@ describe('migration 0013 (the booking address)', () => {
       .get()?.sql;
     expect(sql).not.toContain('flight_lists_booking_url');
     db.raw.prepare(DEFINITION).run({ at: T0 });
-    db.raw
-      .prepare(
-        `${LIST.replace('options_other_cell)', 'options_other_cell, booking_url)').replace(', 0, 0)', ', 0, 0, @url)')}`,
-      )
-      .run({
+    const insert = db.raw.prepare(
+      `${LIST.replace('options_other_cell)', 'options_other_cell, booking_url)').replace(', 0, 0)', ', 0, 0, @url)')}`,
+    );
+    // why: CodeRabbit PR #58 finding 27: the booking address, an empty string and a string that is no address at all
+    // all go in and come back as written, so a column that constrained its value fails here; each its own departure
+    // day, so no uniqueness rule refuses one in its place
+    const urls = [SYNTHETIC_BOOKING_URL, '', 'not a booking address'];
+    for (const [i, url] of urls.entries())
+      insert.run({
         at: T0,
-        dep: '2027-03-14',
+        dep: `2027-03-1${4 + i}`,
         status: 'read',
         reason: null,
         listed: 'flights',
         min: 45100,
-        url: SYNTHETIC_BOOKING_URL,
+        url,
       });
-    expect(db.raw.prepare('SELECT booking_url FROM flight_lists').get()).toEqual({
-      booking_url: SYNTHETIC_BOOKING_URL,
-    });
+    expect(db.raw.prepare('SELECT booking_url FROM flight_lists ORDER BY departure_date').all()).toEqual(
+      urls.map((booking_url) => ({ booking_url })),
+    );
   });
 
   it('the journal lists 14 tags with this one last, and its snapshot follows 0012’s and carries the column', () => {

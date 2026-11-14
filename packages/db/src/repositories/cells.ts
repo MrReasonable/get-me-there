@@ -183,7 +183,9 @@ export class CellsRepo {
   /**
    * Design 2026-11-08 §6.1 (the Trip page's log): every discovery outcome of the definition's executions that searched
    * one date pair itself (priced, empty or no_data, not a reused copy), any airport pair, newest execution first by
-   * (created_at, rowid), then by cell and provider. One statement.
+   * (created_at, rowid), then by cell and provider. One statement. why: a no_data outcome carrying a reason
+   * `markNoData` writes (NO_DATA_REASONS: the provider was never called) did not search the date pair, so it is left
+   * out; a fetched no_data carries no reason (CodeRabbit PR #58 finding 26).
    */
   searchedForDatePair(definitionId: string, departureDate: IsoDate, returnDate: IsoDate): CellOutcome[] {
     return this.db.raw
@@ -191,6 +193,7 @@ export class CellsRepo {
         `SELECT o.* FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
          WHERE e.definition_id = @definitionId AND o.departure_date = @departureDate AND o.return_date = @returnDate
            AND o.stage = 'discovery' AND o.status IN ('priced', 'empty', 'no_data') AND o.reused_from_execution_id IS NULL
+           AND NOT (o.status = 'no_data' AND o.reason IS NOT NULL AND o.reason IN (${sqlList(NO_DATA_REASONS)}))
          ORDER BY e.created_at DESC, e.rowid DESC, o.origin, o.destination, o.provider_id`,
       )
       .all({ definitionId, departureDate, returnDate })

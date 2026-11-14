@@ -2,6 +2,8 @@
 // that found it empty included, so the read returns each searched discovery outcome of that date pair.
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { NO_DATA_REASONS } from '../src/internal/enums.js';
+import { newExecution, withNights } from './helpers/factories.js';
 import { CELLS, historySeed, statementsOf } from './helpers/history.js';
 
 describe('CellsRepo.searchedForDatePair', () => {
@@ -39,4 +41,28 @@ describe('CellsRepo.searchedForDatePair', () => {
     expect(result.some((o) => o.status === 'empty' || o.status === 'no_data')).toBe(true);
     expect(seed.cells.searchedForDatePair(seed.definition.id, dep, asIsoDate('2027-03-27'))).toEqual([]);
   });
+
+  // why: CodeRabbit PR #58 finding 26: a no_data outcome written without a fetch (markNoData, every reason it takes)
+  // never asked the provider, so it is no searched run; the log would otherwise show the run as one that found nothing
+  it.each(NO_DATA_REASONS)(
+    'leaves out a run whose only outcome is no_data:%s, written without a fetch',
+    (reason) => {
+      const seed = historySeed();
+      const first = CELLS[0];
+      if (first === undefined) throw new Error('the seed has cells');
+      const { execution } = newExecution(seed.db, seed.clock, {
+        definition: seed.definition,
+        status: 'completed',
+      });
+      seed.cells.seed(execution.id, [withNights(first)], ['travelpayouts']);
+      expect(seed.cells.markNoData(execution.id, 'discovery', 'travelpayouts', reason)).toBe(1);
+      const result = seed.cells.searchedForDatePair(
+        seed.definition.id,
+        first.departureDate,
+        first.returnDate,
+      );
+      expect(result.length).toBeGreaterThan(0);
+      expect(result.some((o) => o.executionId === execution.id)).toBe(false);
+    },
+  );
 });

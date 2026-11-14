@@ -89,12 +89,23 @@ export function tripLog(o: {
   refreshHours: number;
 }): TripLog {
   const flights = (l: StoredFlightList | undefined) => logFlightsOf(l, o.limits, o.rc.now, o.refreshHours);
+  // why: indexed once by run, so the log grows linearly with the search's history (CodeRabbit PR #58 finding 2)
+  const pricesOf = new Map<string, Array<(typeof o.prices)[number]>>();
+  for (const p of o.prices) {
+    const own = pricesOf.get(p.executionId);
+    if (own === undefined) pricesOf.set(p.executionId, [p]);
+    else own.push(p);
+  }
+  // why: `lists` is newest first, so the first of a run's is its newest for these dates
+  const listOf = new Map<string, StoredFlightList>();
+  for (const l of o.lists)
+    if (l.executionId !== null && !listOf.has(l.executionId)) listOf.set(l.executionId, l);
+  const searched = new Set(o.searched.map((s) => s.executionId));
   const rows: TripLog = [];
   for (const e of o.executions) {
-    const prices = o.prices.filter((p) => p.executionId === e.id);
-    // why: `lists` is newest first, so the first of the run's is its newest for these dates
-    const list = o.lists.find((l) => l.executionId === e.id);
-    const touched = prices.length > 0 || list !== undefined || o.searched.some((s) => s.executionId === e.id);
+    const prices = pricesOf.get(e.id) ?? [];
+    const list = listOf.get(e.id);
+    const touched = prices.length > 0 || list !== undefined || searched.has(e.id);
     if (!touched) continue;
     rows.push({
       at: e.startedAt ?? e.createdAt,
