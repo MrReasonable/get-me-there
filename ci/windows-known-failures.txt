@@ -25,6 +25,8 @@
 # https://github.com/MrReasonable/get-me-there/actions/runs/41487718973, less four renamed recorder tests.
 # Pages at once (spec rev 65) adds main, session and grid-page tests that share those files' POSIX-mode setup, and the
 # quicker settle renames four; not yet confirmed by a Windows run.
+# The booking page's address (spec rev 69) adds eight return-phase tests that share that file's POSIX-mode setup
+# (https://github.com/MrReasonable/get-me-there/actions/runs/43631937545).
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -619,6 +621,14 @@ apps/camoufox-worker/test/returnPhase.test.ts > the reservation (cost-r3-002) a 
 apps/camoufox-worker/test/returnPhase.test.ts > the reservation (cost-r3-002) a refused first load: blocked with pagesLoaded 0 (R-zero)
 apps/camoufox-worker/test/returnPhase.test.ts > the reservation (cost-r3-002) answers before any load state pagesLoaded 0: the spacing, a cool-down
 apps/camoufox-worker/test/returnPhase.test.ts > budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only) the reservation is the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) a read has the address of the booking view
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) an expand-failed read has it too
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) after an expansion whose view has another address, the first view’s address is kept
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) an address that is not worth linking (over the length cap) gives a read with a null address
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) an unrecognised read (no offers read) has a null address
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) an unrecognised read (another currency) has a null address
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) a view that did not settle has a null address
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking page’s address (the booking read carries it) nothing logged in the booking step names the address’s query
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a page loads beside an earlier worker’s counts file, which it never reads or writes
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, pacer
 apps/camoufox-worker/test/session.test.ts > PageSlots (pages at once) a request goes to an idle session; with every session busy it is answered spacing for the soonest end
