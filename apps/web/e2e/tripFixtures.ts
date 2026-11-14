@@ -297,6 +297,30 @@ export const TRIP_STATES = {
       destination: null,
     },
   }),
+  // final review I3: no calendar price, the flights read by hand yield a trip within the limits
+  'read-without-calendar': base({
+    figure: null,
+    calendar: null,
+    cells: [{ origin: 'LHR', destination: 'JFK', bucket: 'empty', skipReason: null }],
+    flightList: list(['Aer Lingus']),
+  }),
+  // final review I3: no calendar price and the read by hand failed: the cells' state under the couldn't-read line
+  'failed-by-hand': base({
+    figure: null,
+    calendar: null,
+    cells: [{ origin: 'LHR', destination: 'JFK', bucket: 'empty', skipReason: null }],
+    flightList: {
+      ...list([]),
+      status: 'failed',
+      reason: 'network',
+      listed: null,
+      minMinor: null,
+      cheapestView: null,
+      flights: [],
+      returns: null,
+    },
+    listFailure: { at: READ_AT, cause: 'network' },
+  }),
   // design §6.1 Review Focus 5: the longest seller and an airline list of three, which must wrap at 375 px
   'long-seller': readTrip('Trip.com Travel Singapore Pte Ltd', [
     'Virgin Atlantic',

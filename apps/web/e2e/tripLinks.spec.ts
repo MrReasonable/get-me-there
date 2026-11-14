@@ -10,6 +10,8 @@ import {
   figurePairing,
   pairingFig,
   provGrid,
+  provSearched,
+  verifiedFig,
 } from '../test/fixtures.dates.js';
 import { cardsResponse, cheapest, flightListProvenance, searchCard } from '../test/fixtures.searches.js';
 import { FIXTURE_SEARCH, TRIP_NOW } from './tripFixtures.js';
@@ -58,6 +60,21 @@ const BOARD: DatesOptions = {
     },
     [at('2027-03-16', 10)]: {
       figure: calendarFig({ price: { ...calendarFig().price, provenance: provGrid(), ageHours: 3 } }),
+    },
+    // final review C1: a stale verified price with an older read trip beneath it, that trip's booking page recorded:
+    // the row links the verified price's own search, never that booking page
+    [at('2027-03-17', 10)]: {
+      figure: verifiedFig({
+        price: {
+          pricePence: 60_000,
+          provenance: provSearched(),
+          stale: 'setting',
+          ageHours: 80,
+          truncated: false,
+        },
+        pairing: figurePairing({ stale: 'refresh', ageHours: 72, bookingUrl: SYNTHETIC_BOOKING_URL }),
+        pairingRead: 'within-older',
+      }),
     },
   },
 };
@@ -119,12 +136,18 @@ for (const width of WIDTHS)
     }) => {
       await openSearch(page, width, scheme);
       const rows = page.locator('tr[data-pair]');
-      await expect(rows).toHaveCount(3);
+      await expect(rows).toHaveCount(4);
       const out = (n: number) => rows.nth(n).locator('a[target="_blank"]');
       await expect(out(0)).toHaveCount(1);
       await expect(out(0)).toHaveAttribute('href', SYNTHETIC_BOOKING_URL);
       await expect(out(1)).toHaveCount(1);
-      await expect(out(2)).toHaveCount(0);
+      // the calendar price is no link
+      await expect(rows.filter({ hasText: '£312' }).locator('a[target="_blank"]')).toHaveCount(0);
+      // the verified row says "Find", to its own search
+      const verified = page.locator(`tr[data-pair] a[target="_blank"]`, { hasText: '£600' });
+      await expect(verified).toHaveCount(1);
+      await expect(verified).toContainText('Find on Google Flights');
+      await expect(verified).not.toHaveAttribute('href', SYNTHETIC_BOOKING_URL);
       await noSidewaysScroll(page);
       await page.screenshot({
         path: `test-results/links-shots/search-${width}-${scheme}.png`,

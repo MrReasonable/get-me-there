@@ -44,6 +44,8 @@ const STATES: readonly TripState[] = [
   'none-within',
   'outside-window',
   'long-seller',
+  'read-without-calendar',
+  'failed-by-hand',
 ];
 
 async function open(page: Page, state: TripState, width: number, scheme: 'light' | 'dark') {
