@@ -7,7 +7,8 @@ import { StopSentence } from '../../components/StopWords.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
-import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { tripHref } from '../../state/tripState.js';
+import { hrefWith, navigateTo, navigateToQuery } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
 import { SearchAgainButton } from '../Dates/SearchAgainButton.js';
 import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
@@ -66,6 +67,8 @@ export function SearchCard({
   const state = stateLine(card, now);
   const never = neverSearchedText(card);
   const cheapest = card.cheapest;
+  const tripLink =
+    cheapest === null ? null : tripHref(card.id, cheapest.departureDate, cheapest.returnDate, {});
   const codes = S.codes(card.origins.join(', '), card.destinations.join(', '));
   return (
     <li className="plate plate-pad search-card" data-card={card.id}>
@@ -96,19 +99,31 @@ export function SearchCard({
         {announcement(state)}
       </p>
       {never === null ? null : <p className="text-sm">{never}</p>}
-      {cheapest === null ? null : (
+      {cheapest === null || tripLink === null ? null : (
         <div className="search-card-cheapest">
-          <PriceBoundary>
-            <PriceCell
-              pricePence={cheapest.pricePence}
-              provenance={cheapest.provenance}
-              calendar={resultBasisOf(cheapest.basis) === 'calendar'}
-              stale={cheapest.stale}
-              truncated={cheapest.truncated}
-              destination={cheapest.destination}
-              compact
-            />
-          </PriceBoundary>
+          {/* why: Ruling 7, design 2026-11-08 §5.3: a card's trip price opens that trip's page (its booking targets come
+          with the card redesign); the link stays in this tab, so the way out of the app is the page's own. The card's
+          price is the whole search's cheapest, read under no filters, so the link carries none and its click goes to
+          exactly that address (CodeRabbit PR #58 finding 9) */}
+          <a
+            href={tripLink}
+            onClick={navigateToQuery(tripLink)}
+            data-testid="card-trip-price"
+            className="search-card-price-link"
+          >
+            <PriceBoundary>
+              <PriceCell
+                pricePence={cheapest.pricePence}
+                provenance={cheapest.provenance}
+                calendar={resultBasisOf(cheapest.basis) === 'calendar'}
+                stale={cheapest.stale}
+                truncated={cheapest.truncated}
+                destination={cheapest.destination}
+                compact
+              />
+            </PriceBoundary>
+            <span className="sr-only">{S.openThisTrip}</span>
+          </a>
           <span>{tripText(cheapest.departureDate, cheapest.returnDate)}</span>
           {/* why: spec rev 56 §11 (prov-006): a card carries no seller, offer count or grid price, so a pairing figure
           says what it is in words */}

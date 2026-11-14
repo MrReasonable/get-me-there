@@ -16,13 +16,13 @@ beforeEach(() => {
 
 const TAG = '0011_wp20_flight_lists';
 // why: 0012 (WP21) builds on 0011's tables, so a world at 0010 lacks it too and gets it after 0011
-const NEXT = '0012_wp21_return_leg';
+const NEXT = ['0012_wp21_return_leg', '0013_booking_url'] as const;
 const SEEDED = ['search_definitions', 'search_executions', 'calendar_prices', 'provider_requests'] as const;
 
 /** A database at 0010 with a definition, a paused run holding the old free-text error, a completed run, a price, a ledger row. */
 function seedAt0010(): Db {
   const db = openTracked(tmpDbPath());
-  applyMigrations(db, migrationsWithout([TAG, NEXT]));
+  applyMigrations(db, migrationsWithout([TAG, ...NEXT]));
   const run = (sql: string): void => {
     db.raw.prepare(sql).run({ at: T0 });
   };
@@ -131,12 +131,12 @@ describe('migration 0011 (spec revision 55 §7)', () => {
   it('keeps every row of a world seeded at 0010, with the two new execution columns NULL on every one', () => {
     const db = seedAt0010();
     const before = rowsOf(db);
-    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, NEXT]);
+    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, ...NEXT]);
     const after = rowsOf(db);
     // why: every old column keeps its value (the paused run's free-text error_text included); only the two new ones appear
     for (const t of SEEDED) {
       expect(after[t]?.length, t).toBe(before[t]?.length);
-      // why: provider_requests' page_count is 0012's, applied after this one (NEXT), NULL on the seeded row as well
+      // why: provider_requests' page_count is 0012's, applied after this one (NEXT's first), NULL on the seeded row as well
       const added =
         t === 'search_executions'
           ? { stop_cause_json: null, flight_lists_json: null }

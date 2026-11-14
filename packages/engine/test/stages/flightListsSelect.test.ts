@@ -252,7 +252,7 @@ describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reus
       expect(outcome({ ...failedList(ago(1)), transientStreak: 2 }, plan)).toBe('read');
   });
 
-  it('listReusable is the rule selectFlightPairs applies (the on-demand read shares it)', () => {
+  it('listReusable is the rule selectFlightPairs applies', () => {
     const n = young({});
     expect(listReusable(n, NOW, 168, BOOKING)).toBe(true);
     expect(listReusable({ ...n, bookingStatus: 'expand-failed' }, NOW, 168, BOOKING)).toBe(false);

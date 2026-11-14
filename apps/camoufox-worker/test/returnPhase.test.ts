@@ -15,6 +15,7 @@ import {
   type WorkerAnswer,
   workerAnswerSchema,
 } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pageBudget } from '../src/budget.js';
 import { CooldownStore } from '../src/cooldown.js';
@@ -72,7 +73,8 @@ const URL0 =
   'https://www.google.com/travel/flights?q=Flights+from+LHR+to+JFK+on+2026-11-05+returning+2026-11-15&curr=GBP&hl=en-GB&gl=GB';
 const LANDED = 'https://www.google.com/travel/flights/search?tfs=x';
 const RETURN_URL = 'https://www.google.com/travel/flights/search?tfs=r';
-const BOOKING_URL = 'https://www.google.com/travel/flights/booking?tfs=b';
+// why: the booking page's address in its real shape (core's synthetic one), so the read's address is checkable
+const BOOKING_URL = SYNTHETIC_BOOKING_URL;
 const versions = { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: '152.0.4-beta.28' };
 /** A verified entry's flags (the module's darwin-arm64 values) with both select flags on, as the flip will set them. */
 const VERIFIED: Selectors = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
@@ -425,6 +427,7 @@ describe('the whole phase (spec rev 56 §2: the outbound, its returns, the shown
       grouped: 1,
       moreControl: false,
       offersStated: null,
+      bookingUrl: SYNTHETIC_BOOKING_URL,
     });
     // why: R-pick: the worker books exactly the return core's one rule picks
     expect(ret.booking?.returnIndex).toBe(bookingReturnOf(ret, a.flights)?.returnIndex);
@@ -1046,6 +1049,7 @@ describe('the phase’s other ends', () => {
         unparsed: 0,
         nonGbp: 0,
         offersStated: null,
+        bookingUrl: null,
       },
     });
     expect(t.page0().calls.actions).toEqual([]);
@@ -1522,6 +1526,81 @@ describe('transient ends of the booking step (the returns intact, returns read)'
     });
     expect(a.versions).toEqual(withGrammar);
     expect(t.page0().calls.actions).toHaveLength(4);
+  });
+  describe('the booking page’s address (the booking read carries it)', () => {
+    const OTHER_URL = 'https://www.google.com/travel/flights/booking?tfs=other&curr=GBP';
+    const addressOf = async (t: Setup) => (await booked(t))?.bookingUrl;
+    it('a read has the address of the booking view', async () => {
+      const t = setup({
+        press: withPress({ [R1180]: { trees: [bookingTree(INITIAL, { more: [] })], url: BOOKING_URL } }),
+      });
+      expect(await booked(t)).toMatchObject({ status: 'read', bookingUrl: SYNTHETIC_BOOKING_URL });
+    });
+    it('an expand-failed read has it too', async () => {
+      const t = setup({ press: withPress({ [MORE]: undefined }) });
+      expect(await booked(t)).toMatchObject({ status: 'expand-failed', bookingUrl: SYNTHETIC_BOOKING_URL });
+    });
+    it('after an expansion whose view has another address, the first view’s address is kept', async () => {
+      const t = setup({
+        press: withPress({ [MORE]: { trees: [bookingTree(EXPANDED, { more: [] })], url: OTHER_URL } }),
+      });
+      expect(await booked(t)).toMatchObject({
+        status: 'read',
+        expanded: true,
+        bookingUrl: SYNTHETIC_BOOKING_URL,
+      });
+    });
+    it('an address that is not worth linking (over the length cap) gives a read with a null address', async () => {
+      const t = setup({
+        press: withPress({
+          [R1180]: {
+            trees: [bookingTree(INITIAL, { more: [] })],
+            url: `${BOOKING_URL}&pad=${'a'.repeat(2100)}`,
+          },
+        }),
+      });
+      // why: the page is still the booking view (its offers read), but its address is never kept raw
+      expect(await booked(t)).toMatchObject({ status: 'read', bookingUrl: null });
+    });
+    it.each([
+      [
+        'no offers read',
+        {
+          trees: [bookingTree([offer('QQ Travel', '1,180', undefined, 'Galleons')], { more: [] })],
+          url: BOOKING_URL,
+        },
+      ],
+      [
+        'another currency',
+        { trees: [bookingTree([...INITIAL, offer('QQ Air', '900', undefined, 'Euros')])], url: BOOKING_URL },
+      ],
+    ])('an unrecognised read (%s) has a null address', async (_n, shows) => {
+      const t = setup({ press: withPress({ [R1180]: shows }) });
+      expect(await booked(t)).toMatchObject({ status: 'unrecognised', bookingUrl: null });
+    });
+    it('a view that did not settle has a null address', async () => {
+      let reads = 0;
+      const t = setup({
+        driver: (d) => ({
+          ...d,
+          bookingFacts: async (dl) => {
+            reads++;
+            if (reads === 1) throw new DeadlineExceeded();
+            return d.bookingFacts(dl);
+          },
+        }),
+      });
+      expect(await booked(t)).toMatchObject({ status: 'not-settled', bookingUrl: null });
+    });
+    it('nothing logged in the booking step names the address’s query', async () => {
+      const t = setup({});
+      expect(await addressOf(t)).toBe(SYNTHETIC_BOOKING_URL);
+      for (const l of t.log.lines) {
+        const text = JSON.stringify(l);
+        expect(text).not.toContain('tfs=');
+        expect(text).not.toContain('tfu=');
+      }
+    });
   });
   it('two or more expansion controls: unrecognised more-options-count, nothing pressed, no offer kept (A9)', async () => {
     const t = setup({

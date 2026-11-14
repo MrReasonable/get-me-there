@@ -1,4 +1,10 @@
-import { type DatePair, type DatePairFigure, type DecodedDatePairs, rankTierOf } from '@gmt/core';
+import {
+  type BookingTarget,
+  type DatePair,
+  type DatePairFigure,
+  type DecodedDatePairs,
+  rankTierOf,
+} from '@gmt/core';
 import {
   Fragment,
   type MouseEvent,
@@ -16,14 +22,9 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatFlapDate, formatIsoDate } from '../../format.js';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
-import {
-  type DatesSortKey,
-  type DatesUiState,
-  datesPatch,
-  detailHref,
-  detailPatch,
-} from '../../state/datesState.js';
-import { navigateTo, updateSearchParams } from '../../state/urlState.js';
+import { type DatesSortKey, type DatesUiState, datesPatch } from '../../state/datesState.js';
+import { tripPatch } from '../../state/tripState.js';
+import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.js';
 import {
   BoardCard,
   CheaperCached,
@@ -41,6 +42,7 @@ import {
   gridFetchedAtOf,
   type ListsState,
   PAGE_SIZE,
+  rowBookingTarget,
   sellerCoverage,
   setsAirlineOrLayover,
 } from './board.js';
@@ -367,6 +369,7 @@ export function BoardTable(props: BoardProps) {
               digits,
               howFar: howFarChecked(p, airportPairs, state.journey),
               notes: definition.destinationNotes,
+              target: rowBookingTarget(p, p.figure, definition.cabin),
               journeyFiltered: filtered,
               lit: lit === p.index,
               onLight,
@@ -459,6 +462,7 @@ function BoardRow({
   digits,
   howFar,
   notes,
+  target,
   journeyFiltered,
   lit,
   onLight,
@@ -468,6 +472,8 @@ function BoardRow({
   toggle,
 }: {
   pair: DatePair & { figure: DatePairFigure };
+  /** Where the row's price links (a pairing figure's), from `rowBookingTarget`. */
+  target: BookingTarget;
   rank: number;
   digits: number;
   howFar: readonly string[];
@@ -488,10 +494,10 @@ function BoardRow({
   const state = rowState(f);
   const dep = formatIsoDate(pair.departureDate);
   const ret = formatIsoDate(pair.returnDate);
-  const open = navigateTo(detailPatch(pair));
+  const open = navigateTo(tripPatch(pair));
   // why: spec §11: a click anywhere on the row follows its link; the link and the buttons inside keep their own
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
-    if (e.target instanceof Element && e.target.closest('a, button') !== null) return;
+    if (e.target instanceof Element && e.target.closest('a, button, details') !== null) return;
     open(e);
   };
   return (
@@ -508,7 +514,7 @@ function BoardRow({
       </td>
       <td className="nowrap">
         <a
-          href={detailHref(pair)}
+          href={hrefWith(tripPatch(pair))}
           onClick={open}
           onFocus={() => onLight(pair.index)}
           onBlur={() => onLight(null)}
@@ -527,7 +533,7 @@ function BoardRow({
         <Flaps text={String(pair.nights)} cells={2} align="right" slot="nights" />
       </td>
       <td className="board-price">
-        <RowPrice figure={f} notes={notes} flapSlot="price" />
+        <RowPrice figure={f} notes={notes} target={target} />
         <CheaperCached figure={f} notes={notes} />
         <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />

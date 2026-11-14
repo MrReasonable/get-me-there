@@ -394,6 +394,7 @@ describe('rule A ends the step (design 2026-11-08 §4.4)', () => {
       unparsed: 0,
       nonGbp: 0,
       offersStated: null,
+      bookingUrl: null,
     };
     const { e } = confirming({
       ranked: pairs(3, (i) => 30_000 + i),

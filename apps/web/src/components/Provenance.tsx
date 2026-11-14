@@ -20,7 +20,7 @@ export class MissingProvenanceError extends Error {
 }
 
 /** Spec §5.5: the `fixture` provider and the `synthetic` source kind only ever appear together. */
-export function provenanceConsistent(p: Pick<ProvenanceT, 'providerId' | 'sourceKind'>): boolean {
+function provenanceConsistent(p: Pick<ProvenanceT, 'providerId' | 'sourceKind'>): boolean {
   return (p.providerId === 'fixture') === (p.sourceKind === 'synthetic');
 }
 
@@ -62,8 +62,6 @@ export interface ProvenanceProps {
   calendar: boolean;
   destination?: string | undefined;
   destinationNote?: string | null | undefined;
-  /** False only beside the wide Results table's columns, whose Provider column already names the provider (ruling on UI-14). */
-  showProvider?: boolean;
   /** Headers show the full age form visibly (spec §3, §11); rows show the compact form with the full one as title. */
   fullAge?: boolean;
   /** Replaces the source's words (`sourceLabel(p)`), e.g. a flight list's own source name; the provenance is still validated. */
@@ -76,7 +74,6 @@ export function Provenance({
   calendar,
   destination,
   destinationNote,
-  showProvider = true,
   fullAge = false,
   sourceLabel: sourceWords,
 }: ProvenanceProps) {
@@ -89,7 +86,7 @@ export function Provenance({
       data-testid="provenance"
       className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-2 ${isCalendar ? 'rounded border border-dashed border-line-strong px-1' : ''}`}
     >
-      {showProvider ? <span className="chip">{COPY.provider[p.providerId]}</span> : null}
+      <span className="chip">{COPY.provider[p.providerId]}</span>
       <span>{sourceWords ?? sourceLabel(p)}</span>
       <span data-testid="point-of-sale">{pointOfSaleLabel(p)}</span>
       {fullAge ? (

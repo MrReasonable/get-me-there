@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trips</title>
+<meta name="description" content="Mockup: first screen, cheapest trips per search and a new search">
+<style>
+/* Shared mockup styles (inlined into each file). Tokens first; dark mode redefines them. */
+:root {
+  --bg: #f5f4f0; --surface: #ffffff; --sunk: #f0eee9; --ink: #17191c; --muted: #5c636c; --faint: #858c95;
+  --line: #e2dfd8; --accent: #0a58ca; --accent-hover: #0847a3; --accent-ink: #ffffff;
+  --seller-bg: #e2f1e7; --seller-ink: #17643a;
+  --google-bg: #e5edf8; --google-ink: #1f4a82;
+  --cal-bg: #fbeed2; --cal-ink: #74500a;
+  --cache-bg: #ebe9e4; --cache-ink: #4a5057;
+  --ok: #17643a; --warn: #8f5200; --bad: #b3261e;
+  --heat-1: #0f6b4f; --heat-2: #3f8f6f; --heat-3: #86b9a2; --heat-4: #c9dfd3; --heat-5: #ecf2ee;
+  --heat-ink-dark: #ffffff; --heat-ink-light: #17191c;
+  --radius: 10px; --gutter: 16px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --surface: #1b1e21; --sunk: #16191b; --ink: #eceef0; --muted: #a5acb5; --faint: #7d848d;
+    --line: #2c3035; --accent: #6aa6ff; --accent-hover: #8dbaff; --accent-ink: #0b1220;
+    --seller-bg: #173526; --seller-ink: #8fd6aa;
+    --google-bg: #1a2a40; --google-ink: #9cc0f0;
+    --cal-bg: #3a2c10; --cal-ink: #f0c873;
+    --cache-bg: #2a2d31; --cache-ink: #c3c8ce;
+    --ok: #8fd6aa; --warn: #f0b860; --bad: #ff8a80;
+    --heat-1: #2fae83; --heat-2: #24805f; --heat-3: #1d5a45; --heat-4: #1a3b30; --heat-5: #1a2622;
+    --heat-ink-dark: #0b1210; --heat-ink-light: #dfe5e2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --surface: #1b1e21; --sunk: #16191b; --ink: #eceef0; --muted: #a5acb5; --faint: #7d848d;
+  --line: #2c3035; --accent: #6aa6ff; --accent-hover: #8dbaff; --accent-ink: #0b1220;
+  --seller-bg: #173526; --seller-ink: #8fd6aa; --google-bg: #1a2a40; --google-ink: #9cc0f0;
+  --cal-bg: #3a2c10; --cal-ink: #f0c873; --cache-bg: #2a2d31; --cache-ink: #c3c8ce;
+  --ok: #8fd6aa; --warn: #f0b860; --bad: #ff8a80;
+  --heat-1: #2fae83; --heat-2: #24805f; --heat-3: #1d5a45; --heat-4: #1a3b30; --heat-5: #1a2622;
+  --heat-ink-dark: #0b1210; --heat-ink-light: #dfe5e2; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+h1 { font-size: 24px; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 17px; font-weight: 650; }
+h3 { font-size: 15px; font-weight: 650; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.small { font-size: 13px; }
+.nowrap { white-space: nowrap; }
+
+/* Mockup annotation: not part of the design */
+.note {
+  border: 1px dashed #c06; color: #a0004f; background: #fff0f6; font-size: 12.5px; padding: 8px 10px;
+  border-radius: 6px; margin: 12px 0;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .note { background: #2a1420; color: #ff9cc8; border-color: #ff6fae; } }
+
+/* Top bar */
+.top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-in { max-width: 1120px; margin: 0 auto; padding: 10px var(--gutter); display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.brand { font-weight: 750; letter-spacing: 0.02em; font-size: 15px; color: var(--ink); }
+.brand span { color: var(--accent); }
+.nav { display: flex; gap: 4px; }
+.nav a { color: var(--muted); padding: 6px 10px; border-radius: 6px; font-weight: 550; }
+.nav a[aria-current="page"] { color: var(--ink); background: var(--sunk); }
+.limits { margin-left: auto; display: flex; gap: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.limits b { color: var(--ink); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+.dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px var(--gutter) 64px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.crumb { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 14px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--faint); text-decoration: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--accent); padding: 0 8px; }
+.btn.sm { min-height: 32px; padding: 0 10px; font-size: 13.5px; }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.card + .card { margin-top: 16px; }
+.card-head { padding: 16px 18px 10px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.card-foot { padding: 10px 18px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); }
+.meta { font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+.section { margin-top: 28px; }
+.section > h2 { margin-bottom: 10px; }
+.section-sub { font-size: 13.5px; color: var(--muted); margin: -4px 0 12px; }
+
+/* Price + its one label */
+.price { font-weight: 700; font-size: 17px; color: var(--accent); white-space: nowrap; }
+.price .ext { font-size: 12px; margin-left: 2px; opacity: 0.8; }
+.price.static { color: var(--ink); }
+.lbl { position: relative; display: inline-block; }
+.lbl > summary {
+  list-style: none; cursor: pointer; display: inline-block; font-size: 12px; font-weight: 600; line-height: 1;
+  padding: 4px 7px; border-radius: 999px; white-space: nowrap;
+}
+.lbl > summary::-webkit-details-marker { display: none; }
+.lbl > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.k-seller > summary { background: var(--seller-bg); color: var(--seller-ink); }
+.k-google > summary { background: var(--google-bg); color: var(--google-ink); }
+.k-cal > summary { background: var(--cal-bg); color: var(--cal-ink); }
+.k-cache > summary { background: var(--cache-bg); color: var(--cache-ink); }
+.k-old > summary { background: transparent; color: var(--faint); border: 1px dashed var(--faint); }
+.lbl .pop {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(300px, 80vw);
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px 12px; font-size: 13px; font-weight: 400;
+}
+.lbl .pop p + p { margin-top: 6px; }
+
+/* Trip rows (grid, become cards on phones) */
+.trips { border-top: 1px solid var(--line); }
+.trip {
+  display: grid; grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 1fr) minmax(130px, 1fr) 28px;
+  gap: 4px 14px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line);
+}
+.trip:last-child { border-bottom: 0; }
+.trip-head { padding-top: 8px; padding-bottom: 8px; font-size: 12px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.trip .pc { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.trip .dates b { font-weight: 600; }
+.trip .leg { font-size: 14px; }
+.trip .leg .via { color: var(--muted); font-size: 13px; }
+.trip .go { color: var(--faint); font-size: 20px; text-align: right; }
+.trip .go:hover { color: var(--accent); text-decoration: none; }
+.leg-tag { display: none; }
+@media (max-width: 720px) {
+  .trip-head { display: none; }
+  .trip { grid-template-columns: 1fr auto; grid-template-areas: "dates pc" "out pc" "back go"; padding: 12px 16px; }
+  .trip .dates { grid-area: dates; } .trip .pc { grid-area: pc; align-items: flex-end; }
+  .trip .nights { display: none; }
+  .trip .out { grid-area: out; } .trip .back { grid-area: back; } .trip .go { grid-area: go; align-self: end; }
+  .leg-tag { display: inline-block; width: 38px; color: var(--faint); font-size: 12px; font-weight: 600; text-transform: uppercase; }
+  .trip .nights-inline { display: inline; }
+  .lbl .pop { left: auto; right: 0; }
+}
+.nights-inline { display: none; color: var(--muted); }
+
+/* Status lines */
+.state { display: flex; gap: 10px; align-items: flex-start; padding: 14px 18px; font-size: 14px; }
+.state .ic { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.ic.info { background: var(--google-bg); color: var(--google-ink); }
+.ic.warn { background: var(--cal-bg); color: var(--warn); }
+.ic.bad { background: #fbe3e1; color: var(--bad); }
+.progress { height: 6px; border-radius: 999px; background: var(--sunk); overflow: hidden; margin-top: 8px; }
+.progress > i { display: block; height: 100%; background: var(--accent); }
+
+/* Forms */
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field label, .field .lab { font-size: 13px; font-weight: 600; }
+.field .hint { font-size: 12.5px; color: var(--muted); }
+input[type="text"], input[type="number"], input[type="date"], input[type="email"], input[type="password"], select {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  min-height: 40px; padding: 0 10px; width: 100%;
+}
+input:focus-visible, select:focus-visible, .btn:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.check input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--sunk); border: 1px solid var(--line); font-size: 13.5px; }
+.chip b { font-weight: 650; }
+.chip .x { color: var(--faint); padding: 0 4px; }
+
+details.more > summary { cursor: pointer; font-weight: 600; color: var(--accent); list-style: none; padding: 10px 0; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸"; display: inline-block; width: 16px; color: var(--faint); }
+details.more[open] > summary::before { content: "▾"; }
+
+table.plain { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.plain th { text-align: left; font-size: 12px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.plain td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.table-scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<style>
+  .home { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+  /* why: beside the 340px New search column the cards are 724px wide at 1280px; these minima (682px with the gaps and
+     padding) keep each trip row inside its card; phones keep their own two-column rows */
+  @media (min-width: 721px) { .home .trip { grid-template-columns: 130px minmax(150px, 1.3fr) 52px minmax(110px, 1fr) minmax(110px, 1fr) 24px; } }
+  .newsearch { position: sticky; top: 16px; padding: 16px 18px 18px; }
+  .newsearch h2 { margin-bottom: 12px; }
+  .newsearch .field + .field, .newsearch .row + .field, .newsearch .field + .row { margin-top: 12px; }
+  .newsearch .row .field { margin-top: 0; }
+  .sources { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .estimate { margin: 14px 0 10px; font-size: 13.5px; color: var(--muted); }
+  .search-title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .search-title a { color: var(--ink); }
+  .running { padding: 0 18px 14px; }
+  .lower { padding: 10px 18px; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--line); }
+  .foot-right { margin-left: auto; }
+  @media (max-width: 900px) { .home { grid-template-columns: 1fr; } .newsearch { position: static; } }
+</style>
+
+<header class="top"><div class="top-in">
+  <div class="brand">get<span>·</span>me<span>·</span>there</div>
+  <nav class="nav" aria-label="Main"><a href="01-searches.html" aria-current="page">Trips</a><a href="04-settings.html">Settings</a></nav>
+  <div class="limits" aria-label="Remaining limits">
+    <span><span class="dot"></span>All working</span>
+    <span>SearchApi <b>412</b> credits left</span>
+    <span>Spent <b>£0</b> of £35 this month</span>
+  </div>
+</div></header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>Trips</h1>
+    <a class="btn primary" href="#new">+ New search</a>
+  </div>
+
+  <div class="home">
+    <div>
+      <!-- Search 1: finished, trips with flights read -->
+      <section class="card" aria-labelledby="s1">
+        <div class="card-head">
+          <div>
+            <div class="search-title"><h2 id="s1"><a href="02-search.html">London → New York</a></h2><span class="small muted">repeats weekly</span></div>
+            <div class="meta">Heathrow, Gatwick → JFK, Newark · leave 9 Nov – 9 May · 10–21 nights · searched 3h ago</div>
+          </div>
+        </div>
+        <div class="trips" role="list" aria-label="Cheapest trips, London to New York">
+          <div class="trip trip-head" aria-hidden="true"><span>Price</span><span>Dates</span><span>Nights</span><span>Out</span><span>Back</span><span></span></div>
+          <div class="trip" role="listitem">
+            <div class="pc">
+              <a class="price" href="#book" title="Open these flights on Google Flights to book">£412<span class="ext">↗</span></a>
+              <details class="lbl k-seller"><summary>Seller · 3h</summary><div class="pop">
+                <p><b>A seller's price</b>, as Google's booking page listed it (Kiwi.com, cheapest of 16 sellers), read by your browser 3h ago.</p>
+                <p class="muted">Not checked with the seller or airline: it can change at checkout.</p>
+              </div></details>
+            </div>
+            <div class="dates"><b>Wed 11 Nov → Sat 28 Nov</b> <span class="nights-inline">· 17 nights</span></div>
+            <div class="nights">17</div>
+            <div class="leg out"><span class="leg-tag">Out</span>10h 40m <span class="via">· 1 change</span></div>
+            <div class="leg back"><span class="leg-tag">Back</span>6h 55m <span class="via">· direct</span></div>
+            <a class="go" href="03-trip.html" aria-label="Details for 11 to 28 November">›</a>
+          </div>
+          <div class="trip" role="listitem">
+            <div class="pc">
+              <a class="price" href="#book">£436<span class="ext">↗</span></a>
+              <details class="lbl k-seller"><summary>Seller · 3h</summary><div class="pop"><p><b>A seller's price</b> from Google's booking page (Norse Atlantic direct), read 3h ago. Not checked with the seller or airline.</p></div></details>
+            </div>
+            <div class="dates"><b>Fri 20 Nov → Mon 30 Nov</b> <span class="nights-inline">· 10 nights</span></div>
+            <div class="nights">10</div>
+            <div class="leg out"><span class="leg-tag">Out</span>8h 10m <span class="via">· direct</span></div>
+            <div class="leg back"><span class="leg-tag">Back</span>7h 05m <span class="via">· direct</span></div>
+            <a class="go" href="03-trip.html" aria-label="Details for 20 to 30 November">›</a>
+          </div>
+          <div class="trip" role="listitem">
+            <div class="pc">
+              <a class="price" href="#book">£448<span class="ext">↗</span></a>
+              <details class="lbl k-seller"><summary>Seller · 3h</summary><div class="pop"><p><b>A seller's price</b> from Google's booking page, read 3h ago. Not checked with the seller or airline.</p></div></details>
+            </div>
+            <div class="dates"><b>Tue 1 Dec → Sat 19 Dec</b> <span class="nights-inline">· 18 nights</span></div>
+            <div class="nights">18</div>
+            <div class="leg out"><span class="leg-tag">Out</span>8h 25m <span class="via">· direct</span></div>
+            <div class="leg back"><span class="leg-tag">Back</span>12h 30m <span class="via">· 1 change</span></div>
+            <a class="go" href="03-trip.html" aria-label="Details for 1 to 19 December">›</a>
+          </div>
+        </div>
+        <p class="lower">Flights read for 23 dates; these are the cheapest. <a href="02-search.html#calendar">155 dates look lower on the calendar (from £372)</a>, flights not read.</p>
+        <div class="card-foot">
+          <a class="btn sm" href="02-search.html">All trips and dates</a>
+          <button class="btn sm" type="button">Search again</button>
+          <a class="btn sm quiet foot-right" href="02-search.html#edit">Edit</a>
+        </div>
+      </section>
+
+      <!-- Search 2: running, showing last run's trips with their age -->
+      <section class="card" aria-labelledby="s2">
+        <div class="card-head">
+          <div>
+            <div class="search-title"><h2 id="s2"><a href="02-search.html">London → New York, winter</a></h2></div>
+            <div class="meta">Heathrow → JFK · leave 1 Dec – 31 Mar · 7–14 nights</div>
+          </div>
+        </div>
+        <div class="running" role="status">
+          <div class="small"><b>Searching now:</b> reading the calendar, 1,203 of 2,184 dates · about 14 min left, then flights for the cheapest dates</div>
+          <div class="progress" aria-hidden="true"><i style="width:55%"></i></div>
+        </div>
+        <div class="trips" role="list" aria-label="Trips from the previous search">
+          <div class="trip" role="listitem">
+            <div class="pc">
+              <a class="price" href="#book">£389<span class="ext">↗</span></a>
+              <details class="lbl k-seller"><summary>Seller · 2d</summary><div class="pop"><p><b>A seller's price</b> read 2 days ago by the previous search. The search running now will replace it.</p></div></details>
+            </div>
+            <div class="dates"><b>Tue 12 Jan → Tue 19 Jan</b> <span class="nights-inline">· 7 nights</span></div>
+            <div class="nights">7</div>
+            <div class="leg out"><span class="leg-tag">Out</span>7h 00m <span class="via">· direct</span></div>
+            <div class="leg back"><span class="leg-tag">Back</span>7h 50m <span class="via">· direct</span></div>
+            <a class="go" href="03-trip.html" aria-label="Details">›</a>
+          </div>
+          <div class="trip" role="listitem">
+            <div class="pc">
+              <a class="price" href="#book">£402<span class="ext">↗</span></a>
+              <details class="lbl k-seller"><summary>Seller · 2d</summary><div class="pop"><p><b>A seller's price</b> read 2 days ago by the previous search.</p></div></details>
+            </div>
+            <div class="dates"><b>Wed 13 Jan → Sat 23 Jan</b> <span class="nights-inline">· 10 nights</span></div>
+            <div class="nights">10</div>
+            <div class="leg out"><span class="leg-tag">Out</span>7h 05m <span class="via">· direct</span></div>
+            <div class="leg back"><span class="leg-tag">Back</span>9h 40m <span class="via">· 1 change</span></div>
+            <a class="go" href="03-trip.html" aria-label="Details">›</a>
+          </div>
+        </div>
+        <div class="card-foot">
+          <a class="btn sm" href="02-search.html">All trips and dates</a>
+          <button class="btn sm" type="button">Cancel search</button>
+          <a class="btn sm quiet foot-right" href="02-search.html#edit">Edit</a>
+        </div>
+      </section>
+
+      <!-- Search 3: searched, nothing found, says why and offers the fix -->
+      <section class="card" aria-labelledby="s3">
+        <div class="card-head">
+          <div>
+            <div class="search-title"><h2 id="s3"><a href="02-search.html">London → New York, long stays</a></h2></div>
+            <div class="meta">Gatwick → Newark · leave 14 Nov – 14 May · 10–21 nights · searched 8h ago</div>
+          </div>
+        </div>
+        <div class="state" style="border-top:1px solid var(--line)">
+          <span class="ic warn" aria-hidden="true">!</span>
+          <div><b>No prices yet.</b> The Aviasales cache had nothing for these airports, and the browser is off for this search, so no dates were read. That doesn't mean there are no flights.</div>
+        </div>
+        <div class="card-foot">
+          <button class="btn sm primary" type="button">Turn on the browser and search again</button>
+          <a class="btn sm quiet foot-right" href="02-search.html#edit">Edit</a>
+        </div>
+      </section>
+    </div>
+
+    <!-- New search: four fields, sources, everything else folded -->
+    <aside class="card newsearch" id="new" aria-labelledby="ns">
+      <h2 id="ns">New search</h2>
+      <div class="field">
+        <label for="from">From</label>
+        <div class="chips"><span class="chip"><b>LHR</b> Heathrow <span class="x" aria-label="Remove">×</span></span><span class="chip"><b>LGW</b> Gatwick <span class="x">×</span></span></div>
+        <input id="from" type="text" placeholder="Add a city, airport or code">
+      </div>
+      <div class="field">
+        <label for="to">To</label>
+        <input id="to" type="text" placeholder="City, airport or code" value="New York (all airports)">
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label for="d1">Leave from</label><input id="d1" type="date" value="2026-11-09"></div>
+        <div class="field"><label for="d2">Leave by</label><input id="d2" type="date" value="2027-05-09"></div>
+      </div>
+      <div class="field">
+        <span class="lab">Stay</span>
+        <div style="display:flex;gap:8px;align-items:center"><input type="number" value="10" aria-label="Shortest stay" style="width:80px"> to <input type="number" value="21" aria-label="Longest stay" style="width:80px"> nights</div>
+      </div>
+      <div class="sources" role="group" aria-labelledby="srch">
+        <span class="lab small" id="srch" style="font-weight:600">Where to look</span>
+        <label class="check"><input type="checkbox" checked><span>Google Flights, in your browser <span class="muted small">· free, takes a while</span></span></label>
+        <label class="check"><input type="checkbox" checked><span>Aviasales cache <span class="muted small">· free, prices up to 2 days old</span></span></label>
+        <label class="check"><input type="checkbox"><span>SearchApi <span class="muted small">· up to 10 credits a run, 412 left</span></span></label>
+      </div>
+      <details class="more">
+        <summary>More options</summary>
+        <div class="field"><label for="lim">Longest journey each way</label><input id="lim" type="text" value="25 hours"><span class="hint">Trips over this are left out once their flights are read.</span></div>
+        <div class="row" style="margin-top:12px">
+          <div class="field"><label for="cab">Cabin</label><select id="cab"><option>Economy</option><option>Premium economy</option><option>Business</option></select></div>
+          <div class="field"><label for="rep">Repeat</label><select id="rep"><option>Never</option><option>Weekly</option></select></div>
+        </div>
+        <label class="check" style="margin-top:12px"><input type="checkbox"><span>Rolling dates (move the window forward each time)</span></label>
+        <div class="field" style="margin-top:12px"><label for="nm">Name</label><input id="nm" type="text" placeholder="London → New York"></div>
+      </details>
+      <p class="estimate">About 25 min, free. Then flights are read for the cheapest dates until the 5 cheapest stop changing.</p>
+      <button class="btn primary" type="button" style="width:100%">Search</button>
+    </aside>
+  </div>
+
+  <p class="note">Mockup note: every price has exactly one label; tap it for the detail. The price itself is the booking link. The top bar always shows remaining limits and one health line (it turns amber or red, with a link, only when something needs you).</p>
+</main>
+
+</body>
+</html>

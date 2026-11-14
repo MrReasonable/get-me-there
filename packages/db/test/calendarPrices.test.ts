@@ -19,7 +19,7 @@ import {
   newExecution,
   withNights,
 } from './helpers/factories.js';
-import { historySeed, statementsOf } from './helpers/history.js';
+import { CELLS, historySeed, statementsOf } from './helpers/history.js';
 
 function setup(allowSynthetic = false, onlyLhrJfk = false) {
   const db = freshDb();
@@ -525,5 +525,45 @@ SELECT id FROM ranked WHERE rn = 1`;
     );
     expect(held.length).toBeGreaterThan(0);
     expect(seed.prices.latestHeldBy(seed.runs, 'business', null)).toEqual([]);
+  });
+});
+
+// why: design 2026-11-08 §6.1 (plan Task 5): the Trip page's log has one row per run that priced these dates, with
+// that run's own fetched prices (a reused copy was not searched by the run that copied it)
+describe('CalendarPricesRepo.perExecutionForDatePair', () => {
+  it("every price a run fetched for the date pair, newest run first, with its source outcome's last_error", () => {
+    const seed = historySeed();
+    const dep = CELLS[0]?.departureDate ?? asIsoDate('2027-03-14');
+    const ret = CELLS[0]?.returnDate ?? asIsoDate('2027-03-28');
+    const { result, statements } = statementsOf(seed.db, () =>
+      seed.prices.perExecutionForDatePair(seed.definition.id, dep, ret),
+    );
+    expect(statements).toBe(1);
+    const all = seed.executions.listForDefinition(seed.definition.id, {
+      limit: 'all',
+      includeChildren: true,
+    });
+    const truncation = (r: CalendarPriceRow): string | null =>
+      seed.cells
+        .outcomes(r.executionId, { stage: 'discovery' })
+        .find((o) => o.providerId === r.providerId && cellKeyString(o) === cellKeyString(r.cell))
+        ?.lastError ?? null;
+    // the reference: per execution newest first, the prices it fetched itself for the date pair, by id
+    const expected = all.flatMap((e) =>
+      seed.prices
+        .fetchedBy(e.id)
+        .filter((r) => r.cell.departureDate === dep && r.cell.returnDate === ret)
+        .map((price) => ({ executionId: e.id, price, sourceLastError: truncation(price) })),
+    );
+    expect(expected.length).toBeGreaterThan(2);
+    expect(result).toEqual(expected);
+    // the seed's reused copies and its truncated tiles both touch this date pair, so the read is told apart from heldBy
+    expect(
+      seed.runs.some((id) =>
+        seed.prices.heldBy(id).some((r) => r.reusedFromExecutionId !== null && r.cell.departureDate === dep),
+      ),
+    ).toBe(true);
+    expect(result.some((r) => r.sourceLastError !== null)).toBe(true);
+    expect(seed.prices.perExecutionForDatePair(seed.definition.id, dep, asIsoDate('2027-03-27'))).toEqual([]);
   });
 });

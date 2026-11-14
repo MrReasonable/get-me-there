@@ -1,0 +1,596 @@
+/* =====================================================================================================================
+   The Trip page (design 2026-11-08 §6.1, mockup 03-trip.html): plain text on plain cards, no split-flap lettering.
+   Its own tokens, light and dark (the departure board's world stays for the shell around it). Every text pair's WCAG
+   ratio is written beside it and asserted by test/views/trip/contrast.test.ts, which reads this file. Spec §4's CSP
+   blocks inline styles, so nothing here is set from markup.
+   ===================================================================================================================== */
+
+/* The tokens are shared with the search page's price cells (`.row-price`: a board row's price, its label and its
+   booking link), so a label reads the same colours on both pages. */
+.trip,
+.row-price {
+  --t-bg: #f5f4f0;
+  --t-surface: #ffffff;
+  --t-sunk: #f0eee9;
+  --t-ink: #17191c; /* 17.0:1 on surface */
+  --t-muted: #5c636c; /* 6.1:1 on surface, 5.5:1 on bg */
+  --t-line: #e2dfd8;
+  --t-accent: #0a58ca; /* 6.4:1 on surface, 5.9:1 on bg */
+  --t-accent-hover: #0847a3;
+  --t-accent-ink: #ffffff; /* 6.4:1 on accent */
+  --t-seller-bg: #e2f1e7;
+  --t-seller-ink: #17643a; /* 6.2:1 */
+  --t-google-bg: #e5edf8;
+  --t-google-ink: #1f4a82; /* 7.5:1 */
+  --t-cal-bg: #fbeed2;
+  --t-cal-ink: #74500a; /* 6.3:1 */
+  --t-cache-bg: #ebe9e4;
+  --t-cache-ink: #4a5057; /* 6.7:1 */
+  --t-old-ink: #5c636c; /* 6.1:1 on surface */
+  --t-warn: #8f5200; /* the stale age: 5.1:1 or more on every label's ground and on surface */
+  --t-bad: #b3261e; /* 6.5:1 on surface */
+  --t-gutter: 16px;
+}
+
+.trip {
+  color-scheme: light;
+  color: var(--t-ink);
+  background: var(--t-bg);
+  border-radius: 10px;
+  padding: 20px var(--t-gutter) 32px;
+  font: 400 15px / 1.45 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  max-width: 1120px;
+  margin: 0 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-color-scheme: dark) {
+  .trip,
+  .row-price {
+    --t-bg: #121416;
+    --t-surface: #1b1e21;
+    --t-sunk: #16191b;
+    --t-ink: #eceef0; /* 14.9:1 on surface */
+    --t-muted: #a5acb5; /* 7.3:1 on surface, 8.1:1 on bg */
+    --t-line: #2c3035;
+    --t-accent: #6aa6ff; /* 6.8:1 on surface */
+    --t-accent-hover: #8dbaff;
+    --t-accent-ink: #0b1220; /* 7.6:1 on accent */
+    --t-seller-bg: #173526;
+    --t-seller-ink: #8fd6aa; /* 7.9:1 */
+    --t-google-bg: #1a2a40;
+    --t-google-ink: #9cc0f0; /* 7.7:1 */
+    --t-cal-bg: #3a2c10;
+    --t-cal-ink: #f0c873; /* 8.5:1 */
+    --t-cache-bg: #2a2d31;
+    --t-cache-ink: #c3c8ce; /* 8.2:1 */
+    --t-old-ink: #a5acb5; /* 7.3:1 on surface */
+    --t-warn: #f0b860; /* 7.4:1 or more on every label's ground and on surface */
+    --t-bad: #ff8a80; /* 7.3:1 on surface */
+  }
+
+  .trip {
+    color-scheme: dark;
+  }
+}
+
+.trip a {
+  color: var(--t-accent);
+  text-decoration: none;
+}
+.trip a:hover {
+  text-decoration: underline;
+}
+.trip :is(a, button, summary):focus-visible {
+  outline: 2px solid var(--t-accent);
+  outline-offset: 2px;
+}
+.trip p {
+  margin: 0;
+}
+
+.trip-crumbs {
+  font-size: 13px;
+  color: var(--t-muted);
+  margin-bottom: 6px;
+}
+.trip-crumbs [aria-current] {
+  color: var(--t-muted);
+}
+.trip-title {
+  margin: 0 0 18px;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.trip-nights {
+  color: var(--t-muted);
+  font-weight: 500;
+}
+.trip-h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 650;
+}
+.trip-subhead {
+  margin: 0;
+  padding: 12px 18px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--t-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.trip-section {
+  margin-top: 28px;
+}
+.trip-section-sub {
+  font-size: 13.5px;
+  color: var(--t-muted);
+  margin: 0 0 12px;
+}
+
+/* Cards */
+.trip-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
+  border-radius: 10px;
+  min-width: 0;
+}
+.trip-card-state {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.trip-card-foot {
+  padding: 0 20px 14px;
+}
+.trip-hero {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+.trip-card-state .trip-hero {
+  width: 100%;
+  border: 1px solid var(--t-line);
+  border-radius: 8px;
+}
+.trip-hero-price {
+  padding: 20px;
+  border-right: 1px solid var(--t-line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.trip-hero-legs {
+  padding: 8px 20px;
+  min-width: 0;
+}
+.trip-caption,
+.trip-note,
+.trip-seller {
+  font-size: 13px;
+  color: var(--t-muted);
+}
+.trip-seller {
+  color: var(--t-ink);
+}
+.trip-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Amounts: the price in large type, a state's price in the middle size, a sentence's inline */
+.trip-amount [data-testid="price-cell"] {
+  font-family: inherit;
+  font-weight: 700;
+}
+.trip-amount-big {
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.trip-amount-mid {
+  font-size: 26px;
+  line-height: 1;
+}
+.trip-amount-inline {
+  font-weight: 650;
+}
+.trip-amount-muted {
+  color: var(--t-old-ink);
+}
+.trip-cal-price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+/* The booking link: the price and its words as one link (Ruling 10), each on its own line. The " · " between them is
+   the link's own text, in its spoken name; drawn at no size here, so no line ever starts with it. */
+:is(.trip, .row-price) :is(a, button):has(> .book-words) {
+  font-size: 0;
+}
+:is(.trip, .row-price) .book-amount,
+:is(.trip, .row-price) .book-words {
+  display: block;
+  font-size: 15px;
+}
+:is(.trip, .row-price) .book-link .book-words {
+  font-size: 13px;
+}
+.trip .trip-book {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--t-accent);
+  color: var(--t-accent-ink);
+  font-family: inherit;
+  font-weight: 600;
+  max-width: 100%;
+  border: 0;
+  cursor: pointer;
+}
+.trip .trip-book:hover {
+  background: var(--t-accent-hover);
+  text-decoration: none;
+}
+.trip form {
+  max-width: 100%;
+}
+:is(.trip, .row-price) .book-link {
+  display: inline-block;
+  font-weight: 650;
+  max-width: 100%;
+}
+
+/* Buttons */
+.trip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 100%;
+  text-align: center;
+}
+.trip-btn:hover {
+  border-color: var(--t-muted);
+}
+.trip-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.trip-btn-primary {
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+  color: var(--t-accent-ink);
+}
+.trip-btn-primary:hover {
+  background: var(--t-accent-hover);
+}
+.trip-btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--t-accent);
+  padding: 0 8px;
+}
+.trip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+}
+.trip-action {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--t-muted);
+  max-width: 100%;
+}
+.trip-link {
+  font-weight: 600;
+}
+
+/* The two legs */
+.trip-leg {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--t-line);
+}
+.trip-leg:last-child {
+  border-bottom: 0;
+}
+.trip-leg-tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--t-muted);
+  text-transform: uppercase;
+  padding-top: 3px;
+}
+.trip-times {
+  font-size: 17px;
+  font-weight: 650;
+}
+.trip-apt {
+  color: var(--t-muted);
+  font-weight: 500;
+  font-size: 14px;
+}
+.trip-plus {
+  font-size: 12px;
+  color: var(--t-muted);
+}
+.trip-legmeta {
+  font-size: 13.5px;
+  color: var(--t-muted);
+  margin-top: 2px;
+}
+.trip-duration {
+  color: var(--t-ink);
+}
+
+/* State lines */
+.trip-sentence {
+  font-size: 14px;
+}
+.trip-bad {
+  color: var(--t-bad);
+  font-weight: 600;
+  font-size: 14px;
+}
+.trip-reading {
+  width: 100%;
+  font-size: 14px;
+}
+.trip-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--t-sunk);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.trip-progress > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--t-accent);
+  animation: trip-progress 120s linear forwards;
+}
+.trip-progress[data-minutes="1"] > i {
+  animation-duration: 60s;
+}
+.trip-progress[data-minutes="3"] > i {
+  animation-duration: 180s;
+}
+.trip-progress[data-minutes="4"] > i {
+  animation-duration: 240s;
+}
+.trip-progress[data-minutes="5"] > i {
+  animation-duration: 300s;
+}
+@keyframes trip-progress {
+  to {
+    width: 95%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trip-progress > i {
+    animation: none;
+    width: 50%;
+  }
+}
+
+/* The one label (design §5.1): Kind · age, the detail one tap down */
+/* why: the detail opens in the flow beneath its label at every width (an open one takes its own line), so it never
+   covers the seller line, an action or the next row */
+.price-label {
+  display: inline-block;
+  max-width: 100%;
+}
+.price-label[open] {
+  display: block;
+  width: 100%;
+}
+.price-label > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.price-label > summary::-webkit-details-marker {
+  display: none;
+}
+.k-seller > summary {
+  background: var(--t-seller-bg);
+  color: var(--t-seller-ink);
+}
+.k-google-price > summary,
+.k-google-list > summary {
+  background: var(--t-google-bg);
+  color: var(--t-google-ink);
+}
+.k-calendar > summary {
+  background: var(--t-cal-bg);
+  color: var(--t-cal-ink);
+}
+.k-cached > summary {
+  background: var(--t-cache-bg);
+  color: var(--t-cache-ink);
+}
+.k-not-seen-again > summary {
+  background: transparent;
+  color: var(--t-old-ink);
+  border: 1px dashed var(--t-old-ink);
+}
+/* why: amber and underlined, so an old price is said by more than its colour */
+.price-label-stale {
+  color: var(--t-warn);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.price-label-pop {
+  max-width: 40rem;
+  margin-top: 6px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  border: 1px solid var(--t-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 400;
+  white-space: normal;
+}
+.price-label-pop p + p {
+  margin-top: 6px;
+}
+.price-label-age {
+  color: var(--t-muted);
+}
+
+/* Other flights */
+.trip-card-list {
+  padding-bottom: 6px;
+}
+.trip-fl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.trip-fl {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 4px 14px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--t-line);
+}
+.trip-fl-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.trip-fl-what {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.trip-fold-line {
+  padding: 10px 18px 6px;
+  font-size: 13px;
+  color: var(--t-muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The folds: About this price, the search log */
+.trip-folds {
+  overflow: visible;
+}
+.trip-fold + .trip-fold {
+  border-top: 1px solid var(--t-line);
+}
+.trip-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 18px;
+  min-height: 44px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+.trip-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.trip-fold > summary::after {
+  content: "▸";
+  color: var(--t-muted);
+}
+.trip-fold[open] > summary::after {
+  content: "▾";
+}
+.trip-fold-sub {
+  font-weight: 400;
+  font-size: 13.5px;
+  color: var(--t-muted);
+}
+.trip-facts {
+  margin: 0;
+  padding: 0 18px 16px 36px;
+  font-size: 14px;
+}
+.trip-fold-body {
+  padding: 0 18px 16px;
+}
+.trip-log {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 13.5px;
+}
+.trip-log > li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--t-line);
+}
+.trip-log-source {
+  color: var(--t-muted);
+}
+.trip-facts > li + li {
+  margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+  .trip {
+    border-radius: 6px;
+    padding: 14px 12px 24px;
+  }
+  .trip-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .trip-hero-price {
+    border-right: 0;
+    border-bottom: 1px solid var(--t-line);
+  }
+  .trip .trip-book {
+    width: 100%;
+    align-items: center;
+  }
+  .trip-fl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

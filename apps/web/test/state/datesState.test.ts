@@ -1,4 +1,4 @@
-import { asIata, DETAIL_LINK_PARAMS } from '@gmt/core';
+import { asIata } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLEARED_FILTERS,
@@ -6,17 +6,13 @@ import {
   type DatesUiState,
   DEFAULT_DATES_SORT,
   datesPatch,
-  detailHref,
-  detailPatch,
   filtersActive,
   parseDatesState,
   scopeQuery,
 } from '../../src/state/datesState.js';
-import { datePairOf, pairingFig } from '../fixtures.dates.js';
 
 // Spec §11 URLs and Filters: the Dates view's state lives in the URL under d.*, parsed strictly against the
-// definition's own airports (decision 53), and the detail link carries the date pair and the figure's basis while
-// every d.* parameter travels with it.
+// definition's own airports (decision 53).
 
 const DEF = { origins: [asIata('LHR'), asIata('LGW')], destinations: [asIata('JFK'), asIata('EWR')] };
 const parse = (q: string) => parseDatesState(new URLSearchParams(q), DEF);
@@ -152,46 +148,5 @@ describe('scopeQuery: what the route is sent (spec §11: airports and the journe
       destinations: undefined,
       maxJourneyMinutes: undefined,
     });
-  });
-});
-
-describe('detailHref (spec §11 Board: each row opens the date pair detail, carrying the figure’s basis)', () => {
-  it('opens the detail with the date pair and basis, keeping def and every d.* parameter, dropping row', () => {
-    window.history.replaceState(null, '', '/?view=dates&def=def-1&d.to=JFK&d.nights=10-14&row=stale-row#top');
-    const pair = datePairOf({ departureDate: '2027-03-14', nights: 14, basis: 'calendar' });
-    const href = detailHref(pair);
-    const url = new URL(href, 'http://localhost');
-    expect(url.pathname).toBe('/');
-    expect(url.hash).toBe('#top');
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      view: 'results',
-      def: 'def-1',
-      'd.to': 'JFK',
-      'd.nights': '10-14',
-      depart: '2027-03-14',
-      return: '2027-03-28',
-      basis: 'calendar',
-    });
-  });
-  it('names its parameters through core’s one constant', () => {
-    const pair = datePairOf({ departureDate: '2027-03-14', nights: 10, basis: 'verified' });
-    expect(detailPatch(pair)).toEqual({
-      [DETAIL_LINK_PARAMS.view]: 'results',
-      [DETAIL_LINK_PARAMS.depart]: '2027-03-14',
-      [DETAIL_LINK_PARAMS.return]: '2027-03-24',
-      [DETAIL_LINK_PARAMS.basis]: 'verified',
-      [DETAIL_LINK_PARAMS.row]: null,
-    });
-  });
-  it('spec rev 56 §6.9: a pairing figure opens its detail on the calendar basis, the row it replaced (resultBasisOf)', () => {
-    const pair = {
-      ...datePairOf({ departureDate: '2027-03-14', nights: 10, basis: null }),
-      figure: pairingFig(),
-    };
-    expect(detailPatch(pair)[DETAIL_LINK_PARAMS.basis]).toBe('calendar');
-  });
-  it('a date pair with no figure opens its detail on the default basis (no basis parameter)', () => {
-    const pair = datePairOf({ departureDate: '2027-03-14', nights: 10, basis: null });
-    expect(detailPatch(pair)[DETAIL_LINK_PARAMS.basis]).toBeNull();
   });
 });

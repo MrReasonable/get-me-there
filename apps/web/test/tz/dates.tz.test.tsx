@@ -1,18 +1,13 @@
-import { asIata, asIsoDate } from '@gmt/core';
-import { HttpResponse, http } from 'msw';
+import { asIsoDate } from '@gmt/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { formatIsoDate, formatIsoDateLong, WEEK_HEADERS } from '../../src/format.js';
-import { ResultsView } from '../../src/views/Results/ResultsView.js';
-import { API, calendarRow, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse } from '../fixtures.js';
-import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
 
 const ZONES = ['America/Los_Angeles', 'Asia/Tokyo'] as const;
 // why: the 2027-01-01 offsets prove the zone is in effect, so these tests cannot pass vacuously in UTC.
 const JAN_OFFSET_MINUTES = { 'America/Los_Angeles': 480, 'Asia/Tokyo': -540 } as const;
 // why: the control proves the bug is real in each zone: a naive Date moves the day. The Dates view's own zone cases
-// (board, cards, overview, readout, the detail's header) are in datesView.tz.test.tsx (WP19); this file keeps the
-// shared formatters and the Results columns.
+// (board, cards, overview, readout, the Trip page's heading) are in datesView.tz.test.tsx (WP19); this file keeps the
+// shared formatters.
 const NAIVE_SHIFT = {
   'America/Los_Angeles': { input: '2027-03-14', localDay: 13 },
   'Asia/Tokyo': { input: '2027-03-14T20:00:00.000Z', localDay: 15 },
@@ -50,29 +45,5 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
     expect(formatIsoDateLong(asIsoDate('2027-10-31'))).toBe('Sun 31 Oct 2027'); // UK DST ends
     expect(formatIsoDateLong(asIsoDate('2028-02-29'))).toBe('Tue 29 Feb 2028');
     expect(formatIsoDate('2027-03-14')).toBe('14 Mar 2027'); // WP9's Results form, the same module
-  });
-
-  it('the Results date columns render departure and return from their strings', async () => {
-    const row = calendarRow({
-      cell: {
-        origin: asIata('LHR'),
-        destination: asIata('JFK'),
-        departureDate: asIsoDate('2027-03-14'),
-        returnDate: asIsoDate('2027-03-28'),
-        nights: 14,
-      },
-    });
-    server.use(
-      http.get(`${API}/definitions/:id/results`, () =>
-        HttpResponse.json(resultsResponse({ rows: [row], total: 1 })),
-      ),
-    );
-    const { findAllByText, queryAllByText } = renderWithProviders(
-      <ResultsView definition={definition()} datePair={DETAIL_PAIR} />,
-      { search: DETAIL_SEARCH },
-    );
-    expect((await findAllByText(/14 Mar 2027/)).length).toBeGreaterThan(0);
-    expect((await findAllByText(/28 Mar 2027/)).length).toBeGreaterThan(0);
-    expect(queryAllByText(/\b(13|15) Mar 2027\b|\b(27|29) Mar 2027\b/)).toHaveLength(0);
   });
 });

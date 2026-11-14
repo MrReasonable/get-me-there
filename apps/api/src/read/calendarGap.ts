@@ -1,4 +1,4 @@
-/** Spec §10 `/calendar-gap` (spec §6.9): the Dates view's banner and the date pair detail's marks. */
+/** Spec §10 `/calendar-gap` (spec §6.9): the search page's calendar-gap banner. */
 import type { apiContract, SearchDefinition } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';

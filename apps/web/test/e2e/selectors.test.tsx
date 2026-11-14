@@ -6,11 +6,12 @@ import { Nav } from '../../src/components/Nav.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
 import { MARK_ORDER } from '../../src/views/Dates/overview.js';
-import { ResultsView } from '../../src/views/Results/ResultsView.js';
 import { SearchesView } from '../../src/views/Searches/SearchesView.js';
+import { TripView } from '../../src/views/Trip/TripView.js';
 import { workedDates } from '../fixtures.dates.js';
-import { API, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse, verifiedRow } from '../fixtures.js';
+import { API, definition } from '../fixtures.js';
 import { flightList, flightPair, pairingList, searchCard } from '../fixtures.searches.js';
+import { readTrip, tripBody } from '../fixtures.trip.js';
 import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
@@ -19,7 +20,7 @@ import { findBoard, renderDates } from '../views/dates/render.js';
 import { renderInShell } from '../views/searches/support.js';
 
 // The Playwright smoke needs WP8's api and a browser, so `pnpm test` cannot run it; this proves its selectors match
-// the markup the Dates view, the date pair detail and the nav render (review arch2-001, ui-r2-002; WP19 Task 19.9),
+// the markup the Dates view, the Trip page and the nav render (review arch2-001, ui-r2-002; WP19 Task 19.9),
 // at both widths it checks.
 
 const one = (selector: string): HTMLElement => {
@@ -96,7 +97,7 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
   });
 });
 
-describe('the Playwright smoke’s nav and detail selectors match the rendered markup', () => {
+describe('the Playwright smoke’s nav and Trip page selectors match the rendered markup', () => {
   it('the nav: two tiers labelled by their names, the current entry with its non-colour cue, 44 px links', () => {
     renderWithProviders(<Nav current="dates" search={{ id: 'def-0001', name: 'Worked example' }} />, {
       search: '?view=dates&def=def-0001',
@@ -110,20 +111,27 @@ describe('the Playwright smoke’s nav and detail selectors match the rendered m
     for (const link of within(nav).getAllByRole('link')) expect(link.className).toContain('min-h-11');
   });
 
-  it('the detail: its table, headline, back link and per-airport-pair panels', async () => {
-    server.use(
-      http.get(`${API}/definitions/:id/results`, () =>
-        HttpResponse.json(resultsResponse({ rows: [verifiedRow()] })),
-      ),
+  it('the Trip page: its card, its breadcrumb back to the search, a label and both folds', async () => {
+    server.use(http.get(`${API}/definitions/:id/trip`, () => HttpResponse.json(tripBody(readTrip()))));
+    renderWithProviders(
+      <TripView
+        definition={definition()}
+        state={{
+          departureDate: readTrip().departureDate,
+          returnDate: readTrip().returnDate,
+          from: [],
+          to: [],
+          journey: null,
+        }}
+      />,
+      { search: '?view=trip&def=def-0001&depart=2026-11-11&return=2026-11-28' },
     );
-    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
-      search: DETAIL_SEARCH,
-    });
-    expect(await screen.findByRole('table', { name: SMOKE.detailTable })).toBeInTheDocument();
-    expect(one(SMOKE.detailHeadline)).toBeInTheDocument();
-    expect(one(SMOKE.backToDates)).toHaveAttribute('href', expect.stringContaining('view=dates'));
-    expect((await screen.findAllByTestId('airport-pair-panel')).length).toBeGreaterThan(0);
-    expect(document.querySelectorAll(SMOKE.airportPairPanel).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('region', { name: SMOKE.tripCard })).toBeInTheDocument();
+    expect(one(SMOKE.tripPage)).toBeInTheDocument();
+    expect(one(SMOKE.tripBack)).toHaveAttribute('href', expect.stringContaining('view=dates'));
+    expect(one(SMOKE.priceLabel).tagName).toBe('SUMMARY');
+    expect(one(SMOKE.aboutPrice).tagName).toBe('SUMMARY');
+    expect(one(SMOKE.searchLog).tagName).toBe('SUMMARY');
   });
 });
 

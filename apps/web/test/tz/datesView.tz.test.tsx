@@ -1,9 +1,11 @@
+import { asIsoDate } from '@gmt/core';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ResultsView } from '../../src/views/Results/ResultsView.js';
+import { TripView } from '../../src/views/Trip/TripView.js';
 import { at, priced, pricedPair } from '../fixtures.dates.js';
-import { API, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse, verifiedRow } from '../fixtures.js';
+import { API, definition } from '../fixtures.js';
+import { tripBody } from '../fixtures.trip.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
@@ -82,17 +84,23 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     expect(screen.getByTestId('dates-readout')).toHaveTextContent('14 Mar 2027–24 Mar 2027 (10n)');
   });
 
-  it('the date pair detail’s header reads 14 Mar and 28 Mar for a 2027-03-14 → 2027-03-28 date pair (WP19 Task 19.8)', async () => {
+  it('the Trip page’s heading reads Sun 14 Mar and Sun 28 Mar for a 2027-03-14 → 2027-03-28 trip (trip-page plan Task 7)', async () => {
+    const departureDate = asIsoDate('2027-03-14');
+    const returnDate = asIsoDate('2027-03-28');
     server.use(
-      http.get(`${API}/definitions/:id/results`, () =>
-        HttpResponse.json(resultsResponse({ rows: [verifiedRow()] })),
+      http.get(`${API}/definitions/:id/trip`, () =>
+        HttpResponse.json(tripBody({ departureDate, returnDate, nights: 14, searchLink: null })),
       ),
     );
-    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
-      search: DETAIL_SEARCH,
-    });
+    renderWithProviders(
+      <TripView
+        definition={definition()}
+        state={{ departureDate, returnDate, from: [], to: [], journey: null }}
+      />,
+      { search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28' },
+    );
     expect(
-      await screen.findByRole('heading', { name: '14 Mar 2027 to 28 Mar 2027 · 14 nights' }),
+      await screen.findByRole('heading', { level: 2, name: 'Sun 14 Mar → Sun 28 Mar · 14 nights' }),
     ).toBeInTheDocument();
   });
 });

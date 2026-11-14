@@ -203,6 +203,8 @@ export interface BookingFacts {
   moreOptions: number;
   /** The grouped "View <seller>, …" controls (`S.booking.grouped`): counted, never activated, their fares never read. */
   grouped: number;
+  /** The page's address as the page reports it; `bookingPageUrl` decides whether it is the booking page's. */
+  url: string;
 }
 
 /** The search form's fields as the page shows them (brief Task 14.3), or null when the controls are absent. */
@@ -732,6 +734,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         offerNames: (await namesOf(offers, d)).map((name) => capped(name, S)),
         moreOptions: await countOf(inMain.getByRole('button', { name: S.booking.moreOptions }), d),
         grouped: await countOf(inMain.getByRole('button', { name: S.booking.grouped }), d),
+        url: page.url(),
       };
     },
 

@@ -25,6 +25,7 @@ function upTo0001(): string {
     '0010_airport_kind',
     '0011_wp20_flight_lists',
     '0012_wp21_return_leg',
+    '0013_booking_url',
   ];
   for (const tag of later) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
@@ -65,6 +66,7 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
       '0010_airport_kind',
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
+      '0013_booking_url',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });

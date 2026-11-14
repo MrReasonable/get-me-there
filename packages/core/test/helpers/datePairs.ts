@@ -66,6 +66,7 @@ export function calendarFigure(over: Partial<DatePairFigure> = {}): DatePairFigu
     pairing: null,
     pairingRead: 'not-read',
     listReason: null,
+    hasBookingOptions: false,
     ...over,
   };
 }
@@ -101,6 +102,7 @@ export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPair
     provenance: flightListProvenance(),
     stale: false,
     ageHours: 2,
+    bookingUrl: null,
     ...over,
   };
 }

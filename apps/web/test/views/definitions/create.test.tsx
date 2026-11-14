@@ -208,29 +208,24 @@ describe('saved definitions (spec §8.1)', () => {
 });
 
 describe('the App (spec §11 layout)', () => {
-  it('filter state persists across a view switch, and the status bar is on every view', async () => {
-    const { user } = renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28&f.class=partially-verified',
-    });
-    const table = await screen.findByRole('table', { name: 'Round trips found' });
-    expect(within(table).getAllByRole('row')).toHaveLength(2);
+  it('a search’s page survives a view switch, the status bar is on every view, and a board row opens the Trip page', async () => {
+    const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    await screen.findByRole('table', { name: /^Best dates/ });
     const nav = screen.getByRole('navigation', { name: 'Views' });
     await user.click(within(nav).getByRole('link', { name: 'Providers' }));
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
     // why: ruling R-bar — the bar always carries the month's spend, whichever view is open
     expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-    // why: WP19 Task 19.7: the detail is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3), and a
-    // board row opens the detail again
+    // why: WP19 Task 19.7: the Trip page is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3),
+    // and a board row opens the Trip page
     await user.click(within(nav).getByRole('link', { name: 'Searches' }));
     await user.click(await screen.findByRole('link', { name: /^See dates for / }));
     const board = await screen.findByRole('table', { name: /^Best dates/ });
     const [first] = within(board).getAllByRole('row').slice(1);
     if (first === undefined) throw new Error('the board has a row');
     await user.click(within(first).getAllByRole('link')[0] ?? first);
-    const again = await screen.findByRole('table', { name: 'Round trips found' });
-    expect(within(again).getAllByRole('row')).toHaveLength(2);
-    expect(screen.getByRole('checkbox', { name: 'partially verified' })).toBeChecked();
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('trip');
   });
 
   it('with /providers synthetic and real rows the red banner shows once (spec §5.5)', async () => {
@@ -259,28 +254,15 @@ describe('the App (spec §11 layout)', () => {
         HttpResponse.json(providersResponse({ synthetic: true, providers: [...base.providers, fixtureRow] })),
       ),
     );
-    renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    await screen.findByRole('table', { name: 'Round trips found' });
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    await screen.findByRole('table', { name: /^Best dates/ });
     expect(screen.getAllByText(/Synthetic data: the fixture provider is enabled/)).toHaveLength(1);
   });
 
   it('with /providers real only (synthetic: false) there is no banner', async () => {
-    renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    await screen.findByRole('table', { name: 'Round trips found' });
+    // why: the shell's banner follows /providers alone; Providers is the view with no prices of its own to raise one
+    renderWithProviders(<App />, { search: '?view=providers' });
+    await screen.findByRole('heading', { name: 'Providers' });
     expect(screen.queryByText(/Synthetic data: the fixture provider is enabled/)).toBeNull();
-  });
-
-  it("the detail's coverage line links to the Dates view's coverage section", async () => {
-    renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    expect(await screen.findByRole('link', { name: /^discovery: / })).toHaveAttribute(
-      'href',
-      '/?view=dates&def=def-0001&d.coverage=open',
-    );
   });
 });

@@ -30,6 +30,8 @@
     "src/local/movedMarker.ts",
     "src/local/paths.ts",
     "src/labels/skip.ts",
+    "src/labels/priceLabel.ts",
+    "src/results/bookingTarget.ts",
     "src/status/report.ts",
     "src/status/rules.ts",
     "src/status/time.ts",

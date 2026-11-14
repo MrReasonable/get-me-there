@@ -103,13 +103,6 @@ export function formatRunInstant(iso: string): string {
   return `${formatInstantLondon(Date.parse(iso))} Europe/London`;
 }
 
-/** Segment local time "2027-03-14T10:25" → "14 Mar 10:25" (wall time at the airport, spec §6.4). */
-export function formatLocalDateTime(local: string): string {
-  const [date, time] = local.split('T');
-  if (date === undefined || time === undefined) return local;
-  return `${formatIsoDateShort(date)} ${time}`;
-}
-
 /** 905 → "15h 05m". */
 export function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);

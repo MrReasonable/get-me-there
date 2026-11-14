@@ -59,6 +59,17 @@
   .search-card-route {
     font-weight: 600;
   }
+  /* The card's price opens its trip: an underlined link in the accent (6.4:1 on the plate), so it reads as one on touch */
+  .search-card-price-link {
+    color: #0a58ca;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-weight: 600;
+  }
+  .search-card-price-link:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
   .search-card-cheapest {
     display: flex;
     flex-wrap: wrap;

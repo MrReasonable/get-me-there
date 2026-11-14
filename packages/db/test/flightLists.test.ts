@@ -10,6 +10,7 @@ import {
   type ReturnRead,
   returnReadSchema,
 } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { FlightListsRepo } from '../src/repositories/flightLists.js';
@@ -307,6 +308,43 @@ describe('FlightListsRepo.newestPerDatePair', () => {
   });
 });
 
+// why: design 2026-11-08 §6.1 (plan Task 5): the Trip page's log reads every list of one date pair, of every airport
+// pair, run and by-hand read, newest first, with each list's returns and offers
+describe('FlightListsRepo.forDatePair', () => {
+  it('returns every list of the date pair, any airport pair and status, newest first, in three statements', () => {
+    const { db, repo, list, definitionId } = setup();
+    const oldest = repo.insert(list({ fetchedAt: hoursAt(8), returns: returnRead() }));
+    const lgw = repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(9) }));
+    const byHand = repo.insert(list({ executionId: null, fetchedAt: hoursAt(10), ...failed }));
+    // a tie on fetched_at goes to the later row
+    const tieFirst = repo.insert(list({ fetchedAt: hoursAt(11) }));
+    const tieLater = repo.insert(list({ fetchedAt: hoursAt(11) }));
+    // another date pair, another point of sale, another cabin's search are not this date pair's
+    repo.insert(list({ ...D2, fetchedAt: hoursAt(12) }));
+    repo.insert(list({ pointOfSale: 'US', fetchedAt: hoursAt(12) }));
+    const { result, statements } = statementsOf(db, () =>
+      repo.forDatePair(definitionId, D1.departureDate, D1.returnDate, 'economy', 'GB'),
+    );
+    expect(statements).toBe(3);
+    expect(result.map((l) => l.id)).toEqual([tieLater, tieFirst, byHand, lgw, oldest]);
+    expect(result[4]?.returns).toEqual(returnRead());
+    expect(result[4]?.flights).toHaveLength(2);
+    expect(result[2]).toMatchObject({ executionId: null, status: 'failed', reason: 'parse', flights: [] });
+    expect(result[0]).not.toHaveProperty('transientStreak');
+  });
+
+  it('returns nothing for another definition, another cabin or a date pair never read', () => {
+    const { db, repo, list, definitionId } = setup();
+    repo.insert(list());
+    expect(repo.forDatePair(definitionId, D2.departureDate, D2.returnDate, 'economy', 'GB')).toEqual([]);
+    expect(repo.forDatePair(definitionId, D1.departureDate, D1.returnDate, 'business', 'GB')).toEqual([]);
+    const other = rawExecution(db, budget);
+    expect(repo.forDatePair(other.definitionId, D1.departureDate, D1.returnDate, 'economy', 'GB')).toEqual(
+      [],
+    );
+  });
+});
+
 describe('FlightListsRepo.forExecution', () => {
   it('counts the newest row per planned cell of that execution: a pair read twice counts once', () => {
     const { repo, list, executionId, db } = setup();
@@ -387,6 +425,7 @@ function booking(over: Partial<BookingRead> = {}): BookingRead {
     unparsed: 2,
     nonGbp: 1,
     offersStated: 45,
+    bookingUrl: null,
     ...over,
   };
 }
@@ -505,6 +544,28 @@ describe('FlightListsRepo.insert with returns (spec rev 56 §7, migration 0012)'
       'GB',
     );
     expect(pair?.returns).toEqual(r);
+  });
+
+  it('stores a booking address that is the booking page’s own and reads it back equal', () => {
+    const { db, repo, list, definitionId } = setup();
+    const r = returnRead({ booking: booking({ bookingUrl: SYNTHETIC_BOOKING_URL }) });
+    repo.insert(list({ returns: r }));
+    expect(db.raw.prepare('SELECT booking_url FROM flight_lists').get()).toEqual({
+      booking_url: SYNTHETIC_BOOKING_URL,
+    });
+    const [cell] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(cell?.returns?.booking?.bookingUrl).toBe(SYNTHETIC_BOOKING_URL);
+  });
+
+  it('stores an address off the booking path as none, and keeps the rest of the read', () => {
+    const { db, repo, list, definitionId } = setup();
+    // why: the contract's own schema takes any string up to its length bound; the insert holds the path rule
+    const offPath = SYNTHETIC_BOOKING_URL.replace('/travel/flights/booking', '/travel/flights');
+    expect(offPath).not.toBe(SYNTHETIC_BOOKING_URL);
+    repo.insert(list({ returns: returnRead({ booking: booking({ bookingUrl: offPath }) }) }));
+    expect(db.raw.prepare('SELECT booking_url FROM flight_lists').get()).toEqual({ booking_url: null });
+    const [cell] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(cell?.returns?.booking).toEqual(booking({ bookingUrl: null }));
   });
 
   it('a return phase that ended with no attempt, and one with a transient booking read, read back whole', () => {

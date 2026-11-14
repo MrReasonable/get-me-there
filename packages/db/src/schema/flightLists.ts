@@ -84,6 +84,9 @@ export const flightLists = sqliteTable(
     bookingUnparsed: integer('booking_unparsed'),
     bookingNonGbp: integer('booking_non_gbp'),
     bookingOffersStated: integer('booking_offers_stated'),
+    // why: the booking page's address (core's `bookingPageUrl` form), NULL on every list stored before 0013; no CHECK, as one
+    // would make drizzle-kit rebuild the table, so the insert re-checks the path rule and a read takes any string
+    bookingUrl: text('booking_url'),
   },
   (t) => [
     check('flight_lists_provider_ck', sql.raw("provider_id = 'camoufox'")),

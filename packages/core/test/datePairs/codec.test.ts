@@ -13,6 +13,7 @@ import type { PairingRead } from '../../src/datePairs/pairing.js';
 import type { DatePairSpace } from '../../src/datePairs/space.js';
 import { addDays } from '../../src/dates/epochDay.js';
 import { sortedAirportPairs } from '../../src/space/generate.js';
+import { SYNTHETIC_BOOKING_URL } from '../../src/testing/booking.js';
 import { asIata, asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
 import type { Provenance } from '../../src/types/provenance.js';
 import {
@@ -237,6 +238,8 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                   });
                 return verifiedFigure({
                   ...common,
+                  // why: final review I1: whether SearchApi's booking options gave a seller's booking
+                  hasBookingOptions: f.truncated,
                   notSeenInLatest: f.notSeen === null ? null : { ageHours: f.notSeen },
                   cheaperCached:
                     f.cheaper === null || f.cheaper >= f.pence
@@ -487,6 +490,25 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
     }
   });
 
+  it("final review I1: a verified figure's booking options ride in the bookingOptions group, keyed by its position", () => {
+    const wire = encodeDatePairs(
+      decoded({
+        pair: (i) =>
+          i === 1
+            ? { figure: verifiedFigure({ hasBookingOptions: true }) }
+            : i === 2
+              ? { figure: verifiedFigure() }
+              : i === 3
+                ? { figure: calendarFigure() }
+                : {},
+      }),
+    );
+    expect(wire.bookingOptions).toEqual({ figure: [0] });
+    expect(datePairsResponseSchema.safeParse(wire).error?.issues ?? []).toEqual([]);
+    const figures = decodeDatePairs(wire).pairs.map((p) => p.figure?.hasBookingOptions ?? null);
+    expect(figures.slice(0, 4)).toEqual([null, true, false, false]);
+  });
+
   it("keys a figure's cheaper-cached price and its times by the figure's position, only where it has them", () => {
     const at = (figure: DatePairFigure) =>
       encodeDatePairs(
@@ -592,6 +614,33 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
     });
     const back = decodeDatePairs(wire).pairs[3]?.figure?.pairing;
     expect(back?.provenance.fetchedAt).toBe('2027-02-27T09:30:00.000Z');
+  });
+
+  // why: Ruling 6: the board's pairing group carries the booking page's address, so a read trip's price is its booking
+  // link on every row; any string up to 2048 characters (Ruling 8: the web re-checks the path)
+  it("Ruling 6: the pairing group carries each pairing's booking address, null where it has none", () => {
+    const x = withPairings();
+    const withUrl: DecodedDatePairs = {
+      ...x,
+      pairs: x.pairs.map((p) =>
+        p.index === 1 && p.figure?.pairing != null
+          ? {
+              ...p,
+              figure: { ...p.figure, pairing: { ...p.figure.pairing, bookingUrl: SYNTHETIC_BOOKING_URL } },
+            }
+          : p,
+      ),
+    };
+    const wire = encodeDatePairs(withUrl);
+    expect(wire.pairing?.bookingUrl).toEqual([SYNTHETIC_BOOKING_URL, null]);
+    expect(datePairsResponseSchema.safeParse(JSON.parse(JSON.stringify(wire))).error?.issues ?? []).toEqual(
+      [],
+    );
+    expect(decodeDatePairs(wire)).toEqual(withUrl);
+    const long = { ...wire, pairing: { ...wire.pairing, bookingUrl: ['x'.repeat(2049), null] } };
+    expect(datePairsResponseSchema.safeParse(long).success).toBe(false);
+    const edge = { ...wire, pairing: { ...wire.pairing, bookingUrl: ['x'.repeat(2048), null] } };
+    expect(datePairsResponseSchema.safeParse(edge).error?.issues ?? []).toEqual([]);
   });
 
   it('the 21.6 ruling: a list-failed read round-trips with its cause in the listReason group', () => {

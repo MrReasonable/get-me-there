@@ -8,7 +8,6 @@ import {
   staleWords,
 } from '@gmt/core';
 import { COPY } from '../copy.js';
-import { Flaps } from '../flaps/Flaps.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
 import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
@@ -35,8 +34,6 @@ export interface PriceCellProps {
   notSeenInLatestHours?: number | 'unknown' | null;
   /** A words-only qualifier after the amount, e.g. the adjusted price's "incl. operator-entered onward cost". */
   qualifier?: string;
-  /** Beside the wide Results table's columns: the Provider and Destination columns carry those, so the line omits them. */
-  besideColumns?: boolean;
   /**
    * The compact variant (WP10's calendar day cells): the amount with "≈", a short provider badge, the destination code,
    * the stale, truncated and unconfirmed marks and, visible without hover (spec §11, ruling 3, overruling decision 46),
@@ -55,12 +52,6 @@ export interface PriceCellProps {
    */
   face?: boolean;
   /**
-   * The row form's amount on split-flap cells (the departure board): the amount is still written out for readers, and
-   * the cells beside it are decorative. `flapSlot` names the board slot the cells flip in (BoardTable).
-   */
-  flaps?: boolean;
-  flapSlot?: string | undefined;
-  /**
    * Replaces the source's words on every face (the title, the compact detail and the provenance line), for a price
    * whose source has a name of its own (a flight list's, WP20 Task 20.10). The provenance is validated all the same.
    */
@@ -71,6 +62,12 @@ export interface PriceCellProps {
    * words kept for screen readers and in the title, instead of repeating the words on every price of the group.
    */
   staleSaid?: boolean;
+  /**
+   * Design 2026-11-08 §5.1: the amount alone (with "≈" when converted), for a price whose one label (`PriceLabel`)
+   * sits beside it and says its kind and age, its provenance and full age one tap away in the label's detail. The
+   * provenance is validated all the same, so a price without one is withheld.
+   */
+  bare?: boolean;
 }
 
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
@@ -101,6 +98,21 @@ export function PriceCell(props: PriceCellProps) {
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];
+  if (props.bare === true) {
+    return (
+      <span data-testid="price-cell" data-bare="" className="figure whitespace-nowrap">
+        {fxTitle !== null ? (
+          <>
+            <span aria-hidden="true" title={fxTitle}>
+              {COPY.fxApprox}
+            </span>
+            <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
+          </>
+        ) : null}
+        {formatPence(props.pricePence)}
+      </span>
+    );
+  }
   if (props.face === true) {
     const G = COPY.priceMarkGlyph;
     const marks = [
@@ -226,20 +238,7 @@ export function PriceCell(props: PriceCellProps) {
             <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
           </>
         ) : null}
-        {props.flaps === true ? (
-          <>
-            <span className="sr-only">{formatPence(props.pricePence)}</span>
-            <Flaps
-              text={formatPence(props.pricePence)}
-              cells={6}
-              align="right"
-              slot={props.flapSlot}
-              className="price-flaps"
-            />
-          </>
-        ) : (
-          formatPence(props.pricePence)
-        )}
+        {formatPence(props.pricePence)}
         {props.qualifier !== undefined ? (
           <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
         ) : null}
@@ -252,9 +251,8 @@ export function PriceCell(props: PriceCellProps) {
       <Provenance
         provenance={p}
         calendar={props.calendar}
-        destination={props.besideColumns === true ? undefined : props.destination}
+        destination={props.destination}
         destinationNote={props.destinationNote}
-        showProvider={props.besideColumns !== true}
         fullAge={props.fullAge === true}
         {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
       />

@@ -16,10 +16,11 @@ import {
   type ReturnRead,
   returnReadSchema,
 } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createEngine } from '../src/engine.js';
-import { createFlightReader, flightListFresh, flightReadUnavailable } from '../src/flightRead.js';
+import { createFlightReader, flightReadUnavailable } from '../src/flightRead.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { readRowOf } from '../src/stages/flightLists.js';
@@ -37,7 +38,7 @@ import {
   stubCamoufox,
   stubTravelpayouts,
 } from './support/camoufox.js';
-import { baseDefinition, JFK, LHR } from './support/harness.js';
+import { baseDefinition, EWR, JFK, LGW, LHR } from './support/harness.js';
 
 beforeEach(realTime);
 afterEach(realTime);
@@ -156,18 +157,18 @@ describe('readFlightList refusals (before any worker call or ledger row)', () =>
     });
   });
 
-  it('fresh when the newest list for the figure cell is read and younger than 0.9 × refresh', async () => {
-    // why: the worker's preflight states its flags (none verified here), so the second read is judged by them; with
-    // the flags unread a young outbound-only list is read again (21.6 re-review N2, the return-leg block below)
+  it('a pair read inside the refresh interval starts: the operator asking is the reason to read', async () => {
     const { e, cam, reader } = setup({}, {}, { preflight: { ok: true, flags: {} } });
     const r = await reader.read(e.definition.id, PAIR);
     if (!r.ok) throw new Error('started');
     await r.done;
-    expect(await reader.read(e.definition.id, PAIR)).toEqual({ ok: false, code: 'fresh' });
-    expect(cam.flightCalls).toHaveLength(1);
+    const again = await reader.read(e.definition.id, PAIR);
+    if (!again.ok) throw new Error('the second read started');
+    await again.done;
+    expect(cam.flightCalls).toHaveLength(2);
   });
 
-  it('outside_space for a departed or out-of-space pair; no_price for a pair without a figure; not_found', async () => {
+  it('outside_space for a departed or out-of-space pair; not_found', async () => {
     const { e, reader } = setup();
     expect(
       await reader.read(e.definition.id, {
@@ -183,8 +184,61 @@ describe('readFlightList refusals (before any worker call or ledger row)', () =>
     ).toEqual({ ok: false, code: 'outside_space' });
     e.clock.set(asIsoDateTime('2026-11-02T09:00:00.000Z'));
     expect(await reader.read(e.definition.id, PAIR)).toEqual({ ok: false, code: 'outside_space' });
-    expect(await reader.read(e.definition.id, pairAt(8))).toEqual({ ok: false, code: 'no_price' });
     expect(await reader.read('no-such-search', PAIR)).toEqual({ ok: false, code: 'not_found' });
+  });
+});
+
+describe('readFlightList names its airport pair', () => {
+  const NAMED = { origin: LHR, destination: JFK };
+  it('a pair with no figure starts and reads the first origin to the first destination', async () => {
+    const { e, cam, reader } = setup();
+    const r = await reader.read(e.definition.id, pairAt(8));
+    if (!r.ok) throw new Error('started');
+    await r.done;
+    expect(cam.flightCalls[0]?.query.cell).toMatchObject({ origin: LHR, destination: JFK, ...pairAt(8) });
+    expect(flightRows(e, null)).toHaveLength(1);
+  });
+
+  it('a named pair reads that pair, whatever the figure says', async () => {
+    const { e, cam, reader } = setup();
+    e.ctx.repos.definitions.update(e.definition.id, { origins: [LHR, LGW] });
+    const r = await reader.read(e.definition.id, { ...PAIR, origin: LGW, destination: JFK });
+    if (!r.ok) throw new Error('started');
+    await r.done;
+    expect(cam.flightCalls[0]?.query.cell).toMatchObject({ origin: LGW, destination: JFK, ...PAIR });
+    const [stored] = e.ctx.repos.flightLists.newestPerCell(
+      e.definition.id,
+      [{ origin: LGW, destination: JFK, ...PAIR }],
+      'economy',
+      'GB',
+    );
+    expect(stored?.status).toBe('read');
+  });
+
+  it('a named pair outside the search’s airports and an unnamed pair outside the window answer outside_space', async () => {
+    const { e, cam, reader } = setup();
+    expect(await reader.read(e.definition.id, { ...PAIR, origin: LGW, destination: JFK })).toEqual({
+      ok: false,
+      code: 'outside_space',
+    });
+    expect(await reader.read(e.definition.id, { ...PAIR, origin: LHR, destination: EWR })).toEqual({
+      ok: false,
+      code: 'outside_space',
+    });
+    expect(
+      await reader.read(e.definition.id, {
+        ...NAMED,
+        departureDate: asIsoDate('2027-06-01'),
+        returnDate: asIsoDate('2027-06-11'),
+      }),
+    ).toEqual({ ok: false, code: 'outside_space' });
+    expect(
+      await reader.read(e.definition.id, {
+        departureDate: asIsoDate('2027-06-01'),
+        returnDate: asIsoDate('2027-06-11'),
+      }),
+    ).toEqual({ ok: false, code: 'outside_space' });
+    expect(cam.flightCalls).toHaveLength(0);
   });
 });
 
@@ -465,6 +519,7 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
         unparsed: 0,
         nonGbp: 0,
         offersStated: null,
+        bookingUrl: null,
         ...booking,
       },
       ...over,
@@ -529,6 +584,14 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(stored(failed.e)).toMatchObject({ status: 'failed', returns: null });
   });
 
+  it('stores the worker’s booking read as it is, its address included', async () => {
+    const r = returnsOf({}, { bookingUrl: SYNTHETIC_BOOKING_URL });
+    const s = flagged(BOTH, { answer: withReturns(r) });
+    await readOnce(s);
+    expect(stored(s.e)?.returns).toEqual(r);
+    expect(stored(s.e)?.returns?.booking?.bookingUrl).toBe(SYNTHETIC_BOOKING_URL);
+  });
+
   it('21.6 review M12: a preflight that states no flags leaves the flags as they were; the read still carries the limits', async () => {
     const s = setup({}, {}, { preflight: { ok: true } });
     s.e.ctx.repos.definitions.update(s.e.definition.id, {
@@ -572,14 +635,8 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     const s = flagged(flags);
     if (flags !== null) s.e.ctx.workerFlags.set('camoufox', flags);
     seed(s.e, lists);
-    // why: final review B-I3: the api's readNow reads the same rule as the read's own refusal, before the read
-    const def = s.e.ctx.repos.definitions.get(s.e.definition.id);
-    const newest = stored(s.e);
-    if (def === null || newest === undefined) throw new Error('seeded');
-    const freshBefore = flightListFresh(s.e.ctx, def, newest);
     const r = await s.reader.read(s.e.definition.id, PAIR);
     if (r.ok) await r.done;
-    expect(freshBefore).toBe(!r.ok && r.code === 'fresh');
     return r.ok ? 'read' : r.code;
   };
   const notSettled = () =>
@@ -592,8 +649,8 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
       booking: null,
     });
 
-  it('fresh: a young finished list under the same limits with a finished booking, or a streak of 2', async () => {
-    expect(await askWith(BOTH, [{ hoursAgo: 150, returns: returnsOf() }])).toBe('fresh');
+  it('every list is read again, however young or complete: a finished list, a streak of 2, a flag off', async () => {
+    expect(await askWith(BOTH, [{ hoursAgo: 150, returns: returnsOf() }])).toBe('read');
     expect(
       await askWith(BOTH, [
         {
@@ -604,21 +661,21 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
           ),
         },
       ]),
-    ).toBe('fresh');
+    ).toBe('read');
     expect(
       await askWith(BOTH, [
         { hoursAgo: 3, returns: notSettled() },
         { hoursAgo: 2, returns: notSettled() },
       ]),
-    ).toBe('fresh');
-    // no return phase planned for this worker (its flags read, the return flag off): any young read list, not-verified
-    // or phase-less included
+    ).toBe('read');
     expect(await askWith({ RETURN_SELECT_VERIFIED: false }, [{ hoursAgo: 1, returns: notSettled() }])).toBe(
-      'fresh',
+      'read',
     );
+    expect(await askWith(null, [{ hoursAgo: 1, returns: returnsOf() }])).toBe('read');
+    expect(await askWith(BOTH, [{ hoursAgo: 151.1, returns: returnsOf() }])).toBe('read');
   });
 
-  it('read again: a young transient (streak 1), not-verified, expand-failed, other-limit or phase-less list', async () => {
+  it('a young transient, not-verified, expand-failed, other-limit or phase-less list is read too', async () => {
     expect(await askWith(BOTH, [{ hoursAgo: 2, returns: notSettled() }])).toBe('read');
     const notVerified = returnReadSchema.parse({
       limits: LIMITS,
@@ -645,39 +702,6 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     ).toBe('read');
     expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
   });
-
-  it('with no booking read planned (the booking flag off) a read return with an expand-failed booking is fresh', async () => {
-    const expandFailed = returnsOf(
-      {},
-      { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
-    );
-    expect(
-      await askWith({ RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false }, [
-        { hoursAgo: 1, returns: expandFailed },
-      ]),
-    ).toBe('fresh');
-    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
-  });
-
-  it('21.6 re-review N2: with the flags unread (no preflight since the app started) a young outbound-only list is read', async () => {
-    // why: the read's own preflight may report the return flags, so it is judged as planning the whole return phase,
-    // as the read button states 2 pages then (prov-008)
-    expect(await askWith(null, [{ hoursAgo: 1, returns: null }])).toBe('read');
-    expect(await askWith(null, [{ hoursAgo: 1, returns: returnsOf() }])).toBe('fresh');
-  });
-
-  it('with the flags unread the booking read is planned too: a young list whose booking expand failed is read again', async () => {
-    const expandFailed = returnsOf(
-      {},
-      { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
-    );
-    expect(await askWith(null, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
-  });
-
-  it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {
-    expect(await askWith(BOTH, [{ hoursAgo: 151.2, returns: returnsOf() }])).toBe('read');
-    expect(await askWith(BOTH, [{ hoursAgo: 151.1, returns: returnsOf() }])).toBe('fresh');
-  });
 });
 
 describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 56 §10, ruling D3)', () => {
@@ -689,41 +713,6 @@ describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 5
     expect(engine.flightPagesPlanned()).toBe(1);
     engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true });
     expect(engine.flightPagesPlanned()).toBe(2);
-    engine.markClosed();
-  });
-  it('final review B-I3: flightListFresh is the read’s fresh rule over the engine’s own flags', () => {
-    const { e } = setup();
-    const engine = createEngine(e.deps, { rankedDatePairs: rankedPairs(5) });
-    e.ctx.repos.definitions.update(e.definition.id, {
-      constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
-    });
-    e.ctx.repos.flightLists.insert(
-      readRowOf(
-        {
-          definitionId: e.definition.id,
-          executionId: null,
-          providerId: 'camoufox',
-          sourceKind: 'scraped-self',
-          cabin: 'economy',
-          origin: LHR,
-          destination: JFK,
-          ...PAIR,
-        },
-        { ...listAnswer(asIsoDateTime('2026-10-15T09:00:00.000Z')), fetchedAt: e.clock.now(), returns: null },
-      ),
-    );
-    const def = e.ctx.repos.definitions.get(e.definition.id);
-    const [newest] = e.ctx.repos.flightLists.newestPerCell(
-      e.definition.id,
-      [{ origin: LHR, destination: JFK, ...PAIR }],
-      'economy',
-      'GB',
-    );
-    if (def === null || newest === undefined) throw new Error('seeded');
-    // why: a young outbound-only list: read again while the flags are unread or plan returns, fresh once they do not
-    expect(engine.flightListFresh(def, newest)).toBe(false);
-    engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
-    expect(engine.flightListFresh(def, newest)).toBe(true);
     engine.markClosed();
   });
 });
@@ -757,14 +746,13 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
     expect(cam.flightCalls).toHaveLength(1);
   });
 
-  it('no_price without the board’s ranking', async () => {
+  it('without the board’s ranking the read still goes ahead, on the first airport pair', async () => {
     const cam = stubCamoufox({ cells: 15, flights: {} });
     const e = engineWith([cam, stubTravelpayouts({ cells: 15 })]);
-    expect(await createFlightReader(e.ctx).read(e.definition.id, PAIR)).toEqual({
-      ok: false,
-      code: 'no_price',
-    });
-    expect(cam.flightCalls).toHaveLength(0);
+    const r = await createFlightReader(e.ctx).read(e.definition.id, PAIR);
+    if (!r.ok) throw new Error('started');
+    await r.done;
+    expect(cam.flightCalls).toHaveLength(1);
   });
 
   it('asks the ranking for the search’s current space, cabin, journey limit and now', async () => {
@@ -790,12 +778,13 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
     ]);
   });
 
-  it('the figure is the ranked pair with both dates: one sharing only its departure or only its return is no price', async () => {
-    // why: stays of 10 to 12 nights, and a ranking holding only 2 Nov to 13 Nov (11 nights)
+  it('the figure is the ranked pair with both dates: one sharing only its departure or only its return has none', async () => {
+    // why: stays of 10 to 12 nights, and a ranking holding only 2 Nov to 13 Nov (11 nights); a date pair with no
+    // figure reads the first airport pair, and the figure's own pair is used only for a date pair that has one
     const ranked: RankedDatePair = {
       departureDate: asIsoDate('2026-11-02'),
       returnDate: asIsoDate('2026-11-13'),
-      origin: LHR,
+      origin: LGW,
       destination: JFK,
       pricePence: 40_000,
       providerId: 'camoufox',
@@ -805,12 +794,13 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
       stale: false,
     };
     const { e, cam, reader } = setup({}, { rankedDatePairs: () => [ranked] });
-    e.ctx.repos.definitions.update(e.definition.id, { minNights: 10, maxNights: 12 });
+    e.ctx.repos.definitions.update(e.definition.id, { origins: [LHR, LGW], minNights: 10, maxNights: 12 });
     const pair = (d: string, r: string) => ({ departureDate: asIsoDate(d), returnDate: asIsoDate(r) });
-    expect(await ask(reader, e.definition.id, pair('2026-11-02', '2026-11-14'))).toBe('no_price');
-    expect(await ask(reader, e.definition.id, pair('2026-11-03', '2026-11-13'))).toBe('no_price');
-    expect(cam.flightCalls).toHaveLength(0);
+    expect(await ask(reader, e.definition.id, pair('2026-11-02', '2026-11-14'))).toBe('read');
+    expect(await ask(reader, e.definition.id, pair('2026-11-03', '2026-11-13'))).toBe('read');
+    expect(cam.flightCalls.map((c) => c.query.cell.origin)).toEqual([LHR, LHR]);
     expect(await ask(reader, e.definition.id, pair('2026-11-02', '2026-11-13'))).toBe('read');
+    expect(cam.flightCalls[2]?.query.cell.origin).toBe(LGW);
   });
 
   it('busy while another reader of the same engine holds the browser lease', async () => {

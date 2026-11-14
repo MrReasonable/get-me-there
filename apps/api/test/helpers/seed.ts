@@ -69,6 +69,7 @@ export interface SeedOffer {
   maxAgeHours?: number | 'unknown';
   /** The stored booking, as an adapter wrote it; the api re-validates it on the way out (decision 54). */
   booking?: Booking;
+
   /** WP19: each direction's stated travel time (default 480 minutes each); null: the source did not state it. */
   minutes?: { outbound: number | null; inbound: number | null };
   /** WP19: the inbound leg's local times (default `<return>T10:00` → `<return>T18:00`), e.g. an overnight return. */
@@ -270,8 +271,14 @@ export function seeder(ports: Ports) {
       });
     },
 
-    /** One verified cell: its itineraries, offers and observations and its priced outcome (spec §7 atomic unit). */
-    verified(name: string, c: CellKey, offers: SeedOffer[]): void {
+    /**
+     * One verified cell: its itineraries, offers and observations and its priced outcome (spec §7 atomic unit).
+     * `provider` (default the fixture provider) is the offers' and the write's, whose link allowlist the api re-validates
+     * a booking against, and its observations' provenance.
+     */
+    verified(name: string, c: CellKey, offers: SeedOffer[], provider: ProviderId = PROVIDER): void {
+      // why: the db holds fixture ⇔ synthetic; any other provider here stands for SearchApi's search
+      const sourceKind = provider === PROVIDER ? 'synthetic' : 'scraped-search';
       const itineraries: VerifiedCellWrite['itineraries'] = offers.map((o) => {
         const itinerary = itineraryOf(c, o.hash, o.stopsOut ?? 0, o);
         const baggage = o.baggage === undefined ? { checkedBags: 1 } : o.baggage;
@@ -288,7 +295,12 @@ export function seeder(ports: Ports) {
           itinerary,
           offers: [
             {
-              offer: { itineraryHash: o.hash, providerId: PROVIDER, seller: o.seller ?? 'BA', cabin: CABIN },
+              offer: {
+                itineraryHash: o.hash,
+                providerId: provider,
+                seller: o.seller ?? 'BA',
+                cabin: CABIN,
+              },
               observation: {
                 pricePence: o.pricePence,
                 priceNativeMinor: o.pricePence,
@@ -304,8 +316,8 @@ export function seeder(ports: Ports) {
                 suppliedFields,
                 partialExpansion: false,
                 provenance: {
-                  providerId: PROVIDER,
-                  sourceKind: 'synthetic',
+                  providerId: provider,
+                  sourceKind,
                   fetchedAt: o.fetchedAt,
                   maxAgeHours: o.maxAgeHours ?? 0,
                   fx: { converted: false },
@@ -321,7 +333,7 @@ export function seeder(ports: Ports) {
       // why: WP7's write rule (decision 45): the cell's price is the cheapest confirmed one, and a cell with no
       // confirmed offer carries the `price-unconfirmed` reason.
       const confirmed = offers.filter((o) => o.confirmed !== false);
-      repos.cells.writeVerifiedCell(id(name), PROVIDER, {
+      repos.cells.writeVerifiedCell(id(name), provider, {
         cell: c,
         itineraries,
         outcome: {
@@ -333,7 +345,7 @@ export function seeder(ports: Ports) {
           minPence: Math.min(...(confirmed.length > 0 ? confirmed : offers).map((o) => o.pricePence)),
           cabin: CABIN,
           pointOfSale: POS,
-          sourceKind: 'synthetic',
+          sourceKind,
         },
       });
     },

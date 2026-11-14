@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useDefinitions, useProviders } from './api/queries.js';
 import { AppBoundary } from './components/AppBoundary.js';
 import { LoadError, Loading } from './components/LoadState.js';
@@ -9,7 +9,7 @@ import { COPY } from './copy.js';
 import { Flaps } from './flaps/Flaps.js';
 import { type Landing, land } from './state/landing.js';
 import { useLastSearch } from './state/lastSearch.js';
-import { parseDetailPair } from './state/resultsState.js';
+import { parseTripState } from './state/tripState.js';
 import { updateSearchParams, useSearchParams } from './state/urlState.js';
 import type { ViewId } from './state/view.js';
 import { AlertsView } from './views/Alerts/index.js';
@@ -17,10 +17,9 @@ import { DatesView } from './views/Dates/DatesView.js';
 import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
 import { HistoryView } from './views/History/HistoryView.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
-import { ResultsView } from './views/Results/ResultsView.js';
-import { RowLanding } from './views/Results/RowLanding.js';
 import { SearchesView } from './views/Searches/SearchesView.js';
 import { StatusView } from './views/Status.js';
+import { TripView } from './views/Trip/TripView.js';
 
 /** The views that need no definition (spec §11: the Set up views other than Alerts). */
 const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['searches', 'definitions', 'providers', 'status']);
@@ -50,30 +49,24 @@ export function App() {
   // edit= land on Searches; the retired views and a Results URL without a date pair land on a search's page, which with
   // no def= is Searches too. The view drawn follows the landing at once, and the URL is rewritten to it
   const landing: Landing = useMemo(() => land(params, selected), [params, selected]);
-  const view: ViewId = landing.kind === 'view' ? landing.view : 'results';
-  // why: Results is the date pair detail (spec §11, WP19 Task 19.6): it renders only for a well-formed date pair
-  const datePair = parseDetailPair(params);
+  const view: ViewId = landing.view;
+  // why: the Trip page (design 2026-11-08 §6.1) renders only for a well-formed pair of dates of the search shown, with
+  // the search page's airport and journey filters it was opened under
+  const tripState = useMemo(
+    () => (selected === null ? null : parseTripState(params, selected)),
+    [params, selected],
+  );
   // why: the rewrite waits for the definitions, so a Calendar link's cal.dest is judged against the selected one
   const definitionsKnown = definitions.data !== undefined || definitions.error !== null;
   // why: a landing on Searches needs no definition to be judged, so it is written at once
-  const rewriteReady = definitionsKnown || (landing.kind === 'view' && landing.view === 'searches');
+  const rewriteReady = definitionsKnown || landing.view === 'searches';
   useEffect(() => {
-    if (rewriteReady && landing.kind === 'view' && Object.keys(landing.patch).length > 0)
-      updateSearchParams(landing.patch, 'replace');
+    if (rewriteReady && Object.keys(landing.patch).length > 0) updateSearchParams(landing.patch, 'replace');
   }, [rewriteReady, landing]);
-  // why: a row lookup that found nothing lands on Dates with a line saying why; it stays while the URL is the one the
-  // lookup wrote, and goes with the operator's next change
-  const [notice, setNotice] = useState<{ search: string; text: string } | null>(null);
-  const onLand = useCallback((patch: Record<string, string | null>, text: string | null) => {
-    updateSearchParams(patch, 'replace');
-    setNotice(
-      text === null ? null : { search: new URLSearchParams(window.location.search).toString(), text },
-    );
-  }, []);
   const editing = params.get('edit');
-  const barNeedsSearch = view === 'dates' || view === 'results' || view === 'definitions';
+  const barNeedsSearch = view === 'dates' || view === 'trip' || view === 'definitions';
   const barSearch =
-    view === 'dates' || view === 'results'
+    view === 'dates' || view === 'trip'
       ? selected
       : view === 'definitions'
         ? (list.find((d) => d.id === editing) ?? null)
@@ -83,7 +76,7 @@ export function App() {
   // synthetic, so no price view renders: a fixture price must never look real for the moment before the banner.
   const providerStatusKnown = providers.data !== undefined || providers.error !== null;
   // why: a view is drawn once the URL says what it shows, so a retired link never reads the unfiltered Dates first
-  const landed = landing.kind === 'row-lookup' || Object.keys(landing.patch).length === 0;
+  const landed = Object.keys(landing.patch).length === 0;
   const show = (v: ViewId) => landed && view === v;
   const needsDefinition = !NO_DEFINITION.has(view);
   // why: spec §11 Dates "No search yet": with no definition at all the Dates view says so itself, linking to Definitions
@@ -145,26 +138,14 @@ export function App() {
             {!landed && definitionsKnown ? <Loading /> : null}
             {show('searches') && providerStatusKnown ? <SearchesView /> : null}
             {datesWithoutSearch ? <DatesView definition={null} /> : null}
-            {show('dates') && notice !== null && notice.search === params.toString() ? (
-              <p role="status" className="plate notice mb-4">
-                {notice.text}
-              </p>
-            ) : null}
             {show('dates') && selected !== null && providerStatusKnown ? (
               <DatesView definition={selected} />
             ) : null}
-            {landing.kind === 'row-lookup' && selected !== null && providerStatusKnown ? (
-              <RowLanding definition={selected} row={landing.row} basis={landing.basis} onLand={onLand} />
-            ) : null}
-            {show('results') &&
-            landing.kind === 'view' &&
-            selected !== null &&
-            providerStatusKnown &&
-            datePair !== null ? (
-              <ResultsView
-                key={`${selected.id}|${datePair.departureDate}|${datePair.returnDate}`}
+            {show('trip') && selected !== null && providerStatusKnown && tripState !== null ? (
+              <TripView
+                key={`${selected.id}|${tripState.departureDate}|${tripState.returnDate}`}
                 definition={selected}
-                datePair={datePair}
+                state={tripState}
               />
             ) : null}
             {show('history') && selected !== null && providerStatusKnown ? (

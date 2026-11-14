@@ -15,7 +15,12 @@ describe('migration 0010', () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(
       db,
-      migrationsWithout(['0010_airport_kind', '0011_wp20_flight_lists', '0012_wp21_return_leg']),
+      migrationsWithout([
+        '0010_airport_kind',
+        '0011_wp20_flight_lists',
+        '0012_wp21_return_leg',
+        '0013_booking_url',
+      ]),
     );
     db.raw
       .prepare(
@@ -26,6 +31,7 @@ describe('migration 0010', () => {
       '0010_airport_kind',
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
+      '0013_booking_url',
     ]);
     expect(db.raw.prepare('SELECT kind, scheduled FROM airports').all()).toEqual([
       { kind: null, scheduled: null },

@@ -216,23 +216,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(screen.queryByText('superseded by a later search')).toBeNull();
   });
 
-  it('beside the table columns the line drops provider and destination; a header shows the full age', () => {
-    const { unmount } = renderWithProviders(
-      <PriceCell
-        pricePence={41200}
-        provenance={searchProvenance}
-        calendar={false}
-        stale={false}
-        destination="JFK"
-        notSeenInLatestHours={72}
-        besideColumns
-      />,
-    );
-    const line = screen.getByTestId('provenance');
-    expect(within(line).queryByText('SearchApi')).toBeNull();
-    expect(within(line).queryByText('JFK')).toBeNull();
-    expect(screen.getByText('not seen in latest search (3d ago)')).toBeInTheDocument();
-    unmount();
+  it('a header shows the full age', () => {
     renderWithProviders(
       <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale={false} fullAge />,
     );

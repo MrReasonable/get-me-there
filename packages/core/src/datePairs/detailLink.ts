@@ -1,8 +1,8 @@
 import type { IsoDate } from '../types/ids.js';
-import { type FigureBasis, resultBasisOf } from './pairing.js';
 
 /**
- * The date pair detail's URL parameters (spec §8.3, §11 URLs): the one place their names live. The engine's alert
+ * The date pair detail's URL parameters (spec §8.3, §11 URLs): the one place their names live. `basis` and `row` are
+ * read from old links only (landing.ts); no link is written with them. The engine's alert
  * link and the web's links and landing rules all build or read the detail URL through these.
  */
 export const DETAIL_LINK_PARAMS = {
@@ -15,24 +15,19 @@ export const DETAIL_LINK_PARAMS = {
 } as const;
 
 /**
- * The detail URL's query, without the leading `?`: `view=results&def=…&depart=…&return=…&basis=…[&row=…]`, in
- * §8.3's order, each value encoded as a query component. A figure's basis is written as the `/results` basis it opens on
- * (spec rev 56 §6.9: a pairing figure opens on `calendar`, the row it replaced; `resultBasisOf`).
+ * The Trip page's URL query, without the leading `?`: `view=trip&def=…&depart=…&return=…`, each value encoded as a query
+ * component (design 2026-11-08 §6.1). It no longer names a basis or a row: the page is one pair of dates, whatever
+ * figure led it.
  */
 export function detailLinkQuery(p: {
   definitionId: string;
   departureDate: IsoDate;
   returnDate: IsoDate;
-  basis: FigureBasis;
-  row?: string;
 }): string {
-  const q = new URLSearchParams([
-    [DETAIL_LINK_PARAMS.view, 'results'],
+  return new URLSearchParams([
+    [DETAIL_LINK_PARAMS.view, 'trip'],
     [DETAIL_LINK_PARAMS.def, p.definitionId],
     [DETAIL_LINK_PARAMS.depart, p.departureDate],
     [DETAIL_LINK_PARAMS.return, p.returnDate],
-    [DETAIL_LINK_PARAMS.basis, resultBasisOf(p.basis)],
-  ]);
-  if (p.row !== undefined) q.append(DETAIL_LINK_PARAMS.row, p.row);
-  return q.toString();
+  ]).toString();
 }

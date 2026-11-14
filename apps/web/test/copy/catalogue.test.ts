@@ -34,45 +34,13 @@ const SAMPLES: Record<string, unknown[]> = {
   childExecutionNotStarted: ['pending'],
   executionNotStarted: ['pending'],
   loadFailed: ['network error'],
-  bandCheapest: [6],
-  verifyCellFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
-  verifyStartedFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
   actionFailed: ['409 conflict'],
   providersUnknown: ['HTTP 500'],
   fxSpoken: ['converted to GBP at the 2026-10-13 rate (frankfurter)'],
   fxTitle: ['2026-10-13', 'frankfurter'],
   notSeenInLatest: ['3d ago'],
   agoOf: ['unknown'],
-  verdictLine: ['arrival time window', 'fail'],
-  notApplied: ['arrival time window, maximum journey time'],
-  unverifiedList: ['checked bag'],
-  sortBy: ['Price', 'ascending'],
-  sortOption: ['Travel time', 'descending'],
-  orderNow: ['server ranking (class, then price)'],
-  sortedWithin: ['Travel time', 1000, 4210],
-  showDetails: ['JFK 14 Mar 2027 to 28 Mar 2027'],
-  hideDetails: ['JFK 14 Mar 2027 to 28 Mar 2027'],
-  detailsFor: ['JFK 14 Mar 2027 to 28 Mar 2027'],
-  rowName: ['JFK', '14 Mar 2027', '28 Mar 2027'],
-  stopsValue: [0, 1],
-  nightsValue: [14],
-  showingRows: [3, 10],
-  staleHidden: [2],
-  failedHidden: [1],
-  headlineRest: [
-    {
-      destination: 'JFK',
-      dates: '14 Mar 2027–28 Mar 2027 (14n)',
-      basis: 'itinerary-search basis',
-      cls: 'verified',
-    },
-  ],
   dateRange: ['14 Mar 2027', '28 Mar 2027', 14],
-  coverageLine: [{ priced: 3, empty: 1, noData: 2, error: 0, skipped: 0, notRun: 4, total: 10, reused: 0 }],
-  itineraryLine: [{ searched: 2, selected: 10, onDemand: 1 }],
-  itineraryLineExpand: [{ searched: 2, selected: 10, expandTop: 2, onDemand: 1 }],
-  truncated: [1000, 4210],
-  excludedByCurrentSpace: [3],
   executionsShown: ['run started 14 Oct 2026 13:00 Europe/London (completed, 2h ago)'],
   executionItem: ['14 Oct 2026 13:00 Europe/London', 'completed', '2h ago'],
   childExecutionItem: ['14 Oct 2026 13:00 Europe/London', 'running', 'just now'],
@@ -106,18 +74,7 @@ const SAMPLES: Record<string, unknown[]> = {
   resumesAt: ['1 Nov 2026 00:00 Europe/London'],
   scheduleBlocked: ['14 Oct 2026'],
   childRun: ['running'],
-  filtersSummary: [2],
   carriersIgnored: ['BRITISH'],
-  segment: ['ZZ', 117, 'LHR', '14 Mar 10:25', 'JFK', '14 Mar 13:20'],
-  layover: ['BBB', '2h 05m'],
-  checkedBags: [1],
-  refundable: [true],
-  changeable: [undefined],
-  seller: ['Example Travel'],
-  openOn: ['www.google.com'],
-  continueOnForm: ['www.google.com'],
-  hostShown: ['www.google.com'],
-  calendarGapLead: [3],
   reusedNote: [4],
   cellLabel: ['LHR', 'JFK', '20 Mar 2027', '1 Apr 2027'],
   withPriceValue: [60, 126],
@@ -312,20 +269,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'datesView.legend.flat': [4],
   'datesView.legend.markCount': ['no cached data', 12],
   bucketBreakdown: [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
-  'panel.run': ['14 Oct 2026'],
-  'panel.heading': ['LHR', 'JFK'],
-  'detailView.title': ['14 Mar 2027', '28 Mar 2027', 14],
-  'landing.rowNotRead': [1000],
-  'detailView.boardPriceRest': ['LHR → JFK', 'itinerary-search basis'],
-  'panel.offersDropped': [3],
-  'panel.reasonRaw': ['something-new'],
-  'panel.reusedFrom': ['run 7 Oct 2026'],
-  'panel.calendarPriceRun': ['run 7 Oct 2026'],
-  'panel.observation': ['Example Air', 'verified'],
-  'panel.verifyCost': [6, 1840],
-  'panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
-  'panel.verifyZeroRunCap': [6],
-  'panel.verifyConfirmRefused': ['the estimate is above the confirmation threshold'],
   'historyView.calendarSeries': ['Aviasales cache', 'economy'],
   'historyView.routeSeries': ['Google', '5–15 Nov', 'economy'],
   'historyView.coloursRepeat': [8, 6],
@@ -348,6 +291,57 @@ const SAMPLES: Record<string, unknown[]> = {
     'cabin not stated',
     'fetched 2h ago · provider age unknown',
   ],
+  // trip-page plan Task 7: the Trip page (design 2026-11-08 §5, §6.1)
+  'trip.heading': ['Wed 11 Nov', 'Sat 28 Nov'],
+  'trip.nights': [17],
+  'trip.labelText': ['Seller', '3h'],
+  'trip.labelStale': ['Calendar · 3h', "older than this search's refresh"],
+  'trip.labelDetail.seller': ['Kiwi.com', 16],
+  'trip.labelDetail.sellerNamed': ['Kiwi.com'],
+  'trip.labelSource': ['the browser worker'],
+  'trip.sellerLine': ['Kiwi.com', 16],
+  'trip.bookOn': ['www.google.com'],
+  'trip.nameContext': ['Back 21:10 JFK → 09:15 LHR'],
+  'trip.lands': ['Sun 29 Nov'],
+  'trip.legDay': ['Sat 28 Nov', 'lands Sun 29 Nov'],
+  'trip.legName': ['Back', '21:10', 'JFK', '09:15', 'LHR'],
+  'trip.readFlights': [true, 2],
+  'trip.tryAgain': [2],
+  'trip.reading': [2],
+  'trip.noneWithin': ['3h ago', 'your 25h limit each way'],
+  'trip.cheapestReadLeg': ['27h 10m'],
+  'trip.otherLimits': ['3h ago'],
+  'trip.outboundOnly': ['3h ago'],
+  'trip.noReturn': ['3h ago'],
+  'trip.calendarWithTrip': ['9d ago'],
+  'trip.readWithoutCalendar': ['2h ago'],
+  'trip.backToSearch': ['London → New York'],
+  'trip.listFailed': ['16:42', 'the connection to it failed'],
+  'trip.limitJourney': ['25h'],
+  'trip.limitStops': [1],
+  'trip.folded': [9, 'outbound', '6 over your 25h limit, 3 dearer'],
+  'trip.foldedOver': [6, '25h'],
+  'trip.foldedDearer': [3],
+  'trip.about.market': ['UK market'],
+  'trip.about.forTheseDatesOn': ['LHR', 'JFK'],
+  'trip.about.seller': ['Kiwi.com', 'today at 16:42'],
+  'trip.about.sellerSearchApi': ['today at 16:42'],
+  'trip.about.google-price': ['today at 16:42'],
+  'trip.about.google-incomplete': ['today at 16:42'],
+  'trip.about.calendar': ['today at 16:42'],
+  'trip.about.cached': ['on 12 Oct at 09:10'],
+  'trip.about.not-seen-again': ['on 9 Oct at 09:10'],
+  'trip.about.checkedJourney': ['25h'],
+  'trip.about.otherPair': ['LGW', 'JFK', 'no price listed in the latest search'],
+  'trip.logCount': [18, '26 Oct'],
+  'trip.logToday': ['16:40'],
+  'trip.logFailed': ['the connection to it failed'],
+  'trip.logShowAll': [18],
+  'trip.logSourceOf': ['the browser worker'],
+  'trip.dayOffset': [1],
+  'trip.aboutWhen.today': ['16:42'],
+  'trip.aboutWhen.yesterday': ['09:10'],
+  'trip.aboutWhen.day': ['12 Oct', '11:44'],
 };
 
 interface Collected {
@@ -403,19 +397,13 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'alertsView.requireAll',
       'alertsView.classVerified',
       'alertsView.classPartial',
-      'classLabel.verified',
-      'classLabel.partially-verified',
-      'calendarGapLead',
       // WP20 Task 20.6: the same banner on a search's page, its reference a class-verified price
       'searchPage.gapLead',
-      'headlineRest',
       // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
       'datesView.howFar.verified',
       'datesView.howFar.partiallyVerified',
       // the departure board: a row's state word on its flaps, shown only on a row whose figure is class verified
       'datesView.stateFlap.verified',
-      // WP10: names the class beside a class-verified value (the panel's offer line)
-      'panel.observation',
     ]);
     // why: the exemption list must not outlive its strings: a renamed or removed key would otherwise leave a stale
     // entry, and a new string later added at that path would inherit the exemption unreviewed.
@@ -429,29 +417,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the itinerary line pluralises, and a run that selected nothing names its on-demand searches plainly (pft-008, po-008)', () => {
-    expect(COPY.itineraryLineExpand({ searched: 1, selected: 4, expandTop: 1, onDemand: 0 })).toBe(
-      ' · itinerary-searched 1 of 4 selected (1 outbound each) +0 on demand',
-    );
-    expect(COPY.itineraryLineExpand({ searched: 3, selected: 4, expandTop: 2, onDemand: 0 })).toContain(
-      '(2 outbounds each)',
-    );
-    // why: "0 of 0 selected (1 outbounds each) +1 on demand" read as if nothing happened beside a real search.
-    expect(COPY.itineraryLineExpand({ searched: 0, selected: 0, expandTop: 1, onDemand: 1 })).toBe(
-      ' · itinerary-searched 1 cell on demand; none selected by the run',
-    );
-    expect(COPY.itineraryLine({ searched: 0, selected: 0, onDemand: 2 })).toBe(
-      ' · itinerary-searched 2 cells on demand; none selected by the run',
-    );
-    expect(COPY.itineraryLine({ searched: 0, selected: 0, onDemand: 0 })).toBe(
-      ' · itinerary-searched 0 of 0 selected +0 on demand',
-    );
-  });
-
-  it('stage counts say itinerary-searched', () => {
-    expect(COPY.itineraryLine({ searched: 2, selected: 10, onDemand: 1 })).toBe(
-      ' · itinerary-searched 2 of 10 selected +1 on demand',
-    );
+  it('stage counts name the buckets', () => {
     // why: ruling 4: the status bar shows the bucket breakdown; no umbrella ("attempted" or "searched") on any view but D.
     expect(
       COPY.progress({
@@ -672,7 +638,6 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
     const claims = (t: string) => t.replace(/not every seller read/gi, '');
     expect(texts.filter((t) => /each seller|every seller|lowest seller price/i.test(claims(t)))).toEqual([]);
     expect(COPY.basisKindName.seller).toBe('cheapest of the sellers read, not checked with the airline');
-    expect(COPY.basisName.pairing).toBe('flights read, not checked with the airline');
   });
   it('"round trip" is spelt one way on Out, Back and the board: never "round-trip total" or "roundtrip"', () => {
     expect(F.roundTrip).toBe('round trip');

@@ -1,7 +1,6 @@
 import { asIata, asIsoDate, detailLinkQuery, type Iata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { type Landing, land } from '../../src/state/landing.js';
-import { parseSelectedRow } from '../../src/state/resultsState.js';
 import { NAV_TIERS, navPatch, parseView, VIEWS, type ViewId } from '../../src/state/view.js';
 
 // Spec rev 55 §11 URLs (WP20 Task 20.3): `?view=` names the view; an absent or unknown value, a search's page without
@@ -81,13 +80,51 @@ describe("?view= URLs land on Searches, a search's page or the view named (spec 
   });
 });
 
-describe('a Results URL lands on the detail, a row lookup or Dates (spec §11 URLs, §8.3)', () => {
-  it.each<[string, string]>([
-    ['two well-formed dates', 'view=results&def=def-1&depart=2027-03-14&return=2027-03-28'],
-    ['a return on the departure date', 'view=results&depart=2027-03-14&return=2027-03-14'],
-    ['a date pair with a row', 'view=results&depart=2027-03-14&return=2027-03-28&row=abc'],
-  ])('%s opens the detail as it stands', (_label, q) => {
-    expect(at(q)).toEqual(view('results'));
+describe('an old Results link lands on the Trip page, or on the search (Ruling 9; spec §11 URLs, §8.3)', () => {
+  const TRIP_PATCH = { view: 'trip', basis: null, row: null };
+
+  it('dates with a basis, a row and a journey limit: the trip, keeping def, the dates and d.journey, dropping basis and row', () => {
+    const link = new URLSearchParams(
+      'view=results&def=D&depart=2026-12-05&return=2026-12-23&basis=verified&row=x&d.journey=1500',
+    );
+    const landing = land(link, DEF);
+    expect(landing).toEqual(view('trip', TRIP_PATCH));
+    // why: applied as the app applies it (null removes), the URL keeps exactly the trip's own parameters
+    for (const [k, v] of Object.entries(landing.patch)) {
+      if (v === null) link.delete(k);
+      else link.set(k, v);
+    }
+    expect(Object.fromEntries(link)).toEqual({
+      view: 'trip',
+      def: 'D',
+      depart: '2026-12-05',
+      return: '2026-12-23',
+      'd.journey': '1500',
+    });
+  });
+
+  it('the Results sort and every f.* are dropped; the airport filters and the stay filter are not named, so kept', () => {
+    expect(
+      at(
+        'view=results&def=D&depart=2026-12-05&return=2026-12-23&sort=price.asc&f.class=verified&f.stops=1&d.from=LGW&d.to=JFK&d.nights=10-12',
+      ),
+    ).toEqual(view('trip', { ...TRIP_PATCH, sort: null, 'f.class': null, 'f.stops': null }));
+  });
+
+  it('dates with no row= are the same trip', () => {
+    expect(at('view=results&def=def-1&depart=2027-03-14&return=2027-03-14')).toEqual(
+      view('trip', TRIP_PATCH),
+    );
+  });
+
+  it('a link with only row= (sent before revision 48) lands on the search page', () => {
+    expect(at('view=results&def=D&row=x')).toEqual(view('dates', DETAIL_GONE));
+    expect(at('view=results&def=D&basis=verified&row=hash-1')).toEqual(view('dates', DETAIL_GONE));
+  });
+
+  it('a Results link with no def= lands on Searches, with or without dates', () => {
+    expect(at('view=results&depart=2027-03-14&return=2027-03-28&row=abc')).toEqual(TO_SEARCHES);
+    expect(at('view=results&row=x')).toEqual(TO_SEARCHES);
   });
 
   it.each<[string, string]>([
@@ -98,44 +135,36 @@ describe('a Results URL lands on the detail, a row lookup or Dates (spec §11 UR
     ['a malformed date', 'view=results&def=def-1&depart=2027-3-14&return=2027-03-28'],
     ['a date that does not exist', 'view=results&def=def-1&depart=2027-02-30&return=2027-03-28'],
     ['a date with a time', 'view=results&def=def-1&depart=2027-03-14T00:00&return=2027-03-28'],
-  ])('%s and no row= lands on Dates, the detail parameters removed', (_label, q) => {
+  ])('%s lands on the search page, the detail parameters removed', (_label, q) => {
     expect(at(q)).toEqual(view('dates', DETAIL_GONE));
   });
 
-  it('without a well-formed date pair but with row= it is a row lookup on the link’s basis', () => {
-    expect(at('view=results&def=def-1&basis=verified&row=hash-1')).toEqual({
-      kind: 'row-lookup',
-      row: 'hash-1',
-      basis: 'verified',
-    });
-    expect(at('view=results&depart=nope&return=2027-03-28&basis=calendar&row=calendar%3A7')).toEqual({
-      kind: 'row-lookup',
-      row: 'calendar:7',
-      basis: 'calendar',
-    });
-    expect(at('view=results&row=hash-1&basis=other')).toEqual({
-      kind: 'row-lookup',
-      row: 'hash-1',
-      basis: null,
-    });
-  });
-
-  it('an empty or oversized row= is no row, so that URL lands on Dates', () => {
+  it('an empty or oversized row= is no row, so a link with only that lands on the search page', () => {
     expect(at('view=results&def=def-1&row=')).toEqual(view('dates', DETAIL_GONE));
     expect(at(`view=results&def=def-1&row=${'x'.repeat(201)}`)).toEqual(view('dates', DETAIL_GONE));
   });
 });
 
+describe('a Trip URL (design 2026-11-08 §6.1)', () => {
+  it('with def and well-formed dates is the trip as it stands', () => {
+    expect(at('view=trip&def=def-1&depart=2027-03-14&return=2027-03-28&d.journey=900')).toEqual(view('trip'));
+  });
+  it('without def lands on Searches', () => {
+    expect(at('view=trip&depart=2027-03-14&return=2027-03-28')).toEqual(TO_SEARCHES);
+  });
+  it('without usable dates lands on the search page', () => {
+    expect(at('view=trip&def=def-1')).toEqual(view('dates', DETAIL_GONE));
+    expect(at('view=trip&def=def-1&depart=2027-03-28&return=2027-03-14')).toEqual(view('dates', DETAIL_GONE));
+  });
+});
+
 describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the engine and the web cannot drift)', () => {
-  // why: the hash of core's test/datePairs/detailLink.test.ts; the web never imports core's test files (WP19 §7)
-  const HASH = '9f3c2a7b41d0e6f85a1c3b2d4e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8b9';
-  const LITERAL = `view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${HASH}`;
+  // why: the literal of core's test/datePairs/detailLink.test.ts; the web never imports core's test files (WP19 §7)
+  const LITERAL = 'view=trip&def=def-1&depart=2027-03-14&return=2027-03-28';
   const query = detailLinkQuery({
     definitionId: 'def-1',
     departureDate: asIsoDate('2027-03-14'),
     returnDate: asIsoDate('2027-03-28'),
-    basis: 'verified',
-    row: HASH,
   });
 
   it("core's detailLinkQuery still writes the literal the engine's link test pins", () => {
@@ -143,21 +172,20 @@ describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the e
   });
 
   it.each([`/?${query}`, `https://flights.example.test/?${query}`, `https://example.test/gmt/?${query}`])(
-    '%s lands on the detail with row= kept',
+    '%s lands on the Trip page',
     (link) => {
       const params = new URL(link, 'https://example.test').searchParams;
-      expect(land(params, DEF)).toEqual(view('results'));
-      expect(parseSelectedRow(params)).toBe(HASH);
+      expect(land(params, DEF)).toEqual(view('trip'));
     },
   );
 });
 
 describe('the view list and the two-tier nav (spec §11 layout)', () => {
-  it('eight views; anything unknown or absent is Searches', () => {
+  it('eight views (Results retired; its links land on the Trip page); anything unknown or absent is Searches', () => {
     expect(VIEWS).toEqual([
       'searches',
       'dates',
-      'results',
+      'trip',
       'history',
       'definitions',
       'providers',
@@ -167,9 +195,10 @@ describe('the view list and the two-tier nav (spec §11 layout)', () => {
     expect(parseView(null)).toBe('searches');
     expect(parseView('calendar')).toBe('searches');
     expect(parseView('history')).toBe('history');
+    expect(parseView('results')).toBe('searches');
   });
 
-  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; Results and Edit are in neither', () => {
+  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; the Trip page and Edit are in neither', () => {
     expect(NAV_TIERS).toEqual([
       { id: 'decide', views: ['searches', 'dates', 'history'] },
       { id: 'setup', views: ['providers', 'alerts', 'status'] },

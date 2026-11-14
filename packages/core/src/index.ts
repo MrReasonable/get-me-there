@@ -54,6 +54,12 @@ export * from './flights/index.js';
 export * from './labels/age.js';
 export { MAIN_PATH_SOURCE, mainPathSource } from './labels/mainPath.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
+export {
+  PRICE_LABEL_KINDS,
+  type PricedThing,
+  type PriceLabelKind,
+  priceLabelKind,
+} from './labels/priceLabel.js';
 export { PROVIDER_NAMES } from './labels/providers.js';
 export {
   LEFT_FOR,
@@ -84,6 +90,7 @@ export * from './ports/logger.js';
 export * from './ports/notifier.js';
 export * from './ports/provider.js';
 export { bandCheapest } from './results/band.js';
+export { type BookingTarget, bookingTargetOf } from './results/bookingTarget.js';
 export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
 export { priceUnconfirmed, rankRows, sortRows } from './results/rank.js';

@@ -12,6 +12,7 @@ import {
 import { workerRuleSchema as leafRule } from '../../src/camoufox/rule.js';
 import { BOOKING_OFFERS_MAX, FLIGHT_LIST_MAX_FLIGHTS } from '../../src/flights/limits.js';
 import { BOOKING_STATUS, RETURN_STATUS } from '../../src/flights/returns.js';
+import { SYNTHETIC_BOOKING_URL } from '../../src/testing/booking.js';
 
 const fields = {
   origin: 'LHR',
@@ -254,6 +255,31 @@ describe("the flights answer's returns (spec rev 56 §5.1)", () => {
       };
       expect(ok(answer({ returns: { ...returnsOf('read'), booking } })), status).toBe(true);
     }
+  });
+  it("the booking's address is kept only when the booking page's own, the answer kept either way; an answer without the key parses (an older worker)", () => {
+    const withUrl = (bookingUrl: string) => {
+      const booking = {
+        ...NO_BOOKING,
+        status: 'read',
+        attempt: 0,
+        returnIndex: 0,
+        expanded: true,
+        offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 118_000 }],
+        bookingUrl,
+      };
+      return answer({ returns: { ...returnsOf('read'), booking } });
+    };
+    const urlOf = (a: unknown) => {
+      const r = workerAnswerSchema.parse(a);
+      const b = r.kind === 'flights' ? r.returns?.booking : undefined;
+      return b === undefined || b === null ? 'no booking' : b.bookingUrl;
+    };
+    expect(urlOf(withUrl(SYNTHETIC_BOOKING_URL))).toBe(SYNTHETIC_BOOKING_URL);
+    // why: final review M1: an address that is not the booking page's drops to null; the page read stays
+    expect(urlOf(withUrl('https://www.google.com/travel/flights/search?tfs=abc'))).toBeNull();
+    expect(urlOf(withUrl('https://evil.example/travel/flights/booking'))).toBeNull();
+    // returnsOf's booking has no bookingUrl key
+    expect(ok(answer({ returns: returnsOf('read') }))).toBe(true);
   });
   it('a flights answer at the limits (two attempts of 30 returns, 30 flights, 40 offers) stays under 100 KB', () => {
     const over = Array.from({ length: FLIGHT_LIST_MAX_FLIGHTS }, () => ret(2, true));

@@ -8,8 +8,8 @@ import type {
   DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
-  ResultsScope,
   StartExecutionBody,
+  TripQuery,
   VerifyCellBody,
 } from './types.js';
 
@@ -56,12 +56,12 @@ export const api = {
     call(c.executionResponseSchema, 'POST', '/api/executions/:id/resume', { params: { id } }),
   verifyCell: (body: VerifyCellBody) =>
     call(c.startExecutionResponseSchema, 'POST', '/api/cells/verify', { body }),
-  // WP19 (spec §10): with a scope, the date pair detail's read (one date pair, the Dates airport filter and journey
-  // limit); without one, the whole space (the status bar's run, the row lookup of an old alert link).
-  results: (id: string, basis: Basis | null, scope?: ResultsScope) =>
+  // spec §10: the search's results over its whole space (the status bar's run, History); the route's date-pair scope
+  // has no web reader since the Results view went (trip-page plan Task 7; the route stays, Ruling 11)
+  results: (id: string, basis: Basis | null) =>
     call(c.resultsResponseSchema, 'GET', '/api/definitions/:id/results', {
       params: { id },
-      query: { basis: basis ?? undefined, ...scope },
+      query: { basis: basis ?? undefined },
     }),
   // WP19 (spec §10): every date pair of the current space with its figure over the airport pairs in scope; the body is
   // read only through core's decodeDatePairs (useDatePairs), never column by column.
@@ -74,6 +74,9 @@ export const api = {
         maxJourneyMinutes: scope.maxJourneyMinutes,
       },
     }),
+  // design 2026-11-08 §6.1: one trip's dates in one call, under the scope names the date-pairs read takes
+  trip: (id: string, query: TripQuery) =>
+    call(c.tripResponseSchema, 'GET', '/api/definitions/:id/trip', { params: { id }, query }),
   coverage: (id: string) =>
     call(c.coverageResponseSchema, 'GET', '/api/definitions/:id/coverage', { params: { id } }),
   calendarGap: (id: string) =>

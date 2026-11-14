@@ -342,16 +342,12 @@
   }
   /* State inks. Calendar: the price and how far checked in amber; stale: how far checked; superseded: dim. Each also
      has its lamp, its glyph flap and its words. */
-  .board tr[data-state="calendar"] .price-flaps,
   .board tr[data-state="calendar"] .howfar-flap,
   .board tr[data-state="stale"] .howfar-flap {
     color: var(--amber);
   }
   .board tr[data-state="superseded"] {
     color: var(--dim);
-  }
-  .board tr[data-state="superseded"] .price-flaps {
-    text-decoration: line-through;
   }
 }
 
@@ -393,11 +389,15 @@
   .board .card-dates {
     grid-column: 1;
   }
+  /* why: the price (its link, its label and the pairing's lines) is wider than the space beside the date flaps at 375 px,
+     so it sits on its own line under them, never under the flaps' fixed width */
   .board .card-price {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-    text-align: right;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+    text-align: left;
+    min-width: 0;
+    max-width: 100%;
   }
   .board .card-rest {
     grid-column: 1 / -1;

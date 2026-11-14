@@ -312,6 +312,31 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     r[group].figure[last] = r.figures.pair.length;
     expect(issuePaths(r)).toEqual([`${group}.figure.${last}`]);
   });
+  it('final review I1: accepts booking options on a verified figure and refuses them on any other', () => {
+    const r = body();
+    r.bookingOptions.figure = [0, 2];
+    expect(issuePaths(r)).toEqual([]);
+    r.bookingOptions.figure = [1];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.0']);
+    r.bookingOptions.figure = [2, 2];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.1']);
+    r.bookingOptions.figure = [r.figures.pair.length];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.0']);
+    const { bookingOptions: _b, ...without } = body();
+    expect(issuePaths(without)).toEqual(['bookingOptions']);
+    expect(issuePaths({ ...body(), bookingOptions: { figure: [], extra: [] } })).toEqual(['bookingOptions']);
+  });
+  // why: CodeRabbit PR #58 finding 25: zod runs the refinement after a continuable issue (the index's own minimum), so a
+  // negative index reaches the figure lookup; it is a range issue there, never a thrown RangeError
+  it.each(['cheaperCached', 'times', 'bookingOptions'] as const)(
+    'refuses a negative %s figure index as an issue, never by throwing',
+    (group) => {
+      const r = body();
+      r[group].figure = [-1];
+      expect(() => datePairsResponseSchema.safeParse(r)).not.toThrow();
+      expect(issuePaths(r)).toContain(`${group}.figure.0`);
+    },
+  );
   it('rejects a cheaper-cached price on a calendar figure', () => {
     const r = body();
     r.cheaperCached.figure[0] = 1;
@@ -408,6 +433,8 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
   });
   it('parses a verified figure with inline provenance', () => {
     expect(datePairFigureSchema.parse(figure)).toEqual(figure);
+    const withBooking = { ...figure, hasBookingOptions: true };
+    expect(datePairFigureSchema.parse(withBooking)).toEqual(withBooking);
   });
   /** The verified figure's times cleared, so a calendar case breaks only the rule it names. */
   const noTimes = { departOut: null, arriveOut: null, departBack: null, arriveBack: null };
@@ -435,6 +462,8 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
       'cheaperCached.pricePence',
     ],
     ['an airport pair index', { airportPair: 3 }, ''],
+    // why: final review I1: booking options are SearchApi's, read for a verified price alone
+    ['booking options on a calendar figure', { ...calendar, hasBookingOptions: true }, 'hasBookingOptions'],
   ] as const)('rejects %s', (_name, over, path) => {
     const r = datePairFigureSchema.safeParse({ ...figure, ...over });
     expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.'))).toEqual([path]);
@@ -527,6 +556,15 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     expect(issuePaths(calendarWithin)).toEqual(['pairingRead.code.1', 'pairing.figure.1']);
     expect(PAIRING_READ.indexOf('within')).toBe(6);
   });
+  it.each(['pairingRead', 'gridPrice', 'pairing'] as const)(
+    'refuses a negative %s figure index as an issue, never by throwing (CodeRabbit PR #58 finding 25)',
+    (group) => {
+      const r = withPairing();
+      groupOf(r, group).figure[0] = -1;
+      expect(() => datePairsResponseSchema.safeParse(r)).not.toThrow();
+      expect(issuePaths(r)).toContain(`${group}.figure.0`);
+    },
+  );
   it('a pairing figure in a body without the gridPrice or the pairing group is refused', () => {
     const { gridPrice: _g, ...noGrid } = withPairing();
     expect(issuePaths(noGrid)).toEqual(['gridPrice']);

@@ -1,3 +1,4 @@
+import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { classifyPageWithRule } from '../src/classify.js';
 import {
@@ -1428,7 +1429,7 @@ describe('bookingFacts and the booking view’s facts (WP21 Task 21.3)', () => {
       ),
     ]);
   it('reads the offer buttons’ names in page order, the expansion controls and the grouped controls in main', async () => {
-    const { driver, d } = setup([
+    const { driver, d, page } = setup([
       tree({
         outside: [
           n('button', 'Continue to book with QQ Air for 9 British pounds'),
@@ -1436,10 +1437,13 @@ describe('bookingFacts and the booking view’s facts (WP21 Task 21.3)', () => {
         ],
       }),
     ]);
+    // why: the facts carry the page's address as the page reports it
+    page.setUrl(SYNTHETIC_BOOKING_URL);
     expect(await driver.bookingFacts(d)).toEqual({
       offerNames: [OFFER, 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'],
       moreOptions: 1,
       grouped: 1,
+      url: SYNTHETIC_BOOKING_URL,
     });
   });
   it('an offer name over the length cap reads as null (counted unparsed upstream, never parsed)', async () => {

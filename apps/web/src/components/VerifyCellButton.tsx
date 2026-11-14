@@ -1,41 +1,28 @@
-import { type CellKey, daysBetween } from '@gmt/core';
-import { useExecutionActions } from '../api/queries.js';
+import type { CellKey } from '@gmt/core';
+import { useVerifyCell } from '../api/queries.js';
 import { COPY } from '../copy.js';
-import { formatIsoDate } from '../format.js';
 
 /**
- * The name of one cell's itinerary search ("LHR → JFK 14 Mar 2027–28 Mar 2027 (14n)"), the one wording Coverage, Results
- * and the Calendar panel share so the same cell is never called two things (review arch M1).
- */
-export function verifyCellName(cell: CellKey): string {
-  return `${COPY.coverageCheckPair(cell.origin, cell.destination)} ${COPY.dateRange(
-    formatIsoDate(cell.departureDate),
-    formatIsoDate(cell.returnDate),
-    daysBetween(cell.departureDate, cell.returnDate),
-  )}`;
-}
-
-/**
- * Per-cell itinerary search (spec §8.1; billed calls). One instance per cell: its name says which cell it
- * searches, it is disabled while its request is in flight (so a double tap cannot spend twice), and its own
- * status line names the cell it started (UI-5).
+ * Design 2026-11-08 §6.1: "Check with SearchApi · 1 credit", the per-cell check (spec §8.1) the Trip page offers only
+ * where it can run. Disabled while its request is in flight, so a double tap cannot spend twice; its own status line
+ * says the check started (UI-5), and the page reads its trip again once the check's run has settled.
  */
 export function VerifyCellButton({ definitionId, cell }: { definitionId: string; cell: CellKey }) {
-  const { verify } = useExecutionActions();
-  const name = verifyCellName(cell);
+  // why: the trip read is read again once the check's run settles, not only when it starts (CodeRabbit PR #58 finding 6)
+  const verify = useVerifyCell(definitionId);
   return (
-    <span className="flex flex-col gap-1">
+    <span className="trip-action">
       <button
         type="button"
-        className="btn btn-sm min-h-11"
+        className="trip-btn"
         disabled={verify.isPending}
         aria-busy={verify.isPending ? true : undefined}
         onClick={() => verify.mutate({ definitionId, cell })}
       >
-        {verify.isPending ? COPY.working : COPY.verifyCellFor(name)}
+        {verify.isPending ? COPY.working : COPY.trip.checkWithSearchApi}
       </button>
-      {verify.isSuccess ? <p role="status">{COPY.verifyStartedFor(name)}</p> : null}
-      {verify.error ? <p role="alert">{COPY.actionFailed(verify.error.message)}</p> : null}
+      {verify.isSuccess ? <span role="status">{COPY.trip.checkStarted}</span> : null}
+      {verify.error ? <span role="alert">{COPY.actionFailed(verify.error.message)}</span> : null}
     </span>
   );
 }

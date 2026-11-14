@@ -36,6 +36,11 @@ export interface DatePairPairing {
   provenance: Provenance;
   stale: StaleMark;
   ageHours: number | 'unknown';
+  /**
+   * Ruling 6: the booking page's address the list's booking read saw, exactly when that read is this pairing's (Ruling
+   * 5); else null. Any string up to MAX_URL_LENGTH: the web re-checks it through `bookingTargetOf` (Ruling 8).
+   */
+  bookingUrl: string | null;
 }
 
 /**
@@ -82,6 +87,11 @@ export interface DatePairFigure {
   pairingRead: PairingRead;
   /** The 21.6 ruling: why the cell's newest flight list failed, exactly on a `list-failed` read; else null. */
   listReason: StopDetail | null;
+  /**
+   * Final review I1: SearchApi's booking options gave this verified price a seller's booking (a GET or POST link), so
+   * its label is "Seller" on the board as on the Trip page; false on every other basis.
+   */
+  hasBookingOptions: boolean;
 }
 
 /** One date pair of the space: its dates, its six buckets and counts over the airport pairs in scope, its figure. */
@@ -143,8 +153,9 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
- * times, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed by the figure's position (spec rev
- * 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an absent one written `not-read`).
+ * times, booking options, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed
+ * by the figure's position (spec rev 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an
+ * absent one written `not-read`).
  * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
@@ -192,6 +203,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   };
   const pairingRead: NonNullable<DatePairsResponse['pairingRead']> = { figure: [], code: [] };
   const listReason: NonNullable<DatePairsResponse['listReason']> = { figure: [], reason: [] };
+  const bookingOptions: DatePairsResponse['bookingOptions'] = { figure: [] };
   const grid: NonNullable<DatePairsResponse['gridPrice']> = {
     figure: [],
     pricePence: [],
@@ -217,6 +229,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     provenance: [],
     stale: [],
     ageHours: [],
+    bookingUrl: [],
   };
   const cheaper: DatePairsResponse['cheaperCached'] = {
     figure: [],
@@ -277,6 +290,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       listReason.figure.push(figure);
       listReason.reason.push(why);
     }
+    if (x.hasBookingOptions) bookingOptions.figure.push(figure);
     const c = x.cheaperCached;
     if (c !== null) {
       cheaper.figure.push(figure);
@@ -321,6 +335,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairing.provenance.push(entry(q.provenance));
       pairing.stale.push(q.stale);
       pairing.ageHours.push(q.ageHours);
+      pairing.bookingUrl.push(q.bookingUrl);
     }
   }
   const { space, scope } = d;
@@ -350,6 +365,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     figures: f,
     cheaperCached: cheaper,
     times,
+    bookingOptions,
     gridPrice: grid,
     pairing,
     pairingRead,

@@ -230,6 +230,7 @@ describe('checkOfRead', () => {
       nonGbp: 0,
       expanded: false,
       offersStated: null,
+      bookingUrl: null,
     };
     const r = readOf({ booking });
     expect(checkOfRead(r, flights, NO_LIMITS)).toEqual(conf(118_000));
@@ -259,6 +260,7 @@ describe('checkOfRead', () => {
     nonGbp: 0,
     expanded: false,
     offersStated: null,
+    bookingUrl: null,
     ...over,
   });
   it('a complete booking of the pairing confirms at the cheapest seller offer', () => {

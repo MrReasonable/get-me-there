@@ -204,6 +204,16 @@ describe('flightListsQuerySchema and the on-demand read (spec rev 55 §10)', () 
       readFlightListRequestSchema.safeParse({ departureDate: '14/03/2027', returnDate: '2027-03-24' })
         .success,
     ).toBe(false);
+    // the airport pair is both or neither
+    const dates = { departureDate: '2027-03-14', returnDate: '2027-03-24' };
+    expect(
+      readFlightListRequestSchema.safeParse({ ...dates, origin: 'LHR', destination: 'JFK' }).success,
+    ).toBe(true);
+    expect(readFlightListRequestSchema.safeParse({ ...dates, origin: 'LHR' }).success).toBe(false);
+    expect(readFlightListRequestSchema.safeParse({ ...dates, destination: 'JFK' }).success).toBe(false);
+    expect(
+      readFlightListRequestSchema.safeParse({ ...dates, origin: 'LHRX', destination: 'JFK' }).success,
+    ).toBe(false);
     expect(readFlightListResponseSchema.safeParse({ accepted: true }).success).toBe(true);
     expect(readFlightListResponseSchema.safeParse({ accepted: false }).success).toBe(false);
   });

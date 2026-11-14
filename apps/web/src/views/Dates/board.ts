@@ -1,5 +1,7 @@
 import {
+  type BookingTarget,
   bestPerWeek,
+  bookingTargetOf,
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
@@ -15,6 +17,7 @@ import {
   rankDatePairs,
   resultBasisOf,
   type StopDetail,
+  searchLinkFor,
 } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import type { COPY } from '../../copy.js';
@@ -134,6 +137,41 @@ const synthetic = (p: { providerId: string; sourceKind: string }) =>
   p.providerId === 'fixture' || p.sourceKind === 'synthetic';
 
 /**
+ * Where a board row's price links (design 2026-11-08 §5.3, Rulings 6 and 10), by core's one rule (`bookingTargetOf`): a
+ * pairing row's booking page where its read recorded one ("Book on Google Flights"), else the Google Flights search for
+ * the figure's own airports and dates. A verified row always takes that search: the pairing it carries is the one read in
+ * the date pair's best calendar cell, another trip (final review C1). The board reads no seller booking, so the "Book on
+ * <seller>" tier is absent. A calendar price is not a trip to book, and a synthetic one is never linked out: both give
+ * `none`. `cabin` is the search's, for the search link.
+ */
+export function rowBookingTarget(
+  pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
+  figure: DatePairFigure,
+  cabin: DefinitionResponse['cabin'],
+): BookingTarget {
+  // why: a calendar price is not a trip to book (design §5.3): nothing is linked out until flights are read
+  if (figure.basis === 'calendar') return { kind: 'none' };
+  const q = figure.pairing;
+  const link = searchLinkFor(
+    'camoufox',
+    {
+      origin: figure.origin,
+      destination: figure.destination,
+      departureDate: pair.departureDate,
+      returnDate: pair.returnDate,
+    },
+    cabin,
+  );
+  return bookingTargetOf({
+    synthetic: synthetic(figure.price.provenance) || (q !== null && synthetic(q.provenance)),
+    booking: null,
+    // why: final review C1: only a pairing figure's pairing is its own trip; a stale verified figure's is another's
+    bookingUrl: figure.basis === 'pairing' ? (q?.bookingUrl ?? null) : null,
+    searchLink: link === null ? null : { url: link.url, host: link.host },
+  });
+}
+
+/**
  * Spec §11 Dates, revision 50: the red synthetic banner shows when any provenance in the read (figures and
  * cheaper-cached prices alike), the discovery providers or any execution read (the shown run's progress) names the
  * fixture provider or a synthetic source; judged on the whole decoded read, never the rows the board shows, and
@@ -176,10 +214,13 @@ export interface FlightReadLine {
   pairing: DatePairPairing | null;
 }
 
+/** A figure as the board decodes it or as the trip read sends it (the wire's figure has no airport-pair index). */
+export type ReadFigure = Omit<DatePairFigure, 'airportPair'>;
+
 /** The lead words of each read that is not a pairing figure's own (`within`), with its pairing's age where it has one. */
 function leadOf(
   read: Exclude<PairingRead, 'within'>,
-  f: DatePairFigure,
+  f: ReadFigure,
   c: typeof COPY,
   reason: (d: StopDetail) => string,
 ): string | null {
@@ -228,7 +269,7 @@ export type ListsState = 'loading' | 'failed' | 'available' | 'unavailable';
  * words a failed list's cause (the 21.6 ruling).
  */
 export function flightReadLine(
-  f: DatePairFigure,
+  f: ReadFigure,
   lists: ListsState,
   c: typeof COPY,
   reason: (d: StopDetail) => string,

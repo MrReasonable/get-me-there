@@ -13,6 +13,7 @@ import {
   resultsResponse,
   statusReport,
 } from '../fixtures.js';
+import { tripBody } from '../fixtures.trip.js';
 import { datesHandlers } from './datesHandlers.js';
 import { searchesHandlers } from './searchesHandlers.js';
 import { wp10Handlers } from './wp10Handlers.js';
@@ -60,6 +61,8 @@ export const handlers = [
   http.get(url('/api/status'), () => HttpResponse.json(statusReport())),
   http.get(url('/api/definitions'), () => HttpResponse.json([definition()])),
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),
+  // trip-page plan Task 7: the Trip page's one read (its own tests serve each state)
+  http.get(url('/api/definitions/:id/trip'), () => HttpResponse.json(tripBody())),
   http.get(url('/api/executions/:id'), () =>
     HttpResponse.json(
       // why: the run the date-pairs fixtures summarise (runSummary): started 12:00, finished 13:00 (UTC)

@@ -19,6 +19,7 @@ import {
   BOOKING_STATUS,
   BOOKING_TRANSIENT,
   type BookingRead,
+  bookingPageUrl,
   bookingReadSchema,
   offerSchema,
   offersComplete,
@@ -29,8 +30,10 @@ import {
   returnAttemptSchema,
   returnReadSchema,
   returnsOutboundIssue,
+  workerBookingReadSchema,
 } from '../../src/flights/returns.js';
 import { type ListedReturn, listedReturnSchema } from '../../src/flights/types.js';
+import { SYNTHETIC_BOOKING_URL } from '../../src/testing/booking.js';
 
 // Spec revision 56 §2 "The return phase", §5.1 and §12: the return read, the booking read and its offers, their statuses
 // and refinements, and the return phase's constants. Synthetic returns, sellers (QQ Travel, QQ Fares) and carriers only.
@@ -86,6 +89,7 @@ function booking(over: Record<string, unknown> = {}) {
     unparsed: 0,
     nonGbp: 0,
     offersStated: null,
+    bookingUrl: null,
     ...over,
   };
 }
@@ -407,5 +411,93 @@ describe("returnsOutboundIssue (the contract checks every outboundIndex against 
     );
     expect(returnsOutboundIssue(two, 3)).toBe(1);
     expect(returnsOutboundIssue(two, 4)).toBeNull();
+  });
+});
+
+describe('the booking page address (design §6.3; Ruling 8)', () => {
+  const PATH = 'https://www.google.com/travel/flights/booking';
+  it('bookingPageUrl gives the synthetic address and its host', () => {
+    expect(bookingPageUrl(SYNTHETIC_BOOKING_URL)).toEqual({
+      url: SYNTHETIC_BOOKING_URL,
+      host: 'www.google.com',
+    });
+  });
+  it.each([
+    ['http:', SYNTHETIC_BOOKING_URL.replace('https:', 'http:')],
+    ['the search path', 'https://www.google.com/travel/flights/search?tfs=abc'],
+    ['another host', 'https://evil.example/travel/flights/booking'],
+    ['userinfo', 'https://user:pw@www.google.com/travel/flights/booking'],
+    ['a port', 'https://www.google.com:8443/travel/flights/booking'],
+    ['2049 characters', `${PATH}?tfs=${'A'.repeat(2049 - PATH.length - 5)}`],
+    ['not an address', 'not a url'],
+  ])('bookingPageUrl refuses %s', (_name, raw) => {
+    expect(bookingPageUrl(raw)).toBeNull();
+  });
+  it('bookingPageUrl accepts an address of exactly 2048 characters', () => {
+    const raw = `${PATH}?tfs=${'A'.repeat(2048 - PATH.length - 5)}`;
+    expect(raw).toHaveLength(2048);
+    expect(bookingPageUrl(raw)?.url).toBe(raw);
+  });
+
+  const bk = (v: unknown) => pathsOf(bookingReadSchema, v);
+  it.each(BOOKING_STATUS.filter((s) => !['read', 'expand-failed'].includes(s)))(
+    'bookingReadSchema refuses an address on status %s',
+    (status) => {
+      const rest = ['select-failed', 'not-settled', 'unrecognised'].includes(status)
+        ? { attempt: 0, returnIndex: 0, rule: 'booking-view' }
+        : { attempt: null, returnIndex: null, rule: status === 'skipped' ? 'spacing' : null };
+      expect(bk(booking({ status, offers: [], ...rest, bookingUrl: SYNTHETIC_BOOKING_URL }))).toEqual([
+        'bookingUrl',
+      ]);
+      expect(bk(booking({ status, offers: [], ...rest }))).toEqual([]);
+    },
+  );
+  it('bookingReadSchema accepts read and expand-failed with an address and with null, and any string path', () => {
+    const failed = { status: 'expand-failed', rule: 'more-options', expanded: false };
+    for (const over of [{}, failed]) {
+      expect(bk(booking({ ...over, bookingUrl: SYNTHETIC_BOOKING_URL }))).toEqual([]);
+      expect(bk(booking({ ...over, bookingUrl: null }))).toEqual([]);
+      // Ruling 8: the path rule is not here; a stored address is read back as any string
+      expect(
+        bk(booking({ ...over, bookingUrl: 'https://www.google.com/travel/flights/search?x=1' })),
+      ).toEqual([]);
+    }
+    expect(bk(booking({ bookingUrl: 'x'.repeat(2049) }))).toEqual(['bookingUrl']);
+  });
+
+  const wk = (v: unknown) => pathsOf(workerBookingReadSchema, v);
+  // why: final review M1: an address that is not the booking page's costs only the link, never the read it came with
+  it.each([
+    ['the search page', 'https://www.google.com/travel/flights/search?x=1'],
+    ['another host', 'https://evil.example/travel/flights/booking'],
+    ['a port', 'https://www.google.com:8443/travel/flights/booking?tfs=x'],
+  ])('workerBookingReadSchema keeps the read and drops an address on %s', (_name, bookingUrl) => {
+    const b = booking({ bookingUrl });
+    expect(wk(b)).toEqual([]);
+    expect(workerBookingReadSchema.parse(b)).toEqual({ ...b, bookingUrl: null });
+  });
+  it("workerBookingReadSchema keeps the booking page's own address as given", () => {
+    expect(workerBookingReadSchema.parse(booking({ bookingUrl: SYNTHETIC_BOOKING_URL })).bookingUrl).toBe(
+      SYNTHETIC_BOOKING_URL,
+    );
+    expect(workerBookingReadSchema.parse(booking({ bookingUrl: null })).bookingUrl).toBeNull();
+  });
+  it('workerBookingReadSchema parses an answer with no bookingUrl key as null', () => {
+    const { bookingUrl: _omit, ...old } = booking();
+    expect(workerBookingReadSchema.parse(old).bookingUrl).toBeNull();
+  });
+  it('workerBookingReadSchema keeps the status rule for an address', () => {
+    expect(
+      wk(
+        booking({
+          status: 'skipped',
+          rule: 'spacing',
+          attempt: null,
+          returnIndex: null,
+          offers: [],
+          bookingUrl: SYNTHETIC_BOOKING_URL,
+        }),
+      ),
+    ).toEqual(['bookingUrl']);
   });
 });

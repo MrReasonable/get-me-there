@@ -16,7 +16,8 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatIsoDate } from '../../format.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
-import { type DatesUiState, detailPatchOf } from '../../state/datesState.js';
+import { DATES_PARAMS, type DatesUiState } from '../../state/datesState.js';
+import { tripPatch } from '../../state/tripState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
 import type { BoardModel } from './board.js';
@@ -230,7 +231,8 @@ export function DatesHeader({
 /**
  * Spec §11 calendar-gap banner on Dates: only the gap cells inside the airport scope and the stay filter (each gap
  * cell carries its nights, so this is done here), the reference price named as across the whole search (no filter
- * narrows it), each cell a link to its date pair's detail, where the verify action runs.
+ * narrows it), each cell a link to its Trip page on its own airports (final review M3), whose card shows that cell's
+ * calendar price and offers the SearchApi check on it.
  */
 function DatesGap({
   definition,
@@ -284,7 +286,12 @@ function DatesGap({
         <ul className="mt-2 space-y-1">
           {cells.map((c) => {
             const { nights: n, ...key } = c.cell;
-            const patch = detailPatchOf(c.cell, 'calendar');
+            // why: final review M3: the gap is one airport pair's, so the Trip page reads that pair alone
+            const patch = {
+              ...tripPatch(c.cell),
+              [DATES_PARAMS.from]: c.cell.origin,
+              [DATES_PARAMS.to]: c.cell.destination,
+            };
             const label = `${COPY.coverageCheckPair(c.cell.origin, c.cell.destination)} ${COPY.dateRange(
               formatIsoDate(c.cell.departureDate),
               formatIsoDate(c.cell.returnDate),

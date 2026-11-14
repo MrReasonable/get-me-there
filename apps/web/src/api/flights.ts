@@ -1,7 +1,7 @@
 import { apiContract as c } from '@gmt/core';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { call } from './client.js';
-import { POLL_MS } from './queries.js';
+import { POLL_MS, qk } from './queries.js';
 import type { FlightListsResponse } from './types.js';
 
 // Spec rev 55 §10 and §11 (WP20 Task 20.10): a search's page's flight lists. `GET /definitions/:id/flight-lists?pairs=`
@@ -16,11 +16,19 @@ export const flightListsApi = {
       params: { id },
       query: { pairs: pairs.join(',') },
     }),
-  read: (id: string, pair: { departureDate: string; returnDate: string }) =>
+  read: (id: string, body: FlightReadRequest) =>
     call(c.readFlightListResponseSchema, 'POST', '/api/definitions/:id/flight-lists', {
       params: { id },
-      body: pair,
+      body,
     }),
+};
+
+/** What a read names: the dates, and the airport pair when the page knows it (both or neither). */
+export type FlightReadRequest = {
+  departureDate: string;
+  returnDate: string;
+  origin?: string;
+  destination?: string;
 };
 
 /** The flight-lists query key prefix of one search; a read on demand invalidates it. */
@@ -70,12 +78,17 @@ export function useFlightLists(
 
 /**
  * Spec rev 55 §8.1 "Reading one date pair's flights": the press of "Read flights for this date". On success the
- * search's flight-lists answers are read again at once (the answer then says the pair is being read).
+ * search's flight-lists answers, and its trip reads, are read again at once (the answer then says the pair is being
+ * read). The board names the dates only; the Trip page also names its figure's airport pair (design §6.1, Ruling 2).
  */
 export function useFlightRead(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (pair: { departureDate: string; returnDate: string }) => flightListsApi.read(id, pair),
-    onSuccess: () => qc.invalidateQueries({ queryKey: flightListsKey(id) }),
+    mutationFn: (request: FlightReadRequest) => flightListsApi.read(id, request),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: flightListsKey(id) }),
+        qc.invalidateQueries({ queryKey: qk.tripOf(id) }),
+      ]),
   });
 }

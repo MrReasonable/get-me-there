@@ -17,6 +17,7 @@ import {
   type ResolvedSpace,
   type RollUp,
   type SearchDefinition,
+  type SkipReason,
 } from '@gmt/core';
 import type { CellsRepo } from '@gmt/db';
 import { ApiError, fieldsDetail } from '../errors.js';
@@ -123,6 +124,8 @@ export function parseScope(def: SearchDefinition, q: ScopeQuery, space: Resolved
 export interface CellClass {
   cell: Cell;
   bucket: 'priced' | 'empty' | 'no_data' | 'error' | 'skipped' | 'not_run';
+  /** why the parent run skipped the cell (its discovery roll-up's reason), exactly on a `skipped` bucket */
+  skipReason: SkipReason | null;
   reused: boolean;
   selected: boolean;
   itinerarySearched: boolean;
@@ -177,9 +180,15 @@ export function classifyCells(
     const selected = parent?.selected.has(key) ?? false;
     const v = r?.verification;
     const itinerarySearched = selected && searched(v?.status ?? null);
+    const bucket = r?.discovery.status ?? 'not_run';
     return {
       cell,
-      bucket: r?.discovery.status ?? 'not_run',
+      bucket,
+      // why: the database holds a skipped outcome to a SkipReason (cell_outcomes' CHECK); the parse narrows the string
+      skipReason:
+        bucket === 'skipped'
+          ? (apiContract.skipReasonSchema.safeParse(r?.discovery.reason).data ?? null)
+          : null,
       reused: parent?.reusedCells.has(key) ?? false,
       selected,
       itinerarySearched,

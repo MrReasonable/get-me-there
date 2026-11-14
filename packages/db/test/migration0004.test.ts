@@ -16,17 +16,32 @@ const WP19 = '0009_wp19_latest_price_idx';
 const AIRPORT_KIND = '0010_airport_kind';
 const FLIGHT_LISTS = '0011_wp20_flight_lists';
 const RETURN_LEG = '0012_wp21_return_leg';
+const BOOKING_URL = '0013_booking_url';
 
 /** A copy of the migrations folder that stops before 0004, as an install made before this migration has it. */
 function before0004(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  for (const tag of [TAG, LATER, NEWEST, LAST, FINAL, WP19, AIRPORT_KIND, FLIGHT_LISTS, RETURN_LEG])
+  for (const tag of [
+    TAG,
+    LATER,
+    NEWEST,
+    LAST,
+    FINAL,
+    WP19,
+    AIRPORT_KIND,
+    FLIGHT_LISTS,
+    RETURN_LEG,
+    BOOKING_URL,
+  ])
     rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
   journal.entries = journal.entries.filter(
-    (e) => ![TAG, LATER, NEWEST, LAST, FINAL, WP19, AIRPORT_KIND, FLIGHT_LISTS, RETURN_LEG].includes(e.tag),
+    (e) =>
+      ![TAG, LATER, NEWEST, LAST, FINAL, WP19, AIRPORT_KIND, FLIGHT_LISTS, RETURN_LEG, BOOKING_URL].includes(
+        e.tag,
+      ),
   );
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
@@ -67,6 +82,7 @@ describe('migration 0004: route price-history points carry their point of sale (
       AIRPORT_KIND,
       FLIGHT_LISTS,
       RETURN_LEG,
+      BOOKING_URL,
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });

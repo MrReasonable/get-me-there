@@ -1,7 +1,7 @@
 // Barrel for @gmt/engine (plan contract "Engine"); the alert runner, templates and EmailNotifier are WP11's.
 export { type AlertRunnerDeps, type AlertRunResult, runAlerts } from './alerts/runner.js';
 export {
-  appRowLink,
+  appTripLink,
   type DigestRenderInput,
   type ItemMarks,
   NO_MARKS,

@@ -23,7 +23,7 @@ reviews:
     - path: "**/*"
       instructions: |
         Project hard rules (spec: docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md; plan decisions in docs/superpowers/plans/):
-        - Provenance: every price carries provider, source kind, fetched/observed time, point of sale and FX status, and every view renders it through PriceCell without hover. Flag any path where synthetic, cached, stale, FX-converted or unconfirmed prices could look live, exact or confirmed.
+        - Provenance: every price on the wire carries provider, source kind, fetched/observed time, point of sale and FX status, and every view renders its amount through PriceCell. Where a price carries a label (spec rev 69 §11: the search page's board rows and every price on the Trip page), the label is its visible provenance: one label per price, `Kind · age` (amber when the wire marks it stale), shown without hover, with the provider/source, point of sale and FX conversion in the label's tap detail and "≈" visible on a converted amount; do not ask for provider or source chips beside a labelled price. Flag a price on those surfaces with no label at all, and any path where synthetic, cached, stale, FX-converted or unconfirmed prices could look live, exact or confirmed.
         - Coverage honesty: never let unsearched look searched, error look empty, or partial look complete.
         - Money is integer pence (or micro-GBP); flag float money and pence/pounds mixing.
         - Spend: every billed call passes the budget guard before the fetch; no retry of quota errors; the ledger never undercounts.

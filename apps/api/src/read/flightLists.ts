@@ -10,12 +10,14 @@ import {
   type apiContract,
   type CellKey,
   cellKeyString,
+  datePairIndex,
   hoursSince,
   type IsoDate,
   type IsoDateTime,
   isoDateSchema,
   listFresh,
   MAX_FLIGHT_LIST_PAIRS,
+  type ResolvedSpace,
   type SearchDefinition,
 } from '@gmt/core';
 import type { StoredFlightList } from '@gmt/db';
@@ -88,6 +90,8 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
   };
 }
 
+type ReadTarget = Pick<StoredFlightList, 'status' | 'reason'> | null;
+
 const pairKey = (p: DatePairAsk): string => `${p.departureDate}|${p.returnDate}`;
 
 /** The contract's link (spec §10): the worker's own page on Google's one host, else none. */
@@ -106,12 +110,35 @@ function googleLink(
  */
 const NO_READ_AGAIN: ReadonlySet<string> = new Set(['execution-cap']);
 
+/**
+ * Whether a read of a date pair would go now (spec rev 55 §10 `readNow`; the Trip page's `read.wouldGo`): flight
+ * lists can be read here, the pair departs after today and is inside the search's current dates (the engine's own
+ * window test, flightRead.ts, so the button never offers a read it refuses), and its newest list is not a failed
+ * list a per-run limit stopped. why: the operator asking is the reason to read (design §6.1): a fresh list and a
+ * pair with no figure both read.
+ */
+export function readNow(
+  unavailable: string | null,
+  today: IsoDate,
+  space: ResolvedSpace,
+  pair: DatePairAsk,
+  list: Pick<StoredFlightList, 'status' | 'reason'> | null,
+): boolean {
+  return (
+    unavailable === null &&
+    pair.departureDate > today &&
+    space.departureFrom <= space.departureTo &&
+    datePairIndex(space, pair.departureDate, pair.returnDate) !== null &&
+    !(list?.status === 'failed' && NO_READ_AGAIN.has(list.reason ?? ''))
+  );
+}
+
 /** Spec revision 55 §10: the GET's answer over `def` for the asked `pairs`, in the order asked. */
 export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned' | 'flightListFresh'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
   const today = ports.clock.todayLondon();
@@ -159,6 +186,29 @@ export function assembleFlightLists(
       .newestPerDatePair(def.id, missing, space, def.cabin, pointOfSale)
       .map((l) => [pairKey(l), l]),
   );
+  // why: CodeRabbit PR #58 finding 1: a read of a pair with no figure goes to the space's first origin and first
+  // destination (the engine's own fallback, flightRead.ts), so its `readNow` weighs that cell's newest list, never
+  // `listOtherPair` (another airport pair's) nor none; the Trip page's `read.wouldGo` weighs the same cell
+  const first = { origin: space.origins[0], destination: space.destinations[0] };
+  const readCellOf = (p: DatePairAsk): CellKey | null =>
+    first.origin === undefined || first.destination === undefined
+      ? null
+      : { origin: first.origin, destination: first.destination, ...p };
+  const readCells = pairs.flatMap((p) => {
+    const c = cellOf(p) === null ? readCellOf(p) : null;
+    return c === null ? [] : [c];
+  });
+  const readTargets = new Map(
+    ports.repos.flightLists
+      .newestPerCell(def.id, readCells, def.cabin, pointOfSale)
+      .map((l) => [cellKeyString(l), l]),
+  );
+  const readTargetOf = (p: DatePairAsk, c: CellKey | null): ReadTarget => {
+    const target = c ?? readCellOf(p);
+    return target === null
+      ? null
+      : (own.get(cellKeyString(target)) ?? readTargets.get(cellKeyString(target)) ?? null);
+  };
   const mark = engine.flightReadInFlight();
   return {
     available: unavailable === null,
@@ -189,17 +239,7 @@ export function assembleFlightLists(
         link,
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
-        // why: final review B-I3: the read button and the status notes' "what happens next" follow the on-demand read's
-        // own rule (`flightListFresh`: the step's reuse rule under the phase the read would send), never a second one
-        readNow:
-          unavailable === null &&
-          c !== null &&
-          c.departureDate > today &&
-          (list === undefined
-            ? true
-            : list.status === 'failed'
-              ? !NO_READ_AGAIN.has(list.reason ?? '')
-              : !engine.flightListFresh(def, list)),
+        readNow: readNow(unavailable, today, space, p, readTargetOf(p, c)),
       };
     }),
   };

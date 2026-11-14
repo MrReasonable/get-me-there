@@ -8,8 +8,10 @@ export {
   BOOKING_REREAD,
   BOOKING_STATUS,
   BOOKING_TRANSIENT,
+  BOOKING_WITH_OFFERS,
   type BookingRead,
   type BookingStatus,
+  bookingPageUrl,
   bookingReadSchema,
   cheapestOffer,
   // why: the package barrel already exports an itinerary `Offer` (types/itinerary.ts); a booking view's offer is named

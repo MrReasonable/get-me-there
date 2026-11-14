@@ -9,7 +9,7 @@ import { workedDates } from '../fixtures.dates.js';
 import { API, definition, execution, providersResponse, resultsResponse } from '../fixtures.js';
 import { latestRun, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
-import { datesError, serveDates } from '../msw/datesHandlers.js';
+import { serveDates } from '../msw/datesHandlers.js';
 import { serveCards } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
@@ -99,12 +99,11 @@ describe('shell (spec §11 layout)', () => {
     expect(dates).not.toHaveAttribute('aria-current');
   });
 
-  it('the date pair detail marks no nav entry as current', async () => {
+  it('the Trip page marks no nav entry as current', async () => {
     renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
+      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
     });
     const nav = await screen.findByRole('navigation', { name: 'Views' });
-    await screen.findByRole('table', { name: 'Round trips found' });
     expect(nav.querySelector('[aria-current]')).toBeNull();
   });
 
@@ -148,10 +147,9 @@ describe('shell (spec §11 layout)', () => {
   });
 
   it('negative: no synthetic banner and no provider alert for real data', async () => {
-    renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    await screen.findByRole('table', { name: 'Round trips found' });
+    // why: the Dates fixtures' prices are synthetic and raise the banner themselves; Providers has no prices of its own
+    renderWithProviders(<App />, { search: '?view=providers' });
+    await screen.findByRole('heading', { name: 'Providers' });
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
     expect(screen.queryByText(/Provider status unknown/)).toBeNull();
   });
@@ -347,34 +345,16 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
     expect(await board()).toBeInTheDocument();
   });
 
-  it('a date pair the server says is outside the current space replaces the URL with Dates, keeping def= and d.*', async () => {
-    server.use(
-      http.get(`${API}/definitions/:id/results`, ({ request }) =>
-        new URL(request.url).searchParams.has('departureDate')
-          ? HttpResponse.json(
-              { error: { code: 'date_pair_outside_space', message: 'that date pair is not in this search' } },
-              { status: 422 },
-            )
-          : HttpResponse.json(resultsResponse()),
-      ),
-    );
+  it('an old alert link opens the Trip page, its URL rewritten with replace and basis and row dropped (Ruling 9)', async () => {
     const before = window.history.length;
     renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&d.to=JFK&depart=2026-01-01&return=2026-01-10&basis=verified',
-    });
-    await waitFor(() => expect(search()).toBe('?view=dates&def=def-0001&d.to=JFK'));
-    expect(await board()).toBeInTheDocument();
-    expect(window.history.length).toBe(before);
-  });
-
-  it('an alert link for a search over the 50,000-cell bound still opens its detail (the scoped /results read answers)', async () => {
-    server.use(datesError(422, 'too_many_cells', 'too many cells', { cells: 100_000, bound: 50_000 }));
-    renderWithProviders(<App />, {
       search:
-        '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28&basis=verified&row=hash-verified-1',
+        '?view=results&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28&basis=verified&row=hash-verified-1&f.class=failed&sort=price.asc',
     });
-    expect(await screen.findByRole('table', { name: 'Round trips found' })).toBeInTheDocument();
-    expect(search()).toContain('row=hash-verified-1');
+    await waitFor(() =>
+      expect(search()).toBe('?view=trip&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28'),
+    );
+    expect(window.history.length).toBe(before);
   });
 
   it('with /providers synthetic and a synthetic read the red banner shows once on Dates (spec §5.5)', async () => {
@@ -415,21 +395,21 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
       expect([...r.searchParams.keys()].sort()).toEqual(['destinations', 'maxJourneyMinutes', 'origins']);
   });
 
-  it("the detail's nav links drop its date pair and row, so a view opened from it is never a stale detail", async () => {
+  it("the Trip page's nav links drop its dates and row, so a view opened from it is never a stale trip", async () => {
     renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28&basis=verified&row=x',
+      search: '?view=trip&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28',
     });
     const nav = await screen.findByRole('navigation', { name: 'Views' });
     // why: no search's page has been opened in this session, so the nav names none; History's link drops the detail's
     // date pair and row and keeps def= and the filters
     expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute(
       'href',
-      '/?view=history&def=def-0001&d.to=JFK&basis=verified',
+      '/?view=history&def=def-0001&d.to=JFK',
     );
     // ruling R-bar: Searches names no search, so its link drops def=
     expect(within(nav).getByRole('link', { name: 'Searches' })).toHaveAttribute(
       'href',
-      '/?view=searches&d.to=JFK&basis=verified',
+      '/?view=searches&d.to=JFK',
     );
   });
 });
@@ -470,11 +450,10 @@ describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () 
     expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
   });
 
-  it('the detail shows no Run now either', async () => {
+  it('the Trip page shows no Run now either', async () => {
     renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
+      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
     });
-    await screen.findByRole('table', { name: 'Round trips found' });
     await screen.findByRole('region', { name: 'Run status' });
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
   });
@@ -584,10 +563,10 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
     ).toBeInTheDocument();
   });
 
-  it('on the date pair detail the bar follows the search by def=, with controls', async () => {
+  it('on the Trip page the bar follows the search by def=, with controls', async () => {
     serveRuns([running]);
     renderWithProviders(<App />, {
-      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
+      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
     });
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });

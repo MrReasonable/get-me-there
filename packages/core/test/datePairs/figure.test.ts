@@ -507,6 +507,7 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     underCurrentLimits: true,
     fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
     executionId: 'ex-2',
+    bookingUrl: null,
     ...over,
   });
   const only =

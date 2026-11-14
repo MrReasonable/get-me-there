@@ -531,7 +531,10 @@ describe('record --select-outbound: the served sequence, two selections and a fr
     const summary = lines.filter((l) => l.startsWith('select-outbound:'));
     expect(summary).toHaveLength(1);
     expect(summary[0]).toMatch(/^select-outbound:[ a-z0-9;:=-]+$/);
-    const all = lines.join('\n');
+    // why: the test's own temporary directories are random names that can hold any letters (CI once drew one with
+    // "QQ" in it), and a recorded file's path names them, so they are taken out before looking for page text
+    const all = lines.join('\n').replaceAll(t.root, '<root>').replaceAll(t.dataDir, '<data>');
+    expect(all).toContain('recorded <root>');
     for (const word of [
       'https://',
       'British pounds',
