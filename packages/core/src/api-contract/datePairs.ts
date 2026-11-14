@@ -521,7 +521,9 @@ function verifiedFigureOf(
     fail(`${name}.order`, [name, 'figure', k], `${name}.figure must be strictly ascending`);
     return null;
   }
-  if (at >= v.figures.pair.length) {
+  // why: zod runs this refinement after a continuable issue, the index's own minimum among them, so a negative index
+  // arrives here and is a range issue, never a lookup that throws (CodeRabbit PR #58 finding 25)
+  if (at < 0 || at >= v.figures.pair.length) {
     fail(`${name}.range`, [name, 'figure', k], `${name}.figure must name one of the figures`);
     return null;
   }
@@ -546,7 +548,8 @@ function groupFigureOf(
     fail(`${name}.order`, [name, 'figure', k], `${name}.figure must be strictly ascending`);
     return null;
   }
-  if (at >= figures) {
+  // why: as `verifiedFigureOf`: a negative index that passed its own minimum's issue is out of range here
+  if (at < 0 || at >= figures) {
     fail(`${name}.range`, [name, 'figure', k], `${name}.figure must name one of the figures`);
     return null;
   }

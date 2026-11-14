@@ -326,6 +326,17 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     expect(issuePaths(without)).toEqual(['bookingOptions']);
     expect(issuePaths({ ...body(), bookingOptions: { figure: [], extra: [] } })).toEqual(['bookingOptions']);
   });
+  // why: CodeRabbit PR #58 finding 25: zod runs the refinement after a continuable issue (the index's own minimum), so a
+  // negative index reaches the figure lookup; it is a range issue there, never a thrown RangeError
+  it.each(['cheaperCached', 'times', 'bookingOptions'] as const)(
+    'refuses a negative %s figure index as an issue, never by throwing',
+    (group) => {
+      const r = body();
+      r[group].figure = [-1];
+      expect(() => datePairsResponseSchema.safeParse(r)).not.toThrow();
+      expect(issuePaths(r)).toContain(`${group}.figure.0`);
+    },
+  );
   it('rejects a cheaper-cached price on a calendar figure', () => {
     const r = body();
     r.cheaperCached.figure[0] = 1;
@@ -545,6 +556,15 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     expect(issuePaths(calendarWithin)).toEqual(['pairingRead.code.1', 'pairing.figure.1']);
     expect(PAIRING_READ.indexOf('within')).toBe(6);
   });
+  it.each(['pairingRead', 'gridPrice', 'pairing'] as const)(
+    'refuses a negative %s figure index as an issue, never by throwing (CodeRabbit PR #58 finding 25)',
+    (group) => {
+      const r = withPairing();
+      groupOf(r, group).figure[0] = -1;
+      expect(() => datePairsResponseSchema.safeParse(r)).not.toThrow();
+      expect(issuePaths(r)).toContain(`${group}.figure.0`);
+    },
+  );
   it('a pairing figure in a body without the gridPrice or the pairing group is refused', () => {
     const { gridPrice: _g, ...noGrid } = withPairing();
     expect(issuePaths(noGrid)).toEqual(['gridPrice']);
