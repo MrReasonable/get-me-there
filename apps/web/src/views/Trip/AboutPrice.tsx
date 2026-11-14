@@ -23,9 +23,26 @@ function whenRead(at: IsoDateTime, now: IsoDateTime): string {
   return T.aboutWhen.day(formatIsoDateShort(date), time);
 }
 
-/** A calendar or cached price for these dates with its label, or the line that says there was none. */
-function OtherPrice({ price, lead, none }: { price: TripResponse['calendar']; lead: string; none: string }) {
+/** An airport pair, or null where the card names none. */
+type Pair = { origin: string | null; destination: string | null };
+
+/**
+ * A calendar or cached price for these dates with its label, or the line that says there was none; a price read for
+ * another airport pair than the card's (`here`) names that pair (final review I4).
+ */
+function OtherPrice({
+  price,
+  lead,
+  none,
+  here,
+}: {
+  price: TripResponse['calendar'];
+  lead: string;
+  none: string;
+  here: Pair;
+}) {
   if (price === null) return <li>{none}</li>;
+  const elsewhere = price.origin !== here.origin || price.destination !== here.destination;
   const kind: PriceLabelKind = priceLabelKind(
     { kind: 'calendar', providerId: price.provenance.providerId },
     price.notSeenAgain,
@@ -36,7 +53,7 @@ function OtherPrice({ price, lead, none }: { price: TripResponse['calendar']; le
       <b>
         <Amount price={price} />
       </b>{' '}
-      {A.forTheseDates}{' '}
+      {elsewhere ? A.forTheseDatesOn(price.origin, price.destination) : A.forTheseDates}{' '}
       <PriceLabel
         kind={kind}
         ageHours={price.ageHours}
@@ -68,7 +85,12 @@ function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): Re
       <b>
         <Amount price={price} />
       </b>{' '}
-      {words} <span data-testid="about-market">{A.market(pointOfSaleLabel(price.provenance))}</span>
+      {words}{' '}
+      <span data-testid="about-market">
+        {price.provenance.pointOfSale === 'unknown'
+          ? A.marketNotStated
+          : A.market(pointOfSaleLabel(price.provenance))}
+      </span>
     </li>
   );
 }
@@ -90,7 +112,7 @@ function checkedLines(trip: ShownTrip | null, r: TripResponse): string[] {
  * one line for each other airport pair of these dates.
  */
 export function AboutPrice({ r, trip, now }: { r: TripResponse; trip: ShownTrip | null; now: IsoDateTime }) {
-  const here = {
+  const here: Pair = {
     origin: r.figure?.origin ?? r.read.origin,
     destination: r.figure?.destination ?? r.read.destination,
   };
@@ -107,8 +129,8 @@ export function AboutPrice({ r, trip, now }: { r: TripResponse; trip: ShownTrip 
         {checkedLines(trip, r).map((l) => (
           <li key={l}>{l}</li>
         ))}
-        <OtherPrice price={r.calendar} lead={A.calendarShowed} none={A.calendarNone} />
-        <OtherPrice price={r.cached} lead={A.cachedShowed} none={A.cachedNone} />
+        <OtherPrice price={r.calendar} lead={A.calendarShowed} none={A.calendarNone} here={here} />
+        <OtherPrice price={r.cached} lead={A.cachedShowed} none={A.cachedNone} here={here} />
         {others.map((c) => (
           <li key={`${c.origin}-${c.destination}`}>
             {A.otherPair(c.origin, c.destination, A.pairState[c.bucket])}

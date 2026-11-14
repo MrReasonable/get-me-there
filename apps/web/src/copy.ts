@@ -1188,6 +1188,9 @@ export const COPY = {
     out: 'Out',
     back: 'Back',
     lands: (date: string) => `lands ${date}`,
+    // a leg's meta separator: a non-breaking space holds each "·" to the item before it, so a line that wraps at
+    // 375 px never starts with one (deferred minor 22)
+    legSeparator: '\u00a0· ',
     legDay: (date: string, lands: string | null) => (lands === null ? date : `${date}, ${lands}`),
     legName: (leg: string, departs: string, from: string, arrives: string, to: string) =>
       `${leg} ${departs} ${from} → ${arrives} ${to}`,
@@ -1256,8 +1259,10 @@ export const COPY = {
     aboutSummary: 'About this price',
     aboutSub: "· what was and wasn't checked",
     about: {
-      // the market the price was read in (design §5.1: in the tap detail and in About this price): "Market: UK market."
-      market: (market: string) => `Market: ${market}.`,
+      // the market the price was read in (design §5.1: in the tap detail and in About this price): "Priced for the UK
+      // market."; final review M8: one natural sentence, and its own when the market wasn't stated
+      market: (market: string) => `Priced for the ${market}.`,
+      marketNotStated: "The market it was priced for wasn't stated.",
       seller: (seller: string, when: string) =>
         `is ${seller}'s price on Google's booking page for the two flights above, read by the browser ${when}.`,
       sellerSearchApi: (when: string) =>
@@ -1276,6 +1281,9 @@ export const COPY = {
       notCheckedCalendar: 'Not checked: the flights, the sellers, your journey limit.',
       calendarShowed: "Google's calendar showed",
       forTheseDates: 'for these dates.',
+      // final review I4: a calendar or cached price read for another airport pair than the card's names it
+      forTheseDatesOn: (origin: string, destination: string) =>
+        `for these dates on ${origin} → ${destination}.`,
       calendarNone: "Google's calendar: no price for these dates.",
       cachedShowed: 'The Aviasales cache showed',
       cachedNone: 'Aviasales cache: no price for these dates.',

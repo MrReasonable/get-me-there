@@ -53,6 +53,7 @@ function trip(over: Partial<TripResponse> = {}): TripResponse {
     flightList: null,
     bookingUrl: null,
     searchLink: null,
+    figureSearchLink: null,
     booking: null,
     calendar: null,
     cached: null,
@@ -206,8 +207,56 @@ describe('over-limit names the limits that rule out every flight read', () => {
 });
 
 describe('no figure: the list, the journey limit, then the cells in order', () => {
-  it('a list read by hand is read-without-calendar', () => {
-    expect(stateOf(trip({ flightList: flightList() }))).toEqual({ kind: 'read-without-calendar' });
+  // final review I3: only a list read by hand that yields a trip is read-without-calendar; every other outcome of that
+  // read says its own sentence, and a failed one falls to the cells' states beneath its couldn't-read line
+  const limits = trip().limits;
+  const READ = returnRead({ limits });
+  it.each<[string, Parameters<typeof flightList>[0], CardState]>([
+    ['a trip within the limits', { returns: READ }, { kind: 'read-without-calendar' }],
+    ['outbounds read, no return phase', { returns: null }, { kind: 'outbound-only' }],
+    [
+      'a return phase that did not finish',
+      { returns: returnRead({ limits, status: 'not-settled', rule: 'not-settled', attempts: [] }) },
+      { kind: 'outbound-only' },
+    ],
+    [
+      'no outbound for the return phase',
+      { returns: returnRead({ limits, status: 'no-outbound', attempts: [] }) },
+      { kind: 'no-return' },
+    ],
+    [
+      'no return listed',
+      {
+        returns: returnRead({
+          limits,
+          attempts: [returnAttempt({ listed: 'none-for-cell', returns: [] })],
+        }),
+      },
+      { kind: 'no-return' },
+    ],
+    [
+      'every trip over the limits',
+      {
+        flights: [listedFlight({ durationMinutes: 1600 })],
+        returns: returnRead({ limits, attempts: [returnAttempt({ outboundFits: false })] }),
+      },
+      { kind: 'none-within', failing: ['journey'] },
+    ],
+    [
+      'a trip read under other limits',
+      { returns: returnRead({ limits: { ...limits, maxStops: 2 } }) },
+      { kind: 'other-limits' },
+    ],
+  ])('a list read by hand: %s', (_label, list, state) => {
+    expect(stateOf(trip({ flightList: flightList(list) }))).toEqual(state);
+  });
+  it.each<[string, Cell[], CardState['kind']]>([
+    ['nothing run', [cell('not_run')], 'not-searched'],
+    ['an empty cell', [cell('empty')], 'no-price'],
+    ['an error', [cell('error')], 'could-not-read'],
+  ])('a failed read by hand falls to the cells (%s), its failure beside them', (_label, cells, kind) => {
+    const r = trip({ flightList: failedList('network'), listFailure: FAILURE, cells });
+    expect(cardOf(r, false)).toEqual({ state: { kind }, couldNotRead: FAILURE });
   });
   it('dates left out by the journey limit', () => {
     expect(stateOf(trip({ journeyLeftOut: 2, cells: [cell('error')] }))).toEqual({
@@ -254,7 +303,7 @@ describe('every state of the card is reachable', () => {
     'other-limits': trip({ figure: calendarFigure({ pairingRead: 'within-other-limits' }) }),
     'outbound-only': trip({ figure: calendarFigure({ pairingRead: 'outbound-only' }) }),
     'no-return': trip({ figure: calendarFigure({ pairingRead: 'no-pairing-read' }) }),
-    'read-without-calendar': trip({ flightList: flightList() }),
+    'read-without-calendar': trip({ flightList: flightList({ returns: returnRead() }) }),
     'calendar-only': trip({ figure: calendarFigure({ pairingRead: 'not-read' }) }),
     gone: trip({ figure: { ...datePairFigure(), notSeenInLatest: { ageHours: 3 } } }),
     'over-journey-limit': trip({ journeyLeftOut: 1 }),

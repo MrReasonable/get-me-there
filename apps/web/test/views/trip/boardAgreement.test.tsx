@@ -16,6 +16,7 @@ import {
   pricedPair,
   provCached,
   provGrid,
+  provSearched,
   verifiedFig,
 } from '../../fixtures.dates.js';
 import { API, definition } from '../../fixtures.js';
@@ -39,7 +40,17 @@ const STATE: TripUiState = {
   journey: null,
 };
 
-/** A trip read of these dates whose figure is `figure`, everything else as the trip fixture's. */
+/** A seller's booking SearchApi's booking options gave (a GET link), as the api re-validates it. */
+const SELLER_BOOKING = {
+  kind: 'get',
+  url: 'https://www.google.com/travel/clk/f?id=1',
+  host: 'www.google.com',
+} as const;
+
+/**
+ * A trip read of these dates whose figure is `figure`, everything else as the trip fixture's; a verified figure with
+ * booking options carries its seller's booking, as the api sends both from the figure's own row.
+ */
 function tripOf(figure: TripResponse['figure']): TripResponse {
   return trip({
     departureDate: asIsoDate(DEPART),
@@ -47,6 +58,9 @@ function tripOf(figure: TripResponse['figure']): TripResponse {
     nights: NIGHTS,
     figure,
     searchLink: null,
+    figureSearchLink: null,
+    booking:
+      figure?.basis === 'verified' ? (figure.hasBookingOptions ? SELLER_BOOKING : { kind: 'none' }) : null,
   });
 }
 
@@ -68,6 +82,11 @@ const FIGURES: ReadonlyArray<readonly [string, DatePairFigure]> = [
   ],
   ['a calendar figure a later search did not see again', calendarFig({ superseded: true })],
   ['a verified figure', verifiedFig()],
+  // why: final review I1: where SearchApi read booking options, both surfaces say "Seller"
+  [
+    'a verified figure SearchApi read booking options for',
+    verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched() }, hasBookingOptions: true }),
+  ],
 ];
 
 /** The amount a price shows ("£1,180"), the first in the element. */
@@ -112,5 +131,10 @@ describe('the board row and the Trip card agree, figure by figure (design §6.5)
     expect(boardSeller).toBe(
       figure.basis === 'pairing' && figure.pairing?.isFrom === false ? figure.pairing.seller : null,
     );
+    // why: the oracle for the label: a verified price with booking options is a seller's on both surfaces
+    if (figure.basis === 'verified')
+      expect(boardLabel?.startsWith(figure.hasBookingOptions ? COPY.trip.label.seller : 'Google price')).toBe(
+        true,
+      );
   });
 });

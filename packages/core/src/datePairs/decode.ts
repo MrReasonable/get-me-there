@@ -17,7 +17,7 @@ export function columnAt<T>(column: readonly T[], i: number): T {
 
 /**
  * The figure in column position `j`, with its full provenance and its airport pair, read `not-read` until the
- * `pairingRead` group says otherwise; no cheaper price, times, grid price or pairing yet.
+ * `pairingRead` group says otherwise; no cheaper price, times, booking options, grid price or pairing yet.
  */
 function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
   const f = r.figures;
@@ -51,6 +51,7 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     pairing: null,
     pairingRead: 'not-read',
     listReason: null,
+    hasBookingOptions: false,
   };
 }
 
@@ -118,6 +119,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     figure.departBack = columnAt(t.departBack, k);
     figure.arriveBack = columnAt(t.arriveBack, k);
   }
+  for (const at of r.bookingOptions.figure) columnAt(figures, at).hasBookingOptions = true;
   // why: spec rev 56 §10: a body without the two groups (an api before them) decodes with no grid price and no pairing
   const g = r.gridPrice;
   if (g !== undefined)

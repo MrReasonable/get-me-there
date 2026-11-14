@@ -31,6 +31,30 @@ const price = (pricePence: number, provenance: unknown) => ({
   truncated: false,
 });
 
+/** The log rows of `body`: a by-hand read trip, a run that couldn't read flights, a run that read none. */
+function logRows() {
+  return [
+    {
+      at: '2026-10-14T08:00:00.000Z',
+      byHand: true,
+      calendar: null,
+      flights: {
+        kind: 'trip',
+        price: price(41_200, listProvenance),
+        pairingKind: 'seller',
+        seller: 'QQ Travel',
+      },
+    },
+    {
+      at: '2026-10-14T07:00:00.000Z',
+      byHand: false,
+      calendar: price(38_800, calendarProvenance),
+      flights: { kind: 'failed', cause: 'limiter-timeout' },
+    },
+    { at: '2026-10-13T07:00:00.000Z', byHand: false, calendar: null, flights: { kind: 'not-read' } },
+  ];
+}
+
 /** A trip body with a failed newest list, two cells and log rows with and without prices. */
 function body(): Record<string, unknown> {
   return {
@@ -48,29 +72,16 @@ function body(): Record<string, unknown> {
     flightList: null,
     bookingUrl: null,
     searchLink: null,
+    figureSearchLink: null,
     booking: null,
-    calendar: { ...price(38_800, calendarProvenance), notSeenAgain: false },
+    calendar: {
+      ...price(38_800, calendarProvenance),
+      notSeenAgain: false,
+      origin: 'LHR',
+      destination: 'JFK',
+    },
     cached: null,
-    log: [
-      {
-        at: '2026-10-14T08:00:00.000Z',
-        byHand: true,
-        calendar: null,
-        flights: {
-          kind: 'trip',
-          price: price(41_200, listProvenance),
-          pairingKind: 'seller',
-          seller: 'QQ Travel',
-        },
-      },
-      {
-        at: '2026-10-14T07:00:00.000Z',
-        byHand: false,
-        calendar: price(38_800, calendarProvenance),
-        flights: { kind: 'failed', cause: 'limiter-timeout' },
-      },
-      { at: '2026-10-13T07:00:00.000Z', byHand: false, calendar: null, flights: { kind: 'not-read' } },
-    ],
+    log: logRows(),
     reading: false,
     read: {
       available: true,
@@ -93,7 +104,8 @@ describe('the trip contract (design 2026-11-08 §6.1)', () => {
 
   it('refuses a log price without its provenance, and a calendar price without its stale mark', () => {
     const b = body();
-    const [first, ...rest] = b.log as Array<Record<string, unknown>>;
+    // why: final review M5: the rows are built typed, so no cast reads them back out of the body
+    const [first, ...rest] = logRows();
     const noProvenance = {
       ...b,
       log: [
@@ -111,9 +123,29 @@ describe('the trip contract (design 2026-11-08 §6.1)', () => {
     };
     expect(tripResponseSchema.safeParse(noProvenance).success).toBe(false);
     const { stale: _stale, ...unmarked } = price(38_800, calendarProvenance);
+    const pair = { origin: 'LHR', destination: 'JFK' };
     expect(
-      tripResponseSchema.safeParse({ ...b, calendar: { ...unmarked, notSeenAgain: false } }).success,
+      tripResponseSchema.safeParse({ ...b, calendar: { ...unmarked, notSeenAgain: false, ...pair } }).success,
     ).toBe(false);
+  });
+
+  it('final review I4: a calendar or cached price names the airport pair it was read for', () => {
+    const seen = { ...price(38_800, calendarProvenance), notSeenAgain: false };
+    expect(tripResponseSchema.safeParse({ ...body(), calendar: seen }).success).toBe(false);
+    expect(tripResponseSchema.safeParse({ ...body(), cached: { ...seen, origin: 'LHR' } }).success).toBe(
+      false,
+    );
+    const named = { ...seen, origin: 'LGW', destination: 'EWR' };
+    expect(tripResponseSchema.safeParse({ ...body(), cached: named }).success).toBe(true);
+  });
+
+  it("final review I2: the figure's own search link is a re-validated search link, or null", () => {
+    const link = { url: 'https://www.google.com/travel/flights?q=x', host: 'www.google.com', label: 'x' };
+    expect(tripResponseSchema.safeParse({ ...body(), figureSearchLink: link }).success).toBe(true);
+    const evil = { ...link, url: 'https://evil.example/' };
+    expect(tripResponseSchema.safeParse({ ...body(), figureSearchLink: evil }).success).toBe(false);
+    const { figureSearchLink: _f, ...without } = body();
+    expect(tripResponseSchema.safeParse(without).success).toBe(false);
   });
 
   it('refuses a list failure without a STOP_DETAILS cause and an unknown skip reason', () => {

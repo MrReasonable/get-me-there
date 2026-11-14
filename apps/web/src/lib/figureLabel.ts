@@ -1,10 +1,4 @@
-import {
-  type Booking,
-  type DatePairFigure,
-  type PriceLabelKind,
-  pairingKindOf,
-  priceLabelKind,
-} from '@gmt/core';
+import { type DatePairFigure, type PriceLabelKind, pairingKindOf, priceLabelKind } from '@gmt/core';
 import { COPY } from '../copy.js';
 
 // Design 2026-11-08 §5.1 (trip-page plan Task 7): the one label a figure carries, from core's `priceLabelKind`, and the
@@ -14,15 +8,16 @@ import { COPY } from '../copy.js';
 /** The parts of a figure its label is decided by, as the date-pairs decoder and the trip read both give them. */
 export type LabelledFigure = Pick<
   DatePairFigure,
-  'basis' | 'price' | 'pairing' | 'superseded' | 'notSeenInLatest'
+  'basis' | 'price' | 'pairing' | 'superseded' | 'notSeenInLatest' | 'hasBookingOptions'
 >;
 
 /**
  * The label kind of a figure: a pairing's by its pairing kind (a read trip is never "Not seen again"); a verified one's
- * by whether SearchApi's booking options gave a seller's booking (`booking`, the trip read's; null where none is known);
- * a calendar one's by its source, "Not seen again" once a later search did not list it.
+ * by whether SearchApi's booking options gave a seller's booking (the figure's own `hasBookingOptions`, which the board
+ * and the trip read both carry, final review I1); a calendar one's by its source, "Not seen again" once a later search
+ * did not list it.
  */
-export function figureLabelKind(f: LabelledFigure, booking: Booking | null): PriceLabelKind {
+export function figureLabelKind(f: LabelledFigure): PriceLabelKind {
   switch (f.basis) {
     case 'pairing':
       // why: the contract gives a pairing figure its pairing; without one it is Google's price, never a seller's
@@ -32,7 +27,7 @@ export function figureLabelKind(f: LabelledFigure, booking: Booking | null): Pri
       );
     case 'verified':
       return priceLabelKind(
-        { kind: 'verified', hasBookingOptions: booking !== null && booking.kind !== 'none' },
+        { kind: 'verified', hasBookingOptions: f.hasBookingOptions },
         f.notSeenInLatest !== null,
       );
     case 'calendar':

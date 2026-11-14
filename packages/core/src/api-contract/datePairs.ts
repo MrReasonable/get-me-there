@@ -191,6 +191,13 @@ const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
 >;
 
 /**
+ * Final review I1: the verified figures whose own row's booking (SearchApi's booking options) is a seller's GET or POST
+ * link, `figure` strictly ascending, so the board labels such a price "Seller" as the Trip page does. Sparse, as
+ * `times` is.
+ */
+const bookingOptionsSchema = z.strictObject({ figure: counts });
+
+/**
  * Spec rev 56 §10: one entry per pairing figure, the calendar price it replaced (shown beneath it with its own source,
  * age, "not checked" and stale mark); `figure` strictly ascending. Sparse, as `cheaperCached` is (§10's 4 MiB bound).
  */
@@ -329,6 +336,7 @@ const datePairsBodySchema = z.strictObject({
   figures: figuresSchema,
   cheaperCached: cheaperCachedSchema,
   times: timesSchema,
+  bookingOptions: bookingOptionsSchema,
   /** spec rev 56: optional until Task 21.6 fills it (R-order); a body without it decodes with no grid price */
   gridPrice: gridPriceSchema.exactOptional(),
   /** spec rev 56: optional until Task 21.6 fills it (R-order); a body without it decodes with no pairing */
@@ -499,11 +507,11 @@ function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean
 
 /**
  * The figure a sparse group's entry `k` names: reports an index that is not strictly ascending or not a figure, and
- * returns it only when it names a verified figure (both groups belong to verified figures alone), else null.
+ * returns it only when it names a verified figure (these groups belong to verified figures alone), else null.
  */
 function verifiedFigureOf(
   v: DatePairsBody,
-  name: 'cheaperCached' | 'times',
+  name: 'cheaperCached' | 'times' | 'bookingOptions',
   k: number,
   fail: Fail,
 ): number | null {
@@ -789,7 +797,10 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
     }
 }
 
-/** The sparse groups' rules: lengths, figure order and basis, the cheaper price below its figure's, indices. */
+/**
+ * The sparse groups' rules: lengths, figure order and basis (booking options too), the cheaper price below its
+ * figure's, indices.
+ */
 function refineGroups(v: DatePairsBody, fail: Fail): void {
   refinePairingGroups(v, fail);
   const c = v.cheaperCached;
@@ -822,6 +833,8 @@ function refineGroups(v: DatePairsBody, fail: Fail): void {
       )
         fail('timesEmpty', ['times', 'departOut', k], 'a times entry must hold at least one time');
     }
+  const b = v.bookingOptions;
+  for (let k = 0; k < b.figure.length; k += 1) verifiedFigureOf(v, 'bookingOptions', k, fail);
 }
 
 /**
@@ -896,6 +909,8 @@ export const datePairFigureSchema = z
     pairingRead: pairingReadSchema,
     /** the 21.6 ruling: why the cell's newest list failed, non-null exactly on a `list-failed` read */
     listReason: z.enum(STOP_DETAILS).nullable(),
+    /** final review I1: SearchApi's booking options gave a seller's booking; verified figures only */
+    hasBookingOptions: z.boolean(),
   })
   .superRefine((f, ctx) => {
     const fail = (path: Array<string | number>, message: string) =>
@@ -909,6 +924,7 @@ export const datePairFigureSchema = z
       // why: §10 refuses times on a calendar figure, as `refineGroups` refuses a `times` entry on one, so the two
       // encodings of one figure accept the same shapes (no "arrives HH:MM" beside an unchecked calendar price)
       for (const k of TIME_KEYS) if (f[k] !== null) fail([k], 'local times are for verified figures');
+      if (f.hasBookingOptions) fail(['hasBookingOptions'], 'booking options are for verified figures');
     }
     if (f.cheaperCached !== null && f.cheaperCached.pricePence >= f.price.pricePence)
       fail(['cheaperCached', 'pricePence'], "a cheaper cached price must be below the figure's");

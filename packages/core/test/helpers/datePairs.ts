@@ -66,6 +66,7 @@ export function calendarFigure(over: Partial<DatePairFigure> = {}): DatePairFigu
     pairing: null,
     pairingRead: 'not-read',
     listReason: null,
+    hasBookingOptions: false,
     ...over,
   };
 }

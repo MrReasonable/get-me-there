@@ -415,6 +415,9 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
       view: 'trip',
       depart: '2027-03-20',
       return: '2027-04-01',
+      // why: final review M3: the gap cell's own airports, so its Trip page shows that cell's calendar price and
+      // offers the SearchApi check on it
+      'd.from': 'LHR',
       'd.to': 'JFK',
     });
   });

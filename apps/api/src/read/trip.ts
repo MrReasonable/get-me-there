@@ -53,13 +53,23 @@ function dateOf(raw: string, field: 'departureDate' | 'returnDate'): IsoDate {
   );
 }
 
-/** The newest of `rows` by fetch time (ties: the first), as a price with whether a later search found it gone. */
+/**
+ * The newest of `rows` by fetch time (ties: the first), as a price with whether a later search found it gone and the
+ * airport pair it was read for.
+ */
 function newestOf(rows: readonly ResultRow[]): TripResponse['calendar'] {
   let best: ResultRow | null = null;
   for (const r of rows)
     if (best === null || Date.parse(r.provenance.fetchedAt) > Date.parse(best.provenance.fetchedAt)) best = r;
   // why: decision 54: a newer search found the cell empty, so the price is "not seen again"
-  return best === null ? null : { ...priceOf(best), notSeenAgain: best.superseded };
+  return best === null
+    ? null
+    : {
+        ...priceOf(best),
+        notSeenAgain: best.superseded,
+        origin: best.cell.origin,
+        destination: best.cell.destination,
+      };
 }
 
 /**
@@ -125,6 +135,7 @@ export function assembleTrip(
       flightList: null,
       bookingUrl: null,
       searchLink: null,
+      figureSearchLink: null,
       booking: null,
       calendar: null,
       cached: null,
@@ -184,6 +195,19 @@ export function assembleTrip(
   // why: the core rule that names a calendar price's label (`cached` only for the Aviasales cache)
   const isCached = (r: ResultRow) =>
     priceLabelKind({ kind: 'calendar', providerId: r.provenance.providerId }, false) === 'cached';
+  // why: final review I4: About's calendar and cached prices are the card's own cell's when its figure is
+  // calendar-based (a calendar figure, or a pairing figure, whose grid price is its own cell's), else the cell whose
+  // list the card reads, so they never name a newer read of another airport pair as the card's
+  const aboutCell =
+    figure !== null && figure.basis !== 'verified'
+      ? { origin: figure.origin, destination: figure.destination }
+      : cell;
+  const aboutRows = loaded.calendar.filter(
+    (r) =>
+      aboutCell !== null &&
+      r.cell.origin === aboutCell.origin &&
+      r.cell.destination === aboutCell.destination,
+  );
   const mark = engine.flightReadInFlight();
   // why: the wire's figure is the board's less its airport-pair index (`datePairFigureSchema`), as `/results` sends it
   let figureOut: TripResponse['figure'] = null;
@@ -206,10 +230,22 @@ export function assembleTrip(
     flightList: list === undefined ? null : toFlightList(list, loaded.rc.now, refreshHours),
     bookingUrl: list === undefined || chosenPairing === null ? null : pairingBookingUrl(list, chosenPairing),
     searchLink: cell === null ? null : safeSearchLink(FLIGHT_LIST_PROVIDER, cell, def, null, pointOfSale),
+    // why: final review I2: a verified price's own search is its own cell's, never the calendar cell it is weighed
+    // against
+    figureSearchLink:
+      figure === null
+        ? null
+        : safeSearchLink(
+            FLIGHT_LIST_PROVIDER,
+            { origin: figure.origin, destination: figure.destination, ...pair },
+            def,
+            null,
+            pointOfSale,
+          ),
     // why: a verified figure's own booking, re-validated when its row was read (`verifiedRow` through `safeBooking`)
     booking: figure?.basis === 'verified' && chosen !== null ? chosen.booking : null,
-    calendar: newestOf(loaded.calendar.filter((r) => !isCached(r))),
-    cached: newestOf(loaded.calendar.filter(isCached)),
+    calendar: newestOf(aboutRows.filter((r) => !isCached(r))),
+    cached: newestOf(aboutRows.filter(isCached)),
     log: tripLog({
       executions: loaded.all,
       searched: ports.repos.cells.searchedForDatePair(def.id, departureDate, returnDate).filter(inScope),

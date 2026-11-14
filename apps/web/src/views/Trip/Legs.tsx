@@ -26,13 +26,13 @@ function LegRow({ tag, leg }: { tag: string; leg: Leg }) {
           {meta[0]}
           {leg.minutes === null ? null : (
             <>
-              {F.separator}
+              {T.legSeparator}
               <b className="trip-duration">{formatMinutes(leg.minutes)}</b>
             </>
           )}
           {meta.slice(1).map((m) => (
             <span key={m}>
-              {F.separator}
+              {T.legSeparator}
               {m}
             </span>
           ))}

@@ -193,10 +193,13 @@ function listPairing(
  */
 export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: boolean): ShownTrip | null {
   const f = r.figure;
-  const target = (bookingUrl: string | null, booking: TripResponse['booking'] = null) =>
-    bookingTargetOf({ synthetic: isSynthetic, booking, bookingUrl, searchLink: r.searchLink });
+  const target = (
+    bookingUrl: string | null,
+    booking: TripResponse['booking'] = null,
+    searchLink: TripResponse['searchLink'] = r.searchLink,
+  ) => bookingTargetOf({ synthetic: isSynthetic, booking, bookingUrl, searchLink });
   if (state.kind === 'verified' && f !== null && f.basis === 'verified') {
-    const label = figureLabelKind(f, r.booking);
+    const label = figureLabelKind(f);
     return {
       ...f.price,
       label,
@@ -205,8 +208,9 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       pairingKind: null,
       legs: verifiedLegs(f),
       times: null,
-      // why: a verified price's own booking; the list's booking page is another pairing's (Ruling 5)
-      target: target(null, r.booking),
+      // why: a verified price's own booking, else its own airports' search (final review I2); the list's booking page
+      // and search are the calendar cell's, another pairing's and maybe another airport pair's (Ruling 5)
+      target: target(null, r.booking, r.figureSearchLink),
     };
   }
   const q = f?.pairing ?? null;
@@ -272,7 +276,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
 export function figurePriceOf(r: TripResponse): (Priced & { label: PriceLabelKind; detail: string }) | null {
   const f = r.figure;
   if (f === null || f.basis === 'pairing') return null;
-  const label = figureLabelKind(f, r.booking);
+  const label = figureLabelKind(f);
   return { ...f.price, label, detail: labelDetail(label, null) };
 }
 

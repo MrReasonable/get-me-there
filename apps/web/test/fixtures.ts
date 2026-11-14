@@ -729,6 +729,7 @@ export function datePairFigure(
     pairing: null,
     pairingRead: 'not-read',
     listReason: null,
+    hasBookingOptions: false,
     ...over,
   });
 }

@@ -27,6 +27,7 @@ import {
   flightReadLine,
   type ListsState,
   pairingKindOf,
+  type ReadFigure,
   sellerOf,
 } from './board.js';
 import { figureSource } from './flightLines.js';
@@ -109,7 +110,7 @@ function RowPriceBody({ figure, notes, target = { kind: 'none' } }: RowPriceProp
   // and age, so the cell's own chips would be a second set of qualifiers on one price
   const price = <FigurePrice figure={figure} notes={notes} bare />;
   const q = figure.pairing;
-  const kind = figureLabelKind(figure, null);
+  const kind = figureLabelKind(figure);
   const p = figure.price;
   return (
     <span className="row-price">
@@ -321,7 +322,7 @@ export function PairingFigureLines({
  * that differs from its return's "from" price (21.7 code M12, prov-008). Nothing for a pairing figure or a fresh
  * verified one; "flights not read" by `lists` (21.7 prov-004), "loading flights" while the request is pending.
  */
-export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: ListsState }) {
+export function FlightRead({ figure, lists }: { figure: ReadFigure; lists: ListsState }) {
   // why: the 21.6 ruling: a failed list's cause in words, the browser worker named (as the flights block's note does)
   const line = flightReadLine(figure, lists, COPY, (d) => stopDetailClause(d, 'camoufox', true));
   if (line === null) return null;

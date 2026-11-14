@@ -166,6 +166,7 @@ export function datePairFigures(
           pairing: pairingGroupOf(f.pairing),
           pairingRead: 'within',
           listReason: null,
+          hasBookingOptions: false,
         };
       case 'calendar':
       case 'verified':
@@ -178,6 +179,9 @@ export function datePairFigures(
           pairing: f.pairing === undefined ? null : pairingGroupOf(f.pairing),
           pairingRead: f.pairingRead ?? 'not-read',
           listReason: f.listReason ?? null,
+          // why: final review I1: the board labels a verified price as the Trip page does, from its own row's
+          // re-validated booking (`verifiedRow` through `safeBooking`); a calendar row's booking is always none
+          hasBookingOptions: x.booking.kind !== 'none',
         };
       default: {
         // why: the exhaustive switch's never default (spec rev 56 §0: a branch on a figure's basis)

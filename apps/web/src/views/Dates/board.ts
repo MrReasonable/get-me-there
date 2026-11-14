@@ -214,10 +214,13 @@ export interface FlightReadLine {
   pairing: DatePairPairing | null;
 }
 
+/** A figure as the board decodes it or as the trip read sends it (the wire's figure has no airport-pair index). */
+export type ReadFigure = Omit<DatePairFigure, 'airportPair'>;
+
 /** The lead words of each read that is not a pairing figure's own (`within`), with its pairing's age where it has one. */
 function leadOf(
   read: Exclude<PairingRead, 'within'>,
-  f: DatePairFigure,
+  f: ReadFigure,
   c: typeof COPY,
   reason: (d: StopDetail) => string,
 ): string | null {
@@ -266,7 +269,7 @@ export type ListsState = 'loading' | 'failed' | 'available' | 'unavailable';
  * words a failed list's cause (the 21.6 ruling).
  */
 export function flightReadLine(
-  f: DatePairFigure,
+  f: ReadFigure,
   lists: ListsState,
   c: typeof COPY,
   reason: (d: StopDetail) => string,

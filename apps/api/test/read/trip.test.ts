@@ -319,6 +319,8 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     expect(t.listFailure).toEqual({ at: at(-1), cause: 'execution-cap' });
     expect(t.bookingUrl).toBeNull();
     expect(t.searchLink).toEqual(safeSearchLink('camoufox', A, def, null, 'GB'));
+    // final review I2: the verified price's own search is its own cell's, never the calendar cell's
+    expect(t.figureSearchLink).toEqual(safeSearchLink('camoufox', G, def, null, 'GB'));
     // a list a per-run limit stopped offers no read again (the calendar cell's; the verified cell's would), and a read
     // from the card names the calendar cell
     expect(t.read).toMatchObject({ wouldGo: false, origin: 'LHR', destination: 'JFK' });
@@ -571,6 +573,31 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     });
   });
 
+  // final review I4: About's calendar line is the card's own cell's, never a newer read of another airport pair
+  it("calendar: a calendar figure's own cell's price, not another pair's newer one", async () => {
+    const { x, def } = await harness();
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-4), finishedAt: at(-1) });
+    s.cells('E', [A, G]);
+    s.tile('E', A, { status: 'priced', fetchedAt: at(-3), pricePence: 38_800 });
+    s.tile('E', G, { status: 'priced', fetchedAt: at(-1), pricePence: 39_500, tileIndex: 1 });
+    const t = await tripOf(x, def.id, Q);
+    expect(t.figure).toMatchObject({ basis: 'calendar', origin: 'LHR', destination: 'JFK' });
+    expect(t.calendar).toMatchObject({ pricePence: 38_800, origin: 'LHR', destination: 'JFK' });
+  });
+
+  it("calendar: a verified figure's is the read cell's, named with that cell's airports", async () => {
+    const { x, def } = await harness({ STALE_AFTER_HOURS: '24' });
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-40), finishedAt: at(-39) });
+    s.cells('E', [A, G], { selected: [{ cell: G, reason: 'top_n' }] });
+    s.tile('E', A, { status: 'priced', fetchedAt: at(-40), pricePence: 40_000 });
+    s.verified('E', G, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-30) }]);
+    const t = await tripOf(x, def.id, Q);
+    expect(t.figure).toMatchObject({ basis: 'verified', origin: 'LGW' });
+    expect(t.calendar).toMatchObject({ pricePence: 40_000, origin: 'LHR', destination: 'JFK' });
+  });
+
   it('a verified figure carries its own booking, re-validated; a pairing or calendar figure none', async () => {
     const { x, def } = await harness();
     const s = seeder(x.ports);
@@ -580,6 +607,43 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     const t = await tripOf(x, def.id, Q);
     expect(t.figure?.basis).toBe('verified');
     expect(t.booking).toEqual({ kind: 'none' });
+  });
+
+  // final review I1: the board learns whether SearchApi's booking options gave a seller's booking, so both surfaces
+  // label the price the same
+  it("a verified figure with a seller's booking says so on the card's figure and the board's alike", async () => {
+    const { x, def } = await harness();
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', [A], { selected: [{ cell: A, reason: 'top_n' }], verification: ['searchapi'] });
+    const booking = {
+      kind: 'get',
+      url: 'https://www.google.com/travel/clk?seller=qq',
+      host: 'www.google.com',
+    } as const;
+    s.verified('E', A, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-1), booking }], 'searchapi');
+    const t = await tripOf(x, def.id, Q);
+    expect(t.booking).toMatchObject({ kind: 'get', host: 'www.google.com' });
+    expect(t.figure).toMatchObject({ basis: 'verified', hasBookingOptions: true });
+    const board = pairOf(await datesOf(x, def.id), DEP, RET).figure;
+    expect(board?.hasBookingOptions).toBe(true);
+  });
+
+  it('a verified figure whose booking is none, or a calendar figure, has no booking options', async () => {
+    const { x, def } = await harness();
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', [A, G], { selected: [{ cell: A, reason: 'top_n' }] });
+    s.tile('E', G, { status: 'priced', fetchedAt: at(-2), pricePence: 30_000, tileIndex: 1 });
+    s.verified('E', A, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) }]);
+    expect((await tripOf(x, def.id, `${Q}&origins=LHR`)).figure).toMatchObject({
+      basis: 'verified',
+      hasBookingOptions: false,
+    });
+    expect((await tripOf(x, def.id, `${Q}&origins=LGW`)).figure).toMatchObject({
+      basis: 'calendar',
+      hasBookingOptions: false,
+    });
   });
 
   it('reading: an on-demand read in flight for these dates, and only these', async () => {

@@ -9,32 +9,30 @@ const D = COPY.trip.labelDetail;
 
 describe('figureLabelKind', () => {
   it("a pairing figure: a seller's price, or Google's price (and a pairing figure missing its pairing never a seller's)", () => {
-    expect(figureLabelKind(pairingFig(), null)).toBe('seller');
+    expect(figureLabelKind(pairingFig())).toBe('seller');
     const from = pairingFig({
       pairing: figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false }),
     });
-    expect(figureLabelKind(from, null)).toBe('google-price');
-    expect(figureLabelKind({ ...pairingFig(), pairing: null }, null)).toBe('google-price');
+    expect(figureLabelKind(from)).toBe('google-price');
+    expect(figureLabelKind({ ...pairingFig(), pairing: null })).toBe('google-price');
   });
 
-  it("a verified figure: a seller's with a seller's booking, Google's without; not seen again once a search missed it", () => {
-    const get = {
-      kind: 'get' as const,
-      url: 'https://www.google.com/travel/clk/f?id=1',
-      host: 'www.google.com',
-    };
-    expect(figureLabelKind(verifiedFig(), get)).toBe('seller');
-    expect(figureLabelKind(verifiedFig(), { kind: 'none' })).toBe('google-price');
-    expect(figureLabelKind(verifiedFig(), null)).toBe('google-price');
-    expect(figureLabelKind(verifiedFig({ notSeenInLatest: { ageHours: 30 } }), get)).toBe('not-seen-again');
+  // why: final review I1: the figure says whether SearchApi's booking options gave a seller's booking, so the board
+  // and the Trip page decide the label from the same figure the same way
+  it("a verified figure: a seller's with booking options, Google's without; not seen again once a search missed it", () => {
+    expect(figureLabelKind(verifiedFig({ hasBookingOptions: true }))).toBe('seller');
+    expect(figureLabelKind(verifiedFig())).toBe('google-price');
+    expect(figureLabelKind(verifiedFig({ hasBookingOptions: true, notSeenInLatest: { ageHours: 30 } }))).toBe(
+      'not-seen-again',
+    );
   });
 
   it('a calendar figure: Calendar, Cached from the Aviasales cache, Not seen again once superseded', () => {
-    expect(figureLabelKind(calendarFig(), null)).toBe('calendar');
+    expect(figureLabelKind(calendarFig())).toBe('calendar');
     expect(
-      figureLabelKind(calendarFig({ price: { ...calendarFig().price, provenance: provCached() } }), null),
+      figureLabelKind(calendarFig({ price: { ...calendarFig().price, provenance: provCached() } })),
     ).toBe('cached');
-    expect(figureLabelKind(calendarFig({ superseded: true }), null)).toBe('not-seen-again');
+    expect(figureLabelKind(calendarFig({ superseded: true }))).toBe('not-seen-again');
   });
 });
 

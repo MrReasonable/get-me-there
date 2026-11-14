@@ -140,6 +140,7 @@ const calendarFigure = (over: Record<string, unknown> = {}) => ({
   pairing: null,
   pairingRead: 'not-read',
   listReason: null,
+  hasBookingOptions: false,
   ...over,
 });
 
@@ -184,6 +185,7 @@ function base(over: Record<string, unknown>) {
       host: 'www.google.com',
       label: 'search link, not a fare link',
     },
+    figureSearchLink: null,
     booking: null,
     calendar: {
       pricePence: 38_800,
@@ -192,6 +194,8 @@ function base(over: Record<string, unknown>) {
       ageHours: 3,
       truncated: false,
       notSeenAgain: false,
+      origin: 'LHR',
+      destination: 'JFK',
     },
     cached: null,
     log: [

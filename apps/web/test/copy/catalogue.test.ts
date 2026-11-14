@@ -321,6 +321,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'trip.foldedOver': [6, '25h'],
   'trip.foldedDearer': [3],
   'trip.about.market': ['UK market'],
+  'trip.about.forTheseDatesOn': ['LHR', 'JFK'],
   'trip.about.seller': ['Kiwi.com', 'today at 16:42'],
   'trip.about.sellerSearchApi': ['today at 16:42'],
   'trip.about.google-price': ['today at 16:42'],

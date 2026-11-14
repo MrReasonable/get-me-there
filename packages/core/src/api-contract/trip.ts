@@ -54,8 +54,15 @@ export const SKIP_REASONS = [
 ] as const satisfies readonly SkipReason[];
 export const skipReasonSchema = z.enum(SKIP_REASONS);
 
-/** A price with whether a later search found its cell empty (decision 54: "Not seen again"). */
-const seenPriceSchema = priceCellSchema.extend({ notSeenAgain: z.boolean() });
+/**
+ * A price with whether a later search found its cell empty (decision 54: "Not seen again"), and the airport pair it was
+ * read for (final review I4: About names it when it is not the card's).
+ */
+const seenPriceSchema = priceCellSchema.extend({
+  notSeenAgain: z.boolean(),
+  origin: iataSchema,
+  destination: iataSchema,
+});
 
 /**
  * What one run's (or one by-hand read's) flight list said of these dates, by the list reads core already defines:
@@ -109,11 +116,20 @@ export const tripResponseSchema = z.strictObject({
   flightList: flightListSchema.nullable(),
   bookingUrl: z.string().max(MAX_URL_LENGTH).nullable(),
   searchLink: searchLinkSchema.nullable(),
+  /**
+   * Final review I2: the Google Flights search for the figure's own airport pair and dates, which a verified price
+   * links to without a seller's booking (`searchLink` is the flight list's cell's, maybe another pair); null with no
+   * figure
+   */
+  figureSearchLink: searchLinkSchema.nullable(),
   /** a verified figure's own booking, re-validated (decision 54); null on every other basis */
   booking: bookingSchema.nullable(),
-  /** the newest calendar price for these dates from a live calendar source (any but the Aviasales cache) */
+  /**
+   * the newest calendar price for these dates from a live calendar source (any but the Aviasales cache), in the
+   * figure's own cell when the figure is calendar-based (a calendar or pairing figure), else in the flight list's cell
+   */
   calendar: seenPriceSchema.nullable(),
-  /** the newest Aviasales cached price for these dates */
+  /** the newest Aviasales cached price for these dates, in the same cell as `calendar` */
   cached: seenPriceSchema.nullable(),
   /** newest first: one row per run that priced or read these dates, and one per by-hand flight read */
   log: z.array(

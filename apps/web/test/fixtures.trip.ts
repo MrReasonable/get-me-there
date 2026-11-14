@@ -23,6 +23,9 @@ export const provGridNow = provGrid({ fetchedAt: provList.fetchedAt });
 /** The Aviasales cache, 2 days' bound, fetched 2 h before NOW. */
 export const provCache = provCached();
 
+/** The airport pair the card's figure is read for, as a calendar or cached price names it (final review I4). */
+export const LHR_JFK = { origin: asIata('LHR'), destination: asIata('JFK') };
+
 export const cell = (
   bucket: Cell['bucket'],
   skipReason: Cell['skipReason'] = null,
@@ -49,6 +52,7 @@ export function trip(over: Partial<TripResponse> = {}): TripResponse {
     flightList: null,
     bookingUrl: null,
     searchLink: SEARCH_LINK,
+    figureSearchLink: SEARCH_LINK,
     booking: null,
     calendar: null,
     cached: null,
@@ -286,7 +290,7 @@ const listPrice = (pence: number) => ({
   ageHours: 3,
   truncated: false,
 });
-const gridPrice = (pence: number) => ({
+export const gridPrice = (pence: number) => ({
   pricePence: pence,
   provenance: provGridNow,
   stale: false as const,
@@ -349,7 +353,7 @@ export function readTrip(over: Partial<TripResponse> = {}): TripResponse {
     figure: pairingFigure(),
     flightList: readList(),
     bookingUrl: SYNTHETIC_BOOKING_URL,
-    calendar: { ...gridPrice(38_800), notSeenAgain: false },
+    calendar: { ...gridPrice(38_800), notSeenAgain: false, ...LHR_JFK },
     cells: [
       cell('priced'),
       cell('empty', null, 'LGW'),
@@ -369,6 +373,7 @@ export const syntheticCalendar = {
   ageHours: 2,
   truncated: false,
   notSeenAgain: false,
+  ...LHR_JFK,
 };
 
 /** A pairing beneath a calendar figure that is over the limits (27h 10m out), £455 from Google's list. */

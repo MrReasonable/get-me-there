@@ -1,5 +1,6 @@
-import { type LegTimes, type PairingRead, withinLimits } from '@gmt/core';
+import { type LegTimes, type PairingRead, RETURN_FINISHED, withinLimits } from '@gmt/core';
 import type { TripResponse } from '../../api/types.js';
+import { pairingOf } from '../Dates/pairing.js';
 
 /**
  * Design 2026-11-08 §6.1 (plan Task 6): every state of the Trip page's card, decided once from the trip read so the
@@ -79,9 +80,31 @@ const CALENDAR_READ: Record<PairingRead, (r: TripResponse) => CardState> = {
   'not-read': (r) => (r.figure?.superseded ? { kind: 'gone' } : { kind: 'calendar-only' }),
 };
 
-/** With no figure, the dates' cells say why none: in this order across the airport pairs (design §6.1). */
+/**
+ * What a list read by hand makes of a card with no figure (Ruling 3, final review I3), by the board's own reads of a
+ * list (`listReadOf`, `pairingReadOf`): a trip within today's limits is `read-without-calendar`; outbounds with no
+ * finished return phase, no return listed, every trip over the limits, or a trip read under other limits each say their
+ * own sentence (the calendar states', with no calendar price beside them). A failed list read nothing, so it says
+ * nothing here (null): the cells' states follow, under its couldn't-read line.
+ */
+function byHandRead(r: TripResponse, list: NonNullable<TripResponse['flightList']>): CardState | null {
+  if (list.status === 'failed') return null;
+  const returns = list.returns;
+  if (returns === null || !RETURN_FINISHED.has(returns.status)) return { kind: 'outbound-only' };
+  const p = pairingOf(list, r.limits);
+  if (p === null) return { kind: 'no-return' };
+  if (!p.underCurrentLimits) return { kind: 'other-limits' };
+  if (!p.fits) return { kind: 'none-within', failing: failingLimits(r) };
+  return { kind: 'read-without-calendar' };
+}
+
+/**
+ * With no figure: a list read by hand says what it read (`byHandRead`); else, and after a failed one, the dates' cells
+ * say why there is no price, in this order across the airport pairs (design §6.1).
+ */
 function withoutFigure(r: TripResponse): CardState {
-  if (r.flightList !== null) return { kind: 'read-without-calendar' };
+  const read = r.flightList === null ? null : byHandRead(r, r.flightList);
+  if (read !== null) return read;
   if (r.journeyLeftOut > 0) return { kind: 'over-journey-limit' };
   const has = (bucket: TripResponse['cells'][number]['bucket'], reasons?: readonly string[]) =>
     r.cells.some(
@@ -89,7 +112,8 @@ function withoutFigure(r: TripResponse): CardState {
         c.bucket === bucket &&
         (reasons === undefined || (c.skipReason !== null && reasons.includes(c.skipReason))),
     );
-  // why: design §3: "couldn't read" must never look like "no price", so an error cell is its own state, before empty
+  // why: the UX design's §3: "couldn't read" must never look like "no price", so an error cell is its own state,
+  // before empty
   if (has('error')) return { kind: 'could-not-read' };
   if (has('empty')) return { kind: 'no-price' };
   if (has('no_data')) return { kind: 'not-offered' };

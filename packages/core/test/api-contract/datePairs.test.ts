@@ -312,6 +312,20 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     r[group].figure[last] = r.figures.pair.length;
     expect(issuePaths(r)).toEqual([`${group}.figure.${last}`]);
   });
+  it('final review I1: accepts booking options on a verified figure and refuses them on any other', () => {
+    const r = body();
+    r.bookingOptions.figure = [0, 2];
+    expect(issuePaths(r)).toEqual([]);
+    r.bookingOptions.figure = [1];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.0']);
+    r.bookingOptions.figure = [2, 2];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.1']);
+    r.bookingOptions.figure = [r.figures.pair.length];
+    expect(issuePaths(r)).toEqual(['bookingOptions.figure.0']);
+    const { bookingOptions: _b, ...without } = body();
+    expect(issuePaths(without)).toEqual(['bookingOptions']);
+    expect(issuePaths({ ...body(), bookingOptions: { figure: [], extra: [] } })).toEqual(['bookingOptions']);
+  });
   it('rejects a cheaper-cached price on a calendar figure', () => {
     const r = body();
     r.cheaperCached.figure[0] = 1;
@@ -408,6 +422,8 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
   });
   it('parses a verified figure with inline provenance', () => {
     expect(datePairFigureSchema.parse(figure)).toEqual(figure);
+    const withBooking = { ...figure, hasBookingOptions: true };
+    expect(datePairFigureSchema.parse(withBooking)).toEqual(withBooking);
   });
   /** The verified figure's times cleared, so a calendar case breaks only the rule it names. */
   const noTimes = { departOut: null, arriveOut: null, departBack: null, arriveBack: null };
@@ -435,6 +451,8 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
       'cheaperCached.pricePence',
     ],
     ['an airport pair index', { airportPair: 3 }, ''],
+    // why: final review I1: booking options are SearchApi's, read for a verified price alone
+    ['booking options on a calendar figure', { ...calendar, hasBookingOptions: true }, 'hasBookingOptions'],
   ] as const)('rejects %s', (_name, over, path) => {
     const r = datePairFigureSchema.safeParse({ ...figure, ...over });
     expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.'))).toEqual([path]);

@@ -12,6 +12,8 @@ import { labelDetail } from '../../lib/figureLabel.js';
 import { useNow } from '../../now.js';
 import { BACK_TO_DATES } from '../../state/resultsState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { FlightRead } from '../Dates/BoardCard.js';
+import type { ListsState } from '../Dates/board.js';
 import { refusalWords } from '../Dates/Flights.js';
 import { hoursText } from '../Dates/flightLines.js';
 import { readAt } from '../Dates/stateLines.js';
@@ -19,6 +21,9 @@ import { Amount } from './Amount.js';
 import type { Card, CardState, LimitName } from './cardState.js';
 import { Legs } from './Legs.js';
 import { cheapestOutbound, figurePriceOf, readMinutes, type ShownTrip } from './model.js';
+
+/** The board's flight-lists state where a list is in hand. */
+const LISTS_READ: ListsState = 'available';
 
 const T = COPY.trip;
 const F = COPY.flights;
@@ -115,15 +120,23 @@ function Actions({
   retry: boolean;
 }) {
   const read = READ_STATES.has(state.kind);
-  // why: design §6.1, §3: the check is shown only where it can run (a SearchApi key, and the search lets it verify)
-  const origin = r.read.origin ?? r.figure?.origin ?? null;
-  const destination = r.read.destination ?? r.figure?.destination ?? null;
+  // why: design §6.1, §3: the check is shown only where it can run (a SearchApi key, and the search lets it verify);
+  // final review I2: it checks the figure's own airport pair, the price the card shows, while a read by hand names the
+  // cell whose list the card reads (`r.read`, maybe another pair for a stale verified price)
+  const f = r.figure;
   const cell: CellKey | null =
-    origin === null || destination === null
+    f === null
       ? null
-      : { origin, destination, departureDate: r.departureDate, returnDate: r.returnDate };
+      : {
+          origin: f.origin,
+          destination: f.destination,
+          departureDate: r.departureDate,
+          returnDate: r.returnDate,
+        };
+  // final review M3: a calendar price is checked where it stands too (the search page's calendar-gap links open its
+  // Trip page on its own airports for this), as is a read trip or a verified price
   const check =
-    (state.kind === 'trip' || state.kind === 'verified') &&
+    (state.kind === 'trip' || state.kind === 'verified' || f?.basis === 'calendar') &&
     r.verificationConfigured &&
     definition.providers.verification.includes('searchapi') &&
     cell !== null;
@@ -309,7 +322,8 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
       </section>
     );
   if (state.kind === 'reading') {
-    const calendar = figurePriceOf(r);
+    // why: final review M2: only a calendar figure's price is "the calendar's"; a verified price is never called so
+    const calendar = r.figure?.basis === 'calendar' ? figurePriceOf(r) : null;
     const minutes = readMinutes(r.read.pagesPlanned);
     return (
       <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
@@ -342,11 +356,19 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
       </p>
     );
   const actions = <Actions r={r} state={state} definition={definition} retry={couldNotRead !== null} />;
+  // why: final review M7 (plan Task 6): a stale verified price's flight read adds the read-trip line the board's row
+  // shows beneath it (the trip read on these dates, which does not lead); a failed read is said above, by `failure`.
+  // A figure with a pairing has a list, so the board's "flights not read" words never apply
+  const readTrip =
+    state.kind === 'verified' && r.figure !== null && r.figure.pairing !== null ? (
+      <FlightRead figure={r.figure} lists={LISTS_READ} />
+    ) : null;
   if ((state.kind === 'trip' || state.kind === 'verified') && trip !== null)
     return (
       <section className="trip-card" aria-label={T.cardLabel} data-state={state.kind}>
         {failure}
         <TripAnswer trip={trip} caption />
+        {readTrip}
         <div className="trip-card-foot">{actions}</div>
       </section>
     );

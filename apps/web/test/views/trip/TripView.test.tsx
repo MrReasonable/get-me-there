@@ -14,6 +14,8 @@ import {
   calendarFigure,
   datesList,
   FAILED_AT,
+  gridPrice,
+  LHR_JFK,
   overPairing,
   pairingFigure,
   provCache,
@@ -103,6 +105,10 @@ describe('a read trip: the answer card (design §6.1)', () => {
     expect(out).toHaveTextContent('Wed 11 Nov · 10h 40m · 1 change · Aer Lingus');
     expect(back).toHaveTextContent('Back18:30 JFK → 06:25+1 LHR');
     expect(back).toHaveTextContent('Sat 28 Nov, lands Sun 29 Nov · 6h 55m · direct · Virgin Atlantic');
+    // why: deferred minor 22: each "·" is held to the item before it, so a wrapped line never starts "· Aer Lingus"
+    const meta = out?.querySelector('.trip-legmeta')?.textContent ?? '';
+    expect(meta).not.toMatch(/ ·/);
+    expect(meta).toContain('\u00a0· Aer Lingus');
   });
 
   it('the heading names the dates and nights, under Trips › the search › the dates', async () => {
@@ -136,7 +142,7 @@ describe('a read trip: the answer card (design §6.1)', () => {
   it('a verified figure with a GET booking says "Book on <host> ↗"', async () => {
     renderTrip(
       trip({
-        figure: datePairFigure(),
+        figure: datePairFigure({ hasBookingOptions: true }),
         booking: { kind: 'get', url: 'https://www.google.com/travel/clk/f?id=1', host: 'www.google.com' },
       }),
     );
@@ -144,6 +150,61 @@ describe('a read trip: the answer card (design §6.1)', () => {
     expect(link).toHaveTextContent('£412 · Book on www.google.com ↗');
     expect(link).toHaveAttribute('href', 'https://www.google.com/travel/clk/f?id=1');
     expect(within(await card()).getByTestId('price-label')).toHaveTextContent('Seller · age unknown');
+  });
+
+  // final review I2: a stale verified price on LGW → JFK whose flights were read on LHR → JFK, the board's calendar cell
+  it("a verified price links to its own airports' search and checks its own airports; a read names the list's", async () => {
+    const own = { ...SEARCH_LINK, url: SEARCH_LINK.url.replace('LHR', 'LGW') };
+    const { user } = renderTrip(
+      trip({
+        figure: datePairFigure({
+          origin: 'LGW',
+          price: { ...datePairFigure().price, stale: 'setting', ageHours: 30 },
+        }),
+        booking: { kind: 'none' },
+        searchLink: SEARCH_LINK,
+        figureSearchLink: own,
+      }),
+    );
+    const verifies: unknown[] = [];
+    server.use(
+      http.post(`${API}/cells/verify`, async ({ request }) => {
+        verifies.push(await request.json());
+        return HttpResponse.json({ error: { code: 'internal', message: 'not here' } }, { status: 500 });
+      }),
+    );
+    const c = await card();
+    const link = within(c).getByRole('link');
+    expect(link).toHaveTextContent('£412 · Find on Google Flights ↗');
+    expect(link).toHaveAttribute('href', own.url);
+    await user.click(within(c).getByRole('button', { name: /Check with SearchApi/ }));
+    await waitFor(() => expect(verifies).toHaveLength(1));
+    expect(verifies[0]).toMatchObject({ cell: { origin: 'LGW', destination: 'JFK' } });
+  });
+
+  // final review M7 (plan Task 6): a stale verified price says the trip its date's flights read, as the board's row does
+  it('a stale verified price with an older read trip beneath shows that trip in the read-trip line', async () => {
+    renderTrip(
+      trip({
+        figure: datePairFigure({
+          price: { ...datePairFigure().price, stale: 'setting', ageHours: 30 },
+          pairing: readPairing({ stale: 'refresh', ageHours: 72, bookingUrl: null }),
+          pairingRead: 'within-older',
+        }),
+        booking: { kind: 'none' },
+      }),
+    );
+    const c = await card();
+    expect(c.dataset.state).toBe('verified');
+    const line = within(c).getByTestId('flight-read');
+    expect(line).toHaveTextContent(COPY.datesView.pairingBeneath('3d ago'));
+    expect(within(line).getByTestId('flight-read-pairing')).toHaveTextContent('£412');
+    expect(line).toHaveTextContent('Kiwi.com');
+  });
+
+  it('a fresh verified price, or one with no read trip beneath, has no read-trip line', async () => {
+    renderTrip(trip({ figure: datePairFigure(), booking: { kind: 'none' } }));
+    expect(within(await card()).queryByTestId('flight-read')).toBeNull();
   });
 
   it('a synthetic price anywhere in the read raises the banner, and nothing links out of the app', async () => {
@@ -162,16 +223,16 @@ const EXPECT: Record<CardState['kind'], { says: string | RegExp; actions: string
   verified: { says: T.caption, actions: ['read', 'check'] },
   trip: { says: T.caption, actions: ['read', 'check'] },
   reading: { says: `${T.reading(2)} ${T.calendarShowed} £388${T.sentenceEnd}`, actions: [] },
-  'calendar-with-trip': { says: T.calendarWithTrip('2d ago'), actions: ['read'] },
+  'calendar-with-trip': { says: T.calendarWithTrip('2d ago'), actions: ['read', 'check'] },
   'none-within': {
     says: `${T.noneWithin('4h ago', 'your 25h limit each way')} ${T.cheapestRead} £455${T.cheapestReadLeg('27h 10m')}`,
-    actions: ['read'],
+    actions: ['read', 'check'],
   },
-  'other-limits': { says: T.otherLimits('4h ago'), actions: ['read'] },
-  'outbound-only': { says: T.outboundOnly('4h ago'), actions: ['read'] },
-  'no-return': { says: T.noReturn('4h ago'), actions: ['read'] },
+  'other-limits': { says: T.otherLimits('4h ago'), actions: ['read', 'check'] },
+  'outbound-only': { says: T.outboundOnly('4h ago'), actions: ['read', 'check'] },
+  'no-return': { says: T.noReturn('4h ago'), actions: ['read', 'check'] },
   'read-without-calendar': { says: T.readWithoutCalendar('3h ago'), actions: ['read'] },
-  'calendar-only': { says: T.calendarOnly, actions: ['read'] },
+  'calendar-only': { says: T.calendarOnly, actions: ['read', 'check'] },
   gone: { says: T.gone, actions: ['read'] },
   'over-journey-limit': { says: T.overJourneyLimit, actions: ['read'] },
   'could-not-read': { says: T.couldNotRead, actions: ['read'] },
@@ -208,6 +269,14 @@ describe('every state of the card says its sentence, with exactly its own action
     const status = within(await card()).getByRole('status');
     expect(status).toHaveAttribute('aria-live', 'polite');
     expect(status.querySelector('.trip-progress')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it("reading over a verified price never calls it the calendar's (final review M2)", async () => {
+    renderTrip(trip({ reading: true, figure: datePairFigure() }));
+    const c = await card();
+    expect(c).toHaveTextContent(T.reading(2));
+    expect(c).not.toHaveTextContent(T.calendarShowed);
+    expect(c).not.toHaveTextContent('£412');
   });
 
   it('outside the window links back to the search', async () => {
@@ -320,7 +389,8 @@ describe('the read by hand (Ruling 2)', () => {
       read: { ...STATE_FIXTURES['calendar-only'].read, wouldGo: false },
     });
     const c = await card();
-    expect(actionsOf(c)).toEqual([]);
+    // why: final review M3: the calendar price's SearchApi check stays; only the read goes
+    expect(actionsOf(c)).toEqual(['check']);
     expect(within(c).queryByTestId('read-unavailable')).toBeNull();
   });
 
@@ -334,7 +404,7 @@ describe('the read by hand (Ruling 2)', () => {
       },
     });
     const c = await card();
-    expect(actionsOf(c)).toEqual([]);
+    expect(actionsOf(c)).toEqual(['check']);
     expect(within(c).getByTestId('read-unavailable')).toHaveTextContent(COPY.flights.unavailable);
   });
 
@@ -479,10 +549,47 @@ describe('About this price and the search log (design §6.1)', () => {
     await card();
     const about = screen.getByTestId('about-price');
     await user.click(within(about).getByText(T.aboutSummary));
-    expect(within(about).getByTestId('about-market')).toHaveTextContent('Market: UK market.');
+    // why: final review M8: one natural sentence, the word "market" said once
+    expect(within(about).getByTestId('about-market')).toHaveTextContent(/^Priced for the UK market\.$/);
     // the card's own label detail carries it too
     const label = within(screen.getByRole('region', { name: T.cardLabel })).getByTestId('price-label');
     expect(within(label).getByTestId('point-of-sale')).toHaveTextContent('UK market');
+  });
+
+  // final review I4: About's calendar line comes from the card's own cell, or from the cell whose flights it reads, and
+  // names that cell's airports when they are not the card's
+  it("About names the airports of a calendar price read for another pair than the card's", async () => {
+    const { user } = renderTrip(
+      trip({
+        figure: datePairFigure({ origin: 'LGW' }),
+        booking: { kind: 'none' },
+        calendar: { ...gridPrice(38_800), notSeenAgain: false, ...LHR_JFK },
+      }),
+    );
+    await card();
+    const about = screen.getByTestId('about-price');
+    await user.click(within(about).getByText(T.aboutSummary));
+    const line = within(about)
+      .getAllByRole('listitem')
+      .find((li) => li.textContent?.startsWith(T.about.calendarShowed));
+    expect(line).toHaveTextContent(`${T.about.calendarShowed} £388 ${T.about.forTheseDatesOn('LHR', 'JFK')}`);
+  });
+
+  it('About says plainly when the market a price was read in was not stated', async () => {
+    const unstated = { ...provCache, pointOfSale: 'unknown' as const };
+    const { user } = renderTrip({
+      ...STATE_FIXTURES['calendar-only'],
+      figure: calendarFigure({
+        pairingRead: 'not-read',
+        price: { ...calendarFigure().price, provenance: unstated },
+      }),
+    });
+    await card();
+    const about = screen.getByTestId('about-price');
+    await user.click(within(about).getByText(T.aboutSummary));
+    expect(within(about).getByTestId('about-market')).toHaveTextContent(
+      /^The market it was priced for wasn't stated\.$/,
+    );
   });
 
   it("About on a calendar price says what it is and what wasn't checked", async () => {

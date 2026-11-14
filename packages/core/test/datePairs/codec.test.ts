@@ -238,6 +238,8 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                   });
                 return verifiedFigure({
                   ...common,
+                  // why: final review I1: whether SearchApi's booking options gave a seller's booking
+                  hasBookingOptions: f.truncated,
                   notSeenInLatest: f.notSeen === null ? null : { ageHours: f.notSeen },
                   cheaperCached:
                     f.cheaper === null || f.cheaper >= f.pence
@@ -486,6 +488,25 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
       g.figure[0] = r.figures.pair.length;
       expect(() => decodeDatePairs(r), group).toThrow(RangeError);
     }
+  });
+
+  it("final review I1: a verified figure's booking options ride in the bookingOptions group, keyed by its position", () => {
+    const wire = encodeDatePairs(
+      decoded({
+        pair: (i) =>
+          i === 1
+            ? { figure: verifiedFigure({ hasBookingOptions: true }) }
+            : i === 2
+              ? { figure: verifiedFigure() }
+              : i === 3
+                ? { figure: calendarFigure() }
+                : {},
+      }),
+    );
+    expect(wire.bookingOptions).toEqual({ figure: [0] });
+    expect(datePairsResponseSchema.safeParse(wire).error?.issues ?? []).toEqual([]);
+    const figures = decodeDatePairs(wire).pairs.map((p) => p.figure?.hasBookingOptions ?? null);
+    expect(figures.slice(0, 4)).toEqual([null, true, false, false]);
   });
 
   it("keys a figure's cheaper-cached price and its times by the figure's position, only where it has them", () => {

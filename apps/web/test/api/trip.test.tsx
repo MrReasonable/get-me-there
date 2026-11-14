@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import type { ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useFlightRead } from '../../src/api/flights.js';
-import { qk, useTrip } from '../../src/api/queries.js';
+import { POLL_MS, qk, useTrip } from '../../src/api/queries.js';
 import { API } from '../fixtures.js';
 import { server } from '../msw/server.js';
 
@@ -22,6 +22,7 @@ const BODY = {
   flightList: null,
   bookingUrl: null,
   searchLink: null,
+  figureSearchLink: null,
   booking: null,
   calendar: null,
   cached: null,
@@ -65,6 +66,39 @@ describe('useTrip', () => {
     const { result } = renderHook(() => useTrip('def-1', query), { wrapper: wrapperOf(newClient()) });
     await waitFor(() => expect(result.current.data?.nights).toBe(10));
     expect(Object.fromEntries(urls[0]?.searchParams ?? [])).toEqual(query);
+  });
+
+  // deferred minor 18: the card leaves "reading" only by this re-read, so it polls exactly while a read is in flight
+  describe('polling', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('asks again every POLL_MS while a read is in flight, and stops once it is not', async () => {
+      // why: the poll is driven by fake timers stepped explicitly; each answer is awaited as the hook's own data
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
+        shouldAdvanceTime: true,
+      });
+      let hits = 0;
+      server.use(
+        http.get(`${API}/definitions/:id/trip`, () => {
+          hits += 1;
+          return HttpResponse.json({ ...BODY, reading: hits < 3 });
+        }),
+      );
+      const query = { departureDate: '2027-03-14', returnDate: '2027-03-24' };
+      const { result } = renderHook(() => useTrip('def-1', query), { wrapper: wrapperOf(newClient()) });
+      await waitFor(() => expect(result.current.data?.reading).toBe(true));
+      expect(hits).toBe(1);
+      await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+      await waitFor(() => expect(hits).toBe(2));
+      await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+      await waitFor(() => expect(result.current.data?.reading).toBe(false));
+      expect(hits).toBe(3);
+      await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 5));
+      expect(hits).toBe(3);
+    });
   });
 
   it('asks nothing with no query', () => {
