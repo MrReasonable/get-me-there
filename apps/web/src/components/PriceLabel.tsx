@@ -39,12 +39,18 @@ export function labelAge(ageHours: number | 'unknown'): string {
  * The wire's age advanced by the hours the page's clock has moved since that age arrived, so the label keeps pace with
  * its detail's full age (CodeRabbit PR #58 finding 4). why: the wire's age is the effective age at the server's clock,
  * which advances one for one with time whatever its kind, so counting on from it never recomputes the rule; an unknown
- * age stays unknown. A new age from the wire starts the count again (React's "adjust state on a prop change" pattern).
+ * age stays unknown. A new age or a new observation from the wire starts the count again (React's "adjust state on a
+ * prop change" pattern).
  */
-function useAdvancedAge(ageHours: number | 'unknown', now: IsoDateTime): number | 'unknown' {
-  const [base, setBase] = useState({ ageHours, at: now });
-  if (base.ageHours !== ageHours) {
-    setBase({ ageHours, at: now });
+function useAdvancedAge(
+  ageHours: number | 'unknown',
+  fetchedAt: IsoDateTime,
+  now: IsoDateTime,
+): number | 'unknown' {
+  const [base, setBase] = useState({ ageHours, fetchedAt, at: now });
+  // why: a replacement observation can arrive with the same wire age, so the observation's fetch time is part of the key
+  if (base.ageHours !== ageHours || base.fetchedAt !== fetchedAt) {
+    setBase({ ageHours, fetchedAt, at: now });
     return ageHours;
   }
   return ageHours === 'unknown' ? 'unknown' : ageHours + hoursSince(base.at, now);
@@ -54,7 +60,7 @@ function Label({ kind, ageHours, stale, provenance, detail }: PriceLabelProps) {
   const now = useNow();
   const p = assertProvenance(provenance);
   const ref = useRef<HTMLDetailsElement>(null);
-  const age = labelAge(useAdvancedAge(ageHours, now));
+  const age = labelAge(useAdvancedAge(ageHours, p.fetchedAt, now));
   const text = T.labelText(T.label[kind], age);
   // why: Escape closes an open detail wherever focus is (a clicked summary takes no focus in some browsers), and puts
   // focus back on its label when focus was inside it or nowhere

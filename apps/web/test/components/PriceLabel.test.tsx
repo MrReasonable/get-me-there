@@ -190,6 +190,29 @@ describe('PriceLabel', () => {
     expect(summaryOf()).toHaveTextContent('Calendar · age unknown');
   });
 
+  // why: CodeRabbit PR #58 (second pass): a replacement observation with the same wire age is a new price, so its age
+  // counts from when it arrived, not from when the label first mounted
+  it('a new observation with the same wire age starts the count again', () => {
+    let now: IsoDateTime = NOW;
+    const at = () => now;
+    const ui = (fetchedAt: IsoDateTime) => (
+      <NowContext.Provider value={at}>
+        <PriceLabel
+          kind="calendar"
+          ageHours={2}
+          stale={false}
+          provenance={{ ...provCalendar, fetchedAt }}
+          detail={detail}
+        />
+      </NowContext.Provider>
+    );
+    const { rerender } = render(ui(isoDateTimeOfEpochMs(Date.parse(provCalendar.fetchedAt))));
+    expect(summaryOf()).toHaveTextContent('Calendar · 2h');
+    now = isoDateTimeOfEpochMs(Date.parse(NOW) + 2 * 3_600_000);
+    rerender(ui(isoDateTimeOfEpochMs(Date.parse(provCalendar.fetchedAt) + 2 * 3_600_000)));
+    expect(summaryOf()).toHaveTextContent('Calendar · 2h');
+  });
+
   // why: spec rev 69 (Ian's ruling on CodeRabbit PR #58 findings 8, 16, 24): the tap detail names the source (the
   // provider, by its main-path name), the market and, for a converted price, the rate it was converted at
   it('its detail names the source, and the conversion of a converted price', () => {

@@ -2,7 +2,7 @@ import type { ResultFilters } from '@gmt/core';
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { BACK_TO_DATES, DATES_COVERAGE, parseBasis, parseDetailPair } from '../../src/state/resultsState.js';
-import { hrefWith, navigateTo, updateSearchParams } from '../../src/state/urlState.js';
+import { hrefWith, navigateTo, navigateToQuery, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
 import { type OptionalKeys, withKey } from '../../src/state/withKey.js';
 
@@ -75,6 +75,37 @@ describe('URL state shared by the views (spec §11: parameters persist across vi
     expect([prevented, window.location.search]).toEqual([0, '?view=results']);
     go(click({}));
     expect([prevented, window.location.search]).toEqual([1, '?view=providers']);
+  });
+
+  // why: CodeRabbit PR #58 finding 9: a link built from scratch goes to exactly its own address, and a modified click
+  // is still the browser's (a new tab), so the page's URL is left alone
+  it('a from-scratch link click goes to exactly its address; a modified click is left to the browser', () => {
+    window.history.replaceState(null, '', '/?view=dates&d.from=LGW');
+    let prevented = 0;
+    const click = (
+      over: Partial<{ metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; button: number }>,
+    ) => ({
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      button: 0,
+      ...over,
+      preventDefault: () => {
+        prevented += 1;
+      },
+    });
+    const go = navigateToQuery('?view=trip&def=d1');
+    go(click({ metaKey: true }));
+    go(click({ ctrlKey: true }));
+    go(click({ shiftKey: true }));
+    go(click({ button: 1 }));
+    expect([prevented, window.location.search]).toEqual([0, '?view=dates&d.from=LGW']);
+    go(click({}));
+    expect([prevented, new URLSearchParams(window.location.search).toString()]).toEqual([
+      1,
+      'view=trip&def=d1',
+    ]);
+    window.history.replaceState(null, '', '/');
   });
 });
 
