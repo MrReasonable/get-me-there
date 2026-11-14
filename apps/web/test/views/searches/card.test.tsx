@@ -121,4 +121,39 @@ describe('a card’s trip price (Ruling 7)', () => {
       return: '2027-03-24',
     });
   });
+
+  // why: CodeRabbit PR #58 finding 9: the card's price is the whole search's cheapest, read under no filters, so a
+  // click opens exactly the link's own address, never one carrying the filters (or anything else) the URL held
+  it('a click opens exactly the link’s address, whatever filters the URL held', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'p',
+          name: 'Pairing',
+          origins: ['LHR'],
+          destinations: ['JFK'],
+          cheapest: cheapest(
+            {
+              basis: 'pairing',
+              priceKind: 'seller',
+              pricePence: 118_000,
+              origin: 'LHR',
+              destination: 'JFK',
+              departureDate: '2027-03-14',
+              returnDate: '2027-03-24',
+            },
+            flightListProvenance('2026-10-14T10:44:00.000Z'),
+          ),
+        }),
+      ]),
+    );
+    const { user } = renderInShell(<SearchesView />, {
+      search: '?view=searches&d.from=LGW&d.to=EWR&d.journey=1500&d.nights=10-12',
+    });
+    const card = (await screen.findByRole('heading', { level: 3, name: 'Pairing' })).closest('li');
+    const link = within(card ?? document.body).getByTestId('card-trip-price');
+    const href = link.getAttribute('href') ?? '';
+    await user.click(link);
+    expect(window.location.search).toBe(href);
+  });
 });

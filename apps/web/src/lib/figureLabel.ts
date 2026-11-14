@@ -1,4 +1,10 @@
-import { type DatePairFigure, type PriceLabelKind, pairingKindOf, priceLabelKind } from '@gmt/core';
+import {
+  type DatePairFigure,
+  type PairingKind,
+  type PriceLabelKind,
+  pairingKindOf,
+  priceLabelKind,
+} from '@gmt/core';
 import { COPY } from '../copy.js';
 
 // Design 2026-11-08 §5.1 (trip-page plan Task 7): the one label a figure carries, from core's `priceLabelKind`, and the
@@ -37,15 +43,19 @@ export function figureLabelKind(f: LabelledFigure): PriceLabelKind {
 
 /**
  * What a label's detail says the price is (design §5.1's tap details), with the seller where one was read. The age is
- * said once, on the detail's second line from the price's provenance, so these words name none.
+ * said once, on the detail's second line from the price's provenance, so these words name none. `pairingKind` is the
+ * pairing's own where the price is a pairing's (else null): Google's price for a pairing whose booking page was read in
+ * part says not every seller was read (CodeRabbit PR #58 finding 7), never that none was.
  */
 export function labelDetail(
   kind: PriceLabelKind,
   seller: { name: string; offersRead: number } | null,
+  pairingKind: PairingKind | null = null,
 ): string {
   const D = COPY.trip.labelDetail;
   // why: a seller named by the browser's booking-page read; without one the seller's price is SearchApi's
   if (kind === 'seller')
     return seller === null ? D.sellerSearchApi : D.seller(seller.name, seller.offersRead);
+  if (kind === 'google-price' && pairingKind === 'google-incomplete') return D['google-incomplete'];
   return D[kind];
 }

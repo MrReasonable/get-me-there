@@ -45,4 +45,15 @@ describe('labelDetail', () => {
   it.each(['google-price', 'google-list', 'calendar', 'cached', 'not-seen-again'] as const)('%s', (kind) => {
     expect(labelDetail(kind, null)).toBe(D[kind]);
   });
+  // why: CodeRabbit PR #58 finding 7: Google's price for a pairing whose booking page was read in part (some sellers
+  // read, `google-incomplete`) never says no seller's price was read; unread, and any other Google price, still does
+  it("Google's price for a pairing read in part says not every seller was read", () => {
+    expect(labelDetail('google-price', null, 'google-incomplete')).toBe(D['google-incomplete']);
+    expect(D['google-incomplete']).not.toContain("No seller's price was read");
+    expect(labelDetail('google-price', null, 'google-unread')).toBe(D['google-price']);
+    expect(labelDetail('google-price', null, null)).toBe(D['google-price']);
+    expect(labelDetail('seller', { name: 'Kiwi.com', offersRead: 16 }, 'seller')).toBe(
+      D.seller('Kiwi.com', 16),
+    );
+  });
 });

@@ -7,7 +7,9 @@ import {
 } from '@gmt/core';
 import { type ReactNode, useState } from 'react';
 import type { PriceCellData, TripResponse } from '../../api/types.js';
+import { PriceLabel } from '../../components/PriceLabel.js';
 import { COPY } from '../../copy.js';
+import { labelDetail } from '../../lib/figureLabel.js';
 import { Amount } from './Amount.js';
 import { LOG_SHOWN, logSince, logWhen } from './model.js';
 
@@ -16,24 +18,34 @@ const F = COPY.flights;
 
 type LogRow = TripResponse['log'][number];
 
-/** A log price, and with each source shown its label and where it came from ("(Seller, the browser worker)"). */
+/**
+ * A log price with its one label beside it (`Kind · age`, amber when the wire marks it stale, its detail one tap down:
+ * CodeRabbit PR #58 finding 16, a price never stands without its label), and with each source shown where it came
+ * from ("(the browser worker)").
+ */
 function LogPrice({
   price,
   kind,
+  detail,
   sources,
 }: {
   price: PriceCellData;
   kind: PriceLabelKind;
+  detail: string;
   sources: boolean;
 }) {
   return (
     <>
-      <Amount price={price} />
+      <Amount price={price} />{' '}
+      <PriceLabel
+        kind={kind}
+        ageHours={price.ageHours}
+        stale={price.stale}
+        provenance={price.provenance}
+        detail={detail}
+      />
       {sources ? (
-        <span className="trip-log-source">
-          {' '}
-          {T.logSourceOf(T.label[kind], mainPathSource(price.provenance.providerId))}
-        </span>
+        <span className="trip-log-source"> {T.logSourceOf(mainPathSource(price.provenance.providerId))}</span>
       ) : null}
     </>
   );
@@ -43,18 +55,26 @@ function LogPrice({
 function flightsPart(row: LogRow, sources: boolean): ReactNode {
   const f = row.flights;
   switch (f.kind) {
-    case 'trip':
+    case 'trip': {
+      const kind = priceLabelKind({ kind: 'pairing', pairingKind: f.pairingKind }, false);
       return (
         <>
           {T.logFlights}{' '}
           <LogPrice
             price={f.price}
-            kind={priceLabelKind({ kind: 'pairing', pairingKind: f.pairingKind }, false)}
+            kind={kind}
+            // why: the log keeps a seller's name but not how many were read, so its detail names the seller alone
+            detail={
+              kind === 'seller' && f.seller !== null
+                ? T.labelDetail.sellerNamed(f.seller)
+                : labelDetail(kind, null, f.pairingKind)
+            }
             sources={sources}
           />
           {f.seller === null ? null : <> {f.seller}</>}
         </>
       );
+    }
     case 'failed':
       return T.logFailed(stopDetailClause(f.cause, 'camoufox', true));
     case 'outbound-only':
@@ -73,6 +93,8 @@ function flightsPart(row: LogRow, sources: boolean): ReactNode {
 /** One row: "Today 16:40 · calendar £388 · flights £412 Kiwi.com"; a read by hand says so in place of the calendar. */
 function Row({ row, now, sources }: { row: LogRow; now: IsoDateTime; sources: boolean }) {
   const c = row.calendar;
+  const calendarKind =
+    c === null ? null : priceLabelKind({ kind: 'calendar', providerId: c.provenance.providerId }, false);
   return (
     <li data-testid="log-row">
       {logWhen(row.at, now)}
@@ -81,13 +103,14 @@ function Row({ row, now, sources }: { row: LogRow; now: IsoDateTime; sources: bo
           {F.separator}
           {T.logByHand}
         </>
-      ) : c === null ? null : (
+      ) : calendarKind === null || c === null ? null : (
         <>
           {F.separator}
           {T.logCalendar}{' '}
           <LogPrice
             price={c}
-            kind={priceLabelKind({ kind: 'calendar', providerId: c.provenance.providerId }, false)}
+            kind={calendarKind}
+            detail={labelDetail(calendarKind, null)}
             sources={sources}
           />
         </>

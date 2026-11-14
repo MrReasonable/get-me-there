@@ -271,6 +271,14 @@ describe('no figure: the list, the journey limit, then the cells in order', () =
       'could-not-read',
     ],
     ['an empty cell', [cell('no_data'), cell('empty')], 'no-price'],
+    // why: CodeRabbit PR #58 finding 12: an airport pair not run makes the dates not searched, before any other cell
+    // (main spec §6.6 row 2, core's reducedMark, so the card agrees with the board); a partly searched date pair never
+    // reads as no price
+    ['an empty cell beside one not run', [cell('empty'), cell('not_run')], 'not-searched'],
+    ['an error beside one not run', [cell('error'), cell('not_run')], 'not-searched'],
+    ['no data beside one not run', [cell('not_run'), cell('no_data')], 'not-searched'],
+    // §6.6 row 4: an empty cell with the rest skipped is no price, as the board's mark reads it
+    ['an empty cell beside a budget skip', [cell('empty'), cell('skipped', 'budget')], 'no-price'],
     ['no data', [cell('skipped', 'budget'), cell('no_data')], 'not-offered'],
     ['a budget skip', [cell('skipped', 'provider_unavailable'), cell('skipped', 'budget')], 'not-reached'],
     [

@@ -357,6 +357,28 @@ export function useExecutionActions() {
   };
 }
 
+/**
+ * The Trip page's "Check with SearchApi" (design 2026-11-08 §6.1): the per-cell check, which refreshes what a start
+ * refreshes when it is accepted and, because the check's run goes on after that (CodeRabbit PR #58 finding 6), follows
+ * the run it started (`useExecution` polls it while in flight) and reads the search's trips again once it leaves its
+ * in-flight status, whatever its end.
+ */
+export function useVerifyCell(definitionId: string) {
+  const qc = useQueryClient();
+  const { verify } = useExecutionActions();
+  const runId = verify.data?.executionId ?? null;
+  const status = useExecution(runId).data?.status;
+  // why: the run this hook last read the trips again for, so a settled run does it once, not on every re-render
+  const refreshedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (runId === null || status === undefined || POLLING.has(status) || refreshedFor.current === runId)
+      return;
+    refreshedFor.current = runId;
+    void qc.invalidateQueries({ queryKey: qk.tripOf(definitionId) });
+  }, [runId, status, qc, definitionId]);
+  return verify;
+}
+
 // --- WP10 queries ---
 
 /** One cell's outcomes and prices for the date pair detail's airport-pair panels; idle until a cell is chosen. */

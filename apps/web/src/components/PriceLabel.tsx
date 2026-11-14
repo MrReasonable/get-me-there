@@ -2,12 +2,15 @@ import {
   effectiveAge,
   formatAgeFull,
   formatDuration,
+  hoursSince,
+  type IsoDateTime,
+  mainPathSource,
   type PriceLabelKind,
   pointOfSaleLabel,
   type StaleMark,
   staleWords,
 } from '@gmt/core';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { COPY } from '../copy.js';
 import { useNow } from '../now.js';
 import { PriceBoundary } from './PriceBoundary.js';
@@ -32,11 +35,26 @@ export function labelAge(ageHours: number | 'unknown'): string {
   return ageHours === 'unknown' ? COPY.ageUnknown : formatDuration(ageHours);
 }
 
+/**
+ * The wire's age advanced by the hours the page's clock has moved since that age arrived, so the label keeps pace with
+ * its detail's full age (CodeRabbit PR #58 finding 4). why: the wire's age is the effective age at the server's clock,
+ * which advances one for one with time whatever its kind, so counting on from it never recomputes the rule; an unknown
+ * age stays unknown. A new age from the wire starts the count again (React's "adjust state on a prop change" pattern).
+ */
+function useAdvancedAge(ageHours: number | 'unknown', now: IsoDateTime): number | 'unknown' {
+  const [base, setBase] = useState({ ageHours, at: now });
+  if (base.ageHours !== ageHours) {
+    setBase({ ageHours, at: now });
+    return ageHours;
+  }
+  return ageHours === 'unknown' ? 'unknown' : ageHours + hoursSince(base.at, now);
+}
+
 function Label({ kind, ageHours, stale, provenance, detail }: PriceLabelProps) {
   const now = useNow();
   const p = assertProvenance(provenance);
   const ref = useRef<HTMLDetailsElement>(null);
-  const age = labelAge(ageHours);
+  const age = labelAge(useAdvancedAge(ageHours, now));
   const text = T.labelText(T.label[kind], age);
   // why: Escape closes an open detail wherever focus is (a clicked summary takes no focus in some browsers), and puts
   // focus back on its label when focus was inside it or nowhere
@@ -61,18 +79,26 @@ function Label({ kind, ageHours, stale, provenance, detail }: PriceLabelProps) {
       <div className="price-label-pop">
         <p>{detail}</p>
         <p className="price-label-age">{formatAgeFull(effectiveAge(p, now))}</p>
+        <p data-testid="label-source" className="price-label-age">
+          {T.labelSource(mainPathSource(p.providerId))}
+        </p>
         <p data-testid="point-of-sale" className="price-label-age">
           {pointOfSaleLabel(p)}
         </p>
+        {p.fx.converted ? (
+          <p data-testid="label-fx" className="price-label-age">
+            {COPY.fxTitle(p.fx.rateDate, p.fx.source)}
+          </p>
+        ) : null}
       </div>
     </details>
   );
 }
 
 /**
- * Design 2026-11-08 §5.1: a price's one label, `Kind · age`, and one tap down its two-line detail: what the price is,
- * then how old it is in full (once, from its provenance), so an unknown or assumed vendor age is said there, and the
- * market it was read in (point of sale). A
+ * Design 2026-11-08 §5.1: a price's one label, `Kind · age`, and one tap down its detail: what the price is, then how
+ * old it is in full (once, from its provenance), so an unknown or assumed vendor age is said there, its source (the
+ * provider, by its main-path name), the market it was read in (point of sale) and, for a converted price, the rate (spec rev 69). A
  * disclosure (`<details>`) that opens in the flow beneath its label, so it covers nothing; Escape closes it. The age
  * turns amber once the wire marks the price stale, and the label's spoken name then says why. The label sits in its
  * own price boundary: a provenance that is not one withholds this label alone, never the page.

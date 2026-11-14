@@ -78,9 +78,16 @@ describe('BookLink', () => {
     expect(form).toHaveAttribute('action', 'https://www.google.com/travel/clk/f');
     expect(form).toHaveAttribute('target', '_blank');
     expect(form).toHaveAttribute('rel', 'noopener noreferrer');
+    // why: CodeRabbit PR #58 finding 15: each field's name and value, so an empty or swapped value fails
     expect(
-      [...(form?.querySelectorAll('input[type="hidden"]') ?? [])].map((i) => i.getAttribute('name')),
-    ).toEqual(['u', 'tfu']);
+      [...(form?.querySelectorAll('input[type="hidden"]') ?? [])].map((i) => [
+        i.getAttribute('name'),
+        i.getAttribute('value'),
+      ]),
+    ).toEqual([
+      ['u', 'abc'],
+      ['tfu', 'xyz'],
+    ]);
   });
 
   it('none: the price alone, no link', () => {

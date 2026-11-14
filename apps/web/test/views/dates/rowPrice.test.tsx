@@ -143,7 +143,10 @@ describe.each([
     // why: the detail is part of the row (it opens in the flow beneath the label), so the row's height is its own
     expect(labels[0]).toHaveTextContent(/QQ Travel/);
     const before = [window.location.search, window.history.length];
+    expect(labels[0]).not.toHaveAttribute('open');
     await user.click(summary ?? row);
+    // why: CodeRabbit PR #58 finding 17: the tap opens the label's detail, which the seller words alone don't show
+    expect(labels[0]).toHaveAttribute('open');
     // why: the row's own click opens its trip; a tap on the label only opens the label
     expect([window.location.search, window.history.length]).toEqual(before);
     expect(outLinks(row)).toHaveLength(1);

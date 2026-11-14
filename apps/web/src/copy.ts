@@ -1159,20 +1159,29 @@ export const COPY = {
     labelText: (kind: string, age: string) => `${kind} · ${age}`,
     // the summary's spoken name when the age is amber: the stale mark's words, said once
     labelStale: (label: string, staleWords: string) => `${label}, ${staleWords}`,
+    // the detail's source line (spec rev 69: the provider, market and FX in the tap detail), in the main path's name
+    // for the provider (spec rev 55 §3, `mainPathSource`): "Source: the browser worker."
+    labelSource: (source: string) => `Source: ${source}.`,
     // design §5.1's tap details, two lines: what the price is, then its full age (core's formatAgeFull)
     labelDetail: {
       seller: (seller: string, offers: number) =>
         `A seller's price as Google's booking page listed it (${seller}, cheapest of ${offers}). Not checked with the seller or airline; it can change at checkout.`,
+      // the search log's seller price, whose row keeps the seller's name but not how many were read
+      sellerNamed: (seller: string) =>
+        `A seller's price as Google's booking page listed it (${seller}). Not checked with the seller or airline; it can change at checkout.`,
       sellerSearchApi:
         "A seller's price from SearchApi's booking options. Not checked with the seller or airline; it can change at checkout. Your limits checked: stops, journey time.",
       'google-price':
         "Google's price for these two flights. No seller's price was read; the booking page may show a different total.",
+      // Google's price for a pairing whose booking page was read in part (`google-incomplete`): some sellers were read
+      'google-incomplete':
+        "Google's price for these two flights, not every seller read; the booking page may show a different total.",
       'google-list':
         "Google's 'from' price for this outbound on its flight list. Its returns and sellers weren't read.",
       calendar:
         "Google's calendar price for these dates. Not a fare: no flights or sellers read, and your journey limit isn't checked.",
       cached: 'A price an Aviasales user saw, then cached. Not a fare quote.',
-      'not-seen-again': "Today's search didn't find it again. Probably gone.",
+      'not-seen-again': "The latest search didn't find it again. Probably gone.",
     },
     sellerLine: (seller: string, n: number) => `${seller} · cheapest of ${n} ${noun(n, 'seller', 'sellers')}`,
     // design §5.3: the booking targets, best first; only an external link carries ↗ and says it opens a new tab
@@ -1219,11 +1228,11 @@ export const COPY = {
       `The trip below was read ${ago}, longer ago than this search's refresh, and doesn't lead.`,
     readWithoutCalendar: (ago: string) =>
       `No calendar price for these dates; their flights were read by hand ${ago}.`,
-    gone: "Today's search didn't find this price again. Probably gone.",
+    gone: "The latest search didn't find this price again. Probably gone.",
     overJourneyLimit: "Every price found for these dates is over the journey limit set on the search's page.",
     couldNotRead: "Google's page for these dates couldn't be read in the latest search. Nothing was saved.",
     noPrice:
-      "Google's calendar listed no price for these dates in today's search. That doesn't mean there are no flights.",
+      "Google's calendar listed no price for these dates in the latest search. That doesn't mean there are no flights.",
     notOffered:
       "The price sources had no data for these dates in the latest search. That doesn't mean there are no flights.",
     notReached:
@@ -1269,11 +1278,13 @@ export const COPY = {
         `is a seller's price from SearchApi's booking options, read ${when}.`,
       'google-price': (when: string) =>
         `is Google's price for the two flights above, read ${when}. No seller's price was read.`,
+      'google-incomplete': (when: string) =>
+        `is Google's price for the two flights above, read ${when}, not every seller read.`,
       calendar: (when: string) =>
         `is Google's calendar price for these dates, read ${when}. No flights or sellers were read.`,
       cached: (when: string) => `is a price an Aviasales user saw, cached ${when}. Not a fare quote.`,
       'not-seen-again': (when: string) =>
-        `was read ${when}; today's search didn't find it again. Probably gone.`,
+        `was read ${when}; the latest search didn't find it again. Probably gone.`,
       checkedJourney: (hours: string) => `Checked: both legs are under your ${hours} limit.`,
       checkedLimits: 'Checked: both legs are within your limits.',
       checkedSearchApi: 'Checked: your limits on stops and journey time.',
@@ -1315,7 +1326,8 @@ export const COPY = {
     logShowFewer: 'Show the newest five',
     logNone: '· none yet',
     agoUnknown: 'at a time not known',
-    logSourceOf: (label: string, source: string) => `(${label}, ${source})`,
+    // the source beside a log price's label in "Show all N, with each source": "(the browser worker)"
+    logSourceOf: (source: string) => `(${source})`,
     dayOffset: (n: number) => (n > 0 ? `+${n}` : `−${-n}`),
     // when a price was read, for About this price: "today at 16:42", "yesterday at 09:10", "on 12 Mar at 11:44"
     aboutWhen: {

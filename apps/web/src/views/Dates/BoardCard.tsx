@@ -131,6 +131,8 @@ function RowPriceBody({ figure, notes, target = { kind: 'none' } }: RowPriceProp
           kind === 'seller' && q !== null && q.seller !== null
             ? { name: q.seller, offersRead: q.offersRead }
             : null,
+          // why: only a pairing figure's price is its pairing's; a verified figure's pairing is another trip's
+          figure.basis === 'pairing' && q !== null ? pairingKindOf(q) : null,
         )}
       />
     </span>

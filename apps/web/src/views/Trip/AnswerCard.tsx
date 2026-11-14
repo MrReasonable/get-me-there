@@ -328,16 +328,25 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
     return (
       <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
         <div role="status" aria-live="polite" className="trip-reading">
-          <p>
+          {/* why: a div, since the price's label is a disclosure (<details>), which a <p> may not hold */}
+          <div>
             {T.reading(minutes)}
             {calendar === null ? null : (
               <>
                 {' '}
-                {T.calendarShowed} <Amount price={calendar} variant="inline" />
+                {T.calendarShowed} <Amount price={calendar} variant="inline" />{' '}
+                {/* why: CodeRabbit PR #58 finding 16: the calendar price keeps its one label while the read runs */}
+                <PriceLabel
+                  kind={calendar.label}
+                  ageHours={calendar.ageHours}
+                  stale={calendar.stale}
+                  provenance={calendar.provenance}
+                  detail={calendar.detail}
+                />
                 {T.sentenceEnd}
               </>
             )}
-          </p>
+          </div>
           {/* why: design §6.1: a bar run against the read's estimated time, an estimate, not progress */}
           <div className="trip-progress" data-minutes={String(Math.min(minutes, 5))} aria-hidden="true">
             <i />

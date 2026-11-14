@@ -106,6 +106,9 @@ describe('the board row and the Trip card agree, figure by figure (design §6.5)
     const [row] = boardRows(await findBoard());
     if (row === undefined) throw new Error('no board row');
     const boardPrice = amountIn(row.querySelector('[data-testid="price-cell"]'));
+    // why: CodeRabbit PR #58 finding 18: both surfaces showing no amount, or the same wrong one, must fail: the board
+    // shows the figure's own price, in whole pounds with thousands commas, written out here independently
+    expect(boardPrice).toBe(`£${Math.round(figure.price.pricePence / 100).toLocaleString('en-GB')}`);
     const boardSeller = sellerIn(row.querySelector('[data-testid="pairing-seller"]'));
     const decoded = decodeDatePairs(datesResponse(body)).pairs.find(
       (p) => p.departureDate === DEPART && p.nights === NIGHTS,

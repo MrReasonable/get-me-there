@@ -1,10 +1,17 @@
-import { effectiveAge, formatAgeFull, provenanceSchema } from '@gmt/core';
-import { screen } from '@testing-library/react';
+import {
+  effectiveAge,
+  formatAgeFull,
+  type IsoDateTime,
+  isoDateTimeOfEpochMs,
+  provenanceSchema,
+} from '@gmt/core';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { PriceBoundary } from '../../src/components/PriceBoundary.js';
 import { PriceLabel } from '../../src/components/PriceLabel.js';
 import { COPY } from '../../src/copy.js';
-import { provCalendar, provSearch } from '../fixtures.js';
+import { NowContext } from '../../src/now.js';
+import { fxConverted, provCalendar, provSearch } from '../fixtures.js';
 import { expectConsoleErrors } from '../guards.js';
 import { NOW, renderWithProviders } from '../render.js';
 
@@ -149,5 +156,51 @@ describe('PriceLabel', () => {
     await user.keyboard('{Escape}');
     expect(d).not.toHaveAttribute('open');
     expect(screen.getByRole('button', { name: 'elsewhere' })).toHaveFocus();
+  });
+
+  // why: CodeRabbit PR #58 finding 4: the label's age advances with the page's clock, as its detail's full age does, so
+  // a price that was "just now" when read never stays "just now" while the page is open; the clock is injected
+  it('advances its age with the clock between renders, from the age the wire gave', () => {
+    let now: IsoDateTime = NOW;
+    const at = () => now;
+    const ui = (ageHours: number | 'unknown') => (
+      <NowContext.Provider value={at}>
+        <PriceLabel
+          kind="calendar"
+          ageHours={ageHours}
+          stale={false}
+          provenance={provCalendar}
+          detail={detail}
+        />
+      </NowContext.Provider>
+    );
+    const { rerender } = render(ui(0));
+    expect(summaryOf()).toHaveTextContent('Calendar · just now');
+    now = isoDateTimeOfEpochMs(Date.parse(NOW) + 3 * 3_600_000);
+    rerender(ui(0));
+    expect(summaryOf()).toHaveTextContent('Calendar · 3h');
+    // a new answer's age is the wire's again, counted from then
+    rerender(ui(5));
+    expect(summaryOf()).toHaveTextContent('Calendar · 5h');
+    now = isoDateTimeOfEpochMs(Date.parse(NOW) + 4 * 3_600_000);
+    rerender(ui(5));
+    expect(summaryOf()).toHaveTextContent('Calendar · 6h');
+    // an unknown age stays unknown
+    rerender(ui('unknown'));
+    expect(summaryOf()).toHaveTextContent('Calendar · age unknown');
+  });
+
+  // why: spec rev 69 (Ian's ruling on CodeRabbit PR #58 findings 8, 16, 24): the tap detail names the source (the
+  // provider, by its main-path name), the market and, for a converted price, the rate it was converted at
+  it('its detail names the source, and the conversion of a converted price', () => {
+    const { unmount } = label({ provenance: provSearch });
+    const d = screen.getByTestId('price-label');
+    expect(d).toHaveTextContent('Source: Google Flights via SearchApi.');
+    expect(d).not.toHaveTextContent('converted to GBP');
+    unmount();
+    label({ provenance: { ...provCalendar, fx: fxConverted } });
+    const c = screen.getByTestId('price-label');
+    expect(c).toHaveTextContent('Source: the Aviasales cache.');
+    expect(c).toHaveTextContent(COPY.fxTitle('2026-10-13', 'frankfurter'));
   });
 });

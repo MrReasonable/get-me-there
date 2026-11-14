@@ -9,7 +9,13 @@ import type { TripUiState } from '../../../src/state/tripState.js';
 import { type CardState, cardOf } from '../../../src/views/Trip/cardState.js';
 import { TripView } from '../../../src/views/Trip/TripView.js';
 import { API, datePairFigure, definition } from '../../fixtures.js';
-import { flightList, listedFlight } from '../../fixtures.searches.js';
+import {
+  flightList,
+  listedFlight,
+  listedReturn,
+  returnAttempt,
+  returnRead,
+} from '../../fixtures.searches.js';
 import {
   calendarFigure,
   datesList,
@@ -19,6 +25,7 @@ import {
   overPairing,
   pairingFigure,
   provCache,
+  readList,
   readPairing,
   readTrip,
   SEARCH_LINK,
@@ -66,6 +73,14 @@ function renderTrip(r: TripResponse | 'error', state: TripUiState = STATE) {
 
 const card = () => screen.findByRole('region', { name: T.cardLabel });
 
+/** An element's text as read with each price label closed: its `Kind · age` kept, its detail left out. */
+function shownText(el: Element): string {
+  const copy = el.cloneNode(true);
+  if (!(copy instanceof Element)) throw new Error('not an element');
+  for (const pop of copy.querySelectorAll('.price-label-pop')) pop.remove();
+  return copy.textContent ?? '';
+}
+
 /** The card's buttons by what they do: read, check, retry (label summaries are not buttons). */
 function actionsOf(region: HTMLElement): string[] {
   return within(region)
@@ -109,6 +124,16 @@ describe('a read trip: the answer card (design §6.1)', () => {
     const meta = out?.querySelector('.trip-legmeta')?.textContent ?? '';
     expect(meta).not.toMatch(/ ·/);
     expect(meta).toContain('\u00a0· Aer Lingus');
+  });
+
+  // why: CodeRabbit PR #58 finding 14: a list read for another airport pair never lends its legs to the figure's price,
+  // even when its pick leaves and returns at the same times; the card then says the pairing's two times only
+  it("a list of another airport pair gives the figure no legs, though its pick's times agree", async () => {
+    renderTrip(readTrip({ flightList: readList({ origin: 'LGW', destination: 'EWR' }) }));
+    const c = await card();
+    expect(within(c).queryAllByTestId('trip-leg')).toEqual([]);
+    expect(c).toHaveTextContent(COPY.datesView.pairingTimes('09:15', '18:30'));
+    expect(c).not.toHaveTextContent('LGW');
   });
 
   it('the heading names the dates and nights, under Trips › the search › the dates', async () => {
@@ -222,7 +247,8 @@ const EXPECT: Record<CardState['kind'], { says: string | RegExp; actions: string
   'outside-window': { says: T.outsideWindow, actions: [] },
   verified: { says: T.caption, actions: ['read', 'check'] },
   trip: { says: T.caption, actions: ['read', 'check'] },
-  reading: { says: `${T.reading(2)} ${T.calendarShowed} £388${T.sentenceEnd}`, actions: [] },
+  // why: CodeRabbit PR #58 finding 16: the calendar price keeps its label while the read runs
+  reading: { says: `${T.reading(2)} ${T.calendarShowed} £388 Calendar · 3h`, actions: [] },
   'calendar-with-trip': { says: T.calendarWithTrip('2d ago'), actions: ['read', 'check'] },
   'none-within': {
     says: `${T.noneWithin('4h ago', 'your 25h limit each way')} ${T.cheapestRead} £455${T.cheapestReadLeg('27h 10m')}`,
@@ -497,6 +523,43 @@ describe('Other flights on these dates (design §6.1)', () => {
     expect(within(section).queryByRole('button', { name: T.showThem })).toBeNull();
   });
 
+  // why: CodeRabbit PR #58 finding 13: a return row's price is Google's for its outbound and that return together, so
+  // it is within the limits only when both legs are; a return under the limit paired with an outbound over it folds
+  it('a return row over the limits by its outbound folds with the over-limit rows, never shown as within', async () => {
+    // the one outbound tried is 27h 10m (over the 25 h limit); both its returns are within it
+    const list = flightList({
+      departureDate: '2026-11-11',
+      returnDate: '2026-11-28',
+      flights: [listedFlight({ durationMinutes: 1630, amountMinor: 45_500 })],
+      returns: returnRead({
+        attempts: [
+          returnAttempt({
+            outboundIndex: 0,
+            outboundFits: false,
+            returns: [
+              listedReturn({ departsLocal: '18:30', durationMinutes: 415, fromMinor: 45_500 }),
+              listedReturn({ departsLocal: '21:10', durationMinutes: 425, fromMinor: 47_000 }),
+            ],
+          }),
+        ],
+      }),
+    });
+    renderTrip(
+      trip({
+        figure: calendarFigure({ pairingRead: 'over-limit', pairing: overPairing() }),
+        flightList: list,
+      }),
+    );
+    const section = (await screen.findByRole('heading', { name: T.otherHeading })).closest('section');
+    if (section === null) throw new Error('no section');
+    expect(
+      within(section)
+        .queryAllByTestId('other-flight')
+        .filter((r) => r.textContent?.includes('Back ')),
+    ).toEqual([]);
+    expect(section).toHaveTextContent('1 more return read: 1 over your 25h limit.');
+  });
+
   it('over-limit rows that break more than the journey limit are said as outside your limits', async () => {
     const list = flightList({
       departureDate: '2026-11-11',
@@ -529,19 +592,35 @@ describe('About this price and the search log (design §6.1)', () => {
     const about = screen.getByTestId('about-price');
     await user.click(within(about).getByText(T.aboutSummary));
     expect(about).toHaveAttribute('open');
-    const items = within(about)
-      .getAllByRole('listitem')
-      .map((li) => li.textContent);
+    const items = within(about).getAllByRole('listitem').map(shownText);
+    // why: CodeRabbit PR #58 finding 16: the card's price keeps its label in About as well
     expect(items).toEqual([
-      `£412 ${T.about.seller('Kiwi.com', 'today at 13:00')} ${T.about.market('UK market')}`,
+      `£412 Seller · 3h ${T.about.seller('Kiwi.com', 'today at 13:00')} ${T.about.market('UK market')}`,
       T.about.checkedJourney('25h'),
       T.about.notCheckedTrip,
-      `${T.about.calendarShowed} £388 ${T.about.forTheseDates} Calendar · 3h${T.labelDetail.calendar}fetched 3h agoUK market`,
+      `${T.about.calendarShowed} £388 ${T.about.forTheseDates} Calendar · 3h`,
       T.about.cachedNone,
       'LGW → JFK: no price listed in the latest search',
       "LHR → EWR: couldn't be read in the latest search",
       'LGW → EWR: not searched in the latest search',
     ]);
+  });
+
+  // why: CodeRabbit PR #58 finding 7: Google's price for a pairing whose booking page was read in part never says no
+  // seller's price was read, on the card's label or in About
+  it("a pairing read in part: Google's price, saying not every seller was read", async () => {
+    const pairing = readPairing({ isFrom: true, seller: null, offersRead: 5, complete: false });
+    const { user } = renderTrip(readTrip({ figure: pairingFigure(pairing), flightList: null }));
+    const c = await card();
+    const label = within(c).getByTestId('price-label');
+    expect(label.querySelector('summary')).toHaveTextContent('Google price · 3h');
+    expect(label).toHaveTextContent(T.labelDetail['google-incomplete']);
+    expect(label).not.toHaveTextContent(T.labelDetail['google-price']);
+    const about = screen.getByTestId('about-price');
+    await user.click(within(about).getByText(T.aboutSummary));
+    expect(shownText(within(about).getAllByRole('listitem')[0] ?? about)).toContain(
+      T.about['google-incomplete']('today at 13:00'),
+    );
   });
 
   it("About names the market the card's price was read in, and a label's detail does too", async () => {
@@ -600,10 +679,10 @@ describe('About this price and the search log (design §6.1)', () => {
     await card();
     const about = screen.getByTestId('about-price');
     await user.click(within(about).getByText(T.aboutSummary));
-    const items = within(about)
-      .getAllByRole('listitem')
-      .map((li) => li.textContent ?? '');
-    expect(items[0]).toBe(`£388 ${T.about.calendar('today at 13:00')} ${T.about.market('UK market')}`);
+    const items = within(about).getAllByRole('listitem').map(shownText);
+    expect(items[0]).toBe(
+      `£388 Calendar · 3h ${T.about.calendar('today at 13:00')} ${T.about.market('UK market')}`,
+    );
     expect(items[1]).toBe(T.about.notCheckedCalendar);
     expect(items[2]).toBe(T.about.calendarNone);
     expect(items[3]).toContain(`${T.about.cachedShowed} £300 ${T.about.forTheseDates} Cached · 2h`);
@@ -629,29 +708,25 @@ describe('About this price and the search log (design §6.1)', () => {
       'Search log for these dates · 7 searches since 8 Oct',
     );
     await user.click(within(log).getByText(T.logSummary));
-    expect(
-      within(log)
-        .getAllByTestId('log-row')
-        .map((r) => r.textContent),
-    ).toEqual([
-      'Today 14:40 · calendar £388 · flights £412 Kiwi.com',
-      'Tue 13 Oct · read by hand · flights £409',
+    // why: CodeRabbit PR #58 finding 16: every log price carries its own label (`Kind · age`, its detail a tap down)
+    expect(within(log).getAllByTestId('log-row').map(shownText)).toEqual([
+      'Today 14:40 · calendar £388 Calendar · 3h · flights £412 Seller · 3h Kiwi.com',
+      'Tue 13 Oct · read by hand · flights £409 Google price · 3h',
       "Tue 13 Oct · couldn't read flights: the connection to it failed",
-      'Mon 12 Oct · calendar £390 · outbound flights read, returns not',
-      'Sun 11 Oct · calendar £395 · flights read, none within your limits',
+      'Mon 12 Oct · calendar £390 Calendar · 3h · outbound flights read, returns not',
+      'Sun 11 Oct · calendar £395 Calendar · 3h · flights read, none within your limits',
     ]);
+    for (const l of within(log).getAllByTestId('price-label')) expect(l.tagName).toBe('DETAILS');
     await user.click(within(log).getByRole('button', { name: T.logShowAll(7) }));
-    const all = within(log)
-      .getAllByTestId('log-row')
-      .map((r) => r.textContent);
+    const all = within(log).getAllByTestId('log-row').map(shownText);
     expect(all).toHaveLength(7);
     expect(all[0]).toBe(
-      'Today 14:40 · calendar £388 (Calendar, the browser worker) · flights £412 (Seller, the browser worker) Kiwi.com',
+      'Today 14:40 · calendar £388 Calendar · 3h (the browser worker) · flights £412 Seller · 3h (the browser worker) Kiwi.com',
     );
     expect(all[5]).toBe(
-      'Sat 10 Oct · calendar £395 (Calendar, the browser worker) · flights read under different limits',
+      'Sat 10 Oct · calendar £395 Calendar · 3h (the browser worker) · flights read under different limits',
     );
-    expect(all[6]).toBe('Thu 8 Oct · calendar £400 (Calendar, the browser worker) · flights not read');
+    expect(all[6]).toBe('Thu 8 Oct · calendar £400 Calendar · 3h (the browser worker) · flights not read');
     await user.click(within(log).getByRole('button', { name: T.logShowFewer }));
     expect(within(log).getAllByTestId('log-row')).toHaveLength(5);
   });

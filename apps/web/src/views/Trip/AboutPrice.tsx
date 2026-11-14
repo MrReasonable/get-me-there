@@ -67,7 +67,7 @@ function OtherPrice({
 
 /** What the card's price is and when it was read, in one sentence after the price. */
 function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): ReactNode {
-  const price: (Priced & { label: PriceLabelKind; seller?: ShownTrip['seller'] }) | null =
+  const price: (Priced & { label: PriceLabelKind; detail: string; seller?: ShownTrip['seller'] }) | null =
     trip ?? figurePriceOf(r);
   if (price === null) return null;
   const when = whenRead(price.provenance.fetchedAt, now);
@@ -79,12 +79,23 @@ function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): Re
         : A.seller(seller.name, when)
       : price.label === 'google-list'
         ? A['google-price'](when)
-        : A[price.label](when);
+        : // why: CodeRabbit PR #58 finding 7: a pairing whose booking page was read in part had some sellers read
+          price.label === 'google-price' && trip?.pairingKind === 'google-incomplete'
+          ? A['google-incomplete'](when)
+          : A[price.label](when);
   return (
     <li>
       <b>
         <Amount price={price} />
       </b>{' '}
+      {/* why: CodeRabbit PR #58 finding 16: the price keeps its one label here too, so its age and stale mark show */}
+      <PriceLabel
+        kind={price.label}
+        ageHours={price.ageHours}
+        stale={price.stale}
+        provenance={price.provenance}
+        detail={price.detail}
+      />{' '}
       {words}{' '}
       <span data-testid="about-market">
         {price.provenance.pointOfSale === 'unknown'

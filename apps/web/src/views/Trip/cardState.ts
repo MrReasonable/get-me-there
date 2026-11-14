@@ -100,7 +100,8 @@ function byHandRead(r: TripResponse, list: NonNullable<TripResponse['flightList'
 
 /**
  * With no figure: a list read by hand says what it read (`byHandRead`); else, and after a failed one, the dates' cells
- * say why there is no price, in this order across the airport pairs (design §6.1).
+ * say why there is no price, in this order across the airport pairs (design §6.1, by main spec §6.6's precedence:
+ * not run, error, empty, no data, skipped).
  */
 function withoutFigure(r: TripResponse): CardState {
   const read = r.flightList === null ? null : byHandRead(r, r.flightList);
@@ -112,6 +113,10 @@ function withoutFigure(r: TripResponse): CardState {
         c.bucket === bucket &&
         (reasons === undefined || (c.skipReason !== null && reasons.includes(c.skipReason))),
     );
+  // why: main spec §6.6 row 2 (core's reducedMark, the board's mark): an airport pair not run leaves the dates not
+  // searched, whatever the others found, so a partly searched date pair never reads as no price (CodeRabbit PR #58
+  // finding 12)
+  if (has('not_run')) return { kind: 'not-searched' };
   // why: the UX design's §3: "couldn't read" must never look like "no price", so an error cell is its own state,
   // before empty
   if (has('error')) return { kind: 'could-not-read' };

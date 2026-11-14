@@ -166,19 +166,26 @@ function verifiedLegs(f: Figure): { out: Leg; back: Leg } | null {
   };
 }
 
-/** The pairing the list's own rule picks, and only when it is the figure's (its two departure times agree). */
+/**
+ * The pairing the list's own rule picks, and only when it is the figure's: read for the figure's airport pair, its two
+ * departure times agreeing.
+ */
 function listPairing(
   r: TripResponse,
-  times: { departOut: string; departBack: string } | null,
+  figure: { origin: string; destination: string; departOut: string; departBack: string } | null,
 ): { list: FlightList; p: PairingView } | null {
   const list = r.flightList;
   if (list === null) return null;
+  // why: CodeRabbit PR #58 finding 14: a list of another airport pair never lends its airports, airlines, durations or
+  // booking to the figure's price, whatever its times
+  if (figure !== null && (list.origin !== figure.origin || list.destination !== figure.destination))
+    return null;
   const p = pairingOf(list, r.limits);
   if (p === null) return null;
   // why: the card follows the board's figure; a list whose pick differs (a limit edit since) gives no legs, never another
   if (
-    times !== null &&
-    (p.outbound.departsLocal !== times.departOut || p.ret.departsLocal !== times.departBack)
+    figure !== null &&
+    (p.outbound.departsLocal !== figure.departOut || p.ret.departsLocal !== figure.departBack)
   )
     return null;
   return { list, p };
@@ -218,7 +225,15 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
     const kind = pairingKindOf(q);
     const label = priceLabelKind({ kind: 'pairing', pairingKind: kind }, false);
     const seller = q.seller === null ? null : { name: q.seller, offersRead: q.offersRead };
-    const read = listPairing(r, { departOut: q.departOut, departBack: q.departBack });
+    const read =
+      f === null
+        ? null
+        : listPairing(r, {
+            origin: f.origin,
+            destination: f.destination,
+            departOut: q.departOut,
+            departBack: q.departBack,
+          });
     // why: goal 4: a leading pairing shows the figure's own price, age and stale mark, exactly as the board's row does;
     // the pairing beneath a calendar figure shows its own
     const price: Priced =
@@ -231,7 +246,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       stale: price.stale,
       ageHours: price.ageHours,
       label,
-      detail: labelDetail(label, seller),
+      detail: labelDetail(label, seller, kind),
       seller,
       pairingKind: kind,
       legs: read === null ? null : pairingLegs(r, read.list, read.p),
@@ -258,7 +273,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       stale: list.stale,
       ageHours: list.ageHours,
       label,
-      detail: labelDetail(label, seller),
+      detail: labelDetail(label, seller, kind),
       seller,
       pairingKind: kind,
       legs: pairingLegs(r, list, p),
@@ -297,12 +312,25 @@ export function dayText(d: IsoDate): string {
 /** The rows a group shows before its fold (the mockup shows two; three keep a choice without a long list). */
 export const OTHERS_SHOWN = 3;
 
-/** One other flight read: its leg, the flight, its price (Google's own) and that price's label. */
+/**
+ * One other flight read: its leg, the flight, its price (Google's own) and that price's label. A return's price is
+ * Google's for its outbound and that return together, so it carries the outbound it was read with.
+ */
 export interface OtherRow {
   leg: 'outbound' | 'return';
   flight: ListedFlight | ListedReturn;
+  /** the outbound a return was read with (its price is the two together); null for an outbound */
+  outbound: ListedFlight | null;
   pence: number;
   label: PriceLabelKind;
+}
+
+/** The legs a row's price covers: an outbound alone, or a return with the outbound it was read with. */
+function legsOf(x: OtherRow): Array<{ flight: ListedFlight | ListedReturn; leg: 'outbound' | 'return' }> {
+  return [
+    { flight: x.flight, leg: x.leg },
+    ...(x.outbound === null ? [] : [{ flight: x.outbound, leg: 'outbound' as const }]),
+  ];
 }
 
 /** A group of other flights: those shown, those folded, and the fold's counts (over the limits, dearer). */
@@ -319,16 +347,21 @@ export interface OtherGroup {
 function groupOf(heading: OtherGroup['heading'], rows: OtherRow[], limits: FlightLimits): OtherGroup | null {
   if (rows.length === 0) return null;
   const sorted = [...rows].sort((a, b) => a.pence - b.pence);
-  const fits = (x: OtherRow) => fitsLimits(x.flight, limits, x.leg);
+  // why: CodeRabbit PR #58 finding 13: a return row is within the limits only when its outbound is too, since its
+  // price is the two together
+  const fits = (x: OtherRow) => legsOf(x).every((l) => fitsLimits(l.flight, limits, l.leg));
   const within = sorted.filter(fits);
   const over = sorted.filter((x) => !fits(x));
   const shown = within.slice(0, OTHERS_SHOWN);
+  // why: an over row breaks the journey limit alone when each of its legs meets every other limit
   const journeyOnly =
     limits.maxJourneyMinutes !== null &&
-    over.every((x) => {
-      const w = withinLimits(x.flight, limits, x.leg);
-      return !w.journey && w.stops && w.arrival && w.departure;
-    });
+    over.every((x) =>
+      legsOf(x).every((l) => {
+        const w = withinLimits(l.flight, limits, l.leg);
+        return w.stops && w.arrival && w.departure;
+      }),
+    );
   return {
     heading,
     shown,
@@ -351,19 +384,27 @@ export function otherFlightsOf(r: TripResponse): OtherGroup[] {
   const p = pairingOf(list, r.limits);
   const attempts = list.returns?.status === 'read' ? list.returns.attempts : [];
   const tried = new Set(attempts.map((a) => a.outboundIndex));
-  const ret = (x: ListedReturn): OtherRow => ({
-    leg: 'return',
-    flight: x,
-    pence: x.fromMinor,
-    label: priceLabelKind({ kind: 'list-return' }, false),
-  });
+  // why: a return row keeps the outbound its attempt read it with (the contract holds the index inside the list)
+  const retOf =
+    (a: (typeof attempts)[number]) =>
+    (x: ListedReturn): OtherRow => ({
+      leg: 'return',
+      flight: x,
+      outbound: list.flights[a.outboundIndex] ?? null,
+      pence: x.fromMinor,
+      label: priceLabelKind({ kind: 'list-return' }, false),
+    });
   const mine = p === null ? null : attempts[p.attempt];
   const others = attempts.filter((a) => a !== mine);
   const groups = [
     mine === undefined || mine === null || p === null
       ? null
-      : groupOf('returns', mine.returns.filter((x) => x !== p.ret).map(ret), r.limits),
-    groupOf('returns-second', others.flatMap((a) => a.returns).map(ret), r.limits),
+      : groupOf('returns', mine.returns.filter((x) => x !== p.ret).map(retOf(mine)), r.limits),
+    groupOf(
+      'returns-second',
+      others.flatMap((a) => a.returns.map(retOf(a))),
+      r.limits,
+    ),
     groupOf(
       'outbounds',
       list.flights
@@ -372,6 +413,7 @@ export function otherFlightsOf(r: TripResponse): OtherGroup[] {
           (x): OtherRow => ({
             leg: 'outbound',
             flight: x,
+            outbound: null,
             pence: x.amountMinor,
             label: priceLabelKind({ kind: 'list-outbound' }, false),
           }),
