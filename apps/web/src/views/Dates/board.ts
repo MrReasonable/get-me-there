@@ -137,10 +137,12 @@ const synthetic = (p: { providerId: string; sourceKind: string }) =>
   p.providerId === 'fixture' || p.sourceKind === 'synthetic';
 
 /**
- * Where a board row's price links (design 2026-11-08 §5.3, Rulings 6 and 10), by core's one rule (`bookingTargetOf`): the
- * row's group's booking page where it has one ("Book on Google Flights"), else the Google Flights search for its airports
- * and dates. The board reads no seller booking, so only the "Book on <seller>" tier is absent. A calendar price is not a
- * trip to book, and a synthetic one is never linked out: both give `none`. `cabin` is the search's, for the search link.
+ * Where a board row's price links (design 2026-11-08 §5.3, Rulings 6 and 10), by core's one rule (`bookingTargetOf`): a
+ * pairing row's booking page where its read recorded one ("Book on Google Flights"), else the Google Flights search for
+ * the figure's own airports and dates. A verified row always takes that search: the pairing it carries is the one read in
+ * the date pair's best calendar cell, another trip (final review C1). The board reads no seller booking, so the "Book on
+ * <seller>" tier is absent. A calendar price is not a trip to book, and a synthetic one is never linked out: both give
+ * `none`. `cabin` is the search's, for the search link.
  */
 export function rowBookingTarget(
   pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
@@ -163,7 +165,8 @@ export function rowBookingTarget(
   return bookingTargetOf({
     synthetic: synthetic(figure.price.provenance) || (q !== null && synthetic(q.provenance)),
     booking: null,
-    bookingUrl: q?.bookingUrl ?? null,
+    // why: final review C1: only a pairing figure's pairing is its own trip; a stale verified figure's is another's
+    bookingUrl: figure.basis === 'pairing' ? (q?.bookingUrl ?? null) : null,
     searchLink: link === null ? null : { url: link.url, host: link.host },
   });
 }

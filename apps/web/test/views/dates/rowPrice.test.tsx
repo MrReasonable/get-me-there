@@ -1,10 +1,11 @@
-import { asIsoDate } from '@gmt/core';
+import { asIata, asIsoDate } from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { rowBookingTarget } from '../../../src/views/Dates/board.js';
 import {
+  airportPairIndex,
   at,
   calendarFig,
   figurePairing,
@@ -32,6 +33,27 @@ async function rowOf(figure: ReturnType<typeof pairingFig>, width = 1280) {
   const row = boardRows(await findBoard())[0];
   if (row === undefined) throw new Error('no board row');
   return { ...view, row };
+}
+
+/**
+ * Final review C1: a stale verified £600 on LGW→JFK with the older trip read three days ago in the date pair's best
+ * calendar cell (LHR→JFK) beneath it (`within-older`), that trip's booking page recorded.
+ */
+function staleVerifiedWithOlderTrip() {
+  return verifiedFig({
+    price: {
+      pricePence: 60_000,
+      provenance: provSearched(),
+      stale: 'setting',
+      ageHours: 80,
+      truncated: false,
+    },
+    origin: asIata('LGW'),
+    destination: asIata('JFK'),
+    airportPair: airportPairIndex('LGW', 'JFK'),
+    pairing: figurePairing({ stale: 'refresh', ageHours: 72, bookingUrl: SYNTHETIC_BOOKING_URL }),
+    pairingRead: 'within-older',
+  });
 }
 
 /** The links out of the app in `el`: the ones that open a new tab. */
@@ -94,6 +116,15 @@ describe.each([
     expect(links[0]).toHaveTextContent('≈');
   });
 
+  it('says "Find", never "Book", on a stale verified row whose older trip beneath has a booking page', async () => {
+    const { row } = await rowOf(staleVerifiedWithOlderTrip(), width);
+    const links = outLinks(row);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAccessibleName(/^£600 · Find on Google Flights ↗/);
+    expect(links[0]?.getAttribute('href')).not.toBe(SYNTHETIC_BOOKING_URL);
+    expect(row).not.toHaveTextContent(/Book on/);
+  });
+
   it('shows a calendar price as plain text, labelled "Calendar · 3h"', async () => {
     const f = calendarFig({ price: { ...calendarFig().price, provenance: provGrid(), ageHours: 3 } });
     const { row } = await rowOf(f, width);
@@ -148,17 +179,15 @@ describe("rowBookingTarget (core's one rule over a board row)", () => {
     ).toEqual({ kind: 'none' });
     expect(rowBookingTarget(pair, calendarFig(), 'economy')).toEqual({ kind: 'none' });
   });
-  it("links a verified row like a pairing row: its group's booking page, else the search", () => {
+  it("links a verified row to its own cell's search, never to the booking page of the pairing beneath it", () => {
     const real = { ...verifiedFig().price, provenance: provSearched() };
     const v = verifiedFig({ price: real });
     expect(rowBookingTarget(pair, v, 'economy')).toMatchObject({ kind: 'search', host: 'www.google.com' });
-    expect(
-      rowBookingTarget(
-        pair,
-        { ...v, pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) },
-        'economy',
-      ),
-    ).toMatchObject({ kind: 'booking-page', url: SYNTHETIC_BOOKING_URL });
+    // why: final review C1: a stale verified figure carries the pairing read in its date pair's best calendar cell,
+    // another trip (maybe another airport pair), so that pairing's booking page is never the verified price's
+    const target = rowBookingTarget(pair, staleVerifiedWithOlderTrip(), 'economy');
+    expect(target).toMatchObject({ kind: 'search', host: 'www.google.com' });
+    expect(target.kind === 'search' ? target.url : '').toContain('LGW');
     // a synthetic verified price (the fixture provider's) is never linked out
     expect(rowBookingTarget(pair, verifiedFig(), 'economy')).toEqual({ kind: 'none' });
   });

@@ -168,8 +168,9 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
     provenance: c.provenance,
     stale: c.stale,
     ageHours: c.ageHours,
-    // why: Ruling 6: the board's group carries the address, so a read trip's price is its booking link on every row
-    bookingUrl: c.bookingUrl,
+    // why: Ruling 6: the board's group carries the address, so a read trip's price is its booking link on every row;
+    // final review (deferred minor 13): a trip over the limits is never offered for booking
+    bookingUrl: c.which === 'over-limit' ? null : c.bookingUrl,
   };
 }
 

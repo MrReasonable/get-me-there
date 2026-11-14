@@ -2,10 +2,10 @@
 // list's booking read is that pairing's, by the rule `pairingOffer` holds for offers (the booking's attempt and return
 // are `bookingReturnOf`'s and the pairing's); otherwise the price says "Find on Google Flights".
 import { type BookingRead, type ReturnRead, returnReadSchema } from '@gmt/core';
-import { PAIRING_FIXTURE, SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
+import { PAIRING_FIXTURE, PAIRING_LIMITS, SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import type { StoredFlightList } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
-import { pairingBookingUrl } from '../../src/read/pairings.js';
+import { candidateOf, pairingBookingUrl, pairingGroupOf } from '../../src/read/pairings.js';
 import { at, cell } from '../helpers/seed.js';
 
 /** The shared fixture's list (its booking read names attempt 1, return 0) with its booking changed by `booking`. */
@@ -74,5 +74,22 @@ describe('pairingBookingUrl (Ruling 5)', () => {
     ).toBeNull();
     const notSettled = listWith({ status: 'not-settled', rule: 'not-settled', offers: [], bookingUrl: null });
     expect(pairingBookingUrl(notSettled, { attempt: 1, returnIndex: 0 })).toBeNull();
+  });
+});
+
+describe("pairingGroupOf's booking address (final review, deferred minor 13)", () => {
+  const candidate = () => {
+    const c = candidateOf(listWith({ bookingUrl: SYNTHETIC_BOOKING_URL }), PAIRING_LIMITS, at(0), 168);
+    if (c === null) throw new Error('the fixture list gives a candidate');
+    return c;
+  };
+
+  it('carries the address of a pairing within the limits', () => {
+    expect(candidate().which).not.toBe('over-limit');
+    expect(pairingGroupOf(candidate()).bookingUrl).toBe(SYNTHETIC_BOOKING_URL);
+  });
+
+  it('gives no address for an over-limit pairing: a trip over the limits is never offered for booking', () => {
+    expect(pairingGroupOf({ ...candidate(), which: 'over-limit', fits: false }).bookingUrl).toBeNull();
   });
 });
