@@ -144,6 +144,13 @@ describe('the board (spec §11 Board)', () => {
     expect(cellsOf(row ?? table)[7]).toBe('LGW → JFK');
   });
 
+  it('point of sale in words on each row, from the price’s provenance, in its label’s detail', async () => {
+    renderDates({ body: workedDates() });
+    const table = await findBoard();
+    for (const r of boardRows(table))
+      expect(within(r).getAllByTestId('point-of-sale')[0]).toHaveTextContent('market not stated');
+  });
+
   it('journey time "not known", and "journey time not known" on a kept row under a journey filter', async () => {
     renderDates({ body: workedDates({ maxJourneyMinutes: 900 }), search: search('&d.journey=900') });
     const table = await findBoard();
@@ -225,7 +232,7 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     expect(screen.queryByTestId('phone-key')).toBeNull();
   });
 
-  it('is stacked cards, each a link to the detail: dates and the PriceCell face lead, then how far checked, journey, airports; no point of sale', async () => {
+  it('is stacked cards, each a link to the detail: dates and the PriceCell face lead, then how far checked, journey, airports; the market only in the label’s detail', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
     const cards = await screen.findAllByTestId('board-card');
@@ -247,7 +254,8 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
       first.textContent?.indexOf('Calendar') ?? 0,
     );
     expect(first).toHaveTextContent('LHR → JFK');
-    expect(first).not.toHaveTextContent('market');
+    // why: the market is in the label's tap detail (design §5.1), not on the card's face
+    expect(first.querySelector('summary')).not.toHaveTextContent('market');
     expect(poundsOutsidePrices()).toEqual([]);
   });
 

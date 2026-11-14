@@ -463,15 +463,26 @@ describe('About this price and the search log (design §6.1)', () => {
       .getAllByRole('listitem')
       .map((li) => li.textContent);
     expect(items).toEqual([
-      `£412 ${T.about.seller('Kiwi.com', 'today at 13:00')}`,
+      `£412 ${T.about.seller('Kiwi.com', 'today at 13:00')} ${T.about.market('UK market')}`,
       T.about.checkedJourney('25h'),
       T.about.notCheckedTrip,
-      `${T.about.calendarShowed} £388 ${T.about.forTheseDates} Calendar · 3h${T.labelDetail.calendar}fetched 3h ago`,
+      `${T.about.calendarShowed} £388 ${T.about.forTheseDates} Calendar · 3h${T.labelDetail.calendar}fetched 3h agoUK market`,
       T.about.cachedNone,
       'LGW → JFK: no price listed in the latest search',
       "LHR → EWR: couldn't be read in the latest search",
       'LGW → EWR: not searched in the latest search',
     ]);
+  });
+
+  it("About names the market the card's price was read in, and a label's detail does too", async () => {
+    const { user } = renderTrip(readTrip());
+    await card();
+    const about = screen.getByTestId('about-price');
+    await user.click(within(about).getByText(T.aboutSummary));
+    expect(within(about).getByTestId('about-market')).toHaveTextContent('Market: UK market.');
+    // the card's own label detail carries it too
+    const label = within(screen.getByRole('region', { name: T.cardLabel })).getByTestId('price-label');
+    expect(within(label).getByTestId('point-of-sale')).toHaveTextContent('UK market');
   });
 
   it("About on a calendar price says what it is and what wasn't checked", async () => {
@@ -485,7 +496,7 @@ describe('About this price and the search log (design §6.1)', () => {
     const items = within(about)
       .getAllByRole('listitem')
       .map((li) => li.textContent ?? '');
-    expect(items[0]).toBe(`£388 ${T.about.calendar('today at 13:00')}`);
+    expect(items[0]).toBe(`£388 ${T.about.calendar('today at 13:00')} ${T.about.market('UK market')}`);
     expect(items[1]).toBe(T.about.notCheckedCalendar);
     expect(items[2]).toBe(T.about.calendarNone);
     expect(items[3]).toContain(`${T.about.cachedShowed} £300 ${T.about.forTheseDates} Cached · 2h`);

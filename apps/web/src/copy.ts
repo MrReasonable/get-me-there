@@ -1256,6 +1256,8 @@ export const COPY = {
     aboutSummary: 'About this price',
     aboutSub: "· what was and wasn't checked",
     about: {
+      // the market the price was read in (design §5.1: in the tap detail and in About this price): "Market: UK market."
+      market: (market: string) => `Market: ${market}.`,
       seller: (seller: string, when: string) =>
         `is ${seller}'s price on Google's booking page for the two flights above, read by the browser ${when}.`,
       sellerSearchApi: (when: string) =>

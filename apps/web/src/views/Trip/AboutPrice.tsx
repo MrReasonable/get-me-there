@@ -1,4 +1,4 @@
-import { type IsoDateTime, type PriceLabelKind, priceLabelKind } from '@gmt/core';
+import { type IsoDateTime, type PriceLabelKind, pointOfSaleLabel, priceLabelKind } from '@gmt/core';
 import type { ReactNode } from 'react';
 import type { TripResponse } from '../../api/types.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
@@ -68,7 +68,7 @@ function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): Re
       <b>
         <Amount price={price} />
       </b>{' '}
-      {words}
+      {words} <span data-testid="about-market">{A.market(pointOfSaleLabel(price.provenance))}</span>
     </li>
   );
 }

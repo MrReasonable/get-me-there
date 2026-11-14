@@ -3,6 +3,7 @@ import {
   formatAgeFull,
   formatDuration,
   type PriceLabelKind,
+  pointOfSaleLabel,
   type StaleMark,
   staleWords,
 } from '@gmt/core';
@@ -60,6 +61,9 @@ function Label({ kind, ageHours, stale, provenance, detail }: PriceLabelProps) {
       <div className="price-label-pop">
         <p>{detail}</p>
         <p className="price-label-age">{formatAgeFull(effectiveAge(p, now))}</p>
+        <p data-testid="point-of-sale" className="price-label-age">
+          {pointOfSaleLabel(p)}
+        </p>
       </div>
     </details>
   );
@@ -67,7 +71,8 @@ function Label({ kind, ageHours, stale, provenance, detail }: PriceLabelProps) {
 
 /**
  * Design 2026-11-08 §5.1: a price's one label, `Kind · age`, and one tap down its two-line detail: what the price is,
- * then how old it is in full (once, from its provenance), so an unknown or assumed vendor age is said there. A
+ * then how old it is in full (once, from its provenance), so an unknown or assumed vendor age is said there, and the
+ * market it was read in (point of sale). A
  * disclosure (`<details>`) that opens in the flow beneath its label, so it covers nothing; Escape closes it. The age
  * turns amber once the wire marks the price stale, and the label's spoken name then says why. The label sits in its
  * own price boundary: a provenance that is not one withholds this label alone, never the page.
