@@ -3,9 +3,7 @@ import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { TripResponse } from '../../../src/api/types.js';
-import { labelAge } from '../../../src/components/PriceLabel.js';
 import { COPY } from '../../../src/copy.js';
-import { figureLabelKind } from '../../../src/lib/figureLabel.js';
 import type { TripUiState } from '../../../src/state/tripState.js';
 import { TripView } from '../../../src/views/Trip/TripView.js';
 import {
@@ -94,9 +92,9 @@ describe('the board row and the Trip card agree, figure by figure (design §6.5)
       (p) => p.departureDate === DEPART && p.nights === NIGHTS,
     )?.figure;
     if (decoded === undefined || decoded === null) throw new Error('no decoded figure');
-    // why: the board shows no label until Task 8 puts one on its row; the label it will show is the one rule over the
-    // decoded figure, with no booking (the date-pairs payload carries none)
-    const boardLabel = `${COPY.trip.label[figureLabelKind(decoded, null)]} · ${labelAge(decoded.price.ageHours)}`;
+    // why: the label as the user sees it on the board's row, not recomputed from the rule (so a row that drew a
+    // different label than the card fails here)
+    const boardLabel = row.querySelector('[data-testid="price-label"] summary')?.textContent;
     board.unmount();
 
     // the card, from a trip read carrying the same figure (the wire's figure is the board's less its index)

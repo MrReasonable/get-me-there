@@ -397,3 +397,25 @@
     border-top: 0;
   }
 }
+
+/* A board row's price (design 2026-11-08 §5.1, §5.3): the price and its label in one block; the booking link, where the
+   price has one, reads as the board's own text (the board is dark in both schemes), underlined so it is a link by more
+   than colour. The label's colours and the link's layout are trip.css's, shared through `.row-price`. */
+.row-price {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.row-price .book-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: right;
+}
+.row-price .price-label {
+  margin-top: 6px;
+}
+.row-price :is(a, summary):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

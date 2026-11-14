@@ -82,6 +82,12 @@ export interface PriceCellProps {
 const badge = 'tag ml-1';
 
 /**
+ * An amount as a link's spoken name says it ("£1,180"), for a link whose visible price is a whole cell: money is
+ * formatted only here and in the cost views (the source guard), so the one place that names an amount is this file.
+ */
+export const spokenAmount = (pricePence: number): string => formatPence(pricePence);
+
+/**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
  * sits on the amount, so a converted price can never be read as exact. An unconfirmed price says so
  * first; a stale one carries the stale mark's words, only when it is stale (spec rev 55 §3: core's `staleMarkText`,

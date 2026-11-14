@@ -1,4 +1,5 @@
 import {
+  type BookingTarget,
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
@@ -7,12 +8,17 @@ import {
 } from '@gmt/core';
 import { type ReactNode, useId } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
+import { BookLink, bookLinkName } from '../../components/BookLink.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
+import { PriceCell, spokenAmount } from '../../components/PriceCell.js';
+import { PriceLabel } from '../../components/PriceLabel.js';
+import { assertProvenance } from '../../components/Provenance.js';
 import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatFlapDate, formatIsoDate, formatIsoDateWords, formatMinutes } from '../../format.js';
+import { figureLabelKind, labelDetail } from '../../lib/figureLabel.js';
 import { useNow } from '../../now.js';
+import '../Trip/trip.css';
 import { tripPatch } from '../../state/tripState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import {
@@ -74,25 +80,66 @@ export function FigurePrice({
 }
 
 /**
- * Design 2026-11-08 §5.1: a calendar price stands in the secondary style, said as "calendar £565", so a date whose
- * flights were never read does not look like a trip. Other bases show their figure as it is.
+ * Design 2026-11-08 §5.1, §5.3: a row's price, its one label beneath it, and where it links. A pairing figure's price
+ * is its booking link (`target`: the group's booking page, else the Google Flights search; one link, the price and its
+ * words), never a second ›; a calendar price stands in the secondary style, said as "calendar £565", and a calendar or
+ * verified price is plain text, so a date whose flights were never read does not look bookable. The label is the board's
+ * and the Trip page's one rule (`figureLabelKind`), with its detail in the flow beneath it. The whole is inside one price
+ * boundary: a price whose provenance is not one is withheld, label and link with it, by one message.
  */
-export function RowPrice({
-  figure,
-  notes,
-  face = false,
-  flapSlot,
-}: {
+export function RowPrice(props: RowPriceProps) {
+  return (
+    <PriceBoundary>
+      <RowPriceBody {...props} />
+    </PriceBoundary>
+  );
+}
+
+interface RowPriceProps {
   figure: DatePairFigure;
   notes: DefinitionResponse['destinationNotes'];
   face?: boolean;
   flapSlot?: string | undefined;
-}) {
+  /** Where a pairing figure's price links; any other basis shows its price as it is. */
+  target?: BookingTarget;
+}
+
+function RowPriceBody({ figure, notes, face = false, flapSlot, target = { kind: 'none' } }: RowPriceProps) {
+  // why: the link's spoken name and the label both read the price outside PriceCell, so a provenance that is not one
+  // withholds the whole price (one message), before any of them is drawn
+  assertProvenance(figure.price.provenance);
   const price = <FigurePrice figure={figure} notes={notes} face={face} flapSlot={flapSlot} />;
-  if (figure.basis !== 'calendar') return price;
+  const q = figure.pairing;
+  const kind = figureLabelKind(figure, null);
+  const p = figure.price;
   return (
-    <span data-testid="calendar-price" className="price-secondary">
-      <span className="calendar-word">{D.calendarPrice}</span> {price}
+    <span className="row-price">
+      {figure.basis === 'pairing' ? (
+        <BookLink
+          target={target}
+          price={price}
+          // why: the price cell's own words (source, age, marks) are many; the link is named by the amount and the words
+          {...(target.kind === 'none' ? {} : { name: bookLinkName(target, spokenAmount(p.pricePence)) })}
+        />
+      ) : figure.basis === 'calendar' ? (
+        <span data-testid="calendar-price" className="price-secondary">
+          <span className="calendar-word">{D.calendarPrice}</span> {price}
+        </span>
+      ) : (
+        price
+      )}
+      <PriceLabel
+        kind={kind}
+        ageHours={p.ageHours}
+        stale={p.stale}
+        provenance={p.provenance}
+        detail={labelDetail(
+          kind,
+          kind === 'seller' && q !== null && q.seller !== null
+            ? { name: q.seller, offersRead: q.offersRead }
+            : null,
+        )}
+      />
     </span>
   );
 }
@@ -450,6 +497,7 @@ export function BoardCard({
   digits,
   howFar,
   notes,
+  target,
   journeyFiltered,
   lit,
   onLight,
@@ -464,6 +512,8 @@ export function BoardCard({
   digits: number;
   howFar: readonly string[];
   notes: DefinitionResponse['destinationNotes'];
+  /** Where the row's price links (a pairing figure's), from `rowBookingTarget`. */
+  target: BookingTarget;
   journeyFiltered: boolean;
   lit: boolean;
   onLight: (index: number | null) => void;
@@ -488,7 +538,7 @@ export function BoardCard({
       data-state={state}
       data-lit={lit ? '' : undefined}
       onClick={(e) => {
-        if (e.target instanceof Element && e.target.closest('a, button') !== null) return;
+        if (e.target instanceof Element && e.target.closest('a, button, details') !== null) return;
         open(e);
       }}
     >
@@ -513,7 +563,7 @@ export function BoardCard({
         </span>
       </th>
       <td className="card-price">
-        <RowPrice figure={f} notes={notes} face />
+        <RowPrice figure={f} notes={notes} face target={target} />
         <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />
         {toggle}

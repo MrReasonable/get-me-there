@@ -159,15 +159,12 @@ describe('a Trip URL (design 2026-11-08 §6.1)', () => {
 });
 
 describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the engine and the web cannot drift)', () => {
-  // why: the hash of core's test/datePairs/detailLink.test.ts; the web never imports core's test files (WP19 §7)
-  const HASH = '9f3c2a7b41d0e6f85a1c3b2d4e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8b9';
-  const LITERAL = `view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${HASH}`;
+  // why: the literal of core's test/datePairs/detailLink.test.ts; the web never imports core's test files (WP19 §7)
+  const LITERAL = 'view=trip&def=def-1&depart=2027-03-14&return=2027-03-28';
   const query = detailLinkQuery({
     definitionId: 'def-1',
     departureDate: asIsoDate('2027-03-14'),
     returnDate: asIsoDate('2027-03-28'),
-    basis: 'verified',
-    row: HASH,
   });
 
   it("core's detailLinkQuery still writes the literal the engine's link test pins", () => {
@@ -175,10 +172,10 @@ describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the e
   });
 
   it.each([`/?${query}`, `https://flights.example.test/?${query}`, `https://example.test/gmt/?${query}`])(
-    '%s lands on the Trip page, basis and row dropped',
+    '%s lands on the Trip page',
     (link) => {
       const params = new URL(link, 'https://example.test').searchParams;
-      expect(land(params, DEF)).toEqual(view('trip', { view: 'trip', basis: null, row: null }));
+      expect(land(params, DEF)).toEqual(view('trip'));
     },
   );
 });

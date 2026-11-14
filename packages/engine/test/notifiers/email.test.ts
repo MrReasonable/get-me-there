@@ -18,7 +18,7 @@ import {
   type TransportFactory,
 } from '../../src/notifiers/email.js';
 import { buildNotifiers } from '../../src/notifiers/index.js';
-import { calendarItem, digestOf, HASH, NOW, renderInput, verifiedItem } from '../alerts/builders.js';
+import { calendarItem, digestOf, NOW, renderInput, verifiedItem } from '../alerts/builders.js';
 import { captureLogger } from '../alerts/fixtures.js';
 
 // Engine tests make no outbound connection (plan decisions 18, 20: test/support/setup.ts refuses DNS and unmatched
@@ -180,9 +180,7 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
         }),
       ]),
     );
-    expect(t.messages[0]?.parsed.text).toContain(
-      `/?view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${HASH}`,
-    );
+    expect(t.messages[0]?.parsed.text).toContain('/?view=trip&def=def-1&depart=2027-03-14&return=2027-03-28');
   });
 
   it('refuses synthetic rows before anything is sent', async () => {

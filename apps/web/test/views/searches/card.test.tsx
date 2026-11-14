@@ -80,3 +80,44 @@ describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)
     expect(heading.closest('li')?.querySelector('[data-testid="card-price-kind"]')).toBeNull();
   });
 });
+
+describe('a card’s trip price (Ruling 7)', () => {
+  it('links to the trip’s page for its dates, in the same tab, with no way out of the app', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'p',
+          name: 'Pairing',
+          origins: ['LHR'],
+          destinations: ['JFK'],
+          cheapest: cheapest(
+            {
+              basis: 'pairing',
+              priceKind: 'seller',
+              pricePence: 118_000,
+              origin: 'LHR',
+              destination: 'JFK',
+              departureDate: '2027-03-14',
+              returnDate: '2027-03-24',
+            },
+            flightListProvenance('2026-10-14T10:44:00.000Z'),
+          ),
+        }),
+      ]),
+    );
+    const { user } = renderInShell(<SearchesView />, { search: '?view=searches' });
+    const card = (await screen.findByRole('heading', { level: 3, name: 'Pairing' })).closest('li');
+    const link = within(card ?? document.body).getByTestId('card-trip-price');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveTextContent('£1,180');
+    expect(link).toHaveAttribute('href', '?view=trip&def=p&depart=2027-03-14&return=2027-03-24');
+    expect(link).not.toHaveAttribute('target');
+    await user.click(link);
+    expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+      view: 'trip',
+      def: 'p',
+      depart: '2027-03-14',
+      return: '2027-03-24',
+    });
+  });
+});

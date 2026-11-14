@@ -1,5 +1,7 @@
 import {
+  type BookingTarget,
   bestPerWeek,
+  bookingTargetOf,
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
@@ -15,6 +17,7 @@ import {
   rankDatePairs,
   resultBasisOf,
   type StopDetail,
+  searchLinkFor,
 } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import type { COPY } from '../../copy.js';
@@ -132,6 +135,37 @@ export function arrival(depart: string | null, arrive: string | null): Arrival |
 /** A provenance that names the fixture provider or a synthetic source (spec §5.5). */
 const synthetic = (p: { providerId: string; sourceKind: string }) =>
   p.providerId === 'fixture' || p.sourceKind === 'synthetic';
+
+/**
+ * Where a board row's price links (design 2026-11-08 §5.3, Ruling 6), by core's one rule (`bookingTargetOf`): a pairing
+ * figure's group's booking page where it has one, else the Google Flights search for its airports and dates. Only a
+ * pairing figure's price is a link: a calendar or verified price is shown as it is (the board reads no seller booking),
+ * and a synthetic one is never linked out. `cabin` is the search's, for the search link.
+ */
+export function rowBookingTarget(
+  pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
+  figure: DatePairFigure,
+  cabin: DefinitionResponse['cabin'],
+): BookingTarget {
+  const q = figure.pairing;
+  if (figure.basis !== 'pairing' || q === null) return { kind: 'none' };
+  const link = searchLinkFor(
+    'camoufox',
+    {
+      origin: figure.origin,
+      destination: figure.destination,
+      departureDate: pair.departureDate,
+      returnDate: pair.returnDate,
+    },
+    cabin,
+  );
+  return bookingTargetOf({
+    synthetic: synthetic(figure.price.provenance) || synthetic(q.provenance),
+    booking: null,
+    bookingUrl: q.bookingUrl,
+    searchLink: link === null ? null : { url: link.url, host: link.host },
+  });
+}
 
 /**
  * Spec §11 Dates, revision 50: the red synthetic banner shows when any provenance in the read (figures and

@@ -1,4 +1,10 @@
-import { type DatePair, type DatePairFigure, type DecodedDatePairs, rankTierOf } from '@gmt/core';
+import {
+  type BookingTarget,
+  type DatePair,
+  type DatePairFigure,
+  type DecodedDatePairs,
+  rankTierOf,
+} from '@gmt/core';
 import {
   Fragment,
   type MouseEvent,
@@ -36,6 +42,7 @@ import {
   gridFetchedAtOf,
   type ListsState,
   PAGE_SIZE,
+  rowBookingTarget,
   sellerCoverage,
   setsAirlineOrLayover,
 } from './board.js';
@@ -362,6 +369,7 @@ export function BoardTable(props: BoardProps) {
               digits,
               howFar: howFarChecked(p, airportPairs, state.journey),
               notes: definition.destinationNotes,
+              target: rowBookingTarget(p, p.figure, definition.cabin),
               journeyFiltered: filtered,
               lit: lit === p.index,
               onLight,
@@ -454,6 +462,7 @@ function BoardRow({
   digits,
   howFar,
   notes,
+  target,
   journeyFiltered,
   lit,
   onLight,
@@ -463,6 +472,8 @@ function BoardRow({
   toggle,
 }: {
   pair: DatePair & { figure: DatePairFigure };
+  /** Where the row's price links (a pairing figure's), from `rowBookingTarget`. */
+  target: BookingTarget;
   rank: number;
   digits: number;
   howFar: readonly string[];
@@ -486,7 +497,7 @@ function BoardRow({
   const open = navigateTo(tripPatch(pair));
   // why: spec §11: a click anywhere on the row follows its link; the link and the buttons inside keep their own
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
-    if (e.target instanceof Element && e.target.closest('a, button') !== null) return;
+    if (e.target instanceof Element && e.target.closest('a, button, details') !== null) return;
     open(e);
   };
   return (
@@ -522,7 +533,7 @@ function BoardRow({
         <Flaps text={String(pair.nights)} cells={2} align="right" slot="nights" />
       </td>
       <td className="board-price">
-        <RowPrice figure={f} notes={notes} flapSlot="price" />
+        <RowPrice figure={f} notes={notes} flapSlot="price" target={target} />
         <CheaperCached figure={f} notes={notes} />
         <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />

@@ -5,7 +5,10 @@
    blocks inline styles, so nothing here is set from markup.
    ===================================================================================================================== */
 
-.trip {
+/* The tokens are shared with the search page's price cells (`.row-price`: a board row's price, its label and its
+   booking link), so a label reads the same colours on both pages. */
+.trip,
+.row-price {
   --t-bg: #f5f4f0;
   --t-surface: #ffffff;
   --t-sunk: #f0eee9;
@@ -27,6 +30,9 @@
   --t-warn: #8f5200; /* the stale age: 5.1:1 or more on every label's ground and on surface */
   --t-bad: #b3261e; /* 6.5:1 on surface */
   --t-gutter: 16px;
+}
+
+.trip {
   color-scheme: light;
   color: var(--t-ink);
   background: var(--t-bg);
@@ -41,7 +47,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .trip {
+  .trip,
+  .row-price {
     --t-bg: #121416;
     --t-surface: #1b1e21;
     --t-sunk: #16191b;
@@ -62,6 +69,9 @@
     --t-old-ink: #a5acb5; /* 7.3:1 on surface */
     --t-warn: #f0b860; /* 7.4:1 or more on every label's ground and on surface */
     --t-bad: #ff8a80; /* 7.3:1 on surface */
+  }
+
+  .trip {
     color-scheme: dark;
   }
 }
@@ -208,15 +218,15 @@
 
 /* The booking link: the price and its words as one link (Ruling 10), each on its own line. The " · " between them is
    the link's own text, in its spoken name; drawn at no size here, so no line ever starts with it. */
-.trip :is(a, button):has(> .book-words) {
+:is(.trip, .row-price) :is(a, button):has(> .book-words) {
   font-size: 0;
 }
-.trip .book-amount,
-.trip .book-words {
+:is(.trip, .row-price) .book-amount,
+:is(.trip, .row-price) .book-words {
   display: block;
   font-size: 15px;
 }
-.trip .book-link .book-words {
+:is(.trip, .row-price) .book-link .book-words {
   font-size: 13px;
 }
 .trip .trip-book {
@@ -242,7 +252,7 @@
 .trip form {
   max-width: 100%;
 }
-.trip .book-link {
+:is(.trip, .row-price) .book-link {
   display: inline-block;
   font-weight: 650;
   max-width: 100%;

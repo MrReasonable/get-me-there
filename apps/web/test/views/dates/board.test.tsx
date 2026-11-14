@@ -432,7 +432,12 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     expect(within(row).getByTestId('pairing-which')).toHaveTextContent('2nd outbound tried');
     // the long explanation is not a visible line of the row
     expect(within(row).getByTestId('pairing-which')).not.toHaveTextContent('next-cheapest');
-    expect(within(row).getAllByRole('group')).toHaveLength(1);
+    // why: the row's price label is a disclosure (`details`, also a group); the pairing's lines are the one fieldset
+    expect(
+      within(row)
+        .getAllByRole('group')
+        .filter((g) => g.tagName === 'FIELDSET'),
+    ).toHaveLength(1);
   });
 
   it('the one-attempt read: no "2nd outbound tried"; its description the cheapest outbound', async () => {

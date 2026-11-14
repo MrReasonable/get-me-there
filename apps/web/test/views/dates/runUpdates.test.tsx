@@ -230,6 +230,8 @@ describe('a read held while the operator is in the board (revision 50, Ian ruled
     within(boardRows(table)[3] ?? table)
       .getByRole('link')
       .focus();
+    // why: the last row's price label (a disclosure) is a stop between its link and the button
+    await user.tab();
     await user.tab();
     expect(document.activeElement).toBe(button);
     await user.keyboard('{Enter}');

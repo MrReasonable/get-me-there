@@ -8,8 +8,9 @@ import { contrast } from '../../contrast.js';
 // page uses reads at WCAG AA, in both schemes.
 
 const css = readFileSync(join(import.meta.dirname, '../../../src/views/Trip/trip.css'), 'utf8');
-const light = /\n\.trip \{([^}]*)\}/.exec(css)?.[1] ?? '';
-const dark = /@media \(prefers-color-scheme: dark\) \{\s*\.trip \{([^}]*)\}/.exec(css)?.[1] ?? '';
+const light = /\n\.trip,\n\.row-price \{([^}]*)\}/.exec(css)?.[1] ?? '';
+const dark =
+  /@media \(prefers-color-scheme: dark\) \{\s*\.trip,\s*\.row-price \{([^}]*)\}/.exec(css)?.[1] ?? '';
 
 function tokenIn(block: string, name: string): string {
   const m = new RegExp(`--t-${name}:\\s*(#[0-9a-f]{6})`, 'i').exec(block);
