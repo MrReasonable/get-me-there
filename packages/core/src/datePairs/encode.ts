@@ -153,8 +153,9 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
- * times, booking options, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed by the figure's position (spec rev
- * 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an absent one written `not-read`).
+ * times, booking options, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed
+ * by the figure's position (spec rev 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an
+ * absent one written `not-read`).
  * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {

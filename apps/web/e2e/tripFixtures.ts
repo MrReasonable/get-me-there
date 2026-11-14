@@ -303,6 +303,7 @@ export const TRIP_STATES = {
     calendar: null,
     cells: [{ origin: 'LHR', destination: 'JFK', bucket: 'empty', skipReason: null }],
     flightList: list(['Aer Lingus']),
+    log: [],
   }),
   // final review I3: no calendar price and the read by hand failed: the cells' state under the couldn't-read line
   'failed-by-hand': base({
@@ -320,6 +321,7 @@ export const TRIP_STATES = {
       returns: null,
     },
     listFailure: { at: READ_AT, cause: 'network' },
+    log: [],
   }),
   // design §6.1 Review Focus 5: the longest seller and an airline list of three, which must wrap at 375 px
   'long-seller': readTrip('Trip.com Travel Singapore Pte Ltd', [
