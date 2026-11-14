@@ -13,7 +13,8 @@
       "!**/drizzle/meta",
       "!**/pnpm-lock.yaml",
       "!**/packages/db/data/airports.*.json",
-      "!**/packages/db/data/ourairports.json"
+      "!**/packages/db/data/ourairports.json",
+      "!docs/superpowers/specs/**/*-mockups"
     ]
   },
   "formatter": {
