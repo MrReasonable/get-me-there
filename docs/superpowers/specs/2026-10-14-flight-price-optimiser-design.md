@@ -2246,8 +2246,8 @@ Rule: `{ type: 'absolute' | 'dropPct' | 'dropAbs', thresholdPence | pct, basis: 
 
 ### 6.9 Results basis
 `basis: 'verified' | 'calendar'` (the `/results` basis; a date pair's figure
-may also have the basis `pairing`, below, which opens the detail on
-`calendar`). Verified basis ranks observations (class
+may also have the basis `pairing`, below, which opens the Trip page, whatever
+the basis). Verified basis ranks observations (class
 `verified` and `partially-verified`; `failed` excluded by default, included
 by filter). Calendar basis ranks calendar prices as rows with class
 `unchecked`, no segments, an explicit "not checked" marker in every
@@ -3852,13 +3852,13 @@ First-failing-test per WP in §16.
    overview's one tab stop and the coverage section's toggle in that order;
    in the overview the arrows, PageUp/PageDown and Home/End move as §11
    says, across a month end and into a band, Enter on a band opens it and
-   Escape closes it, Enter on a cell or a row opens the detail with the date
+   Escape closes it, Enter on a cell or a row opens the Trip page with the date
    pair in the URL, and focus stays on its date pair across a re-rank; the
    re-rank's one transition, and none under `prefers-reduced-motion:
    reduce`; the status region announces once per read; while the pointer is
    over the board or focus is inside it a read is held behind the "Update
    board" button; the best-per-week switch; on touch a first tap shows the
-   readout and a second opens the detail; rings and lighting both ways; every amount on the board, the readout and the phone cards
+   readout and a second opens the Trip page; rings and lighting both ways; every amount on the board, the readout and the phone cards
    renders through `PriceCell`, no overview cell prints an amount, and a
    figure lacking provenance fails to render; the old `?view=calendar`,
    `?view=duration` and `?view=coverage` URLs and `?view=results` without a
@@ -4056,11 +4056,11 @@ points alike; a bare `true` is refused.
 | `POST /executions/:id/cancel`, `/resume` | `/resume` 409 if another is active or the compare-and-set loses; manual resume re-enables disabled providers and, on a `completed` execution, retries `error` outcomes with headroom |
 | `POST /cells/verify` | validated cell → child execution; 409 if a child is active for that cell |
 | `GET /definitions/:id/trip?departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | the Trip page's one read (§11, `tripResponseSchema`): one date pair of a search, assembled from the board's own composition, so its `figure` (the date-pairs route's figure for those dates, `null` when it has none) and `journeyLeftOut` are exactly the board's. The scope parameters are the date-pairs route's (their 422s; a malformed date 422 `invalid_date_pair`). `inWindow` is the board's window test (the date pair departs after today and is inside the search's current dates); it is judged before the scope is parsed, so an old link to departed dates answers 200 with `inWindow` false and the date-specific fields null or empty. Otherwise: `cells` (each airport pair of the dates in scope with its bucket and skip reason), `flightList` (the newest list of the cell whose flight read the board used for the figure, else the figure's own cell, else, with no figure, the cell a read with no pair named takes, with its returns and offers) and `listFailure` (`{ at, cause }`) set only where the board shows a failed read: the figure's `pairingRead` is `list-failed`, or there is no figure and that list failed; `bookingUrl` (the address of the booking page for the list's chosen pairing, by the pairing group's rule above), `searchLink` (the Google Flights search for the cell, through the allowlist), `booking` (a verified figure's own seller booking, re-validated, else null), `calendar` and `cached` (the newest live-calendar price and the newest Aviasales cached price for these dates, each with whether a later search found its cell empty), `log` (newest first, one row per run that priced or read these dates and one per by-hand read: the calendar price and what the flight list said, never why a run did not read), `reading` (a read in flight is for these dates), `read` (`available`, `unavailableReason`, `wouldGo` by the flight-lists route's `readNow` rule, `pagesPlanned` and the `origin` and `destination` of the cell the page's read names), `verificationConfigured`, `refreshHours` and `limits`. Every price carries its full provenance; the read never spends and never loads a page |
-| `GET /definitions/:id/results?basis=&executionId=&limit=&departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | the source of the alert emails' rows and History (§11; the web has no view of it; stage 4 of the UX redesign removes what is left of it): `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage, datePairFigure }`; default basis per §6.9; **scope parameters**: `departureDate` and `returnDate` (both or neither, else 422 `date_pair_incomplete`; a malformed date 422 `invalid_date_pair`; a date pair outside the current resolved space 422 `date_pair_outside_space`) narrow the rows and `coverage` to that date pair's cells before the basis is chosen and the rows ranked, and `origins`, `destinations` and `maxJourneyMinutes` narrow by the date-pair route's rule and 422s (plan decision 53: no row or count from a cell outside the scope; a row whose known journey time is above the limit is left out); `datePairFigure` is, on a date-pair read only (else null), the figure the Dates board shows for that date pair, from the same function; without them the read is the whole space, as an alert email sent before revision 48 needs; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`; read through a fixed number of grouped statements, `?executionId=` included with its truncation and supersession marks; `coverage` is the per-cell classification's sum (§6.6). **No sort or filter parameters**: sorting and filtering are client-side (§6.5); the scope parameters only choose which cells are read |
+| `GET /definitions/:id/results?basis=&executionId=&limit=&departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | read by the web's status bar and History (§11; the web has no view of its rows; stage 4 of the UX redesign removes what is left of it): `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage, datePairFigure }`; default basis per §6.9; **scope parameters**: `departureDate` and `returnDate` (both or neither, else 422 `date_pair_incomplete`; a malformed date 422 `invalid_date_pair`; a date pair outside the current resolved space 422 `date_pair_outside_space`) narrow the rows and `coverage` to that date pair's cells before the basis is chosen and the rows ranked, and `origins`, `destinations` and `maxJourneyMinutes` narrow by the date-pair route's rule and 422s (plan decision 53: no row or count from a cell outside the scope; a row whose known journey time is above the limit is left out); `datePairFigure` is, on a date-pair read only (else null), the figure the Dates board shows for that date pair, from the same function; without them the read is the whole space, as an alert email sent before revision 48 needs; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`; read through a fixed number of grouped statements, `?executionId=` included with its truncation and supersession marks; `coverage` is the per-cell classification's sum (§6.6). **No sort or filter parameters**: sorting and filtering are client-side (§6.5); the scope parameters only choose which cells are read |
 | `GET /definitions/:id/date-pairs?origins=&destinations=&maxJourneyMinutes=` | the source of a search's page (§11), shape below: for the definition's latest parent run, one entry per date pair of the current resolved space with its six discovery buckets over the airport pairs in scope, its verification counts, and its **figure**, the cheapest price found across those airport pairs by §11's precedence, with the airport pair it came from, its basis and class, provenance, `stale`, age, and the decision 54 marks; the same execution set and price rules as `/results` (children included, current space and cabin, plan decisions 53, 54, 58); `origins` and `destinations` scope every count, figure and the summary to those airport pairs alone (decision 53); `maxJourneyMinutes` leaves out of a figure any price whose journey time is known and above it, never one whose time is unknown; columns, not paged, gzip, at most 50,000 cells read through a fixed number of grouped statements |
 | `GET /definitions/:id/coverage` | the latest parent run's coverage, read by the status bar (its blocked-schedule line) and a search's coverage section: summary (the per-cell classification's sum over the current space, §6.6, so it equals the unfiltered date-pair summary and counts days a relative window rolled in, widened nights and added airports as not searched), per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
 | `GET /definitions/:id/calendar-gap` | the calendar-gap banner of a search's page: cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
-| `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (kept for the alert builders and History; the web no longer reads it, and stage 4 of the UX redesign removes it) |
+| `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (nothing in the app reads it any more; stage 4 of the UX redesign removes it) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
 | `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3); `gmt smoke` prints all of it before it asks, and waits for the page's bound (§13) |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
@@ -4261,8 +4261,9 @@ email nor `gmt` reads them), so they are **removed** with their contract
 schemas, read modules and tests in the Dates view's work package.
 `GET /definitions/:id/coverage` is **kept**: the status bar reads its
 blocked-schedule line and a search's coverage section reads the rest.
-`calendar-gap` and the cell route are kept for a search's page and the date
-pair detail.
+`calendar-gap` is kept for a search's page banner. The cell route has no
+reader now that the date pair detail is gone; stage 4 of the UX redesign
+removes it.
 
 ---
 
@@ -4637,7 +4638,7 @@ merged into price.
     below your reference verified price (latest seen, then fresh, then
     cheapest) (£X)", the reference named as "across the whole search" (no
     filter narrows it), listing only the cells inside the airport scope and
-    the stay filter, each linking to its date pair's detail, where the verify
+    the stay filter, each linking to its Trip page, where the verify
     action runs (below). The red synthetic banner shows when any provenance
     in the response (figures, cheaper-cached prices, grid prices and pairings
     alike), the discovery
@@ -4776,9 +4777,9 @@ merged into price.
     created before the latest parent run; never the
     "searched" umbrella and never a word claiming completeness. Its final
     wording, "verified · cabin only" included, is the clarify step's, within
-    the banned-word list and the "verified" rule. Each row opens the date
-    pair detail: its dates are a real link to the detail URL, carrying the
-    figure's basis, and a click anywhere on the row follows it.
+    the banned-word list and the "verified" rule. Each row opens the Trip
+    page: its dates are a real link to the Trip URL (the dates only, no basis), and a click anywhere on the row
+    follows it.
   - **How checking ended**, in one line under the board (a pure function of the
     run's stored summary, `ended`, the run's `stopCause` and its dates checked; the
     words are the operator's "trips with flights read", never "confirmed", which the
@@ -5069,7 +5070,7 @@ merged into price.
     detail (on a closed band, opens the band); focus is always visible.
     **Touch**: a first tap on a cell focuses it and shows its readout; a
     second tap on the same cell, or the readout's "Open these dates" link,
-    opens the detail.
+    opens the Trip page.
   - **Filters**, above the board, in the URL, applying to the header line,
     the board and the overview together, and kept across views: stay range
     (`d.nights=10-14`, applied in the browser to the decoded date pairs
@@ -5105,7 +5106,7 @@ merged into price.
     calls. It reads `GET /definitions/:id/coverage` and is not narrowed by
     the filters, which it says.
   - **Phone** (narrower than 900 px): the board becomes stacked cards, each a
-    link to the detail: the dates and the price lead (`PriceCell` phone
+    link to the Trip page: the dates and the price lead (`PriceCell` phone
     face: provider mark, destination, short age, "not checked" on a calendar
     price), then how far checked, then journey time ("journey time not
     known" when it is not, the card having no column head) and airports.
@@ -5953,8 +5954,9 @@ pair, the trip route) and §11 (the Trip page, the label rule, booking targets, 
   search's page. The row-lookup landing and its messages are gone.
 - **Ruling (plan): the Trip card's price and booking text are one link.** On a board row the price is the link, the
   date cell links to the Trip page, and a click on the row still opens it in place.
-- **Ruling (plan): `GET /results` and the cell route stay** for History and the alert builders; only the web Results
-  view goes. Stage 4 of the redesign removes what is left.
+- **Ruling (plan): `GET /results` and the calendar-gap route stay**: the status bar and History read `/results`, the
+  search page's banner reads calendar-gap. Only the web Results view goes; the cell route has no reader now. Stage 4
+  of the redesign removes what is left.
 - **Ruling (plan, Ruling 7): a Trips card's trip price opens its Trip page** in stage 1; the cards' booking targets
   come with the cards' redesign (their read carries no booking inputs today).
 - **Ruling (execution): the card follows the board.** A failed newest list never lets an older read trip lead (the

@@ -257,7 +257,7 @@ real run after the merge is the check that the address is captured.
 - For every pair of dates, the Trip card's price, label and seller equal the Search page row's (one test over the
   same API data).
 - A browser read records `bookingUrl` (worker test from booking-view facts; engine and DB round-trip tests),
-  and the Trip page's price links to it; older reads link to the Google Flights search, labelled "Find".
+  and the Trip page's price links to it; a read trip whose booking page was not recorded, or is another pairing's, links to the Google Flights search, labelled "Find".
 - "Read flights again" from the Trip page runs on a pair read inside the refresh interval and on a pair with no
   calendar price (engine tests).
 - `view=results` links open the Trip page.
