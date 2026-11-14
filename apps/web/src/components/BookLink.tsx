@@ -26,14 +26,6 @@ function wordsOf(target: Exclude<BookingTarget, { kind: 'none' }>): string {
   }
 }
 
-/**
- * The spoken name of a target's link where the price beside it is a whole cell of its own words (a board row's): the
- * amount, the target's words and that it opens in a new tab, with nothing between them but the join.
- */
-export function bookLinkName(target: Exclude<BookingTarget, { kind: 'none' }>, amount: string): string {
-  return `${amount}${T.priceJoin}${wordsOf(target)}${T.newTab}`;
-}
-
 /** The address a target links to, checked against its source's allowlist and its own stated host. */
 function addressOf(target: Exclude<BookingTarget, { kind: 'none' }>): string | null {
   if (target.kind === 'seller') return safeVendorUrl(target.booking.url, target.booking.host, 'searchapi');
@@ -53,14 +45,11 @@ export function BookLink({
   target,
   price,
   label,
-  name,
   className = 'book-link',
 }: {
   target: BookingTarget;
   price?: ReactNode;
   label?: string;
-  /** The link's whole spoken name (`bookLinkName`), for a price whose own words are too many to be read as the name. */
-  name?: string;
   className?: string;
 }) {
   const href = target.kind === 'none' ? null : addressOf(target);
@@ -77,12 +66,10 @@ export function BookLink({
         </>
       )}
       <span className="book-words">{wordsOf(target)}</span>
-      {name === undefined ? (
-        <span className="sr-only">
-          {label === undefined ? null : T.nameContext(label)}
-          {T.newTab}
-        </span>
-      ) : null}
+      <span className="sr-only">
+        {label === undefined ? null : T.nameContext(label)}
+        {T.newTab}
+      </span>
     </>
   );
   if (target.kind === 'seller' && target.booking.kind === 'post') {
@@ -92,14 +79,14 @@ export function BookLink({
         {fields.map(([name, value], i) => (
           <input key={`${name}-${i}`} type="hidden" name={name} value={value} />
         ))}
-        <button type="submit" className={className} aria-label={name}>
+        <button type="submit" className={className}>
           {body}
         </button>
       </form>
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className} aria-label={name}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
       {body}
     </a>
   );

@@ -8,7 +8,6 @@ import {
   staleWords,
 } from '@gmt/core';
 import { COPY } from '../copy.js';
-import { Flaps } from '../flaps/Flaps.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
 import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
@@ -53,12 +52,6 @@ export interface PriceCellProps {
    */
   face?: boolean;
   /**
-   * The row form's amount on split-flap cells (the departure board): the amount is still written out for readers, and
-   * the cells beside it are decorative. `flapSlot` names the board slot the cells flip in (BoardTable).
-   */
-  flaps?: boolean;
-  flapSlot?: string | undefined;
-  /**
    * Replaces the source's words on every face (the title, the compact detail and the provenance line), for a price
    * whose source has a name of its own (a flight list's, WP20 Task 20.10). The provenance is validated all the same.
    */
@@ -80,12 +73,6 @@ export interface PriceCellProps {
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
 // steel, on an enamel plate and on a board, and never inherits its surroundings' colour (review ui C1).
 const badge = 'tag ml-1';
-
-/**
- * An amount as a link's spoken name says it ("£1,180"), for a link whose visible price is a whole cell: money is
- * formatted only here and in the cost views (the source guard), so the one place that names an amount is this file.
- */
-export const spokenAmount = (pricePence: number): string => formatPence(pricePence);
 
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
@@ -251,20 +238,7 @@ export function PriceCell(props: PriceCellProps) {
             <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
           </>
         ) : null}
-        {props.flaps === true ? (
-          <>
-            <span className="sr-only">{formatPence(props.pricePence)}</span>
-            <Flaps
-              text={formatPence(props.pricePence)}
-              cells={6}
-              align="right"
-              slot={props.flapSlot}
-              className="price-flaps"
-            />
-          </>
-        ) : (
-          formatPence(props.pricePence)
-        )}
+        {formatPence(props.pricePence)}
         {props.qualifier !== undefined ? (
           <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
         ) : null}

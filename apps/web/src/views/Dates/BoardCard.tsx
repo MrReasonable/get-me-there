@@ -8,9 +8,9 @@ import {
 } from '@gmt/core';
 import { type ReactNode, useId } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
-import { BookLink, bookLinkName } from '../../components/BookLink.js';
+import { BookLink } from '../../components/BookLink.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell, spokenAmount } from '../../components/PriceCell.js';
+import { PriceCell } from '../../components/PriceCell.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { assertProvenance } from '../../components/Provenance.js';
 import { COPY } from '../../copy.js';
@@ -45,18 +45,19 @@ export function FigurePrice({
   figure,
   notes,
   face = false,
-  flapSlot,
+  bare = false,
 }: {
   figure: DatePairFigure;
   notes: DefinitionResponse['destinationNotes'];
   face?: boolean;
-  /** On the board: the amount on flap cells that flip in this slot. */
-  flapSlot?: string | undefined;
+  /** The amount alone: a row whose one label says the rest (design 2026-11-08 §5.1). */
+  bare?: boolean;
 }) {
   const p = figure.price;
   return (
     <PriceBoundary>
       <PriceCell
+        bare={bare}
         pricePence={p.pricePence}
         provenance={p.provenance}
         calendar={calendarStyled(figure.basis)}
@@ -72,8 +73,6 @@ export function FigurePrice({
         destination={figure.destination}
         destinationNote={notes[figure.destination] ?? null}
         face={face}
-        flaps={flapSlot !== undefined}
-        flapSlot={flapSlot}
       />
     </PriceBoundary>
   );
@@ -98,35 +97,28 @@ export function RowPrice(props: RowPriceProps) {
 interface RowPriceProps {
   figure: DatePairFigure;
   notes: DefinitionResponse['destinationNotes'];
-  face?: boolean;
-  flapSlot?: string | undefined;
-  /** Where a pairing figure's price links; any other basis shows its price as it is. */
+  /** Where a price links (`rowBookingTarget`); a calendar price is never a link. */
   target?: BookingTarget;
 }
 
-function RowPriceBody({ figure, notes, face = false, flapSlot, target = { kind: 'none' } }: RowPriceProps) {
-  // why: the link's spoken name and the label both read the price outside PriceCell, so a provenance that is not one
-  // withholds the whole price (one message), before any of them is drawn
+function RowPriceBody({ figure, notes, target = { kind: 'none' } }: RowPriceProps) {
+  // why: the label reads the price outside PriceCell, so a provenance that is not one withholds the whole price (one
+  // message), before the label is drawn
   assertProvenance(figure.price.provenance);
-  const price = <FigurePrice figure={figure} notes={notes} face={face} flapSlot={flapSlot} />;
+  // why: the amount alone (with "≈" when converted, said in the link's name too): the label beside it says the source
+  // and age, so the cell's own chips would be a second set of qualifiers on one price
+  const price = <FigurePrice figure={figure} notes={notes} bare />;
   const q = figure.pairing;
   const kind = figureLabelKind(figure, null);
   const p = figure.price;
   return (
     <span className="row-price">
-      {figure.basis === 'pairing' ? (
-        <BookLink
-          target={target}
-          price={price}
-          // why: the price cell's own words (source, age, marks) are many; the link is named by the amount and the words
-          {...(target.kind === 'none' ? {} : { name: bookLinkName(target, spokenAmount(p.pricePence)) })}
-        />
-      ) : figure.basis === 'calendar' ? (
+      {figure.basis === 'calendar' ? (
         <span data-testid="calendar-price" className="price-secondary">
           <span className="calendar-word">{D.calendarPrice}</span> {price}
         </span>
       ) : (
-        price
+        <BookLink target={target} price={price} />
       )}
       <PriceLabel
         kind={kind}
@@ -563,7 +555,7 @@ export function BoardCard({
         </span>
       </th>
       <td className="card-price">
-        <RowPrice figure={f} notes={notes} face target={target} />
+        <RowPrice figure={f} notes={notes} target={target} />
         <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />
         {toggle}

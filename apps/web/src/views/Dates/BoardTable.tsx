@@ -533,7 +533,7 @@ function BoardRow({
         <Flaps text={String(pair.nights)} cells={2} align="right" slot="nights" />
       </td>
       <td className="board-price">
-        <RowPrice figure={f} notes={notes} flapSlot="price" target={target} />
+        <RowPrice figure={f} notes={notes} target={target} />
         <CheaperCached figure={f} notes={notes} />
         <PairingFigureLines figure={f} settings={settings} changes={changes} />
         <FlightRead figure={f} lists={lists} />

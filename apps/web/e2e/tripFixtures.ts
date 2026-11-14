@@ -307,7 +307,8 @@ export type TripState = keyof typeof TRIP_STATES;
  * first). Saved only, never started: the trip read is served here.
  */
 export const FIXTURE_SEARCH = {
-  name: 'London → New York',
+  // why: not the smoke's search name, so the smoke finds its own search by name whatever saved one before it
+  name: 'London → New York (layout checks)',
   origins: ['LHR'],
   destinations: ['JFK'],
   window: { kind: 'relative', startOffsetDays: 7, lengthDays: 30 },

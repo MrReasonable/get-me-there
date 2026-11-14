@@ -165,7 +165,8 @@ describe('a search’s header (spec rev 55 §11)', () => {
     });
     const board = await findBoard();
     expect(screen.getByText("Every price shown is older than this search's refresh.")).toBeInTheDocument();
-    expect(within(board).getAllByText("older than this search's refresh")).toHaveLength(2);
+    expect(within(board).getAllByLabelText(/older than this search's refresh/)).toHaveLength(2);
+    // why: the stale words are the label's spoken name (design 2026-11-08 §5.1), the age turns amber; no price shows a "stale" chip
     expect(within(board).queryByText('stale')).toBeNull();
   });
 
@@ -173,7 +174,7 @@ describe('a search’s header (spec rev 55 §11)', () => {
     const stale = calendarFig({ price: { ...calendarFig().price, stale: 'setting' } });
     renderDates({ body: { pairs: { [at('2027-03-14', 10)]: pricedPair(stale) } } });
     const board = await findBoard();
-    expect(within(board).getAllByText('older than your stale setting')).toHaveLength(1);
+    expect(within(board).getAllByLabelText(/older than your stale setting/)).toHaveLength(1);
     expect(screen.getByText('Every price shown is older than your stale setting.')).toBeInTheDocument();
   });
 
@@ -181,7 +182,7 @@ describe('a search’s header (spec rev 55 §11)', () => {
     const fig = verifiedFig({ price: { ...verifiedFig().price, stale: 'setting' } });
     renderDates({ body: { pairs: { [at('2027-03-14', 10)]: pricedPair(fig) } } });
     const board = await findBoard();
-    expect(within(board).getAllByText('older than your stale setting')).toHaveLength(1);
+    expect(within(board).getAllByLabelText(/older than your stale setting/)).toHaveLength(1);
     expect(screen.getByText('Every price shown is older than your stale setting.')).toBeInTheDocument();
   });
 

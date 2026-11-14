@@ -11,6 +11,7 @@ import {
   pairingFig,
   pricedPair,
   provGrid,
+  provSearched,
   provSynthetic,
   verifiedFig,
 } from '../../fixtures.dates.js';
@@ -68,6 +69,31 @@ describe.each([
     expect(links[0]?.getAttribute('href')).toMatch(/^https:\/\/www\.google\.com\//);
   });
 
+  it('shows the amount and its one label only: no source, age or mark chips beside it', async () => {
+    const { row } = await rowOf(pairingFig(), width);
+    const price = within(row).getAllByTestId('price-cell')[0];
+    expect(price).toHaveAttribute('data-bare');
+    expect(row.querySelector('[data-testid="provenance"], [data-testid="face-provider"]')).toBeNull();
+    expect(within(row).getAllByTestId('price-label')).toHaveLength(1);
+  });
+
+  it('links a verified row\'s price: "Find on Google Flights ↗", its spoken name keeping a conversion\'s words', async () => {
+    const fx = {
+      converted: true as const,
+      rateNano: 1_270_000_000,
+      rateDate: asIsoDate('2026-10-14'),
+      source: 'ECB',
+    };
+    const figure = verifiedFig({
+      price: { ...verifiedFig().price, provenance: provSearched({ fx }) },
+    });
+    const { row } = await rowOf(figure, width);
+    const links = outLinks(row);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAccessibleName(/^approximately \(.*\)£412 · Find on Google Flights ↗/);
+    expect(links[0]).toHaveTextContent('≈');
+  });
+
   it('shows a calendar price as plain text, labelled "Calendar · 3h"', async () => {
     const f = calendarFig({ price: { ...calendarFig().price, provenance: provGrid(), ageHours: 3 } });
     const { row } = await rowOf(f, width);
@@ -107,7 +133,7 @@ describe("rowBookingTarget (core's one rule over a board row)", () => {
     expect(search).toMatchObject({ kind: 'search', host: 'www.google.com' });
     expect(search.kind === 'search' ? search.url : '').toContain('LHR');
   });
-  it('is none for a synthetic price, a calendar price and a verified price', () => {
+  it('is none for a synthetic price and a calendar price', () => {
     const f = pairingFig({ pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) });
     expect(
       rowBookingTarget(pair, { ...f, price: { ...f.price, provenance: provSynthetic() } }, 'economy'),
@@ -121,6 +147,19 @@ describe("rowBookingTarget (core's one rule over a board row)", () => {
       ),
     ).toEqual({ kind: 'none' });
     expect(rowBookingTarget(pair, calendarFig(), 'economy')).toEqual({ kind: 'none' });
+  });
+  it("links a verified row like a pairing row: its group's booking page, else the search", () => {
+    const real = { ...verifiedFig().price, provenance: provSearched() };
+    const v = verifiedFig({ price: real });
+    expect(rowBookingTarget(pair, v, 'economy')).toMatchObject({ kind: 'search', host: 'www.google.com' });
+    expect(
+      rowBookingTarget(
+        pair,
+        { ...v, pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) },
+        'economy',
+      ),
+    ).toMatchObject({ kind: 'booking-page', url: SYNTHETIC_BOOKING_URL });
+    // a synthetic verified price (the fixture provider's) is never linked out
     expect(rowBookingTarget(pair, verifiedFig(), 'economy')).toEqual({ kind: 'none' });
   });
   it('is none when the search link is not for a cabin the browser reads', () => {

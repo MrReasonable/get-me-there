@@ -109,6 +109,7 @@ describe('a card’s trip price (Ruling 7)', () => {
     const card = (await screen.findByRole('heading', { level: 3, name: 'Pairing' })).closest('li');
     const link = within(card ?? document.body).getByTestId('card-trip-price');
     expect(link.tagName).toBe('A');
+    expect(link).toHaveAccessibleName(/£1,180.*, open this trip$/);
     expect(link).toHaveTextContent('£1,180');
     expect(link).toHaveAttribute('href', '?view=trip&def=p&depart=2027-03-14&return=2027-03-24');
     expect(link).not.toHaveAttribute('target');

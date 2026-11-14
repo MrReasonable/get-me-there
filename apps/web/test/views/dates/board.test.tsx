@@ -71,8 +71,9 @@ describe('the board (spec §11 Board)', () => {
     expect(cellsOf(rows[1] ?? table).slice(1, 4)).toEqual(['14 Mar 2027', '24 Mar 2027', '10']);
     // the superseded (31000) and not-seen (32000) figures are cheaper than most, and rank last; between the two, the tier
     // (design 2026-11-08 §5.1) puts the not-seen verified figure before the superseded calendar price
-    expect(rows[9]).toHaveTextContent('not seen in latest search (30h ago)');
-    expect(rows[10]).toHaveTextContent('superseded by a later search');
+    // (each says so in its one label, "Not seen again · age")
+    expect(within(rows[9] ?? table).getByTestId('price-label')).toHaveTextContent('Not seen again');
+    expect(within(rows[10] ?? table).getByTestId('price-label')).toHaveTextContent('Not seen again');
   });
 
   it('sorts by departure, nights, price and journey time with aria-sort; a second press reverses; the rank stays', async () => {
@@ -138,16 +139,9 @@ describe('the board (spec §11 Board)', () => {
     renderDates({ body: workedDates() });
     const table = await findBoard();
     const row = boardRows(table).find((r) => cellsOf(r)[1] === '22 Mar 2027');
-    expect(row).toHaveTextContent('cheapest of the rows read');
+    // why: the row's price is the amount and its one label (design 2026-11-08 §5.1); the cut-short read is said in "how far checked"
     expect(cellsOf(row ?? table)[5]).toContain('read was cut short');
     expect(cellsOf(row ?? table)[7]).toBe('LGW → JFK');
-  });
-
-  it('point of sale in words on each row, from the price’s provenance', async () => {
-    renderDates({ body: workedDates() });
-    const table = await findBoard();
-    for (const r of boardRows(table))
-      expect(within(r).getAllByTestId('point-of-sale')[0]).toHaveTextContent('market not stated');
   });
 
   it('journey time "not known", and "journey time not known" on a kept row under a journey filter', async () => {
@@ -245,12 +239,12 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     const first = cards[1] ?? document.body;
     const link = within(first).getByRole('link');
     expect(link.getAttribute('href')).toContain('depart=2027-03-14');
-    const face = within(first).getByTestId('price-cell');
-    expect(face).toHaveAttribute('data-face');
-    expect(within(face).getByTestId('face-provider')).toHaveTextContent('syn JFK');
-    expect(within(face).getByTestId('face-unchecked')).toHaveTextContent('not checked');
+    // why: design 2026-11-08 §5.1: the card's price is the amount and its one label, no source chips beside it
+    expect(within(first).getByTestId('price-cell')).toHaveAttribute('data-bare');
+    expect(within(first).queryByTestId('face-provider')).toBeNull();
+    expect(within(first).getByTestId('price-label')).toHaveTextContent('Calendar');
     expect(first.textContent?.indexOf('14 Mar 2027')).toBeLessThan(
-      first.textContent?.indexOf('constraints not checked') ?? 0,
+      first.textContent?.indexOf('Calendar') ?? 0,
     );
     expect(first).toHaveTextContent('LHR → JFK');
     expect(first).not.toHaveTextContent('market');
@@ -357,11 +351,10 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     const price = within(row).getAllByTestId('price-cell')[0];
     if (price === undefined) throw new Error('no price');
     expect(price).toHaveTextContent('£1,180');
-    expect(within(price).getByTestId('provenance')).toHaveTextContent(
-      "the browser worker's flight list, the cheapest of the sellers read for these two flights",
-    );
-    expect(within(price).getByTestId('provenance')).toHaveTextContent('constraints not checked');
-    expect(within(price).getByTestId('provenance')).toHaveTextContent(/4h/);
+    // why: the source and age are the row's one label ("Seller · 4h"), not chips beside the amount
+    expect(price).toHaveAttribute('data-bare');
+    expect(within(row).queryByTestId('provenance')).toBeNull();
+    expect(within(row).getByTestId('price-label').querySelector('summary')).toHaveTextContent('Seller · 4h');
     expect(within(row).getByTestId('pairing-seller')).toHaveTextContent(
       'QQ Travel · cheapest of 3 offers read',
     );
@@ -395,8 +388,8 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
       expect(within(row).getByTestId('pairing-kind')).toHaveTextContent(words);
       expect(within(row).queryByTestId('pairing-seller')).toBeNull();
       expect(row).not.toHaveTextContent('cheapest of 3 offers read');
-      const price = within(row).getAllByTestId('price-cell')[0];
-      expect(within(price ?? row).getByTestId('provenance')).toHaveTextContent(
+      expect(within(row).getByTestId('price-label')).toHaveTextContent(/^Google price · 4h/);
+      expect(within(row).getByTestId('price-label')).toHaveTextContent(
         "Google's price for these two flights",
       );
       expect(row).toHaveTextContent(words);
@@ -414,7 +407,9 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     expect(row).toHaveAttribute('data-state', 'stale');
     const price = within(row).getAllByTestId('price-cell')[0];
     expect(price).toHaveTextContent('£1,180');
-    expect(price).toHaveTextContent("older than this search's refresh");
+    expect(within(row).getByTestId('price-label').querySelector('summary')).toHaveAccessibleName(
+      /older than this search's refresh/,
+    );
     expect(within(row).getByTestId('pairing-seller')).toHaveTextContent(
       'QQ Travel · cheapest of 3 offers read',
     );
@@ -546,7 +541,7 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
       expect(within(within(card).getByTestId('pairing-grid')).getByTestId('price-cell')).toHaveTextContent(
         '£564',
       );
-      expect(within(card).getAllByTestId('price-cell')[0]).toHaveTextContent('not checked');
+      expect(within(card).getByTestId('price-label')).toHaveTextContent('Seller · 4h');
     } finally {
       setViewportWidth(1280);
     }

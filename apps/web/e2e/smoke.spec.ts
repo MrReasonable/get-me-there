@@ -34,10 +34,22 @@ async function addAirport(page: Page, label: string, code: string) {
  */
 async function searchId(page: Page): Promise<string> {
   const res = await page.request.get('/api/definitions');
-  const [first] = z.array(z.object({ id: z.string() })).parse(await res.json());
-  if (first === undefined) throw new Error('the smoke search was not created');
-  return first.id;
+  // why: by name, so a search another spec saved first neither is taken nor breaks this one
+  const mine = z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .parse(await res.json())
+    .find((d) => d.name === SMOKE_SEARCH);
+  if (mine === undefined) throw new Error('the smoke search was not created');
+  return mine.id;
 }
+
+/** The name the first test gives its search (the form's suggested name for the worked example's route). */
+const SMOKE_SEARCH = 'London → New York';
+/** The smoke's own search card, found by its name, never by how many cards the page has. */
+const smokeCard = (page: Page) =>
+  page
+    .locator(SMOKE.searchCard)
+    .filter({ has: page.getByRole('heading', { level: 3, name: SMOKE_SEARCH, exact: true }) });
 
 const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
 const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
@@ -57,7 +69,7 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   // why: the provider checkboxes sit behind More options, below the short form.
   await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
   // the name is suggested from the airports picked (the airports table's cities for LHR and JFK)
-  const searchName = 'London → New York';
+  const searchName = SMOKE_SEARCH;
   await expect(page.getByRole('textbox', { name: PLAN_COPY.name })).toHaveValue(searchName);
   // why: the presets name the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
   for (const prefix of ['p-d-', 'p-v-']) {
@@ -90,7 +102,7 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   // the name the form suggested from the two airports picked, now the page's heading
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
 
-  // (2) Dates: the header line, the banner, the first row's provenance, the legend, the overview's keyboard and rings
+  // (2) Dates: the header line, the banner, the first row's label, the legend, the overview's keyboard and rings
   await page.goto(`/?view=dates&def=${defId}&d.nights=${NIGHTS}`);
   await expect(board(page)).toBeVisible();
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
@@ -99,8 +111,8 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   // the alarm plate: the red of spec §5.5, with white words (styles/world.css --alarm)
   await expect(banner(page)).toHaveCSS('background-color', 'rgb(163, 35, 26)');
   const first = board(page).locator(SMOKE.boardRow).first();
-  await expect(first).toContainText(SOURCE_LABELS.synthetic);
-  await expect(first.getByTestId('price-cell')).toContainText(/ago|just now|old/);
+  // why: a row's source and age are its one label (design 2026-11-08 §5.1); the synthetic source is the banner above
+  await expect(first.getByTestId('price-label')).toContainText(/ · (just now|\d+[hdm])/);
   await expect(page.locator(SMOKE.legend)).toBeVisible();
   const stop = page.locator(SMOKE.overviewTabStop);
   await expect(stop).toHaveCount(1);
@@ -152,7 +164,7 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   await page.goto('/?view=definitions');
   await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('searches');
-  await expect(page.locator(SMOKE.searchCard)).toHaveCount(1);
+  await expect(smokeCard(page)).toHaveCount(1);
   await expect(
     page.getByRole('navigation', { name: SMOKE.nav }).getByRole('link', { name: searchName }),
   ).toBeVisible();
@@ -303,7 +315,7 @@ test('at 375px the new-search form sits above the list, and the cards list fits 
   page,
 }) => {
   await page.goto('/');
-  const card = page.locator(SMOKE.searchCard).first();
+  const card = smokeCard(page);
   await expect(card).toBeVisible();
   // spec rev 55 §11: narrower than 900 px the form is first in the DOM, so it is above the list
   const form = await page.locator(SMOKE.newSearchForm).boundingBox();

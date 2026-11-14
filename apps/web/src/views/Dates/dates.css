@@ -415,6 +415,18 @@
 .row-price .price-label {
   margin-top: 6px;
 }
+/* why: the label sits on its own line under the amount and link, on the side they are aligned to */
+.row-price > .price-label:not([open]) {
+  display: block;
+  width: fit-content;
+  margin-inline-start: auto;
+}
+.card-price .row-price > .price-label:not([open]) {
+  margin-inline-start: 0;
+}
+.card-price .row-price .book-link {
+  text-align: left;
+}
 .row-price :is(a, summary):focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;

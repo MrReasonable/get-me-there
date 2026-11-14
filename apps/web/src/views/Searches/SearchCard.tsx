@@ -121,6 +121,7 @@ export function SearchCard({
                 compact
               />
             </PriceBoundary>
+            <span className="sr-only">{S.openThisTrip}</span>
           </a>
           <span>{tripText(cheapest.departureDate, cheapest.returnDate)}</span>
           {/* why: spec rev 56 §11 (prov-006): a card carries no seller, offer count or grid price, so a pairing figure

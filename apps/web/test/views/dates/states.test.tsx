@@ -132,7 +132,7 @@ describe('the Dates view’s states (spec §11)', () => {
     });
     await findBoard();
     expect(screen.getByText("Every price shown is older than this search's refresh.")).toBeInTheDocument();
-    expect(within(await findBoard()).getAllByText("older than this search's refresh")).toHaveLength(2);
+    expect(within(await findBoard()).getAllByLabelText(/older than this search's refresh/)).toHaveLength(2);
   });
 
   it('not every figure stale: no header label, the stale figure still labelled', async () => {
@@ -147,7 +147,7 @@ describe('the Dates view’s states (spec §11)', () => {
     });
     const table = await findBoard();
     expect(screen.queryByText(/^Every price shown is/)).toBeNull();
-    expect(within(table).getAllByText("older than this search's refresh")).toHaveLength(1);
+    expect(within(table).getAllByLabelText(/older than this search's refresh/)).toHaveLength(1);
   });
 
   it('no prices but coverage: "No prices in this run" with the header line and the six buckets under it, never "no flights"', async () => {

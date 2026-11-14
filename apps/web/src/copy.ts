@@ -487,6 +487,8 @@ export const COPY = {
     // actions
     seeDates: 'See dates',
     seeDatesOf: (name: string) => `See dates for ${name}`,
+    // the card's price is a link to its trip's page; said to a screen reader, after the price
+    openThisTrip: ', open this trip',
     searchAgainOf: (name: string) => `Search again: ${name}`,
     edit: 'Edit',
     editOf: (name: string) => `Edit ${name}`,
