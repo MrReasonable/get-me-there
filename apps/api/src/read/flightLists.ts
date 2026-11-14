@@ -109,11 +109,11 @@ function googleLink(
 const NO_READ_AGAIN: ReadonlySet<string> = new Set(['execution-cap']);
 
 /**
- * Whether a read of a date pair would go now (spec rev 55 §10 `readNow`; the Trip page's `read.wouldGo`): flight lists
- * can be read here, the pair departs after today and is inside the search's current dates (the engine's own window
- * test, flightRead.ts, so the button never offers a read it refuses), and its newest list is not a failed list a
- * per-run limit stopped. why: the operator asking is the reason to read (design §6.1): a fresh list and a pair with no
- * figure both read.
+ * Whether a read of a date pair would go now (spec rev 55 §10 `readNow`; the Trip page's `read.wouldGo`): flight
+ * lists can be read here, the pair departs after today and is inside the search's current dates (the engine's own
+ * window test, flightRead.ts, so the button never offers a read it refuses), and its newest list is not a failed
+ * list a per-run limit stopped. why: the operator asking is the reason to read (design §6.1): a fresh list and a
+ * pair with no figure both read.
  */
 export function readNow(
   unavailable: string | null,
