@@ -147,8 +147,11 @@ shows that pair and "About this price" names the other pairs' states in one line
 withheld, and the rest of the page still shows. A label's detail and "About this price" both name the market the price
 was read in ("UK market").
 
-**Actions**: "Read flights again · free, ~2 min" (the existing on-demand read) and, only when SearchApi can run for
-this search, "Check with SearchApi · 1 credit" (the existing verify). An action that can't run isn't shown (§3).
+**Actions**: "Read flights again · free, ~2 min" (the existing on-demand read, for the airport pair whose flights the
+card reads) and, on a read trip, a verified price or a calendar price, only when SearchApi can run for this search,
+"Check with SearchApi · 1 credit" (the existing verify, for the card's own airport pair: a stale verified price's is
+its own, not the calendar pair it is weighed against). An action that can't run isn't shown (§3). The calendar-gap
+banner's links open the Trip page on the gap's own airport pair, so its calendar price can be checked there.
 The on-demand read today refuses a pair whose newest list is inside the refresh interval (`fresh`) and a pair with
 no figure (`no_price`). Asked for from the Trip page, it runs in both cases: the operator asking is the reason to
 read *(my call: a free read the operator starts by hand needs no freshness guard)*.
@@ -163,9 +166,11 @@ read: 6 over your 25h limit, 3 dearer. Show them". These rows link out to the Go
 
 **One click down:**
 
-- **About this price**: what it is, when it was read, what was checked (the journey limit each way), what wasn't
-  (the seller, bags, fare rules), and what the calendar and the Aviasales cache said for these dates, each with its
-  label.
+- **About this price**: what it is, when it was read and the market ("Priced for the UK market."), what was checked
+  (the journey limit each way), what wasn't (the seller, bags, fare rules), and what the calendar and the Aviasales
+  cache said for these dates, each with its label: in the card's own airport pair when its price is calendar-based,
+  else in the pair whose flights the card reads, which the line names when it is not the card's ("Google's calendar
+  showed £395 for these dates on LHR → JFK.").
 - **Search log for these dates**: one row per run that touched these dates, plus on-demand reads ("Today 16:40 ·
   calendar £388 · flights £412 Kiwi.com"; "Tue 3 Nov · couldn't read: page timed out"; "Sat 31 Oct · calendar £395
   · flights not read"; "Today 18:05 · flights read by hand · £409"), newest first, five shown, the rest behind
@@ -181,8 +186,8 @@ figure's own cell when the board read none). The first matching row wins:
 |---|---|
 | Page can't load its data | one red line: "Can't reach the app's server; showing nothing rather than old prices. [Retry]" |
 | The dates are outside the search's dates now (departed, or the search's dates changed; an old alert link) | "These dates are outside this search's dates now." with a link back to the search. The page answers normally; this is not an error. |
-| Reading now (an on-demand read in flight for these dates) | "Reading flights for these dates… about 2 min. The calendar showed £388." A bar runs against the measured read time; it is an estimate, not progress *(my call: no new progress reporting)*. |
-| A read trip (pairing figure) or a verified price | The answer card above. Older than the refresh interval: the age turns amber; it stays a Seller or Google price (rev 68 ranks older reads after fresh ones). A verified price the latest search did not see again is the "Price gone" row. |
+| Reading now (an on-demand read in flight for these dates) | "Reading flights for these dates… about 2 min. The calendar showed £388." (the second sentence only for a calendar price, never a verified one). A bar runs against the measured read time; it is an estimate, not progress *(my call: no new progress reporting)*. |
+| A read trip (pairing figure) or a verified price | The answer card above. Older than the refresh interval: the age turns amber; it stays a Seller or Google price (rev 68 ranks older reads after fresh ones). A verified price the latest search did not see again is the "Price gone" row. A verified price links to its own Google Flights search (its own airports) when SearchApi gave no seller's booking; a stale one with a read trip beneath it adds the row's read-trip line ("return flights read 3d ago, older than this search's refresh: £412 Kiwi.com"). |
 | Calendar price, and an older read trip that does not lead (`within-older`) | "£388 · Calendar · 3h. The trip below was read 3d ago, longer ago than this search's refresh, and doesn't lead." The older trip is shown under it. |
 | Calendar price, flights read under limits other than the search's now (`within-other-limits`) | "£388 · Calendar · 3h. Flights were read 3h ago under different limits from yours now." [Read flights again] |
 | Flights read, none within the limits (`over-limit`) | "£388 · Calendar · 3h. Flights were read 3h ago: none within your 25h limit each way. The cheapest read was £455 · Google list, 27h 10m out." [Read flights again] The limit named is the one every flight failed. |
@@ -191,7 +196,8 @@ figure's own cell when the board read none). The first matching row wins:
 | Couldn't read (the newest list failed), where the board shows a failed read | "The flights page didn't load at 16:42 (timed out). Nothing was saved." [Try again], above the card below it: the calendar price when the figure has one. An older read trip does not lead past a failed newest list; it shows again once the dates are read again. The line appears only where the board shows the failed read. |
 | Calendar price only (no read) | "£388 · Calendar · 3h. Flights not read yet, so there's nothing to book here. [Read flights · free, ~2 min]" |
 | Price gone (the figure is superseded / not seen in the latest run) | the price greyed, "Not seen again · 5d", and [Read flights] |
-| No figure, flights read by hand | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The board ranks no such dates: it has no figure for them.) |
+| No figure, flights read by hand that yield a trip within the limits | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The board ranks no such dates: it has no figure for them.) |
+| No figure, flights read by hand that yield no trip within the limits | The matching sentence above with no calendar price: outbounds without returns, no return listed, none within the limits, or read under other limits. A failed read by hand falls to the rows below, under its couldn't-read line. |
 | No figure, every price found is over the journey limit set on the search's page | "Every price found for these dates is over the journey limit set on the search's page." |
 | No figure, a cell errored | "Google's page for these dates couldn't be read in the latest search. Nothing was saved." It is never worded "no price". |
 | No figure, no price listed | "Google's calendar listed no price for these dates in today's search. That doesn't mean there are no flights. [Read flights]" |
@@ -217,9 +223,12 @@ Trips card, the trip's price opens that trip's Trip page: the cards' booking tar
 redesign, since the cards' read carries no booking inputs today.
 
 A Search page row shows one label for its price (§5.1); the source and age chips it carried are gone. A row's price
-is a link by §5.3's rule: a read trip's price (a Seller or Google price row, and a verified row too) links to the
-booking page its read recorded, else to the Google Flights search for its airports and dates. The search link uses the
-default GB point of sale. A calendar price and a synthetic price are not links. Opening a label's detail pushes the
+is a link by §5.3's rule: a read trip's price (a Seller or Google price row) links to the booking page its read
+recorded, else to the Google Flights search for its airports and dates; a verified row's price links to the search for
+its own airports and dates, never to the booking page of a trip read beside it (a stale verified price carries the trip
+read on its dates' best calendar pair, which is another trip). A verified price's label is the same on the row and on
+the Trip page: "Seller" when SearchApi's booking options gave a seller's link. The search link uses the default GB
+point of sale. A calendar price and a synthetic price are not links. Opening a label's detail pushes the
 content below it down, at every width: no floating panel. The rest of those screens changes in stage 2.
 
 ### 6.3 Recording the booking page's address

@@ -722,10 +722,13 @@ none: `skipped`, rule `not-cheapest-view`). The request is admitted for
   allowlist (`google.com`), the booking path, no userinfo or port, at most 2048
   characters (`validateVendorUrl`, then the path). Otherwise `bookingUrl` is
   null. It costs no page load, click or request, and is never written to a log
-  (the worker logs the path only). The path rule applies where the address enters (the
-  worker's answer and the database insert); a stored address is read back as any
-  string and re-checked wherever it is used, so a later change to the booking
-  path makes a link fall back to a search link, never a read error.
+  (the worker logs the path only). The path rule applies where the address
+  enters: the app's reading of the worker's answer drops an address that is not
+  the booking page's own to null and keeps the read (an address is only a link,
+  never worth the page read and its outbound list), and the database insert
+  checks it again. A stored address is read back as any string and re-checked
+  wherever it is used, so a later change to the booking path makes a link fall
+  back to a search link, never a read error.
   **No offer (an offer button is the booking control), grouped control or
   anything else on the booking view is ever activated, and no seller's host is
   ever reached**: the guard refuses every navigation off the allowlist, and a
@@ -4055,7 +4058,7 @@ points alike; a bare `true` is refused.
 | `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses; a camoufox `provider-execution` scope states its flight pages as `flightLists { calls }` with no cap, §8.1), estimate vs ledger (updates during run), `stop` (the stored cause's `{ sentence, fix }` from `core`'s `stopText`; `NO_STOP_CAUSE_TEXT` on a stopped row with no cause; null on every other status), `flights` (`{ planned, read, reused, failed, ended, confirm, stopCause }` from the stored flight-list plan, §8.1, or null when none was stored: `confirm` is the step's stored summary `{ mode, confirmed, unread, uncheckedCheaper, stop }`, null on a plan stored before revision 68, and `stopCause` why the step stopped before its own rule ended it, null while nothing stopped it: `{ kind: 'detail', detail }` for the ending page's or cap's stop detail (worded by `core`'s `stopDetailClause`), else `{ kind }` of `cancelled`, `budget`, `fatal` or `other`, never a cause's text) and `estimatedFinishAt` (now plus the run's remaining seconds while pending or running, else null; the api keeps a run's remaining seconds per execution and ledger row count for at most 30 s, so a poll with no new call does not re-estimate the run, and this route and the cards read the same kept figure) |
 | `POST /executions/:id/cancel`, `/resume` | `/resume` 409 if another is active or the compare-and-set loses; manual resume re-enables disabled providers and, on a `completed` execution, retries `error` outcomes with headroom |
 | `POST /cells/verify` | validated cell → child execution; 409 if a child is active for that cell |
-| `GET /definitions/:id/trip?departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | the Trip page's one read (§11, `tripResponseSchema`): one date pair of a search, assembled from the board's own composition, so its `figure` (the date-pairs route's figure for those dates, `null` when it has none) and `journeyLeftOut` are exactly the board's. The scope parameters are the date-pairs route's (their 422s; a malformed date 422 `invalid_date_pair`). `inWindow` is the board's window test (the date pair departs after today and is inside the search's current dates); it is judged before the scope is parsed, so an old link to departed dates answers 200 with `inWindow` false and the date-specific fields null or empty. Otherwise: `cells` (each airport pair of the dates in scope with its bucket and skip reason), `flightList` (the newest list of the cell whose flight read the board used for the figure, else the figure's own cell, else, with no figure, the cell a read with no pair named takes, with its returns and offers) and `listFailure` (`{ at, cause }`) set only where the board shows a failed read: the figure's `pairingRead` is `list-failed`, or there is no figure and that list failed; `bookingUrl` (the address of the booking page for the list's chosen pairing, by the pairing group's rule above), `searchLink` (the Google Flights search for the cell, through the allowlist), `booking` (a verified figure's own seller booking, re-validated, else null), `calendar` and `cached` (the newest live-calendar price and the newest Aviasales cached price for these dates, each with whether a later search found its cell empty), `log` (newest first, one row per run that priced or read these dates and one per by-hand read: the calendar price and what the flight list said, never why a run did not read), `reading` (a read in flight is for these dates), `read` (`available`, `unavailableReason`, `wouldGo` by the flight-lists route's `readNow` rule, `pagesPlanned` and the `origin` and `destination` of the cell the page's read names), `verificationConfigured`, `refreshHours` and `limits`. Every price carries its full provenance; the read never spends and never loads a page |
+| `GET /definitions/:id/trip?departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | the Trip page's one read (§11, `tripResponseSchema`): one date pair of a search, assembled from the board's own composition, so its `figure` (the date-pairs route's figure for those dates, `null` when it has none) and `journeyLeftOut` are exactly the board's. The scope parameters are the date-pairs route's (their 422s; a malformed date 422 `invalid_date_pair`). `inWindow` is the board's window test (the date pair departs after today and is inside the search's current dates); it is judged before the scope is parsed, so an old link to departed dates answers 200 with `inWindow` false and the date-specific fields null or empty. Otherwise: `cells` (each airport pair of the dates in scope with its bucket and skip reason), `flightList` (the newest list of the cell whose flight read the board used for the figure, else the figure's own cell, else, with no figure, the cell a read with no pair named takes, with its returns and offers) and `listFailure` (`{ at, cause }`) set only where the board shows a failed read: the figure's `pairingRead` is `list-failed`, or there is no figure and that list failed; `bookingUrl` (the address of the booking page for the list's chosen pairing, by the pairing group's rule above), `searchLink` (the Google Flights search for that list's cell, through the allowlist), `figureSearchLink` (the same for the figure's own airport pair, null with no figure: a verified price links there without a seller booking, since a stale verified figure's list cell may be another pair), `booking` (a verified figure's own seller booking, re-validated, else null), `calendar` and `cached` (the newest live-calendar price and the newest Aviasales cached price for these dates in the figure's own cell when the figure is calendar-based, a calendar or pairing figure, else in the list's cell, each with whether a later search found its cell empty and the airport pair it was read for), `log` (newest first, one row per run that priced or read these dates and one per by-hand read: the calendar price and what the flight list said, never why a run did not read), `reading` (a read in flight is for these dates), `read` (`available`, `unavailableReason`, `wouldGo` by the flight-lists route's `readNow` rule, `pagesPlanned` and the `origin` and `destination` of the cell the page's read names), `verificationConfigured`, `refreshHours` and `limits`. Every price carries its full provenance; the read never spends and never loads a page |
 | `GET /definitions/:id/results?basis=&executionId=&limit=&departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | read by the web's status bar and History (§11; the web has no view of its rows; stage 4 of the UX redesign removes what is left of it): `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage, datePairFigure }`; default basis per §6.9; **scope parameters**: `departureDate` and `returnDate` (both or neither, else 422 `date_pair_incomplete`; a malformed date 422 `invalid_date_pair`; a date pair outside the current resolved space 422 `date_pair_outside_space`) narrow the rows and `coverage` to that date pair's cells before the basis is chosen and the rows ranked, and `origins`, `destinations` and `maxJourneyMinutes` narrow by the date-pair route's rule and 422s (plan decision 53: no row or count from a cell outside the scope; a row whose known journey time is above the limit is left out); `datePairFigure` is, on a date-pair read only (else null), the figure the Dates board shows for that date pair, from the same function; without them the read is the whole space, as an alert email sent before revision 48 needs; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`; read through a fixed number of grouped statements, `?executionId=` included with its truncation and supersession marks; `coverage` is the per-cell classification's sum (§6.6). **No sort or filter parameters**: sorting and filtering are client-side (§6.5); the scope parameters only choose which cells are read |
 | `GET /definitions/:id/date-pairs?origins=&destinations=&maxJourneyMinutes=` | the source of a search's page (§11), shape below: for the definition's latest parent run, one entry per date pair of the current resolved space with its six discovery buckets over the airport pairs in scope, its verification counts, and its **figure**, the cheapest price found across those airport pairs by §11's precedence, with the airport pair it came from, its basis and class, provenance, `stale`, age, and the decision 54 marks; the same execution set and price rules as `/results` (children included, current space and cabin, plan decisions 53, 54, 58); `origins` and `destinations` scope every count, figure and the summary to those airport pairs alone (decision 53); `maxJourneyMinutes` leaves out of a figure any price whose journey time is known and above it, never one whose time is unknown; columns, not paged, gzip, at most 50,000 cells read through a fixed number of grouped statements |
 | `GET /definitions/:id/coverage` | the latest parent run's coverage, read by the status bar (its blocked-schedule line) and a search's coverage section: summary (the per-cell classification's sum over the current space, §6.6, so it equals the unfiltered date-pair summary and counts days a relative window rolled in, widened nights and added airports as not searched), per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
@@ -4159,7 +4162,8 @@ datePairsResponseSchema = {
     which: ('cheapest' | 'next-cheapest' | 'over-limit')[];   // which outbound the pairing used
     bookingUrl: (string | null)[];   // the booking page's address (§5), only when the list's booking read is this pairing's own
                                 // (its attempt and return are the pairing's and its status reached the booking view, the rule an offer
-                                // is attached by), else null; at most 2048 characters
+                                // is attached by) and the pairing is within the limits (never on an over-limit one), else null; at
+                                // most 2048 characters
     departOut: string[]; arriveOut: string[]; departBack: string[]; arriveBack: string[];   // HH:MM, local, the two legs'
         mismatch: boolean[];        // the cheapest offer differs from the return's "from" price
     provenance: number[]; stale: (false | 'refresh' | 'setting')[]; ageHours: (number | 'unknown')[];
@@ -4184,12 +4188,16 @@ datePairsResponseSchema = {
     departBack: (string | null)[]; arriveBack: (string | null)[];  // segment's arriveLocal of each direction,
                                                 // as the source states them
   };
+  bookingOptions: {             // sparse: one entry per verified figure whose own row's booking (SearchApi's booking
+    figure: number[];           // options, re-validated) is a seller's GET or POST link, so the board labels it Seller
+  };                            // as the Trip page does; decoded as the figure's `hasBookingOptions`
 }
 ```
 
 The contract's refinement rejects any response whose `pairs` columns are not
 all `days × stays` long, whose `figures` columns differ in length or whose
-`cheaperCached`, `times`, `gridPrice`, `pairing` or `pairingRead` columns do, whose
+`cheaperCached`, `times`, `gridPrice`, `pairing` or `pairingRead` columns do, whose `bookingOptions` entry
+names a figure that is not verified, whose
 `pairingRead` group holds a `not-read` code or one outside `PAIRING_READ`, whose `pair` indices or any
 sparse group's `figure` indices are not strictly ascending and in range, whose
 `gridPrice` entries are not exactly the pairing figures, whose pairing figure
@@ -4366,7 +4374,9 @@ says so (never recomputed in the web). The kind comes from one pure function
 in `core` over the price's provenance and what it prices (`priceLabelKind`:
 a pairing's kind, a verified price with or without booking options, a list's
 return or outbound, or a calendar price and its provider), and every surface
-uses it; none builds its own wording. Tapping a label opens its detail in the
+uses it; none builds its own wording. Whether a verified price had booking
+options is the figure's own (`hasBookingOptions`, from its row's re-validated
+booking), so the board and the Trip page label it alike. Tapping a label opens its detail in the
 flow, pushing the content below it down, at every width, never as a floating
 panel: a short explanation of what the price is and what was and wasn't
 checked, and the market it was read in (the same words as the full price
@@ -4384,8 +4394,12 @@ the booking page, not on the allowlist, over 2048 characters or another
 pairing's gives the search link. Only an external link carries "↗", opens in
 a new tab (`rel="noopener noreferrer"`) and has an accessible name that says
 so. A board row's price is a link by this rule where its figure is a read trip
-(a seller or Google price row, a verified row included): its pairing group's booking page, else the search link
-with the default GB point of sale (the web has no point-of-sale setting); a
+or a verified price: a pairing figure's row links its pairing group's booking
+page, else the search link; a verified row links the search for its own
+airports and dates, never the booking page of the pairing it carries (a stale
+verified figure carries the pairing read in its date pair's best calendar cell,
+another trip, maybe on another airport pair). The search link uses the default
+GB point of sale (the web has no point-of-sale setting); a
 calendar price is not a trip to book and is no link, and links to its Trip page
 through its row. The row's date cell links to the Trip page, a click on the row
 still opens it in place, and the price link does not open the row. A Trips
@@ -4778,8 +4792,8 @@ merged into price.
     "searched" umbrella and never a word claiming completeness. Its final
     wording, "verified · cabin only" included, is the clarify step's, within
     the banned-word list and the "verified" rule. Each row opens the Trip
-    page: its dates are a real link to the Trip URL (the dates only, no basis), and a click anywhere on the row
-    follows it.
+    page: its dates are a real link to the Trip URL (the dates only, no
+    basis), and a click anywhere on the row follows it.
   - **How checking ended**, in one line under the board (a pure function of the
     run's stored summary, `ended`, the run's `stopCause` and its dates checked; the
     words are the operator's "trips with flights read", never "confirmed", which the
@@ -5166,9 +5180,12 @@ merged into price.
   (`inWindow` false: "These dates are outside this search's dates now.", with a
   link back to the search; the page answers 200, never an error); a read is in
   flight for these dates ("Reading flights for these dates… about 2 min", with
-  the calendar price and a bar against the measured read time, an estimate);
+  the calendar price when the figure is one, never a verified price called the
+  calendar's, and a bar against the measured read time, an estimate);
   a verified figure, or a leading pairing (the answer card; a verified price
-  the latest search did not see again is "gone"); then, for a calendar
+  the latest search did not see again is "gone"; a stale verified price with a
+  read trip beneath it adds the board row's read-trip line, that trip with its
+  price, label and age); then, for a calendar
   figure, by its flight read: an older read trip that does not lead
   (`within-older`: the calendar price, and the older trip shown beneath it
   with its age), flights read under limits other than the search's now
@@ -5177,9 +5194,13 @@ merged into price.
   Google list label), outbounds read without returns (`outbound-only`), no
   return listed (`no-pairing-read`), or no read (the calendar price and "Flights
   not read yet, so there's nothing to book here"; a price a later search did
-  not find again is "gone"); and, with no figure: flights read by hand (the
-  trip under "No calendar price for these dates; their flights were read by hand
-  2h ago"), every price over the search page's journey limit, a cell that
+  not find again is "gone"); and, with no figure: flights read by hand that
+  yield a trip within the limits (the trip under "No calendar price for these
+  dates; their flights were read by hand 2h ago"), or that yield none, each in
+  the calendar states' own sentence with no calendar price (outbounds without
+  returns, no return listed, none within the limits, read under other limits;
+  a failed read by hand falls to the states below, under its couldn't-read
+  line), every price over the search page's journey limit, a cell that
   errored ("Google's page for these dates couldn't be read in the latest
   search. Nothing was saved.", never worded "no price"), no price listed, no
   data, not reached (the search stopped at its limit), the browser not
@@ -5198,8 +5219,9 @@ merged into price.
   asked none; with no figure, the cell a read with no pair named takes).
   **Actions**: "Read flights again · free, ~2 min", which sends the card's
   airport pair (§8.1) and runs whether the newest list is recent or the dates
-  have no price, and, only when SearchApi can verify for this search, "Check
-  with SearchApi · 1 credit" (the verify action, stating the child's hard
+  have no price, and, on a read trip, a verified price or a calendar price,
+  only when SearchApi can verify for this search, "Check with SearchApi · 1
+  credit" for the figure's own airport pair (the verify action, stating the child's hard
   stop, the budget headroom left, the cap to raise when the search allows 0
   billed calls, and handing the started search to the status bar, §8.1).
   **Other flights on these dates**, from the card's flight list (one airport
@@ -5209,10 +5231,12 @@ merged into price.
   into one line ("9 more outbounds read: 6 over your 25h limit, 3 dearer. Show
   them"). Each links to the Google Flights search for the dates.
   **About this price** (one click down): what the price is and when it was
-  read, the market it was read in ("Market: UK market."), what was checked (the
-  journey limit each way) and what wasn't (the seller, bags, fare rules), and
-  what the calendar and the Aviasales cache said for these dates, each with its
-  label. **Search log for these dates** (one click down): one row per run
+  read, the market it was read in ("Priced for the UK market.", or "The market
+  it was priced for wasn't stated."), what was checked (the journey limit each
+  way) and what wasn't (the seller, bags, fare rules), and what the calendar and
+  the Aviasales cache said for these dates in the card's own cell (a
+  calendar-based figure's) or the cell whose list it reads, each with its label,
+  naming the airport pair when it is not the card's. **Search log for these dates** (one click down): one row per run
   that priced or read these dates and per by-hand read, newest first, five
   shown and the rest behind "Show all N" ("Today 16:40 · calendar £388 ·
   flights £412 Kiwi.com"; "Sat 31 Oct · calendar £395 · flights not read").
@@ -5937,16 +5961,18 @@ pair, the trip route) and §11 (the Trip page, the label rule, booking targets, 
 - **Ruling (plan): a read names its airport pair.** `origin` and `destination` are both or neither; a pair outside the
   search's space is `outside_space`. With none named, the read takes the figure's, else the search's first origin and
   first destination.
-- **Ruling (plan, prov-007): dates with no figure that were read by hand show their read trip** (`read-without-calendar`).
-  The board is unchanged for them: it has no figure to rank.
+- **Ruling (plan, prov-007): dates with no figure that were read by hand show their read trip** (`read-without-calendar`)
+  when that read yields one within the limits; a read that yields none says what it read in its own sentence, and a
+  failed one falls to the cells' states beneath its couldn't-read line (final review I3). The board is unchanged for
+  them: it has no figure to rank.
 - **Ruling (plan): dates outside the search's dates** (departed, or the search's dates changed; old alert links) get a
   card state, not an error. The window test is the board's, made before the scope is parsed, so the route answers 200.
 - **Ruling (plan): a booking address belongs to one pairing.** The API attaches `bookingUrl` to a pairing only when the
   list's booking read is that pairing's own and reached the booking view (the rule an offer is attached by); otherwise
   the price says "Find on Google Flights ↗". The board's pairing group carries `bookingUrl` too, so a read trip's price
-  is its booking link on every row.
-- **Ruling (plan): the path rule is held where the address enters** (the worker's answer and the database insert). A
-  stored address is read back as any string and re-checked where it is used, so a later change to the booking path
+  is its booking link on every row; an over-limit pairing never carries one.
+- **Ruling (plan): the path rule is held where the address enters** (the worker's answer, which drops an off-path
+  address to null and keeps the read, and the database insert, which checks it again). A stored address is read back as any string and re-checked where it is used, so a later change to the booking path
   degrades a link to "Find", never to a read error. Migration 0013's column has no CHECK constraint, which would make
   the migration tool rebuild the table.
 - **Ruling (plan): old links.** `view=results` with dates lands on the Trip page, keeping `def`, `depart`, `return`,
@@ -5973,8 +5999,16 @@ pair, the trip route) and §11 (the Trip page, the label rule, booking targets, 
   seller line, the read button and the next row's link.
 - **Ruling (execution): board rows show one label per price.** The source and age chips are gone: two sets of
   qualifiers on one price contradict one label.
-- **Ruling (execution): a verified row's price links through the booking rule like any read trip's** (its group's
-  booking page, else the search); the board reads no seller booking, so only the seller tier is absent there.
+- **Ruling (final review C1): a board row takes a booking page only from a pairing figure.** A verified row links the
+  search for its own airports and dates: a stale verified figure carries the pairing read in its date pair's best
+  calendar cell, another trip, so that pairing's booking page is never the verified price's. The board reads no
+  seller booking, so the seller tier is absent there too.
+- **Ruling (final review I1): the board learns a verified figure's booking options** (`hasBookingOptions`, the
+  date-pairs read's sparse `bookingOptions` group), so both pages label it from the figure alone.
+- **Ruling (final review I2): a verified card links and checks its own airport pair** (`figureSearchLink`, and the
+  SearchApi check names the figure's cell); "Read flights again" keeps the cell whose list the card reads.
+- **Ruling (final review I4): About's calendar and cached prices are the card's own cell's** when its figure is
+  calendar-based, else the list cell's, and a price read for another airport pair names that pair.
 - **Ruling (execution): the board's search link uses the default GB point of sale**, as the web has no point-of-sale
   setting.
 - **Ruling (execution): the market a price was read in is in every label's detail and in "About this price"**, from the
