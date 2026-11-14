@@ -1,9 +1,18 @@
-import type { BookingTarget } from '@gmt/core';
+import { type BookingTarget, LINK_ALLOWLIST, type ProviderId, validateVendorUrl } from '@gmt/core';
 import type { ReactNode } from 'react';
 import { COPY } from '../copy.js';
-import { BookingForm, safeVendorUrl } from './BookingAction.js';
 
 const T = COPY.trip;
+
+/**
+ * Defence in depth over the API's validation: core's spec §5.2 validator (`https:` only, no userinfo, no port, length
+ * cap, host inside the provider's allowlist) and, on top, the URL's host must equal the host the API states, which is
+ * what the operator is shown. Anything else is no link.
+ */
+export function safeVendorUrl(url: string, statedHost: string, providerId: ProviderId): string | null {
+  const v = validateVendorUrl(url, LINK_ALLOWLIST[providerId]);
+  return v.kind === 'get' && v.host === statedHost ? v.url : null;
+}
 
 /** The words of a target that links out (design 2026-11-08 §5.3); "Book" only where a booking page or seller is known. */
 function wordsOf(target: Exclude<BookingTarget, { kind: 'none' }>): string {
@@ -17,7 +26,7 @@ function wordsOf(target: Exclude<BookingTarget, { kind: 'none' }>): string {
   }
 }
 
-/** The address a target links to and the source whose allowlist it is checked against. */
+/** The address a target links to, checked against its source's allowlist and its own stated host. */
 function addressOf(target: Exclude<BookingTarget, { kind: 'none' }>): string | null {
   if (target.kind === 'seller') return safeVendorUrl(target.booking.url, target.booking.host, 'searchapi');
   // why: the booking page and the Google Flights search are the browser worker's own pages (google.com only)
@@ -25,11 +34,12 @@ function addressOf(target: Exclude<BookingTarget, { kind: 'none' }>): string | n
 }
 
 /**
- * Design 2026-11-08 §5.3 and Ruling 10: a price and its booking text as one link, one tab stop ("£412 · Book on Google
- * Flights ↗"), opening the best target in a new tab; its spoken name adds `label` (what the price is for, such as its
- * flights' times) and that it opens a new tab. A seller's POST booking is the same words in a form button. The address
- * is checked again here (`safeVendorUrl` with the target's own host), so one that fails, and a `none` target (a
- * synthetic price is never linked out), show the price without a link.
+ * Design 2026-11-08 §5.3 and Ruling 10: a price and its booking words as one link, one tab stop, opening the best target
+ * in a new tab. The price and the words sit on their own lines; the " · " between them is in the link's spoken name
+ * ("£412 · Book on Google Flights ↗, opens in a new tab") and drawn at no size (trip.css), so a wrapped line never
+ * starts with it. `label` (what the price is for, such as its flights' times) is spoken too. A seller's POST booking is
+ * the same words in a form button, its fields hidden, never submitted on render. The address is checked again here, so
+ * one that fails, and a `none` target (a synthetic price is never linked out), show the price without a link.
  */
 export function BookLink({
   target,
@@ -45,27 +55,36 @@ export function BookLink({
   const href = target.kind === 'none' ? null : addressOf(target);
   if (target.kind === 'none' || href === null)
     return price === undefined ? null : <span className="book-price">{price}</span>;
+  // why: the join is a text node of the link itself, so the spoken name keeps its spaces (an element's own text is
+  // trimmed when the name is computed)
   const body = (
     <>
       {price === undefined ? null : (
         <>
-          {price}
+          <span className="book-amount">{price}</span>
           {T.priceJoin}
         </>
       )}
-      {wordsOf(target)}
+      <span className="book-words">{wordsOf(target)}</span>
       <span className="sr-only">
         {label === undefined ? null : T.nameContext(label)}
         {T.newTab}
       </span>
     </>
   );
-  if (target.kind === 'seller' && target.booking.kind === 'post')
+  if (target.kind === 'seller' && target.booking.kind === 'post') {
+    const fields = [...new URLSearchParams(target.booking.postData).entries()];
     return (
-      <BookingForm href={href} postData={target.booking.postData} className={className}>
-        {body}
-      </BookingForm>
+      <form method="post" action={href} target="_blank" rel="noopener noreferrer">
+        {fields.map(([name, value], i) => (
+          <input key={`${name}-${i}`} type="hidden" name={name} value={value} />
+        ))}
+        <button type="submit" className={className}>
+          {body}
+        </button>
+      </form>
     );
+  }
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
       {body}

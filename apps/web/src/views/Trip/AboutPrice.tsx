@@ -1,8 +1,6 @@
 import { type IsoDateTime, type PriceLabelKind, priceLabelKind } from '@gmt/core';
 import type { ReactNode } from 'react';
 import type { TripResponse } from '../../api/types.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDateShort, londonParts } from '../../format.js';
@@ -10,7 +8,8 @@ import { labelDetail } from '../../lib/figureLabel.js';
 import { instantMs } from '../../lib/time.js';
 import { hoursText } from '../Dates/flightLines.js';
 import { londonDaysAgo } from '../Dates/stateLines.js';
-import { calendarPriceOf, type Priced, type ShownTrip } from './model.js';
+import { Amount } from './Amount.js';
+import { figurePriceOf, type Priced, type ShownTrip } from './model.js';
 
 const T = COPY.trip;
 const A = T.about;
@@ -24,22 +23,6 @@ function whenRead(at: IsoDateTime, now: IsoDateTime): string {
   return T.aboutWhen.day(formatIsoDateShort(date), time);
 }
 
-function Amount({ price }: { price: Priced }) {
-  return (
-    <b>
-      <PriceBoundary>
-        <PriceCell
-          pricePence={price.pricePence}
-          provenance={price.provenance}
-          calendar={false}
-          stale={price.stale}
-          bare
-        />
-      </PriceBoundary>
-    </b>
-  );
-}
-
 /** A calendar or cached price for these dates with its label, or the line that says there was none. */
 function OtherPrice({ price, lead, none }: { price: TripResponse['calendar']; lead: string; none: string }) {
   if (price === null) return <li>{none}</li>;
@@ -49,13 +32,17 @@ function OtherPrice({ price, lead, none }: { price: TripResponse['calendar']; le
   );
   return (
     <li>
-      {lead} <Amount price={price} /> {A.forTheseDates}{' '}
+      {lead}{' '}
+      <b>
+        <Amount price={price} />
+      </b>{' '}
+      {A.forTheseDates}{' '}
       <PriceLabel
         kind={kind}
         ageHours={price.ageHours}
         stale={price.stale}
         provenance={price.provenance}
-        detail={labelDetail(kind, { seller: null, ageHours: price.ageHours })}
+        detail={labelDetail(kind, null)}
       />
     </li>
   );
@@ -64,7 +51,7 @@ function OtherPrice({ price, lead, none }: { price: TripResponse['calendar']; le
 /** What the card's price is and when it was read, in one sentence after the price. */
 function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): ReactNode {
   const price: (Priced & { label: PriceLabelKind; seller?: ShownTrip['seller'] }) | null =
-    trip ?? calendarPriceOf(r);
+    trip ?? figurePriceOf(r);
   if (price === null) return null;
   const when = whenRead(price.provenance.fetchedAt, now);
   const seller = trip?.seller ?? null;
@@ -78,13 +65,18 @@ function whatLine(trip: ShownTrip | null, r: TripResponse, now: IsoDateTime): Re
         : A[price.label](when);
   return (
     <li>
-      <Amount price={price} /> {words}
+      <b>
+        <Amount price={price} />
+      </b>{' '}
+      {words}
     </li>
   );
 }
 
 /** What was checked of the card's price, and what wasn't. */
 function checkedLines(trip: ShownTrip | null, r: TripResponse): string[] {
+  // why: a verified price not seen again (`gone`) shows no trip, but SearchApi checked it all the same
+  if (trip === null && r.figure?.basis === 'verified') return [A.checkedSearchApi, A.notCheckedTrip];
   if (trip === null) return [A.notCheckedCalendar];
   // why: SearchApi's own checks (its verdicts) apply to a verified price; a pairing is checked by the list's limits
   if (trip.pairingKind === null) return [A.checkedSearchApi, A.notCheckedTrip];

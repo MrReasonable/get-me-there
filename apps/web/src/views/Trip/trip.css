@@ -206,18 +206,30 @@
   align-items: center;
 }
 
-/* The booking link: the price and its words as one link (Ruling 10) */
+/* The booking link: the price and its words as one link (Ruling 10), each on its own line. The " · " between them is
+   the link's own text, in its spoken name; drawn at no size here, so no line ever starts with it. */
+.trip :is(a, button):has(> .book-words) {
+  font-size: 0;
+}
+.trip .book-amount,
+.trip .book-words {
+  display: block;
+  font-size: 15px;
+}
+.trip .book-link .book-words {
+  font-size: 13px;
+}
 .trip .trip-book {
   display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   min-height: 44px;
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--t-accent);
   color: var(--t-accent-ink);
-  font: inherit;
+  font-family: inherit;
   font-weight: 600;
   max-width: 100%;
   border: 0;
@@ -230,8 +242,10 @@
 .trip form {
   max-width: 100%;
 }
-.book-link {
+.trip .book-link {
+  display: inline-block;
   font-weight: 650;
+  max-width: 100%;
 }
 
 /* Buttons */
@@ -383,10 +397,15 @@
 }
 
 /* The one label (design §5.1): Kind · age, the detail one tap down */
+/* why: the detail opens in the flow beneath its label at every width (an open one takes its own line), so it never
+   covers the seller line, an action or the next row */
 .price-label {
-  position: relative;
   display: inline-block;
   max-width: 100%;
+}
+.price-label[open] {
+  display: block;
+  width: 100%;
 }
 .price-label > summary {
   list-style: none;
@@ -431,16 +450,12 @@
   text-underline-offset: 2px;
 }
 .price-label-pop {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  left: 0;
-  width: 300px;
+  max-width: 40rem;
+  margin-top: 6px;
   background: var(--t-surface);
   color: var(--t-ink);
   border: 1px solid var(--t-line);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
   padding: 10px 12px;
   font-size: 13px;
   font-weight: 400;
@@ -563,20 +578,9 @@
   }
   .trip .trip-book {
     width: 100%;
-    justify-content: center;
+    align-items: center;
   }
   .trip-fl {
     grid-template-columns: minmax(0, 1fr);
-  }
-  /* why: at phone width the detail opens in the flow, beneath its label, so it can never run off the screen */
-  .price-label[open] {
-    display: block;
-    width: 100%;
-  }
-  .price-label-pop {
-    position: static;
-    width: auto;
-    margin-top: 6px;
-    box-shadow: none;
   }
 }

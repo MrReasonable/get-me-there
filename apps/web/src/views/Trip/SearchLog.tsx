@@ -7,9 +7,8 @@ import {
 } from '@gmt/core';
 import { type ReactNode, useState } from 'react';
 import type { PriceCellData, TripResponse } from '../../api/types.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
+import { Amount } from './Amount.js';
 import { LOG_SHOWN, logSince, logWhen } from './model.js';
 
 const T = COPY.trip;
@@ -29,15 +28,7 @@ function LogPrice({
 }) {
   return (
     <>
-      <PriceBoundary>
-        <PriceCell
-          pricePence={price.pricePence}
-          provenance={price.provenance}
-          calendar={false}
-          stale={price.stale}
-          bare
-        />
-      </PriceBoundary>
+      <Amount price={price} />
       {sources ? (
         <span className="trip-log-source">
           {' '}

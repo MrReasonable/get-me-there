@@ -2,13 +2,12 @@ import { type BookingTarget, bookingTargetOf } from '@gmt/core';
 import { useState } from 'react';
 import type { FlightList, TripResponse } from '../../api/types.js';
 import { BookLink } from '../../components/BookLink.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
 import { carriersText } from '../Dates/flightLines.js';
+import { Amount } from './Amount.js';
 import { type OtherGroup, type OtherRow, otherFlightsOf } from './model.js';
 
 const T = COPY.trip;
@@ -38,24 +37,14 @@ function Row({ row, list, target }: { row: OtherRow; list: FlightList; target: B
         <BookLink
           target={target}
           label={name}
-          price={
-            <PriceBoundary>
-              <PriceCell
-                pricePence={row.pence}
-                provenance={list.provenance}
-                calendar={false}
-                stale={list.stale}
-                bare
-              />
-            </PriceBoundary>
-          }
+          price={<Amount price={{ pricePence: row.pence, provenance: list.provenance, stale: list.stale }} />}
         />
         <PriceLabel
           kind={row.label}
           ageHours={list.ageHours}
           stale={list.stale}
           provenance={list.provenance}
-          detail={labelDetail(row.label, { seller: null, ageHours: list.ageHours })}
+          detail={labelDetail(row.label, null)}
         />
       </span>
       <span className="trip-fl-what">

@@ -14,7 +14,6 @@ import type {
   DatePairsScope,
   DefinitionBody,
   EstimateResponse,
-  ResultsScope,
   StartRefusal,
   TripQuery,
   VerifyCellBody,
@@ -25,20 +24,7 @@ export const qk = {
   providers: ['providers'] as const,
   definitions: ['definitions'] as const,
   cards: ['cards'] as const,
-  // why: a scoped read (WP19 Task 19.6) holds every scope value in its key; the 'results' prefix still invalidates both
-  results: (id: string, basis: Basis | null, scope?: ResultsScope) =>
-    scope === undefined
-      ? (['results', id, basis ?? 'default'] as const)
-      : ([
-          'results',
-          id,
-          basis ?? 'default',
-          scope.departureDate,
-          scope.returnDate,
-          scope.origins ?? '',
-          scope.destinations ?? '',
-          scope.maxJourneyMinutes ?? '',
-        ] as const),
+  results: (id: string, basis: Basis | null) => ['results', id, basis ?? 'default'] as const,
   execution: (id: string) => ['execution', id] as const,
   coverage: (id: string) => ['coverage', id] as const,
   // WP19 §6: the key holds every route parameter, so a filtered read is never answered from an unfiltered one
@@ -239,11 +225,11 @@ export function useSearchRemoval() {
  * One fetch per (definition, basis, scope); every sort and filter is client-side (spec §6.5). With a scope it is the
  * date pair detail's read (spec §11, WP19 Task 19.6); without one, the whole space.
  */
-export function useResults(definitionId: string | null, basis: Basis | null, scope?: ResultsScope) {
+export function useResults(definitionId: string | null, basis: Basis | null) {
   return useQuery({
-    queryKey: qk.results(definitionId ?? '', basis, scope),
+    queryKey: qk.results(definitionId ?? '', basis),
     // why: skipToken idles the query (the pattern from WP10 on, review arch M10), with no rejecting queryFn
-    queryFn: definitionId === null ? skipToken : () => api.results(definitionId, basis, scope),
+    queryFn: definitionId === null ? skipToken : () => api.results(definitionId, basis),
   });
 }
 

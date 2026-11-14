@@ -1,24 +1,24 @@
-import { type CellKey, stopDetailClause } from '@gmt/core';
+import { type CellKey, priceLabelKind, stopDetailClause } from '@gmt/core';
 import type { ReactNode } from 'react';
 import { useFlightRead } from '../../api/flights.js';
 import type { DefinitionResponse, TripResponse } from '../../api/types.js';
 import { BookLink } from '../../components/BookLink.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { VerifyCellButton } from '../../components/VerifyCellButton.js';
 import { listText } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
+import { labelDetail } from '../../lib/figureLabel.js';
 import { useNow } from '../../now.js';
 import { BACK_TO_DATES } from '../../state/resultsState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { refusalWords } from '../Dates/Flights.js';
 import { hoursText } from '../Dates/flightLines.js';
 import { readAt } from '../Dates/stateLines.js';
+import { Amount } from './Amount.js';
 import type { Card, CardState, LimitName } from './cardState.js';
 import { Legs } from './Legs.js';
-import { calendarPriceOf, cheapestOutbound, type Priced, readMinutes, type ShownTrip } from './model.js';
+import { cheapestOutbound, figurePriceOf, readMinutes, type ShownTrip } from './model.js';
 
 const T = COPY.trip;
 const F = COPY.flights;
@@ -40,31 +40,6 @@ const READ_STATES: ReadonlySet<CardState['kind']> = new Set<CardState['kind']>([
   'over-journey-limit',
   'could-not-read',
 ]);
-
-/** A price in the card's large or middle size, through PriceCell (the one component that prints a price). */
-function Amount({
-  price,
-  variant,
-  muted = false,
-}: {
-  price: Priced;
-  variant: 'big' | 'mid' | 'inline';
-  muted?: boolean;
-}) {
-  return (
-    <span className={`trip-amount trip-amount-${variant}${muted ? ' trip-amount-muted' : ''}`}>
-      <PriceBoundary>
-        <PriceCell
-          pricePence={price.pricePence}
-          provenance={price.provenance}
-          calendar={false}
-          stale={price.stale}
-          bare
-        />
-      </PriceBoundary>
-    </span>
-  );
-}
 
 /** "3h ago", or "at a time not known" when the read's age is not known. */
 function agoText(hours: number | 'unknown'): string {
@@ -206,7 +181,7 @@ function TripAnswer({ trip, caption }: { trip: ShownTrip; caption: boolean }) {
 
 /** A calendar figure's price with its one label, greyed when the latest search did not see it again. */
 function CalendarPrice({ r, muted = false }: { r: TripResponse; muted?: boolean }) {
-  const c = calendarPriceOf(r);
+  const c = figurePriceOf(r);
   if (c === null) return null;
   return (
     <span className="trip-cal-price">
@@ -227,23 +202,28 @@ function stateSentence(r: TripResponse, state: CardState, listAgo: string): Reac
   switch (state.kind) {
     case 'none-within': {
       const cheapest = cheapestOutbound(r.flightList);
+      const list = r.flightList;
+      // why: the cheapest outbound's price is Google's list price for it, said with its own label like every price
+      const kind = priceLabelKind({ kind: 'list-outbound' }, false);
       return (
         <>
           {T.noneWithin(listAgo, limitsText(state.failing, r.limits))}
-          {cheapest === null || r.flightList === null ? null : (
+          {cheapest === null || list === null ? null : (
             <>
               {' '}
               {T.cheapestRead}{' '}
               <Amount
-                price={{
-                  pricePence: cheapest.amountMinor,
-                  provenance: r.flightList.provenance,
-                  stale: r.flightList.stale,
-                  ageHours: r.flightList.ageHours,
-                }}
+                price={{ pricePence: cheapest.amountMinor, provenance: list.provenance, stale: list.stale }}
                 variant="inline"
               />
-              {T.cheapestReadLeg(formatMinutes(cheapest.durationMinutes))}
+              {T.cheapestReadLeg(formatMinutes(cheapest.durationMinutes))}{' '}
+              <PriceLabel
+                kind={kind}
+                ageHours={list.ageHours}
+                stale={list.stale}
+                provenance={list.provenance}
+                detail={labelDetail(kind, null)}
+              />
             </>
           )}
         </>
@@ -329,7 +309,7 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
       </section>
     );
   if (state.kind === 'reading') {
-    const calendar = calendarPriceOf(r);
+    const calendar = figurePriceOf(r);
     const minutes = readMinutes(r.read.pagesPlanned);
     return (
       <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
@@ -375,7 +355,7 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
     <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
       {failure}
       <CalendarPrice r={r} muted={state.kind === 'gone'} />
-      <p className="trip-sentence">{stateSentence(r, state, listAgo)}</p>
+      <div className="trip-sentence">{stateSentence(r, state, listAgo)}</div>
       {trip !== null ? <TripAnswer trip={trip} caption={false} /> : null}
       {actions}
     </section>

@@ -39,21 +39,12 @@ describe('figureLabelKind', () => {
 });
 
 describe('labelDetail', () => {
-  it('names the seller and its count, or says the price is SearchApi’s', () => {
-    expect(labelDetail('seller', { seller: { name: 'Kiwi.com', offersRead: 16 }, ageHours: 3 })).toBe(
-      D.seller('Kiwi.com', 16, '3h ago'),
-    );
-    expect(labelDetail('seller', { seller: null, ageHours: 3 })).toBe(D.sellerSearchApi);
+  it('names the seller and its count, or says the price is SearchApi’s; the age is never in these words', () => {
+    expect(labelDetail('seller', { name: 'Kiwi.com', offersRead: 16 })).toBe(D.seller('Kiwi.com', 16));
+    expect(D.seller('Kiwi.com', 16)).not.toMatch(/\bago\b|\bread \d/);
+    expect(labelDetail('seller', null)).toBe(D.sellerSearchApi);
   });
-  it('says how long ago a price no longer seen was read, or that its age is not known', () => {
-    expect(labelDetail('not-seen-again', { seller: null, ageHours: 120 })).toBe(
-      D['not-seen-again']('5d ago'),
-    );
-    expect(labelDetail('not-seen-again', { seller: null, ageHours: 'unknown' })).toBe(
-      D['not-seen-again'](COPY.ageUnknown),
-    );
-  });
-  it.each(['google-price', 'google-list', 'calendar', 'cached'] as const)('%s', (kind) => {
-    expect(labelDetail(kind, { seller: null, ageHours: 3 })).toBe(D[kind]);
+  it.each(['google-price', 'google-list', 'calendar', 'cached', 'not-seen-again'] as const)('%s', (kind) => {
+    expect(labelDetail(kind, null)).toBe(D[kind]);
   });
 });

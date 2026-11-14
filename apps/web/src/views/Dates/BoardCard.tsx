@@ -328,15 +328,7 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
 }
 
 /** One direction's "arrives HH:MM", with "+1" and the date in words for assistive technology when it is a later day. */
-export function Arrives({
-  label,
-  depart,
-  arrive,
-}: {
-  label: string;
-  depart: string | null;
-  arrive: string | null;
-}) {
+function Arrives({ label, depart, arrive }: { label: string; depart: string | null; arrive: string | null }) {
   const a = arrival(depart, arrive);
   if (a === null) return null;
   return (

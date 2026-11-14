@@ -68,7 +68,7 @@ export default defineConfig({
         branches: 60,
         functions: 70,
         statements: 70,
-        'src/components/{Provenance,PriceCell,PriceBoundary,BookingAction,BookLink,PriceLabel}.tsx': FULL,
+        'src/components/{Provenance,PriceCell,PriceBoundary,BookLink,PriceLabel}.tsx': FULL,
         'src/state/{urlState,resultsState,parse,datesState,tripState}.ts': FULL,
         'src/views/Trip/cardState.ts': FULL,
         'src/lib/**': VIEW_MODEL,

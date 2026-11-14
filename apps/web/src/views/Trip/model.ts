@@ -200,7 +200,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
     return {
       ...f.price,
       label,
-      detail: labelDetail(label, { seller: null, ageHours: f.price.ageHours }),
+      detail: labelDetail(label, null),
       seller: null,
       pairingKind: null,
       legs: verifiedLegs(f),
@@ -227,7 +227,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       stale: price.stale,
       ageHours: price.ageHours,
       label,
-      detail: labelDetail(label, { seller, ageHours: price.ageHours }),
+      detail: labelDetail(label, seller),
       seller,
       pairingKind: kind,
       legs: read === null ? null : pairingLegs(r, read.list, read.p),
@@ -254,7 +254,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       stale: list.stale,
       ageHours: list.ageHours,
       label,
-      detail: labelDetail(label, { seller, ageHours: list.ageHours }),
+      detail: labelDetail(label, seller),
       seller,
       pairingKind: kind,
       legs: pairingLegs(r, list, p),
@@ -265,14 +265,15 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
   return null;
 }
 
-/** A calendar figure's price as its card states show it ("£388 · Calendar · 3h"), or null with no calendar figure. */
-export function calendarPriceOf(
-  r: TripResponse,
-): (Priced & { label: PriceLabelKind; detail: string }) | null {
+/**
+ * The price of a figure that is not a read trip (a calendar figure, or a verified one, which the card shows greyed once
+ * it is not seen again), with its one label: "£388 · Calendar · 3h". Null with no figure or a pairing figure.
+ */
+export function figurePriceOf(r: TripResponse): (Priced & { label: PriceLabelKind; detail: string }) | null {
   const f = r.figure;
   if (f === null || f.basis === 'pairing') return null;
   const label = figureLabelKind(f, r.booking);
-  return { ...f.price, label, detail: labelDetail(label, { seller: null, ageHours: f.price.ageHours }) };
+  return { ...f.price, label, detail: labelDetail(label, null) };
 }
 
 /** The date a leg lands, when another day than it leaves ("lands Sun 29 Nov"), else null. */

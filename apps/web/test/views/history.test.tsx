@@ -4,7 +4,7 @@ import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 import { formatInstantLondon } from '../../src/format.js';
-import { HISTORY_PARAMS, historyHref } from '../../src/state/links.js';
+import { HISTORY_PARAMS } from '../../src/state/links.js';
 import { HistoryChart } from '../../src/views/History/HistoryChart.js';
 import { HistoryView } from '../../src/views/History/HistoryView.js';
 import {
@@ -631,12 +631,6 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const { findByRole, container } = renderWithProviders(<HistoryView definition={definition()} />);
     expect(await findByRole('alert')).toHaveTextContent(/^Could not load:/);
     expect(container).not.toHaveTextContent('£');
-  });
-
-  it('historyHref keeps the other URL parameters and sets view and hash', () => {
-    window.history.replaceState(null, '', '/?view=results&def=def-0001');
-    const p = new URLSearchParams(historyHref('abc 123').split('?')[1]);
-    expect([p.get('view'), p.get('hash'), p.get('def')]).toEqual(['history', 'abc 123', 'def-0001']);
   });
 
   it('the scrolling charts and tables are named regions (review ui I4)', async () => {

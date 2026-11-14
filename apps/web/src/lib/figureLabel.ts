@@ -1,7 +1,6 @@
 import {
   type Booking,
   type DatePairFigure,
-  formatAgo,
   type PriceLabelKind,
   pairingKindOf,
   priceLabelKind,
@@ -41,23 +40,17 @@ export function figureLabelKind(f: LabelledFigure, booking: Booking | null): Pri
   }
 }
 
-/** What a label's detail says the price is (design §5.1's tap details), with the seller where one was read. */
+/**
+ * What a label's detail says the price is (design §5.1's tap details), with the seller where one was read. The age is
+ * said once, on the detail's second line from the price's provenance, so these words name none.
+ */
 export function labelDetail(
   kind: PriceLabelKind,
-  ctx: { seller: { name: string; offersRead: number } | null; ageHours: number | 'unknown' },
+  seller: { name: string; offersRead: number } | null,
 ): string {
   const D = COPY.trip.labelDetail;
-  const ago = COPY.agoOf(ctx.ageHours);
-  switch (kind) {
-    case 'seller':
-      // why: a seller named by the browser's booking-page read; without one the seller's price is SearchApi's
-      return ctx.seller === null ? D.sellerSearchApi : D.seller(ctx.seller.name, ctx.seller.offersRead, ago);
-    case 'not-seen-again':
-      return D['not-seen-again'](ctx.ageHours === 'unknown' ? COPY.ageUnknown : formatAgo(ctx.ageHours));
-    case 'google-price':
-    case 'google-list':
-    case 'calendar':
-    case 'cached':
-      return D[kind];
-  }
+  // why: a seller named by the browser's booking-page read; without one the seller's price is SearchApi's
+  if (kind === 'seller')
+    return seller === null ? D.sellerSearchApi : D.seller(seller.name, seller.offersRead);
+  return D[kind];
 }

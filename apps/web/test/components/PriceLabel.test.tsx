@@ -102,10 +102,52 @@ describe('PriceLabel', () => {
     expect(screen.getByTestId('price-label')).not.toHaveAttribute('open');
   });
 
-  it('a provenance that is not one withholds the label', () => {
+  it('a provenance that is not one withholds the label alone, inside its own boundary', () => {
     expectConsoleErrors(/price withheld|price rendered without valid provenance/);
-    label({ provenance: { providerId: 'fixture', sourceKind: 'scraped-search' } });
+    renderWithProviders(
+      <p>
+        <span>before</span>
+        <PriceLabel
+          kind="calendar"
+          ageHours={3}
+          stale={false}
+          provenance={{ ...provCalendar, providerId: 'fixture' }}
+          detail={detail}
+        />
+        <span>after</span>
+      </p>,
+    );
     expect(screen.getByRole('alert')).toHaveTextContent(COPY.priceWithheld);
     expect(screen.queryByTestId('price-label')).toBeNull();
+    expect(screen.getByText('before')).toBeInTheDocument();
+    expect(screen.getByText('after')).toBeInTheDocument();
+  });
+
+  it('Escape closes an open detail even when its label does not hold focus, and focus returns to the label', async () => {
+    const { user } = label();
+    const d = screen.getByTestId('price-label');
+    if (!(d instanceof HTMLDetailsElement)) throw new Error('not a details element');
+    // why: a clicked summary takes no focus in some browsers; opened with focus left on the page
+    d.open = true;
+    expect(document.activeElement).toBe(document.body);
+    await user.keyboard('{Escape}');
+    expect(d).not.toHaveAttribute('open');
+    expect(summaryOf()).toHaveFocus();
+  });
+
+  it('Escape leaves focus where it is when it is elsewhere on the page', async () => {
+    const { user } = renderWithProviders(
+      <>
+        <button type="button">elsewhere</button>
+        <PriceLabel kind="calendar" ageHours={3} stale={false} provenance={provCalendar} detail={detail} />
+      </>,
+    );
+    const d = screen.getByTestId('price-label');
+    if (!(d instanceof HTMLDetailsElement)) throw new Error('not a details element');
+    d.open = true;
+    screen.getByRole('button', { name: 'elsewhere' }).focus();
+    await user.keyboard('{Escape}');
+    expect(d).not.toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: 'elsewhere' })).toHaveFocus();
   });
 });

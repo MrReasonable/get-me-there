@@ -25,7 +25,7 @@ import {
   trip,
   tripBody,
 } from '../../fixtures.trip.js';
-import { poundsOutsidePrices, renderedCopy } from '../../guards.js';
+import { expectConsoleErrors, poundsOutsidePrices, renderedCopy } from '../../guards.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 import { jargonIn, mainPathWords } from '../dates/jargon.js';
@@ -236,7 +236,10 @@ describe('every state of the card says its sentence, with exactly its own action
       flightList: STATE_FIXTURES['none-within'].flightList,
     });
     const { unmount } = renderTrip(cached);
-    expect(within(await card()).getByTestId('price-label')).toHaveTextContent('Cached · 2h');
+    const first = await card();
+    await waitFor(() => expect(first.dataset.state).toBe('none-within'));
+    // why: the card's first label is its figure's; the cheapest flight read has its own after the sentence
+    expect(within(first).getAllByTestId('price-label')[0]).toHaveTextContent('Cached · 2h');
     unmount();
     renderTrip(
       trip({
@@ -247,6 +250,17 @@ describe('every state of the card says its sentence, with exactly its own action
     const c = await card();
     await waitFor(() => expect(c.dataset.state).toBe('outbound-only'));
     expect(within(c).getByTestId('price-label')).toHaveTextContent('Not seen again · 3h');
+  });
+
+  it("none-within names the cheapest flight read with its own label, Google's list price", async () => {
+    renderTrip(STATE_FIXTURES['none-within']);
+    const c = await card();
+    await waitFor(() => expect(c.dataset.state).toBe('none-within'));
+    const labels = within(c).getAllByTestId('price-label');
+    expect(labels.map((l) => l.querySelector('summary')?.textContent)).toEqual([
+      'Calendar · 3h',
+      'Google list · 4h',
+    ]);
   });
 
   it("the newest read's failure is said above the card, and the read is offered again", async () => {
@@ -261,6 +275,32 @@ describe('every state of the card says its sentence, with exactly its own action
       "The flights page didn't load at 14:40: the connection to it failed. Nothing was saved.",
     );
     expect(within(c).getByRole('button', { name: T.tryAgain(2) })).toBeInTheDocument();
+  });
+});
+
+describe('a price whose provenance is not one is withheld alone (spec §5.5)', () => {
+  it('the calendar price is withheld, its label too, and the rest of the page renders', async () => {
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
+    // why: the fixture provider without the synthetic tag: the contract accepts the pair, PriceCell refuses it
+    const bad = { ...provCache, providerId: 'fixture' as const };
+    renderTrip(
+      trip({
+        figure: calendarFigure({
+          pairingRead: 'not-read',
+          price: { pricePence: 38_800, provenance: bad, stale: false, ageHours: 2, truncated: false },
+        }),
+      }),
+    );
+    const c = await card();
+    await waitFor(() => expect(c.dataset.state).toBe('calendar-only'));
+    const withheld = within(c).getAllByRole('alert');
+    expect(withheld.map((a) => a.textContent)).toEqual([COPY.priceWithheld, COPY.priceWithheld]);
+    expect(c).not.toHaveTextContent('£388');
+    expect(c).toHaveTextContent(T.calendarOnly);
+    expect(within(c).getByRole('button', { name: T.readFlights(false, 2) })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /Wed 11 Nov → Sat 28 Nov/ })).toBeInTheDocument();
+    expect(screen.getByTestId('about-price')).toBeInTheDocument();
+    expect(screen.getByTestId('search-log')).toBeInTheDocument();
   });
 });
 
@@ -449,6 +489,18 @@ describe('About this price and the search log (design §6.1)', () => {
     expect(items[1]).toBe(T.about.notCheckedCalendar);
     expect(items[2]).toBe(T.about.calendarNone);
     expect(items[3]).toContain(`${T.about.cachedShowed} £300 ${T.about.forTheseDates} Cached · 2h`);
+  });
+
+  it('About on a verified price not seen again says SearchApi checked it, never that the flights were not', async () => {
+    const { user } = renderTrip(STATE_FIXTURES.gone);
+    await card();
+    const about = screen.getByTestId('about-price');
+    await user.click(within(about).getByText(T.aboutSummary));
+    const items = within(about)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+    expect(items).toContain(T.about.checkedSearchApi);
+    expect(items).not.toContain(T.about.notCheckedCalendar);
   });
 
   it('the log: its summary, five rows newest first in its words, then every row with each source', async () => {

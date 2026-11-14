@@ -10,6 +10,8 @@ import type { Page } from '@playwright/test';
  */
 
 export const TRIP_DEPART = '2027-03-14';
+/** The page's clock in the spec: 3 h after the fixture's reads, so every age agrees with the wire's `ageHours: 3`. */
+export const TRIP_NOW = '2026-10-14T15:00:00.000Z';
 export const TRIP_RETURN = '2027-03-24';
 const READ_AT = '2026-10-14T12:00:00.000Z';
 
@@ -251,7 +253,30 @@ export const TRIP_STATES = {
         bookingUrl: null,
       }),
     }),
-    flightList: list(['QQ Air'], []),
+    // why: every outbound read is over the 25 h limit, as none-within says; no return was read for them
+    flightList: {
+      ...list(['QQ Air']),
+      minMinor: 43_000,
+      flights: [
+        flight({
+          departsLocal: '06:00',
+          arrivesLocal: '17:10',
+          arrivesDayOffset: 1,
+          durationMinutes: 1630,
+          carriers: ['QQ Air'],
+          amountMinor: 43_000,
+        }),
+        flight({
+          departsLocal: '08:00',
+          arrivesLocal: '20:00',
+          arrivesDayOffset: 1,
+          durationMinutes: 1680,
+          carriers: ['QQ Atlantic'],
+          amountMinor: 45_500,
+        }),
+      ],
+      returns: null,
+    },
   }),
   'outside-window': base({
     inWindow: false,
@@ -276,6 +301,29 @@ export const TRIP_STATES = {
   ]),
 } as const;
 export type TripState = keyof typeof TRIP_STATES;
+
+/**
+ * A search of the fixture provider, London → New York, for a spec run on its own (the smoke makes one when it runs
+ * first). Saved only, never started: the trip read is served here.
+ */
+export const FIXTURE_SEARCH = {
+  name: 'London → New York',
+  origins: ['LHR'],
+  destinations: ['JFK'],
+  window: { kind: 'relative', startOffsetDays: 7, lengthDays: 30 },
+  minNights: 10,
+  maxNights: 10,
+  cabin: 'economy',
+  constraints: {},
+  verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
+  budget: { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 },
+  providers: { discovery: ['fixture'], verification: ['fixture'], discoveryRefreshHours: { fixture: 24 } },
+  destinationNotes: {},
+  onwardCostPence: {},
+  scheduleCron: null,
+  scheduleTz: 'Europe/London',
+  enabled: false,
+};
 
 /** Serves `state` as the trip read of the search `id`; everything else goes to the api. */
 export async function serveTrip(page: Page, id: string, state: TripState) {

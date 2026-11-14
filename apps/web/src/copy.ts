@@ -13,8 +13,6 @@ import {
   type ProviderId,
   type Stage,
   TRUNCATED_NOTE,
-  type Verdict,
-  type VerdictClass,
 } from '@gmt/core';
 import type { z } from 'zod';
 import { DAY_PLURAL, listText } from './copy/setup.js';
@@ -140,15 +138,6 @@ export const COPY = {
   >,
   ageUnknown: 'age unknown',
   agoOf: (hours: number | 'unknown') => (hours === 'unknown' ? 'age unknown' : formatAgo(hours)),
-
-  // classes, bases, verdicts (spec §3, §6.2, §6.9)
-  classLabel: {
-    verified: 'verified',
-    'partially-verified': 'partially verified',
-    failed: 'failed',
-    unchecked: 'constraints not checked',
-  } satisfies Record<VerdictClass | 'unchecked', string>,
-  classSpoken: 'verdict class:',
   basisKindName: {
     seller: 'cheapest of the sellers read, not checked with the airline',
     'google-unread': "Google's price, sellers not read, not checked with the airline",
@@ -157,14 +146,8 @@ export const COPY = {
   // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
   // under COPY so the catalogue test sweeps it for banned words like every other string.
   constraint: CONSTRAINT_LABELS satisfies Record<ConstraintName, string>,
-  verdictWord: { pass: 'pass', fail: 'fail', unverified: 'unverified' } satisfies Record<Verdict, string>,
-  verdictGlyph: { pass: '✓', fail: '✗', unverified: '?' } satisfies Record<Verdict, string>,
-  verdictLine: (constraint: string, verdict: string) => `${constraint}: ${verdict}`,
-  verdictsHeading: 'Constraint verdicts',
-  noVerdicts: 'No constraints evaluated for this row.',
   noRowsFromRun: 'This run has no rows on this basis. Coverage shows what was searched and what was not.',
   dateRange: (dep: string, ret: string, nights: number) => `${dep}–${ret} (${nights}n)`,
-  truncated: (shown: number, total: number) => `within the cheapest ${shown} of ${total}`,
 
   // view header (spec §11)
   executionsShown: (list: string) => `showing ${list}`,
@@ -259,12 +242,6 @@ export const COPY = {
   progressCoverageLink: 'Coverage of this search',
   carriersIgnored: (entries: string) => `ignored, not two-character carrier codes: ${entries}`,
   clearFilters: 'Clear filters',
-  seller: (s: string) => `sold by ${s}`,
-  booking: 'Booking',
-  noLink: 'no link',
-  openOn: (host: string) => `open on ${host}`,
-  continueOnForm: (host: string) => `continue on ${host} (sends a form)`,
-  summary: 'Summary',
 
   // coverage view (spec §11 View D)
   coverageHeading: 'Coverage',
@@ -1182,8 +1159,8 @@ export const COPY = {
     labelStale: (label: string, staleWords: string) => `${label}, ${staleWords}`,
     // design §5.1's tap details, two lines: what the price is, then its full age (core's formatAgeFull)
     labelDetail: {
-      seller: (seller: string, offers: number, ago: string) =>
-        `A seller's price as Google's booking page listed it (${seller}, cheapest of ${offers}), read ${ago}. Not checked with the seller or airline; it can change at checkout.`,
+      seller: (seller: string, offers: number) =>
+        `A seller's price as Google's booking page listed it (${seller}, cheapest of ${offers}). Not checked with the seller or airline; it can change at checkout.`,
       sellerSearchApi:
         "A seller's price from SearchApi's booking options. Not checked with the seller or airline; it can change at checkout. Your limits checked: stops, journey time.",
       'google-price':
@@ -1193,7 +1170,7 @@ export const COPY = {
       calendar:
         "Google's calendar price for these dates. Not a fare: no flights or sellers read, and your journey limit isn't checked.",
       cached: 'A price an Aviasales user saw, then cached. Not a fare quote.',
-      'not-seen-again': (ago: string) => `Read ${ago}; today's search didn't find it again. Probably gone.`,
+      'not-seen-again': "Today's search didn't find it again. Probably gone.",
     },
     sellerLine: (seller: string, n: number) => `${seller} · cheapest of ${n} ${noun(n, 'seller', 'sellers')}`,
     // design §5.3: the booking targets, best first; only an external link carries ↗ and says it opens a new tab

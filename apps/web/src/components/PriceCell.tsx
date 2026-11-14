@@ -35,8 +35,6 @@ export interface PriceCellProps {
   notSeenInLatestHours?: number | 'unknown' | null;
   /** A words-only qualifier after the amount, e.g. the adjusted price's "incl. operator-entered onward cost". */
   qualifier?: string;
-  /** Beside the wide Results table's columns: the Provider and Destination columns carry those, so the line omits them. */
-  besideColumns?: boolean;
   /**
    * The compact variant (WP10's calendar day cells): the amount with "≈", a short provider badge, the destination code,
    * the stale, truncated and unconfirmed marks and, visible without hover (spec §11, ruling 3, overruling decision 46),
@@ -273,9 +271,8 @@ export function PriceCell(props: PriceCellProps) {
       <Provenance
         provenance={p}
         calendar={props.calendar}
-        destination={props.besideColumns === true ? undefined : props.destination}
+        destination={props.destination}
         destinationNote={props.destinationNote}
-        showProvider={props.besideColumns !== true}
         fullAge={props.fullAge === true}
         {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
       />
