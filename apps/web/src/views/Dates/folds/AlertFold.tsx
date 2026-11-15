@@ -60,7 +60,11 @@ export function AlertFold({
           ))}
         </ul>
       )}
-      {on.every((r) => r.basis === 'calendar') ? <p className="sfold-note">{F.alertWatches}</p> : null}
+      {/* why: final review M6: the line speaks of the rules listed, so it shows only when there is one and every one
+      watches calendar prices */}
+      {on.length > 0 && on.every((r) => r.basis === 'calendar') ? (
+        <p className="sfold-note">{F.alertWatches}</p>
+      ) : null}
       <p className="sfold-note">
         <a href={alertsQuery} onClick={navigateToQuery(alertsQuery)}>
           {F.changeAlerts}

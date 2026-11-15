@@ -258,3 +258,29 @@ describe('Alerts events table point of sale (spec §11)', () => {
     for (const e of within(third).getAllByTestId('point-of-sale')) expect(e).toHaveTextContent('UK market');
   });
 });
+
+// Task 10 re-review: the Search page's Alert fold words a drop as a price that drops, by a share or an amount
+describe('describeRule in plain words', () => {
+  const base = {
+    id: 'r',
+    definitionId: 'def-0001',
+    thresholdPence: null,
+    pct: null,
+    basis: 'calendar',
+    requireAllVerified: null,
+    cooldownHours: 336,
+    enabled: true,
+  } as const;
+  it('a drop reads "Price drops by 10% or more" or "Price drops by £50 or more"; the Alerts view keeps its own words', () => {
+    const pct = { ...base, type: 'dropPct', pct: 10 } as const;
+    const abs = { ...base, type: 'dropAbs', thresholdPence: 5_000 } as const;
+    expect(describeRule(pct, true)).toMatch(/^Price drops by 10% or more · /);
+    expect(describeRule(abs, true)).toMatch(/^Price drops by £50 or more · /);
+    expect(describeRule(pct)).toMatch(/^Drop by percent 10% · /);
+    expect(describeRule(abs)).toMatch(/^Drop by amount £50 · /);
+  });
+  it('a drop with no figure says it is not set', () => {
+    expect(describeRule({ ...base, type: 'dropPct' }, true)).toMatch(/^Price drops by an amount not set · /);
+    expect(describeRule({ ...base, type: 'dropAbs' }, true)).toMatch(/^Price drops by an amount not set · /);
+  });
+});

@@ -320,12 +320,14 @@ describe('Alert', () => {
   const serveRules = (rules: unknown[]) =>
     server.use(http.get(`${API}/alerts`, () => HttpResponse.json(rules)));
 
-  it('is off with no rules, says what alerts watch, links Change alerts to this search', async () => {
+  it('is off with no rules, says nothing of what no rule watches, links Change alerts to this search', async () => {
     server.use(serveCards([card()]));
     renderDates({ body: workedDates(real) });
     await findTrips();
     const d = await waitFor(() => fold(/^Alert · off/));
-    expect(within(d).getByText(F.alertWatches)).toBeInTheDocument();
+    // final review M6: the line speaks of the rules listed, so with none it is not said
+    await waitFor(() => expect(within(d).getByText(F.alertNone)).toBeInTheDocument());
+    expect(within(d).queryByText(F.alertWatches)).toBeNull();
     const href = new URL(
       within(d).getByRole('link', { name: F.changeAlerts }).getAttribute('href') ?? '',
       'http://x',
@@ -358,8 +360,9 @@ describe('Alert', () => {
     expect(items[0]).toHaveTextContent(
       'Price at or below £450 · calendar prices, limits not checked · at most one email every 14 days',
     );
+    // Task 10 re-review: the plain words for a drop
     expect(items[1]).toHaveTextContent(
-      'Drop by percent 10% · flights read · at most one email every 14 days',
+      'Price drops by 10% or more · flights read · at most one email every 14 days',
     );
   });
 

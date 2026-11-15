@@ -1231,6 +1231,9 @@ export const COPY = {
     cooldown: 'Cooldown (hours)',
     cooldownHint: 'Default 336 h (two weeks), deliberately longer than a weekly schedule.',
     cooldownText: (hours: number) => `cooldown ${hours}h`,
+    // the plain words for a drop on the Search page's Alert fold (Task 10 re-review): "Price drops by 10% or more"
+    plainDrop: (by: string | null) =>
+      by === null ? 'Price drops by an amount not set' : `Price drops by ${by} or more`,
     // the plain wording the Search page's Alert fold uses: days where the cooldown is a whole number of them
     plainCooldown: (hours: number) =>
       hours % 24 === 0
