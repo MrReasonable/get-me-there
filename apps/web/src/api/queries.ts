@@ -20,6 +20,12 @@ import type {
 } from './types.js';
 
 /** Query keys; prefixes are what mutations invalidate. */
+/** A search's alert rules and events (the Alerts view's reads; the Search page's Alert fold reads the rules). */
+export const alertKeys = {
+  rules: (id: string) => ['alerts', id] as const,
+  events: (id: string) => ['alert-events', id] as const,
+};
+
 export const qk = {
   providers: ['providers'] as const,
   definitions: ['definitions'] as const,

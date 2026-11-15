@@ -518,12 +518,18 @@ for (const width of WIDTHS)
       await expect(summaries.nth(0)).toContainText('Price over time · lowest calendar price £372');
       await expect(summaries.nth(1)).toContainText('What was searched · 2,146 of 2,184 dates priced, 38 not');
       await expect(summaries.nth(2)).toContainText('Alert · 2 on');
+      // one bordered box with single dividers: the group has the only outer border, each later row one top rule
+      const rules = await page
+        .locator('.search-folds > .sfold')
+        .evaluateAll((all) => all.map((d) => getComputedStyle(d).borderTopWidth));
+      expect(rules).toEqual(['0px', '1px', '1px']);
+      expect(await group.evaluate((g) => getComputedStyle(g).borderTopWidth)).toBe('1px');
+      await group.screenshot({ path: `test-results/folds-shots/folds-closed-${width}-${scheme}.png` });
       // a closed fold's content is out of the tab order: Tab from a summary reaches the next summary
       await summaries.nth(0).focus();
       await page.keyboard.press('Tab');
       await expect(summaries.nth(1)).toBeFocused();
       await expect(summaries.nth(0)).toHaveCSS('min-height', '44px');
-      await group.screenshot({ path: `test-results/folds-shots/folds-closed-${width}-${scheme}.png` });
       await openFolds(page);
       // Price over time: six of the seven runs, newest first, the other search's point left out
       await expect(page.locator('.sfold-runs > li')).toHaveCount(6);

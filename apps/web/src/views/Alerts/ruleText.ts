@@ -29,5 +29,5 @@ export function describeRule(r: AlertRule, plain = false): string {
       : r.requireAllVerified === true
         ? C.requireAll
         : C.basisVerified;
-  return `${what} · ${basis} · ${C.cooldownText(r.cooldownHours)}`;
+  return `${what} · ${basis} · ${plain ? C.plainCooldown(r.cooldownHours) : C.cooldownText(r.cooldownHours)}`;
 }

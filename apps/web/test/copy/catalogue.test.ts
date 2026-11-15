@@ -153,6 +153,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchPage.folds.searchedSummary': [2146, 2184],
   'searchPage.folds.flightsReadValue': [23],
   'searchPage.folds.alertOn': [2],
+  'alertsView.plainCooldown': [336],
   // WP20 Task 20.10: the flights on a search's page
   'flights.changes': [1],
   'flights.operatedBy': ['Virgin Atlantic', 'Delta'],

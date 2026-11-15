@@ -1,6 +1,7 @@
 /** Alerts view (spec §11): the rule form, the rules list and the events list. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
+import { alertKeys } from '../../api/queries.js';
 import { LoadError } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { SettingsCrumbs } from '../Settings/SettingsView.js';
@@ -12,11 +13,6 @@ import './alerts.css';
 const C = COPY.alertsView;
 /** The newest events shown (alertEventsQuerySchema allows up to 1000). */
 const EVENTS_LIMIT = 200;
-
-export const alertKeys = {
-  rules: (id: string) => ['alerts', id] as const,
-  events: (id: string) => ['alert-events', id] as const,
-};
 
 export function AlertsView(props: { definitionId: string }) {
   const qc = useQueryClient();

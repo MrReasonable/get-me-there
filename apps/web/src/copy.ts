@@ -715,7 +715,7 @@ export const COPY = {
         'no-price-shown': "The calendar showed none. That isn't the same as no flights.",
         'couldnt-read': "The page didn't load; the next search tries them again.",
         'not-reached': 'The search stopped before these dates.',
-        'not-searched': '',
+        'not-searched': 'Not asked yet.',
       } satisfies Record<ReducedMark, string>,
       flightsRead: 'Flights read',
       flightsReadValue: (n: number) => `${thousands(n)} ${noun(n, 'date', 'dates')}`,
@@ -1215,7 +1215,7 @@ export const COPY = {
     requireAll: 'Only class verified (every constraint passed)',
     // the same three bases in the words the Search page's Alert fold uses (its main path says no "basis")
     plainBasis: {
-      calendar: 'calendar prices (constraints not checked)',
+      calendar: 'calendar prices, limits not checked',
       verified: 'flights read',
       requireAll: 'flights read, every limit passed',
     },
@@ -1224,6 +1224,13 @@ export const COPY = {
     cooldown: 'Cooldown (hours)',
     cooldownHint: 'Default 336 h (two weeks), deliberately longer than a weekly schedule.',
     cooldownText: (hours: number) => `cooldown ${hours}h`,
+    // the plain wording the Search page's Alert fold uses: days where the cooldown is a whole number of them
+    plainCooldown: (hours: number) =>
+      hours % 24 === 0
+        ? hours === 24
+          ? 'at most one email a day'
+          : `at most one email every ${hours / 24} days`
+        : `at most one email every ${hours} hours`,
     addRule: 'Add rule',
     deleteRule: 'Delete rule',
     deleteKeepsHistory: 'Deleting a rule stops it firing; its alert history below is kept.',

@@ -17,20 +17,18 @@ const MARKS: readonly ReducedMark[] = [
 
 /**
  * Ruling 19, "What was searched": the latest run's five marks over its whole space (they sum to the total the summary
- * names), then the dates with flights read (Ruling 6, across every search so far), the thin-coverage line when it
+ * names), then the dates with flights read (the card's whole-space count, across every search so far), the thin-coverage line when it
  * applies, and "Full search log", which opens the coverage section beneath.
  */
 export function WhatWasSearched({
   definition,
   card,
-  readDates,
   coverageOpen,
   requested,
   onHandled,
 }: {
   definition: DefinitionResponse;
   card: SearchCard | null;
-  readDates: number;
   coverageOpen: boolean;
   requested: boolean;
   onHandled: () => void;
@@ -60,7 +58,7 @@ export function WhatWasSearched({
             ))}
             <tr>
               <th scope="row">{F.flightsRead}</th>
-              <td className="sfold-count">{F.flightsReadValue(readDates)}</td>
+              <td className="sfold-count">{F.flightsReadValue(card?.readDates ?? 0)}</td>
               <td className="sfold-why">{F.flightsReadNote}</td>
             </tr>
           </tbody>

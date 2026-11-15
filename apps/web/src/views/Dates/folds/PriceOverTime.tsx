@@ -42,7 +42,8 @@ export interface PriceHistory {
   points: readonly RunPoint[];
   loading: boolean;
   error: Error | null;
-  retry: () => void;
+  /** Reads every airport pair's history again (a failed read's Retry, and a run reaching its end). */
+  refetch: () => void;
 }
 
 /**
@@ -58,20 +59,21 @@ export function usePriceHistory(definition: DefinitionResponse, data: DecodedDat
     [definition.origins, definition.destinations],
   );
   const queries = useRouteHistories(pairs, definition.cabin, data !== null);
-  const runIds = useMemo(
-    () => new Set((data?.executions ?? []).filter((e) => !e.isChild).map((e) => e.id)),
+  const runs = useMemo(
+    () =>
+      (data?.executions ?? []).filter((e) => !e.isChild).map((e) => ({ id: e.id, startedAt: e.startedAt })),
     [data],
   );
   // why: a handful of small arrays per render; the points follow the reads without a memo to keep in step
   const points = lowestPerRun(
     queries.map((q) => q.data),
-    runIds,
+    runs,
   );
   return {
     points,
     loading: data === null || queries.some((q) => q.isPending),
     error: queries.find((q) => q.error !== null)?.error ?? null,
-    retry: () => {
+    refetch: () => {
       for (const q of queries) void q.refetch();
     },
   };
@@ -100,6 +102,7 @@ function Lowest({ point }: { point: RunPoint }) {
       <span className={point.stale === false ? undefined : 'price-label-stale'}>
         {T.labelText(T.label[kind], labelAge(ageOf(point, now)))}
       </span>
+      {point.stale === false ? null : <span className="sr-only">, {staleWords(point.stale)}</span>}
     </PriceBoundary>
   );
 }
@@ -128,7 +131,6 @@ function RunRow({ point }: { point: RunPoint }) {
         provenance={point.provenance}
         detail={labelDetail(kind, null)}
       />
-      {point.stale === false ? null : <span className="sr-only"> {staleWords(point.stale)}</span>}
     </li>
   );
 }
@@ -158,10 +160,9 @@ export function PriceOverTime({
       requested={requested}
       onHandled={onHandled}
     >
-      {history.error !== null ? (
-        <LoadError error={history.error} retry={history.retry} />
-      ) : history.points.length === 0 ? (
-        history.loading ? null : (
+      {history.error !== null ? <LoadError error={history.error} retry={history.refetch} /> : null}
+      {history.points.length === 0 ? (
+        history.loading || history.error !== null ? null : (
           <p>{F.priceNone}</p>
         )
       ) : (

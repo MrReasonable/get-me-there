@@ -144,7 +144,15 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   const card: SearchCard | null =
     useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id) ?? null;
 
-  useRunRereads(run, () => void query.refetch(), clock);
+  // why: Price over time reads the route history, which the run's end changes: it is re-read with the page's own read
+  useRunRereads(
+    run,
+    () => {
+      void query.refetch();
+      history.refetch();
+    },
+    clock,
+  );
 
   // why: Ruling 19: a link that asks for a fold (the run line's, `d.fold=`) or lands on the full search log
   // (`d.coverage=open` on arrival, `?view=coverage`) opens it once, scrolls to it and focuses it; the asking is then
@@ -254,7 +262,8 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
           />
         </div>
       ) : null}
-      {model !== null ? (
+      {/* why: Ruling 19 and Task 10 review I1: the folds, and so the full search log, show whatever the date-pairs read does */}
+      {
         <section className="search-folds" data-testid="search-folds" aria-label={P.folds.groupLabel}>
           <PriceOverTime
             definition={definition}
@@ -265,14 +274,13 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
           <WhatWasSearched
             definition={definition}
             card={card}
-            readDates={model.readDates}
             coverageOpen={state.coverageOpen}
             requested={asked('searched')}
             onHandled={foldHandled}
           />
           <AlertFold definition={definition} requested={asked('alert')} onHandled={foldHandled} />
         </section>
-      ) : null}
+      }
     </div>
   );
 }

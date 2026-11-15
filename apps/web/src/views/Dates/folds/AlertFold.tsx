@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/endpoints.js';
+import { alertKeys } from '../../../api/queries.js';
 import { useStatus } from '../../../api/statusQuery.js';
 import type { DefinitionResponse } from '../../../api/types.js';
 import { LoadError } from '../../../components/LoadState.js';
 import { COPY } from '../../../copy.js';
 import { navigateToQuery } from '../../../state/urlState.js';
-import { alertKeys } from '../../Alerts/AlertsView.js';
 import { describeRule } from '../../Alerts/ruleText.js';
 import { Fold } from './Fold.js';
 
@@ -60,7 +60,7 @@ export function AlertFold({
           ))}
         </ul>
       )}
-      <p className="sfold-note">{F.alertWatches}</p>
+      {on.every((r) => r.basis === 'calendar') ? <p className="sfold-note">{F.alertWatches}</p> : null}
       <p className="sfold-note">
         <a href={alertsQuery} onClick={navigateToQuery(alertsQuery)}>
           {F.changeAlerts}
