@@ -18,20 +18,35 @@ export function sortChecks(checks: readonly StatusCheck[]): StatusCheck[] {
   );
 }
 
+/** What the one concerned check is about, for the caller to word: its label as typed, else its provider, else its area. */
+export type BarSubject =
+  | { kind: 'label'; text: string }
+  | { kind: 'provider'; providerId: NonNullable<StatusCheck['providerId']> }
+  | { kind: 'area'; area: StatusCheck['area'] };
+
 /**
  * What the status bar and `gmt status` word: how bad it is (`fail` outranks `warn`), how many checks are concerned
- * (every `fail` and `warn`; `off` checks and notes never count) and, when exactly one is, its name (its label, else
- * its area). The words are the caller's (the web's COPY, the CLI's own line), never this function's.
+ * (every `fail` and `warn`; `off` checks and notes never count) and, when exactly one is, what it is about (`subject`:
+ * its label, else its provider, else its area). The words are the caller's (the web's COPY, the CLI's own line), never
+ * this function's.
  */
 export function barSummary(checks: readonly StatusCheck[]): {
   kind: 'clean' | 'warn' | 'fail';
   count: number;
-  name: string | null;
+  subject: BarSubject | null;
 } {
   const concerned = checks.filter((c) => c.state === 'fail' || c.state === 'warn');
   const kind = checks.some((c) => c.state === 'fail') ? 'fail' : concerned.length > 0 ? 'warn' : 'clean';
   const [only] = concerned;
-  // why: one concerned check is named by its label (a search's name) or else its area; several by their count
-  const name = concerned.length === 1 && only !== undefined ? (only.label ?? only.area) : null;
-  return { kind, count: concerned.length, name };
+  return {
+    kind,
+    count: concerned.length,
+    subject: concerned.length === 1 && only !== undefined ? subjectOf(only) : null,
+  };
+}
+
+function subjectOf(c: StatusCheck): BarSubject {
+  if (c.label !== null) return { kind: 'label', text: c.label };
+  if (c.providerId !== null) return { kind: 'provider', providerId: c.providerId };
+  return { kind: 'area', area: c.area };
 }

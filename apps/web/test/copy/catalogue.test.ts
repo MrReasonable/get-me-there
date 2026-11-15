@@ -47,7 +47,8 @@ const SAMPLES: Record<string, unknown[]> = {
   'topBar.spent': ['£32', '£35'],
   'topBar.spentNoCap': ['£32'],
   'topBar.searching': ['Birmingham → Frankfurt'],
-  'runProgress.calendar': [1203, 2184, 'about 14m left'],
+  'runProgress.calendar': [1203, 2184, 'about 14 min left'],
+  'runProgress.minutesLeft': [14],
   'runProgress.flights': [9],
   'runProgress.resumesAt': ['1 Nov 2026 00:00 Europe/London'],
   'runProgress.childRun': ['stopped'],
@@ -402,8 +403,8 @@ describe('COPY catalogue (spec §11 banned words)', () => {
 
   it('run progress says dates and flights in the plan’s own words, with a thousands separator and no umbrella', () => {
     const R = COPY.runProgress;
-    expect(R.calendar(1203, 2184, 'about 14m left')).toBe(
-      'Reading the calendar, 1,203 of 2,184 dates · about 14m left',
+    expect(R.calendar(1203, 2184, 'about 14 min left')).toBe(
+      'Reading the calendar, 1,203 of 2,184 dates · about 14 min left',
     );
     expect(R.calendar(0, 1, null)).toBe('Reading the calendar, 0 of 1 date');
     expect(R.flights(9)).toBe('Reading flights for the cheapest dates, 9 read so far');

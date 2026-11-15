@@ -19,9 +19,16 @@ type Tone = 'ok' | 'warn' | 'bad';
 /** A glyph beside the words, so a state differs in more than colour. */
 const GLYPH: Record<Tone, string> = { ok: '●', warn: '▲', bad: '✕' };
 
-/** Core's `name` in words: an area slug through COPY ("data" is "searches"), a label (a search's name) as it is. */
-const nameWords = (name: string): string =>
-  Object.entries(COPY.statusView.offName).find(([area]) => area === name)?.[1] ?? name;
+/**
+ * Core's subject in words: a search's name as typed, a provider by its name, an area through COPY ("data" is
+ * "searches") with a capital, since it starts the sentence.
+ */
+function subjectWords(subject: NonNullable<ReturnType<typeof apiContract.barSummary>['subject']>): string {
+  if (subject.kind === 'label') return subject.text;
+  if (subject.kind === 'provider') return COPY.provider[subject.providerId];
+  const area = COPY.statusView.offName[subject.area];
+  return area.charAt(0).toUpperCase() + area.slice(1);
+}
 
 /**
  * The health line (Ruling 10): one line from the same query as the Status page and core's `barSummary`. All working
@@ -52,7 +59,7 @@ export function HealthLine() {
     const bar = apiContract.barSummary(q.data.checks);
     tone = bar.kind === 'clean' ? 'ok' : bar.kind === 'fail' ? 'bad' : 'warn';
     fix = bar.kind !== 'clean';
-    const name = bar.name === null ? null : nameWords(bar.name);
+    const name = bar.subject === null ? null : subjectWords(bar.subject);
     text =
       bar.kind === 'clean'
         ? T.allWorking

@@ -30,26 +30,24 @@ export function SettingsCrumbs({ title }: { title: string }) {
  */
 export function SettingsView() {
   return (
-    <div className="settings pt-5">
-      <div className="space-y-2">
-        <h1 className="h-view">{S.heading}</h1>
-        <p className="lede">{S.lede}</p>
-      </div>
+    <div className="settings">
+      <h1 className="settings-title">{S.heading}</h1>
+      <p className="settings-lede">{S.lede}</p>
       <ul aria-label={S.sectionsLabel} className="settings-sections">
         {SECTIONS.map((s) => {
           const patch = navPatch(s.view);
           return (
             <li key={s.view}>
-              <section aria-labelledby={`settings-${s.view}`} className="plate plate-pad space-y-1">
-                <h3 id={`settings-${s.view}`} className="h-section">
+              <section aria-labelledby={`settings-${s.view}`} className="settings-card">
+                <h2 id={`settings-${s.view}`} className="settings-card-title">
                   <a
                     href={hrefWith(patch)}
                     onClick={navigateTo(patch)}
-                    className="link inline-flex min-h-11 items-center"
+                    className="inline-flex min-h-11 items-center"
                   >
                     {s.title}
                   </a>
-                </h3>
+                </h2>
                 <p>{s.line}</p>
               </section>
             </li>

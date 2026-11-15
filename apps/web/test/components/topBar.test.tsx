@@ -77,8 +77,15 @@ describe('the health line (Ruling 10)', () => {
       ]),
     );
     const second = renderWithProviders(<HealthLine />);
-    expect(await screen.findByRole('link', { name: 'Provider failing · fix' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'SearchApi failing · fix' })).toBeInTheDocument();
     second.unmount();
+    // a search called like an area is named as typed, never reworded
+    for (const label of ['data', 'email']) {
+      serve(statusReport([{ id: 'data-9', area: 'data', label, state: 'fail', summary: 'x' }]));
+      const r = renderWithProviders(<HealthLine />);
+      expect(await screen.findByRole('link', { name: `${label} failing · fix` })).toBeInTheDocument();
+      r.unmount();
+    }
     serve(statusReport([failing('worker')]));
     renderWithProviders(<HealthLine />);
     expect(await screen.findByRole('link', { name: 'Browser provider failing · fix' })).toBeInTheDocument();

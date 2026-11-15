@@ -24,9 +24,6 @@ const noun = (n: number | string, one: string, many: string): string => (String(
 /** A whole number with a comma between thousands ("2184" → "2,184"), as the plan words its counts. */
 const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-/** A sentence's first letter, for a name that starts one ("backups" → "Backups"). */
-const upperFirst = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
-
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
 /** The six coverage buckets; `reused` is a count beside them, not a bucket (spec §3). */
@@ -207,8 +204,8 @@ export const COPY = {
   topBar: {
     /** The bar's first line: the health of the install, one word each for the worst problem (`barSummary`). */
     allWorking: 'All working',
-    needsAttention: (name: string) => `${upperFirst(name)} needs attention`,
-    failing: (name: string) => `${upperFirst(name)} failing`,
+    needsAttention: (name: string) => `${name} needs attention`,
+    failing: (name: string) => `${name} failing`,
     severalNeedYou: (count: number) => `${count} things need you`,
     /** The link's tail: the Status page says what to do (the System page of Settings). */
     fix: 'fix',
@@ -229,6 +226,8 @@ export const COPY = {
     barLabel: 'Dates read',
     calendar: (done: number, total: number, left: string | null) =>
       `Reading the calendar, ${thousands(done)} of ${thousands(total)} ${noun(total, 'date', 'dates')}${left === null ? '' : ` · ${left}`}`,
+    minutesLeft: (minutes: number) => `about ${minutes} min left`,
+    lessThanAMinuteLeft: 'less than a minute left',
     flights: (read: number) => `Reading flights for the cheapest dates, ${read} read so far`,
     resumesAt: (when: string) => `resumes ${when}`,
     childRun: (status: string) => `Reading flights for one more date: ${status}`,

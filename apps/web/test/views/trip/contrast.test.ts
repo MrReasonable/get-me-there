@@ -56,15 +56,19 @@ describe('the Trip page’s colours (WCAG AA, light and dark)', () => {
     },
   );
 
-  it.each(SCHEMES)('%s: every heat step reads at 4.5:1 with one of the two heat inks', (_scheme, block) => {
-    for (const h of HEATS) {
-      const ground = tokenIn(block, h);
-      const best = Math.max(
-        contrast(tokenIn(block, 'heat-ink-dark'), ground),
-        contrast(tokenIn(block, 'heat-ink-light'), ground),
-      );
-      expect(best, h).toBeGreaterThanOrEqual(4.5);
-    }
+  // why: pinned so Task 9 cannot pair a step with the ink that fails on it. In both schemes only the cheapest step takes
+  // the "dark" ink (white on the light scheme's deep green, near-black on the dark scheme's bright one); steps 2 to 5
+  // take the "light" ink (which is the only one that reaches 4.5:1 on them: 4.5 to 15.5 light, 4.7 to 12.2 dark)
+  const INK_OF: Record<(typeof HEATS)[number], 'heat-ink-dark' | 'heat-ink-light'> = {
+    'heat-1': 'heat-ink-dark',
+    'heat-2': 'heat-ink-light',
+    'heat-3': 'heat-ink-light',
+    'heat-4': 'heat-ink-light',
+    'heat-5': 'heat-ink-light',
+  };
+  it.each(SCHEMES)('%s: every heat step reads at 4.5:1 with its own heat ink', (_scheme, block) => {
+    for (const h of HEATS)
+      expect(contrast(tokenIn(block, INK_OF[h]), tokenIn(block, h)), h).toBeGreaterThanOrEqual(4.5);
   });
 
   it.each(SCHEMES)(

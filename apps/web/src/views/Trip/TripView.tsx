@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useProvidersWatch, useTrip } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
-import { Crumbs } from '../../components/Crumbs.js';
+import { Crumbs, tripsCrumb } from '../../components/Crumbs.js';
 import { Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
@@ -9,7 +9,6 @@ import { useNow } from '../../now.js';
 import { BACK_TO_DATES } from '../../state/resultsState.js';
 import { type TripUiState, tripQueryOf } from '../../state/tripState.js';
 import { hrefWith } from '../../state/urlState.js';
-import { navPatch } from '../../state/view.js';
 import { AboutPrice } from './AboutPrice.js';
 import { AnswerCard } from './AnswerCard.js';
 import { cardOf } from './cardState.js';
@@ -46,7 +45,7 @@ export function TripView({ definition, state }: { definition: DefinitionResponse
       {synthetic && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
       <Crumbs
         items={[
-          { label: COPY.crumbs.trips, href: hrefWith(navPatch('searches')) },
+          tripsCrumb(),
           { label: definition.name, href: hrefWith(BACK_TO_DATES), testId: 'trip-back' },
           { label: dates },
         ]}

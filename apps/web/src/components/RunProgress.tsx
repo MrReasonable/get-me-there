@@ -11,7 +11,7 @@ import type { SearchCard } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatRunInstant } from '../format.js';
 import { readingCount } from '../lib/flightsReading.js';
-import { leftWords } from '../lib/leftWords.js';
+import { instantMs } from '../lib/time.js';
 import { useNow } from '../now.js';
 import { fixNamesResume, StopSentence, type StopWords, stopOrNone } from './StopWords.js';
 
@@ -73,6 +73,13 @@ export interface RunProgressProps {
   failure?: string | null;
 }
 
+/** "about 14 min left" (Ruling 11's own sentence), "less than a minute left" under a minute; null without an estimate. */
+function leftOf(finish: IsoDateTime | null, now: IsoDateTime): string | null {
+  if (finish === null) return null;
+  const minutes = Math.ceil((instantMs(finish) - instantMs(now)) / 60_000);
+  return minutes < 1 ? R.lessThanAMinuteLeft : R.minutesLeft(minutes);
+}
+
 /**
  * Ruling 11: the one place a run's progress is worded, used by the cards and the Search page. A pending or running run
  * has a bar over "Reading the calendar, 1,203 of 2,184 dates · about 14 min left", then "Reading flights for the
@@ -112,22 +119,25 @@ export function RunProgress({ run, onCancel, onResume, pending = null, failure =
           />
           <p className="run-line">
             {run.flightsRead === null
-              ? R.calendar(run.done, run.total, leftWords(run.estimatedFinishAt, now))
+              ? R.calendar(run.done, run.total, leftOf(run.estimatedFinishAt, now))
               : R.flights(run.flightsRead)}
           </p>
         </>
       ) : null}
       {/* why: spec rev 55 §8.1, §11 — a stopped run's sentence as-is with its fix, `NO_STOP_CAUSE_TEXT` for a row with
       no stored cause; never a stored status word and never a prefix of ours */}
-      {stopped ? (
-        <p className="run-line warn-text">
-          <StopSentence stop={stopOrNone(run.stop)} />
-          {run.resumeAfter !== null ? ` · ${R.resumesAt(formatRunInstant(run.resumeAfter))}` : null}
-        </p>
-      ) : null}
-      {run.childRun !== null ? (
-        <p className="run-line">{R.childRun(COPY.barStatusName[run.childRun])}</p>
-      ) : null}
+      {/* why: only a stop appearing or a child run changing is announced, politely; the ticking estimate is not */}
+      <div aria-live="polite">
+        {stopped ? (
+          <p className="run-line warn-text">
+            <StopSentence stop={stopOrNone(run.stop)} />
+            {run.resumeAfter !== null ? ` · ${R.resumesAt(formatRunInstant(run.resumeAfter))}` : null}
+          </p>
+        ) : null}
+        {run.childRun !== null ? (
+          <p className="run-line">{R.childRun(COPY.barStatusName[run.childRun])}</p>
+        ) : null}
+      </div>
       <div className="run-actions">
         {canResume ? (
           <button

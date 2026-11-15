@@ -47,13 +47,13 @@ function show(props: RunProgressProps) {
 }
 
 describe('RunProgress while a run is going', () => {
-  it('the calendar phase: a bar of the dates read, then "Reading the calendar, 1,203 of 2,184 dates · about 14m left"', () => {
+  it('the calendar phase: a bar of the dates read, then "Reading the calendar, 1,203 of 2,184 dates · about 14 min left"', () => {
     show({ run: run() });
     const bar = screen.getByRole('progressbar', { name: COPY.runProgress.barLabel });
     expect(bar).toHaveAttribute('value', '1203');
     expect(bar).toHaveAttribute('max', '2184');
     expect(
-      screen.getByText('Reading the calendar, 1,203 of 2,184 dates · about 14m left'),
+      screen.getByText('Reading the calendar, 1,203 of 2,184 dates · about 14 min left'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Reading flights/)).toBeNull();
   });
