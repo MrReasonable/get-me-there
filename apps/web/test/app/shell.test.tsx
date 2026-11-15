@@ -545,8 +545,8 @@ describe('"Searching: <name>" in the top bar (Ruling 10; Review Focus 2)', () =>
   });
 });
 
-// why: final review C2, I1 and I2 (and its recommendation of one shell-level test): an anchor (`#main`, `#calendar`) or an
-// "open once" parameter (`d.coverage=open`) in the URL never reaches a parameter and never travels to another search
+// why: final review C2, I1 and I2 (and its recommendation of one shell-level test): an anchor (`#main`, `#calendar`) or
+// an "open once" parameter (`d.coverage=open`) in the URL never reaches a parameter and never travels to another search
 describe('what a URL lands at is used once (final review C2, I1, I2)', () => {
   const A = 'Worked example';
   const B = 'Second search';
@@ -647,7 +647,8 @@ describe('what a URL lands at is used once (final review C2, I1, I2)', () => {
   });
 });
 
-// final review M3: the Trip page's crumb back restores the Search page's own airport filter (or none), never the trip's pair
+// final review M3: the Trip page's crumb back restores the Search page's own airport filter (or none), never the trip's
+// pair
 describe('the Trip page’s crumb back (final review M3)', () => {
   const lgw = pairingFig({
     origin: asIata('LGW'),

@@ -141,8 +141,8 @@ describe('the 30 s re-read during a run', () => {
   });
 });
 
-// final review M5: the run line's whole-space counts come from the card, which the page re-reads itself at the run's end
-// (without a top bar mounted, whose own cards poll would otherwise be the only one to refresh it)
+// final review M5: the run line's whole-space counts come from the card, which the page re-reads itself at the run's
+// end (without a top bar mounted, whose own cards poll would otherwise be the only one to refresh it)
 describe('the run’s end re-reads the card too', () => {
   it('the cards are read again at once when the run leaves running, and not on a progress change', async () => {
     const cards: CardRequests = [];

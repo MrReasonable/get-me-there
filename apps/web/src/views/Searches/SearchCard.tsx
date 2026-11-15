@@ -32,15 +32,15 @@ const searchPatch = (id: string) => ({ ...navPatch('dates'), def: id });
 const editPatch = (id: string) => ({ view: 'definitions', edit: id });
 
 /**
- * Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 4, 5, 7, 8, 11, 20: one saved search as a card. Its name links to
- * the Search page; under it the meta line (the route's codes, the window, the stay, when a finished run searched) and
- * "repeats Mondays 05:00" when scheduled. Then, by state: the run's progress and Cancel (`RunProgress`) while one goes,
- * or its stop and Resume; "Dates changed since this was last searched"; and for a finished search that found nothing
- * the first reason that applies (Ruling 8), with its fix. Then its three cheapest trips as shared rows (no airlines), each
- * price a label and a link, the counts line (trips with flights read; the dates that look lower on the calendar), and the
- * actions: All trips and dates, Search again (Cancel stands in its place while a run goes), Edit, and Remove, quietly.
- * The card owns no mutation of its search except the run's Cancel and Resume: Remove's request, the undo line and the
- * re-read live in the view.
+ * Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 4, 5, 7, 8, 11, 20: one saved search as a card. Its name links
+ * to the Search page; under it the meta line (the route's codes, the window, the stay, when a finished run searched)
+ * and "repeats Mondays 05:00" when scheduled. Then, by state: the run's progress and Cancel (`RunProgress`) while one
+ * goes, or its stop and Resume; "Dates changed since this was last searched"; and for a finished search that found
+ * nothing the first reason that applies (Ruling 8), with its fix. Then its three cheapest trips as shared rows (no
+ * airlines), each price a label and a link, the counts line (trips with flights read; the dates that look lower on the
+ * calendar), and the actions: All trips and dates, Search again (Cancel stands in its place while a run goes), Edit,
+ * and Remove, quietly. The card owns no mutation of its search except the run's Cancel and Resume: Remove's request,
+ * the undo line and the re-read live in the view.
  */
 export function SearchCard({
   card,
@@ -87,7 +87,8 @@ export function SearchCard({
     showCarriers: false,
   } as const;
   // why: `fromEarlierSearch` is each trip's own (read before the latest run started): only such a trip says it was read
-  // by the previous search, and "will replace it" only while a run goes; a trip the running search read keeps its detail
+  // by the previous search, and "will replace it" only while a run goes; a trip the running search read keeps its
+  // detail
   const earlierNote = (fromEarlier: boolean): string | null =>
     fromEarlier ? (active ? S.previousSearchReplaced : S.previousSearchDetail) : null;
   const fix = found?.kind === 'browser-off';
@@ -213,8 +214,8 @@ export function SearchCard({
  * cheapest.") and how many look lower on the calendar, from which price, with its label ("155 dates look lower on the
  * calendar, from £372 Calendar · 3h, flights not read."); with no trip, "Calendar prices for 2,146 dates, from £372
  * Calendar · 3h; no flights read yet." (final review M2: dates read that gave no trip say "23 dates with flights read."
- * and the calendar clause then ends plainly). Each clause only when its count is not zero; the count links to the Search
- * page's calendar.
+ * and the calendar clause then ends plainly). Each clause only when its count is not zero; the count links to the
+ * Search page's calendar.
  */
 function CountsLine({ card, link }: { card: Card; link: Record<string, string> }) {
   const lower = card.lowerOnCalendar;

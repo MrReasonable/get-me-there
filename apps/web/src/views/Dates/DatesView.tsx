@@ -161,10 +161,10 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   );
 
   // why: Ruling 19: a link that asks for a fold (the run line's, `d.fold=`) or lands on the full search log
-  // (`d.coverage=open`: `?view=coverage`, the status card) opens it once, scrolls to it and focuses it; the asking is then
-  // consumed (replaced out of the URL), so the same link asks again, a later filter change never pulls the page back,
-  // and the asking never travels to another search (final review I2). The log, once open, stays open as the page's own
-  // state until its button closes it.
+  // (`d.coverage=open`: `?view=coverage`, the status card) opens it once, scrolls to it and focuses it; the asking is
+  // then consumed (replaced out of the URL), so the same link asks again, a later filter change never pulls the page
+  // back, and the asking never travels to another search (final review I2). The log, once open, stays open as the
+  // page's own state until its button closes it.
   const urlFold = foldOf(params);
   const urlLog = state.coverageOpen;
   const [logOpen, setLogOpen] = useState(urlLog);
@@ -305,8 +305,9 @@ function refusalOf(v: string | null): StartRefusalCode | null {
 
 /**
  * What "Cheapest trips" says with no trip (Review Focus 3, Ruling 8), the first that applies: calendar prices below, so
- * "No flights read yet for these dates…" (its first sentence alone where flight lists can't be read here); the filters leave no price; the search is still going; else the card's
- * reason the search found nothing ("No prices were found. That isn't the same as no flights." when it names none).
+ * "No flights read yet for these dates…" (its first sentence alone where flight lists can't be read here); the filters
+ * leave no price; the search is still going; else the card's reason the search found nothing ("No prices were found.
+ * That isn't the same as no flights." when it names none).
  */
 function noTripOf(
   model: BoardModel,

@@ -39,7 +39,8 @@ export interface RunProgressRun {
   flightsRead: number | null;
   /**
    * While the run checks fares (running at its verification stage: the page's hidden status says "Checking fares"), the
-   * date pairs checked of those to check; a total of 0 is a run whose checks are not counted (a card's). Null otherwise.
+   * date pairs checked of those to check; a total of 0 is a run whose checks are not counted (a card's). Null
+   * otherwise.
    */
   checking: { done: number; total: number } | null;
   /** A stopped run's sentence and fix; null takes `NO_STOP_CAUSE_TEXT` when the status is a stopped one. */
@@ -123,9 +124,9 @@ function leftOf(finish: IsoDateTime | null, now: IsoDateTime): string | null {
  * Ruling 11: the one place a run's progress is worded, used by the cards and the Search page. A pending or running run
  * has a bar over "Reading the calendar, 1,203 of 2,184 dates · about 14 min left", then "Reading flights for the
  * cheapest dates, 9 read so far", then while it checks fares "Checking fares, 3 of 10 done · about 2 min left" (final
- * review M1: the hidden status's own words); a stopped or interrupted one its stop sentence with the fix, when it resumes and
- * Resume; an active run Cancel, which asks once more. A finished run says nothing. The run's calls and cost, and each
- * source's window, are not here (the Full search log keeps estimate versus ledger).
+ * review M1: the hidden status's own words); a stopped or interrupted one its stop sentence with the fix, when it
+ * resumes and Resume; an active run Cancel, which asks once more. A finished run says nothing. The run's calls and
+ * cost, and each source's window, are not here (the Full search log keeps estimate versus ledger).
  */
 export function RunProgress({ run, onCancel, onResume, pending = null, failure = null }: RunProgressProps) {
   const now = useNow();

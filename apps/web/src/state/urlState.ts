@@ -20,9 +20,9 @@ export function useSearchParams(): URLSearchParams {
 }
 
 /**
- * The fragment policy (final review C2/I1), the one place it lives: a filter edit (`replace`) keeps the page's fragment,
- * an anchor the page was opened at; a navigation (`push`, and so every link `hrefWith` writes) drops it unless the link
- * names its own, so an anchor one page was opened at never travels to another page.
+ * The fragment policy (final review C2/I1), the one place it lives: a filter edit (`replace`) keeps the page's
+ * fragment, an anchor the page was opened at; a navigation (`push`, and so every link `hrefWith` writes) drops it
+ * unless the link names its own, so an anchor one page was opened at never travels to another page.
  */
 const hashFor = (mode: 'push' | 'replace', hash: string | undefined): string =>
   hash ?? (mode === 'replace' ? window.location.hash : '');
