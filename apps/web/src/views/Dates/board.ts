@@ -44,7 +44,7 @@ export interface BoardModel {
   trips: readonly FigurePair[];
   /** Ruling 5: the calendar prices below the cheapest trip (core's `lowerOnCalendar`), by price; one per week likewise. */
   lower: readonly FigurePair[];
-  /** Ruling 4: the dates in view whose trips were all over the journey limit (core's `overLimitCount`). */
+  /** Ruling 4: the dates in view whose read trips were all outside the search's limits (core's `overLimitCount`). */
   overLimit: number;
   /** Ruling 6: the dates in view whose flights were read (core's `flightsRead`), over every search so far. */
   readDates: number;

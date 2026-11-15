@@ -4737,8 +4737,9 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
     loading; and a load error with Retry.
 - **Trip page** (`?view=trip&def=…&depart=…&return=…`; replaces the date pair
   detail and the Results view): one pair of dates, ending in a booking link.
-  It opens from a trip row's ›, a row of a calendar day's panel, a Trips card's
-  trip price and an alert email, never from the nav. Its breadcrumb (Trips › the
+  It opens from a trip row's › (on a Trips card, in Cheapest trips and in a
+  calendar day's panel; the row's price is its booking link) and from an alert
+  email's link, never from the nav. Its breadcrumb (Trips › the
   search › the dates) returns to the search's page with its filters kept, and
   the page carries a multi-airport trip's own pair (`t.from`, `t.to`) and the
   search page's `d.from`, `d.to` and `d.journey`, so it reads the same airport

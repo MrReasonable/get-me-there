@@ -45,8 +45,8 @@ export interface CheapestTripsProps {
  * Design 2026-11-08 §5.2 (mockup 02), Rulings 4, 20 and 22: the trips whose flights were read, cheapest first, as shared
  * rows with their airlines: five, then "Show 10 more". Its lead says what they are and how reading stopped (the stopping
  * sentence, "these five" only of the five cheapest shown unfiltered); "N dates' trips are over 25h each way" when the
- * journey limit (the only one set) left trips out, else "N dates' trips are outside your limits (…)"; with none, why (Review Focus 3: "No flights read yet for these dates…" when calendar
- * prices are below). A trip an earlier search read is styled as such, with its age (Review Focus 2).
+ * journey limit (the only one set) left trips out, else "N dates' trips are outside your limits (…)"; with none, why
+ * (Review Focus 3: "No flights read yet for these dates…" when calendar prices are below). A trip an earlier search read is styled as such, with its age (Review Focus 2).
  */
 export function CheapestTrips({
   definition,
