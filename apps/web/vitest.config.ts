@@ -73,6 +73,8 @@ export default defineConfig({
         'src/views/Trip/cardState.ts': FULL,
         // Task 9: the calendar's model (a day's mark, price and name; the heat scale; the day panel's order)
         'src/views/Dates/overview.ts': FULL,
+        // Task 10: the folds' view-model (the lowest calendar price of each of a search's runs)
+        'src/views/Dates/folds/priceHistory.ts': FULL,
         'src/lib/{bookingTarget,legWords,readStateWords}.ts': FULL,
         'src/components/rows/*.tsx': FULL,
         'src/lib/**': VIEW_MODEL,

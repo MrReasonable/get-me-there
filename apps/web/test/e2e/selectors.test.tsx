@@ -59,10 +59,12 @@ describe('the Playwright smoke’s Search page selectors match the rendered page
     expect(panel).toHaveAccessibleName('Sun 14 Mar: 3 stays');
     expect(panel.querySelectorAll(`${SMOKE.tripRow}, ${SMOKE.calendarRow}`)).toHaveLength(3);
     expect(within(panel).getByRole('button', { name: SMOKE.dayClose })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
+    // Ruling 19: the three folds are one group of native details rows, closed until asked
+    const folds = screen.getByRole('region', { name: SMOKE.folds });
+    expect(folds.querySelectorAll(':scope > details')).toHaveLength(3);
+    expect(folds.querySelectorAll('details[open]')).toHaveLength(0);
+    for (const name of [SMOKE.priceFold, SMOKE.searchedFold, SMOKE.alertFold])
+      expect(within(folds).getByText(name)).toBeInTheDocument();
   });
 
   it('a day of more than five stays offers "Show N more stays"', async () => {

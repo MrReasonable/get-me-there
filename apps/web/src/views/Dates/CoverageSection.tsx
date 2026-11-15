@@ -14,7 +14,7 @@ import { type BucketName, COPY } from '../../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../../format.js';
 import { useNow } from '../../now.js';
 import { datesPatch } from '../../state/datesState.js';
-import { updateSearchParams } from '../../state/urlState.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 
 /** Spec §3 / §6.6: the six buckets, which sum to the cell count. */
 const BUCKETS = [
@@ -305,29 +305,34 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
 }
 
 /**
- * Spec §11 Dates "Coverage section": folded by default; the header line's coverage link, `d.coverage=open` and
- * `?view=coverage` (Task 19.7) open it. It reads `GET /definitions/:id/coverage` only while open, over the latest
- * parent run, and says the filters do not narrow it.
+ * The full search log, inside the "What was searched" fold (Ruling 19): a link that opens the coverage section beneath
+ * the fold's rows (`d.coverage=open`; `?view=coverage` and the run line's link land there too). It reads
+ * `GET /definitions/:id/coverage` only while open, over the latest parent run, and says the filters do not narrow it.
  */
 export function CoverageSection({ definition, open }: { definition: DefinitionResponse; open: boolean }) {
   const id = useId();
+  const toggle = datesPatch({ coverageOpen: !open });
   return (
-    <section aria-labelledby={`${id}-toggle`} className="plate coverage-plate">
-      <h3>
-        <button
-          id={`${id}-toggle`}
-          type="button"
+    <section aria-labelledby={`${id}-log`} className="sfold-log">
+      <p className="sfold-note">
+        <a
+          id={`${id}-log`}
+          href={hrefWith(toggle)}
+          onClick={navigateTo(toggle)}
           aria-expanded={open}
           aria-controls={`${id}-body`}
-          className="coverage-toggle min-h-11"
-          onClick={() => updateSearchParams(datesPatch({ coverageOpen: !open }), 'replace')}
         >
-          {COPY.datesView.coverageToggle}
-        </button>
-      </h3>
-      <p className="px-[18px] pb-3 text-sm text-fg-2">{COPY.datesView.coverageNotFiltered}</p>
-      <div id={`${id}-body`} className="coverage-body">
-        {open ? <CoverageBody definition={definition} /> : null}
+          {open ? COPY.searchPage.folds.hideLog : COPY.searchPage.folds.fullLog}
+        </a>
+        {open ? null : <span className="sfold-why"> {COPY.searchPage.folds.fullLogNote}</span>}
+      </p>
+      <div id={`${id}-body`}>
+        {open ? (
+          <>
+            <p className="sfold-note">{COPY.datesView.coverageNotFiltered}</p>
+            <CoverageBody definition={definition} />
+          </>
+        ) : null}
       </div>
     </section>
   );

@@ -128,7 +128,7 @@ describe('the calendar’s keyboard (Ruling 18)', () => {
 });
 
 describe('Tab order across the page (spec §11 Accessibility; mockup 02)', () => {
-  it("the crumbs, the actions, the run line's link, the filter row, the trips, the lower dates, the calendar's one stop, then the coverage toggle", async () => {
+  it("the crumbs, the actions, the run line's link, the filter row, the trips, the lower dates, the calendar's one stop, then the first fold's summary", async () => {
     const { user } = renderDates({
       body: {
         ...workedDates(),
@@ -152,7 +152,7 @@ describe('Tab order across the page (spec §11 Accessibility; mockup 02)', () =>
           ? 'calendar'
           : (el.getAttribute('aria-label') ?? labelled ?? el.textContent ?? ''),
       );
-      if (el.textContent === 'Coverage of the latest run') break;
+      if (el.matches('.sfold > summary')) break;
     }
     const index = (label: string | RegExp) =>
       seen.findIndex((s) => (typeof label === 'string' ? s === label : label.test(s)));
@@ -169,7 +169,9 @@ describe('Tab order across the page (spec §11 Accessibility; mockup 02)', () =>
       index(/^Calendar · /),
       index('See all on the calendar'),
       index('calendar'),
-      index('Coverage of the latest run'),
+      // why: Ruling 19: the folds are closed, so the tab stop after the calendar is the first fold's summary (jsdom
+      // keeps a closed row's links in the order; the browsers skip them, which the layout checks measure)
+      index(/^Price over time/),
     ];
     expect(
       order.every((i) => i >= 0),

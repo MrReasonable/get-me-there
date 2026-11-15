@@ -468,4 +468,57 @@ describe('the new-search panel says no banned word, no main-path term and no "£
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
   });
+
+  it('view=dates, Task 10: the three folds open, with a thin-coverage line, an alert rule and email not set up', async () => {
+    server.use(
+      serveDates({ discoveryProviders: ['travelpayouts'] }),
+      serveCards([
+        searchCard({
+          latestRun: latestRun({
+            datePairs: 100,
+            datePairsSearched: 90,
+            datePairsNeverSearched: 5,
+            marks: {
+              priced: 10,
+              'no-price-shown': 80,
+              'couldnt-read': 0,
+              'not-reached': 5,
+              'not-searched': 5,
+            },
+          }),
+        }),
+      ]),
+      http.get(`${API}/alerts`, () =>
+        HttpResponse.json([
+          {
+            id: 'r1',
+            definitionId: 'def-0001',
+            type: 'absolute',
+            thresholdPence: 45_000,
+            pct: null,
+            basis: 'calendar',
+            requireAllVerified: null,
+            cooldownHours: 336,
+            enabled: true,
+          },
+        ]),
+      ),
+      http.get(`${API}/status`, () =>
+        HttpResponse.json(
+          statusReport([
+            { id: 'email', area: 'email', state: 'off', offReason: 'not-set-up', summary: 'no email' },
+          ]),
+        ),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    await screen.findByRole('region', { name: COPY.searchPage.folds.groupLabel });
+    await screen.findByText(COPY.searchPage.folds.emailNotSet);
+    await screen.findByText(COPY.searchPage.folds.thin);
+    for (const d of document.querySelectorAll('details.sfold')) d.setAttribute('open', '');
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(poundsOutsidePrices()).toEqual([]);
+    expect(jargonIn(mainPathWords())).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/\bbasis\b/i);
+  });
 });

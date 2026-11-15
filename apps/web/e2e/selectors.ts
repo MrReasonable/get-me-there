@@ -1,6 +1,5 @@
 import { COPY } from '../src/copy.js';
 
-const D = COPY.datesView;
 const P = COPY.searchPage;
 const C = COPY.calendar;
 const MONTHS = '[data-testid="calendar-months"]';
@@ -42,7 +41,12 @@ export const SMOKE = {
   showMoreStays: /^Show \d+ more stays?$/,
   previousMonth: C.previousMonth,
   nextMonth: C.nextMonth,
-  coverageToggle: D.coverageToggle,
+  /** The three folds under the calendar (Ruling 19): one group, a row for each, named by its summary's first words. */
+  folds: COPY.searchPage.folds.groupLabel,
+  priceFold: COPY.searchPage.folds.priceOverTime,
+  searchedFold: COPY.searchPage.folds.searched,
+  alertFold: COPY.searchPage.folds.alert,
+  fullLog: COPY.searchPage.folds.fullLog,
   /** The nav, labelled "Main", with its two links: Trips and Settings (design 2026-11-08 Ruling 9). */
   nav: COPY.navLabel,
   navItems: [COPY.nav.trips, COPY.nav.settings],

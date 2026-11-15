@@ -1,7 +1,8 @@
 import { apiContract } from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, type Route, test } from '@playwright/test';
 import { z } from 'zod';
+import { COPY } from '../src/copy.js';
 import {
   at,
   bucketsOf,
@@ -14,10 +15,18 @@ import {
   provCached,
   provGrid,
   provSearched,
+  runSummary,
   verifiedFig,
 } from '../test/fixtures.dates.js';
-import { execution } from '../test/fixtures.js';
-import { cardsResponse, cardTrip, flightListProvenance, searchCard } from '../test/fixtures.searches.js';
+import { coverageResponse, execution, statusReport } from '../test/fixtures.js';
+import {
+  cardsResponse,
+  cardTrip,
+  flightListProvenance,
+  latestRun,
+  searchCard,
+} from '../test/fixtures.searches.js';
+import { cellAt, fetchPoint, routeHistory } from '../test/fixtures.wp10.js';
 import { expectNoSidewaysScroll } from './layout.js';
 import { SMOKE } from './selectors.js';
 import { FIXTURE_SEARCH, TRIP_NOW } from './tripFixtures.js';
@@ -233,6 +242,137 @@ const MOCKUP: DatesOptions = {
   },
 };
 
+/** Seven of this search's runs, newest first, as the served date pairs list them (Ruling 19's Price over time). */
+const RUNS = [1, 2, 3, 4, 5, 6, 7].map((k) => ({ id: `exec-000${k}`, hours: k * 24 }));
+const FOLDS_BOARD: DatesOptions = {
+  ...MOCKUP,
+  executions: RUNS.map((r) => runSummary({ id: r.id, ageHours: r.hours })),
+};
+
+/**
+ * The reads behind the three folds (Ruling 19), served for this search: its card with the latest run's marks over 2,184
+ * dates (priced, no price listed, couldn't read, not reached, not searched, so every row has a count), the route history
+ * with a point for each of the seven runs and one of another search's, two alert rules and a status report that says
+ * email isn't set up, and the coverage the full search log reads.
+ */
+async function serveFolds(page: Page) {
+  const json = (body: unknown) => (route: Route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  const marks = {
+    priced: 2146,
+    'no-price-shown': 20,
+    'couldnt-read': 10,
+    'not-reached': 6,
+    'not-searched': 2,
+  };
+  await page.route(
+    '**/api/definitions/cards',
+    json(
+      apiContract.searchCardsResponseSchema.parse(
+        cardsResponse([
+          searchCard({
+            id,
+            latestRun: latestRun({
+              datePairs: 2184,
+              datePairsSearched: 2166,
+              datePairsNeverSearched: 2,
+              marks,
+            }),
+          }),
+        ]),
+      ),
+    ),
+  );
+  const cell = cellAt('2027-03-14', 10);
+  await page.route(
+    '**/api/routes/*/*/history*',
+    json(
+      routeHistory({
+        calendarSeries: [
+          {
+            providerId: 'travelpayouts',
+            cabin: 'economy',
+            points: [
+              ...RUNS.map((r, i) =>
+                fetchPoint(r.hours, 37_200 + i * 100, cell, { executionId: r.id, truncated: i === 1 }),
+              ),
+              fetchPoint(12, 100, cell, { executionId: 'another-search' }),
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  const rule = (n: number, over: Record<string, unknown>) => ({
+    id: `rule-${n}`,
+    definitionId: id,
+    type: 'absolute',
+    thresholdPence: 45_000,
+    pct: null,
+    basis: 'calendar',
+    requireAllVerified: null,
+    cooldownHours: 336,
+    enabled: true,
+    ...over,
+  });
+  await page.route(
+    '**/api/alerts?*',
+    json([
+      rule(1, {}),
+      rule(2, {
+        type: 'dropPct',
+        thresholdPence: null,
+        pct: 10,
+        basis: 'verified',
+        requireAllVerified: true,
+      }),
+    ]),
+  );
+  await page.route(
+    '**/api/status',
+    json(
+      statusReport([
+        { id: 'email', area: 'email', state: 'off', offReason: 'not-set-up', summary: 'email is not set up' },
+      ]),
+    ),
+  );
+  await page.route(`**/api/definitions/${id}/coverage*`, json(coverageResponse()));
+}
+
+/** The three fold summaries, in order. */
+const foldSummaries = (page: Page) =>
+  page.getByRole('region', { name: SMOKE.folds }).locator('.sfold > summary');
+
+/** Opens each fold by pressing its summary, as a person does. */
+async function openFolds(page: Page) {
+  const summaries = foldSummaries(page);
+  await expect(summaries).toHaveCount(3);
+  for (let i = 0; i < 3; i += 1) await summaries.nth(i).click();
+  await expect(page.locator('.search-folds .sfold[open]')).toHaveCount(3);
+}
+
+/**
+ * The parts of the open folds whose content is wider than their box (a wrapped line that still spills), or that lie
+ * beyond the window's right edge outside a region that scrolls itself, as "tag.class: scroll > client".
+ */
+async function overflowingFolds(page: Page): Promise<string[]> {
+  return page.locator('.search-folds').evaluate((group) => {
+    const out: string[] = [];
+    for (const el of group.querySelectorAll(
+      '.sfold-body, .sfold > summary, .sfold-run, .sfold-rules li, td, th',
+    )) {
+      if (el.scrollWidth > el.clientWidth + 1)
+        out.push(`${el.tagName}.${el.className}: ${el.scrollWidth} > ${el.clientWidth}`);
+    }
+    for (const el of group.querySelectorAll('*')) {
+      if (el.closest('.overflow-x-auto') !== null) continue;
+      if (el.getBoundingClientRect().right > window.innerWidth + 0.5)
+        out.push(`${el.tagName}.${el.className} past the window`);
+    }
+    return out;
+  });
+}
+
 async function openTrips(page: Page, width: number, scheme: 'light' | 'dark') {
   await page.setViewportSize({ width, height: 900 });
   await page.emulateMedia({ colorScheme: scheme });
@@ -363,6 +503,48 @@ for (const width of WIDTHS)
       });
     });
 
+    test(`the three folds at ${width}px, ${scheme}: closed they hold one line each, open they fit, nothing sideways`, async ({
+      page,
+    }) => {
+      await serveReadable(page);
+      await serveFolds(page);
+      await openSearch(page, width, scheme, FOLDS_BOARD);
+      const group = page.getByRole('region', { name: SMOKE.folds });
+      await group.scrollIntoViewIfNeeded();
+      const summaries = foldSummaries(page);
+      await expect(summaries).toHaveCount(3);
+      // closed by default, each summary its name and its one-line state
+      await expect(page.locator('.search-folds .sfold[open]')).toHaveCount(0);
+      await expect(summaries.nth(0)).toContainText('Price over time · lowest calendar price £372');
+      await expect(summaries.nth(1)).toContainText('What was searched · 2,146 of 2,184 dates priced, 38 not');
+      await expect(summaries.nth(2)).toContainText('Alert · 2 on');
+      // a closed fold's content is out of the tab order: Tab from a summary reaches the next summary
+      await summaries.nth(0).focus();
+      await page.keyboard.press('Tab');
+      await expect(summaries.nth(1)).toBeFocused();
+      await expect(summaries.nth(0)).toHaveCSS('min-height', '44px');
+      await group.screenshot({ path: `test-results/folds-shots/folds-closed-${width}-${scheme}.png` });
+      await openFolds(page);
+      // Price over time: six of the seven runs, newest first, the other search's point left out
+      await expect(page.locator('.sfold-runs > li')).toHaveCount(6);
+      await expect(page.locator('.sfold-runs')).not.toContainText('£1 ');
+      // What was searched: six rows, then the full search log inside it
+      await expect(page.locator('.sfold-table tr')).toHaveCount(6);
+      await page.getByRole('link', { name: SMOKE.fullLog }).click();
+      await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
+      // Alert: both rules in words, and email not set up
+      await expect(page.locator('.sfold-rules > li')).toHaveCount(2);
+      await expect(page.getByText(COPY.searchPage.folds.emailNotSet)).toBeVisible();
+      expect(await overflowingFolds(page)).toEqual([]);
+      for (const box of await group.locator('.sfold').all()) {
+        const b = await box.boundingBox();
+        expect((b?.x ?? 0) + (b?.width ?? 0)).toBeLessThanOrEqual(width);
+      }
+      await expectNoSidewaysScroll(page);
+      // the group alone, to set beside mockup 02's three rows
+      await group.screenshot({ path: `test-results/folds-shots/folds-open-${width}-${scheme}.png` });
+    });
+
     test(`the Trips page at ${width}px, ${scheme}: a trip's › opens its page, no sideways scroll`, async ({
       page,
     }) => {
@@ -396,14 +578,20 @@ test('the search page fits every trip row in its box at each width from 720 to 1
   page,
 }) => {
   await serveReadable(page);
-  await openSearch(page, SWEEP[0], 'light', MOCKUP);
+  await serveFolds(page);
+  await openSearch(page, SWEEP[0], 'light', FOLDS_BOARD);
   // Task 9: the day panel's trip and calendar rows are swept with the sections'
   await page.locator(`${SMOKE.calendarDay}[data-day="2027-03-14"]`).click();
   await expect(page.getByRole('region', { name: SMOKE.dayPanel }).locator(SMOKE.tripRow)).toHaveCount(1);
+  // Task 10: the three folds open, with the full search log, swept with them
+  await openFolds(page);
+  await page.getByRole('link', { name: SMOKE.fullLog }).click();
+  await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
   for (const width of SWEEP) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.locator(SMOKE.tripRow).first()).toBeVisible();
     expect(await overflowingRows(page), `${width}px`).toEqual([]);
+    expect(await overflowingFolds(page), `the folds at ${width}px`).toEqual([]);
     await expectNoSidewaysScroll(page);
   }
 });

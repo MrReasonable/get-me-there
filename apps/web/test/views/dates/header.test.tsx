@@ -91,7 +91,8 @@ describe('a search’s header (design 2026-11-08 §5, mockup 02)', () => {
       'Searched today 13:00–14:00 · calendar prices for 2,146 of 2,184 dates · 1 date with flights read · what was searched',
     );
     const link = within(line).getByRole('link', { name: P.whatWasSearched });
-    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('d.coverage')).toBe('open');
+    // Ruling 19: it asks for the What was searched fold (the fold's own tests follow it)
+    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('d.fold')).toBe('searched');
     // the actions: Search again (primary), Edit, and the schedule in words with Change
     const actions = screen.getByRole('group', { name: P.actionsLabel });
     const again = within(actions).getByRole('button', { name: COPY.searchAgain.label });

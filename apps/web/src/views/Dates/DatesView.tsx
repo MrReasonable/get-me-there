@@ -7,7 +7,7 @@ import {
   londonDateOf,
   type StartRefusalCode,
 } from '@gmt/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import {
   DATES_DRAWN_MARK,
@@ -20,17 +20,27 @@ import type { DefinitionResponse, ExecutionResponse, SearchCard } from '../../ap
 import { LoadError } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
-import { isSyntheticRead } from '../../lib/bookingTarget.js';
+import { isSyntheticRead, syntheticProvenance } from '../../lib/bookingTarget.js';
 import { useNow } from '../../now.js';
-import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '../../state/datesState.js';
+import {
+  DATES_PARAMS,
+  type DatesUiState,
+  type FoldId,
+  filtersActive,
+  foldOf,
+  parseDatesState,
+  scopeQuery,
+} from '../../state/datesState.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
-import { useSearchParams } from '../../state/urlState.js';
+import { updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { nothingFound, nothingFoundText } from '../Searches/cardWords.js';
 import { type BoardModel, boardModel, type FigurePair, shownCount } from './board.js';
 import { CheapestTrips, type NoTrip } from './CheapestTrips.js';
-import { CoverageSection } from './CoverageSection.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters, isOwnStay } from './Filters.js';
+import { AlertFold } from './folds/AlertFold.js';
+import { PriceOverTime, usePriceHistory } from './folds/PriceOverTime.js';
+import { WhatWasSearched } from './folds/WhatWasSearched.js';
 import { CALENDAR_ID, LowerOnCalendar, ReadSaid, usePageFlights } from './LowerOnCalendar.js';
 import { Calendar } from './OverviewGrid.js';
 import { staysByDay } from './overview.js';
@@ -66,8 +76,8 @@ export interface DatesViewProps {
  * Design 2026-11-08 §5 (mockup 02): a search's page (`?view=dates&def=`). It reads `GET /definitions/:id/date-pairs`
  * through core's decoder, applies the stay range, ranks with core's `rankDatePairs` and splits the ranking by core's
  * shared rules, then renders the header (crumbs, name, meta line, actions, run line and the run's progress), the filter
- * row, Cheapest trips and Lower on the calendar, then the calendar with its day panel (Ruling 18) and the coverage
- * section.
+ * row, Cheapest trips and Lower on the calendar, then the calendar with its day panel (Ruling 18) and the three folds
+ * (Ruling 19: Price over time, What was searched with the full search log inside it, Alert).
  */
 export function DatesView({ definition, clock = browserClock }: DatesViewProps) {
   if (definition === null) return <NoSearch />;
@@ -121,6 +131,8 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
 
   const data = shown?.data ?? null;
   const executionId = data?.executionId ?? null;
+  // why: Ruling 19: the route history of this search's runs, read here so the page's synthetic check covers its points
+  const history = usePriceHistory(definition, data);
   // why: spec rev 55 §11 — the latest run, polled while it is going (the top bar's poll of the same run is one query)
   const watch = useLatestRun(executionId);
   const run: ExecutionResponse | undefined = watch.data?.id === executionId ? watch.data : undefined;
@@ -133,6 +145,17 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
     useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id) ?? null;
 
   useRunRereads(run, () => void query.refetch(), clock);
+
+  // why: Ruling 19: a link that asks for a fold (the run line's, `d.fold=`) or lands on the full search log
+  // (`d.coverage=open` on arrival, `?view=coverage`) opens it once, scrolls to it and focuses it; the asking is then
+  // consumed so the same link asks again, and a later filter change never pulls the page back
+  const urlFold = foldOf(params);
+  const [landingOnLog, setLandingOnLog] = useState(state.coverageOpen);
+  const asked = (id: FoldId) => urlFold === id || (id === 'searched' && landingOnLog);
+  const foldHandled = useCallback(() => {
+    setLandingOnLog(false);
+    updateSearchParams({ [DATES_PARAMS.fold]: null }, 'replace');
+  }, []);
 
   const model: BoardModel | null = useMemo(
     () => (shown === null ? null : boardModel(shown.data.pairs, options, shown.now)),
@@ -165,7 +188,9 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   return (
     <div className="dates-view search-page token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
-      {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
+      {data !== null &&
+      providers.data?.synthetic !== true &&
+      (isSyntheticRead(data, run) || history.points.some((p) => syntheticProvenance(p.provenance))) ? (
         <SyntheticBanner />
       ) : null}
       <DatesHeader
@@ -229,7 +254,25 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
           />
         </div>
       ) : null}
-      <CoverageSection definition={definition} open={state.coverageOpen} />
+      {model !== null ? (
+        <section className="search-folds" data-testid="search-folds" aria-label={P.folds.groupLabel}>
+          <PriceOverTime
+            definition={definition}
+            history={history}
+            requested={asked('price')}
+            onHandled={foldHandled}
+          />
+          <WhatWasSearched
+            definition={definition}
+            card={card}
+            readDates={model.readDates}
+            coverageOpen={state.coverageOpen}
+            requested={asked('searched')}
+            onHandled={foldHandled}
+          />
+          <AlertFold definition={definition} requested={asked('alert')} onHandled={foldHandled} />
+        </section>
+      ) : null}
     </div>
   );
 }

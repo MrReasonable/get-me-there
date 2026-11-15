@@ -186,10 +186,13 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await page.goto(`/?view=coverage&def=${defId}`);
   await expect(trips(page)).toBeVisible();
   expect(new URL(page.url()).searchParams.get('d.coverage')).toBe('open');
-  await expect(page.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
-    'aria-expanded',
-    'true',
-  );
+  // Ruling 19: the landing opens the What was searched fold, moves focus to its summary and shows the full log
+  const searched = page
+    .getByRole('region', { name: SMOKE.folds })
+    .locator('details', { hasText: SMOKE.searchedFold })
+    .first();
+  await expect(searched).toHaveAttribute('open', '');
+  await expect(searched.locator('summary')).toBeFocused();
   await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
 
   // (5) History: the charts draw in a real layout and the table names the synthetic source

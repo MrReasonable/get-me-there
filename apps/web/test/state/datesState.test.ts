@@ -6,6 +6,7 @@ import {
   type DatesUiState,
   datesPatch,
   filtersActive,
+  foldOf,
   parseDatesState,
   scopeQuery,
 } from '../../src/state/datesState.js';
@@ -73,6 +74,16 @@ describe('parseDatesState (spec §11 Filters and URLs)', () => {
   it('only the exact words switch the week view and open the coverage section', () => {
     expect(parse('d.week=all').bestPerWeek).toBe(false);
     expect(parse('d.coverage=yes').coverageOpen).toBe(false);
+  });
+});
+
+describe('foldOf', () => {
+  it('names one of the three folds, and anything else is no fold', () => {
+    for (const f of ['price', 'searched', 'alert'])
+      expect(foldOf(new URLSearchParams(`d.fold=${f}`))).toBe(f);
+    for (const bad of ['', 'Price', 'coverage', 'all'])
+      expect(foldOf(new URLSearchParams(`d.fold=${bad}`))).toBeNull();
+    expect(foldOf(new URLSearchParams(''))).toBeNull();
   });
 });
 

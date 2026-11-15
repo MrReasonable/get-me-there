@@ -688,6 +688,51 @@ export const COPY = {
       "The lowest calendar prices. Their flights haven't been read yet, and calendar prices often rise once they are.",
     inAll: (n: number) => `${thousands(n)} ${noun(n, 'date', 'dates')} in all.`,
     seeAll: 'See all on the calendar',
+    // the three folds under the calendar (Ruling 19): one group of details rows, each summary its one-line state
+    folds: {
+      groupLabel: 'More about this search',
+      priceOverTime: 'Price over time',
+      priceHeading: 'Lowest calendar price per search',
+      lowestCalendar: 'lowest calendar price',
+      priceNone: 'No calendar prices have been read for this search yet.',
+      priceNotTrips: 'These are calendar prices, not trips with flights read.',
+      fullHistory: 'Full price history',
+      searched: 'What was searched',
+      count: (n: number) => thousands(n),
+      searchedSummary: (priced: number, total: number) =>
+        `${thousands(priced)} of ${thousands(total)} ${noun(total, 'date', 'dates')} priced, ${thousands(total - priced)} not`,
+      searchedNone: 'Not searched yet, so there is nothing to count.',
+      // the five marks of core's `reducedMark`, each with the one thing it means
+      marks: {
+        priced: 'Calendar price found',
+        'no-price-shown': 'No price listed',
+        'couldnt-read': "Couldn't read",
+        'not-reached': 'Not reached',
+        'not-searched': 'Not searched',
+      } satisfies Record<ReducedMark, string>,
+      markNotes: {
+        priced: 'A calendar price, not a fare.',
+        'no-price-shown': "The calendar showed none. That isn't the same as no flights.",
+        'couldnt-read': "The page didn't load; the next search tries them again.",
+        'not-reached': 'The search stopped before these dates.',
+        'not-searched': '',
+      } satisfies Record<ReducedMark, string>,
+      flightsRead: 'Flights read',
+      flightsReadValue: (n: number) => `${thousands(n)} ${noun(n, 'date', 'dates')}`,
+      flightsReadNote: 'Counted across every search so far.',
+      thin: "Most of the dates searched had no price listed. That isn't the same as no flights.",
+      fullLog: 'Full search log',
+      fullLogNote: '(every run, source and outcome)',
+      hideLog: 'Close the full search log',
+      alert: 'Alert',
+      alertOff: 'off',
+      alertOn: (n: number) => `${thousands(n)} on`,
+      alertNone: 'No alert is set for this search.',
+      alertWatches: 'Alerts watch calendar prices, not trips with flights read.',
+      changeAlerts: 'Change alerts',
+      emailNotSet: "Email isn't set up yet",
+      emailSetUp: 'set it up in Settings',
+    },
   },
   // --- Trips and Search plan, Ruling 18 (Task 9): a search's calendar, its key and the day panel (mockup 02) ---
   calendar: {
@@ -887,7 +932,6 @@ export const COPY = {
     tooManyCells: (cells: number, bound: number) =>
       `This search covers ${thousands(cells)} combinations of dates and airports, more than the ${thousands(bound)} this page reads at once. Pick one airport in From or To above to bring it under ${thousands(bound)}.`,
     // the coverage section (Task 19.5; what the Coverage view held)
-    coverageToggle: 'Coverage of the latest run',
     coverageNotFiltered:
       'The filters above do not narrow this section: it covers the latest run over the whole search.',
   },
@@ -1169,6 +1213,12 @@ export const COPY = {
     basisVerified: 'Itinerary-search basis (class verified or partially-verified)',
     basisCalendar: 'Calendar basis (constraints not checked)',
     requireAll: 'Only class verified (every constraint passed)',
+    // the same three bases in the words the Search page's Alert fold uses (its main path says no "basis")
+    plainBasis: {
+      calendar: 'calendar prices (constraints not checked)',
+      verified: 'flights read',
+      requireAll: 'flights read, every limit passed',
+    },
     requireAllCalendarNote:
       'Calendar prices carry no constraint checks, so this option applies to the itinerary-search basis only.',
     cooldown: 'Cooldown (hours)',

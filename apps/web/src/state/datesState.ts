@@ -14,7 +14,18 @@ export const DATES_PARAMS = {
   journey: 'd.journey',
   week: 'd.week',
   coverage: 'd.coverage',
+  /** A link that opens one of the three folds under the calendar (Ruling 19); consumed once the fold has opened. */
+  fold: 'd.fold',
 } as const;
+
+/** The three folds under the calendar, by the value `d.fold` names them with. */
+export const FOLD_IDS = ['price', 'searched', 'alert'] as const;
+export type FoldId = (typeof FOLD_IDS)[number];
+
+/** The fold a URL asks to open, or null (a value that names none is ignored, never an error). */
+export function foldOf(p: URLSearchParams): FoldId | null {
+  return FOLD_IDS.find((f) => f === p.get(DATES_PARAMS.fold)) ?? null;
+}
 
 export interface DatesUiState {
   /** The stay filter, applied in the browser to the decoded date pairs before ranking and shading. */

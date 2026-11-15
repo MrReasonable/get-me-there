@@ -149,6 +149,10 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchPage.overLimit': [2, '25h'],
   'searchPage.showMore': [10],
   'searchPage.inAll': [155],
+  'searchPage.folds.count': [2146],
+  'searchPage.folds.searchedSummary': [2146, 2184],
+  'searchPage.folds.flightsReadValue': [23],
+  'searchPage.folds.alertOn': [2],
   // WP20 Task 20.10: the flights on a search's page
   'flights.changes': [1],
   'flights.operatedBy': ['Virgin Atlantic', 'Delta'],
