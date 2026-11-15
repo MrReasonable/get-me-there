@@ -1,10 +1,12 @@
-import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { App } from '../../src/App.js';
 import { RunProgress, type RunProgressRun } from '../../src/components/RunProgress.js';
+import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
+import { TripRow } from '../../src/components/rows/TripRow.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
 import { VIEWS } from '../../src/state/view.js';
@@ -226,6 +228,38 @@ describe('the top bar and run progress say no banned word, no set-up term and no
     ],
   ])('RunProgress: %s', (_name, run) => {
     renderWithProviders(<RunProgress run={run} onCancel={() => undefined} onResume={() => undefined} />);
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(jargonIn(mainPathWords())).toEqual([]);
+    expect(poundsOutsidePrices()).toEqual([]);
+  });
+
+  it.each([
+    'not-read',
+    'outbound-only',
+    'no-pairing-read',
+    'list-failed',
+    'within-older',
+    'over-limit',
+  ] as const)('the trip and calendar rows (Task 5): calendar read state %s', (pairingRead) => {
+    const search = {
+      id: 'd',
+      cabin: 'economy',
+      multiAirport: true,
+      pointOfSale: 'GB',
+      showCarriers: true,
+    } as const;
+    const pair = { departureDate: asIsoDate('2026-11-11'), returnDate: asIsoDate('2026-11-28'), nights: 17 };
+    renderWithProviders(
+      <ul>
+        <TripRow figure={pairingFig()} details={null} search={search} pair={pair} />
+        <CalendarRow
+          figure={calendarFig({ pairingRead, listReason: pairingRead === 'list-failed' ? 'network' : null })}
+          search={search}
+          pair={pair}
+          onRead={() => undefined}
+        />
+      </ul>,
+    );
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(jargonIn(mainPathWords())).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);

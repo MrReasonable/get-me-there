@@ -1,0 +1,162 @@
+/* =====================================================================================================================
+   The shared trip and calendar rows (design 2026-11-08 §5.2, mockups 01-searches and 02-search; Ruling 20): list items
+   in a grid at a desktop, two-column cards under 720 px. They read the shared tokens (styles/theme.css), light and dark.
+   The price's link and label are trip.css's (`.row-price`). Spec §4's CSP blocks inline styles: nothing is set from markup.
+   ===================================================================================================================== */
+
+.trip-row {
+  display: grid;
+  grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 1fr) minmax(130px, 1fr) 28px;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--t-line);
+  color: var(--t-ink);
+  list-style: none;
+  min-width: 0;
+}
+.trip-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-row:last-child {
+  border-bottom: 0;
+}
+.trip-row-head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 12px;
+  color: var(--t-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.trip-row-cal {
+  grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 2fr) auto;
+}
+.trip-row .row-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.trip-row .book-link {
+  color: var(--t-accent);
+}
+.trip-row .book-link:hover {
+  color: var(--t-accent-hover);
+}
+.trip-row .row-dates b {
+  font-weight: 600;
+}
+.trip-row .row-airports {
+  display: block;
+  color: var(--t-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.trip-row .row-leg {
+  font-size: 14px;
+}
+.trip-row .row-muted {
+  color: var(--t-muted);
+  font-size: 13px;
+}
+.trip-row .row-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 28px;
+  min-height: 44px;
+  color: var(--t-muted);
+  font-size: 20px;
+  text-decoration: none;
+}
+.trip-row .row-go:hover {
+  color: var(--t-accent);
+}
+.trip-row .row-read {
+  justify-self: end;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trip-row :is(a, button):focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.trip-row .row-nights-inline {
+  display: none;
+  color: var(--t-muted);
+}
+/* The names a value carries for assistive technology: visually hidden on a desktop (the column head says them), drawn as
+   a small tag on a phone, where the head is gone. */
+.trip-row .row-vh,
+.trip-row .row-leg-tag {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .trip-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "dates pc" "out pc" "back go";
+    padding: 12px 16px;
+  }
+  .trip-row-head {
+    display: none;
+  }
+  .trip-row .row-dates {
+    grid-area: dates;
+  }
+  .trip-row .row-price {
+    grid-area: pc;
+    align-items: flex-end;
+  }
+  .trip-row .row-nights {
+    display: none;
+  }
+  .trip-row .row-nights-inline {
+    display: inline;
+  }
+  .trip-row .row-out {
+    grid-area: out;
+  }
+  .trip-row .row-back {
+    grid-area: back;
+  }
+  .trip-row .row-go {
+    grid-area: go;
+    align-self: end;
+  }
+  .trip-row-cal {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "dates pc" "out go";
+  }
+  .trip-row-cal .row-read {
+    grid-area: go;
+  }
+  .trip-row .row-leg-tag {
+    position: static;
+    display: inline-block;
+    width: 38px;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    color: var(--t-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+}

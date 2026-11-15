@@ -70,24 +70,37 @@ export function rowBookingTarget(
   });
 }
 
+/** One current verified figure's details (Ruling 2), as the read carries them. */
+export type VerifiedDetails = DecodedDatePairs['verifiedDetails'][number];
+
 /**
- * A verified figure's own booking from the read's details (Ruling 2): the entry naming its dates and airports, or null
- * where there is none (the figure is not a current verified one).
+ * A verified figure's own details from the read's (Ruling 2): the entry naming its dates and airports, or null where
+ * there is none (the figure is not a current verified one).
  */
+export function verifiedDetailOf(
+  details: DecodedDatePairs['verifiedDetails'],
+  pair: { departureDate: IsoDate; returnDate: IsoDate },
+  figure: Pick<DatePairFigure, 'basis' | 'origin' | 'destination'>,
+): VerifiedDetails | null {
+  if (figure.basis !== 'verified') return null;
+  return (
+    details.find(
+      (x) =>
+        x.departureDate === pair.departureDate &&
+        x.returnDate === pair.returnDate &&
+        x.origin === figure.origin &&
+        x.destination === figure.destination,
+    ) ?? null
+  );
+}
+
+/** A verified figure's own booking from the read's details (Ruling 2): null where there is no entry for it. */
 export function verifiedBookingOf(
   details: DecodedDatePairs['verifiedDetails'],
   pair: { departureDate: IsoDate; returnDate: IsoDate },
   figure: Pick<DatePairFigure, 'basis' | 'origin' | 'destination'>,
 ): Booking | null {
-  if (figure.basis !== 'verified') return null;
-  const d = details.find(
-    (x) =>
-      x.departureDate === pair.departureDate &&
-      x.returnDate === pair.returnDate &&
-      x.origin === figure.origin &&
-      x.destination === figure.destination,
-  );
-  return d?.booking ?? null;
+  return verifiedDetailOf(details, pair, figure)?.booking ?? null;
 }
 
 /**

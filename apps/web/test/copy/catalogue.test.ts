@@ -276,6 +276,14 @@ const SAMPLES: Record<string, unknown[]> = {
     'cabin not stated',
     'fetched 2h ago · provider age unknown',
   ],
+  // Trips and Search plan Task 5: the shared trip and calendar rows
+  'rows.nightsInline': [17],
+  'rows.pair': ['LHR', 'JFK'],
+  'rows.detailsFor': ['Wed 11 Nov → Sat 28 Nov', 'LHR → JFK'],
+  'rows.readFlightsFor': ['Wed 11 Nov → Sat 28 Nov', null],
+  'rows.legTimes': ['07:15', '17:55'],
+  'rows.changes': [2],
+  'readState.failed': ['the connection to it failed'],
   // trip-page plan Task 7: the Trip page (design 2026-11-08 §5, §6.1)
   'trip.heading': ['Wed 11 Nov', 'Sat 28 Nov'],
   'trip.nights': [17],

@@ -8,6 +8,7 @@ import {
   type ExecutionStatus,
   formatAgo,
   mainPathSource,
+  type PairingRead,
   PROVIDER_NAMES,
   type PriceLabelKind,
   type ProviderId,
@@ -20,6 +21,23 @@ import { EXAMPLE_PAIR_CELLS } from './example.js';
 
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
+
+/**
+ * What a calendar price says of its flights, by the figure's read of them (`readStateWords`): one record, so the Search
+ * page's rows and the Trip card's calendar sentence say the same of one read.
+ */
+const READ_STATE_WORDS = {
+  'not-read': 'Flights not read',
+  'outbound-only': 'Return flights not read',
+  'no-pairing-read': 'Google listed no return flights',
+  'list-failed': "Flights couldn't be read",
+  within: 'Flights read',
+  'within-older': 'Flights read earlier, not the latest',
+  'sellers-not-read': 'Flights read, sellers not read',
+  'offers-incomplete': 'Flights read, some sellers not read',
+  'over-limit': 'Flights read, over your journey limit',
+  'within-other-limits': 'Flights read under other limits',
+} as const satisfies Record<PairingRead, string>;
 
 /** A whole number with a comma between thousands ("2184" → "2,184"), as the plan words its counts. */
 const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -1220,7 +1238,7 @@ export const COPY = {
     outboundOnly: (ago: string) => `Outbound flights were read ${ago}, but not their returns.`,
     noReturn: (ago: string) =>
       `Flights were read ${ago}, but Google listed no return for the outbounds tried.`,
-    calendarOnly: "Flights not read yet, so there's nothing to book here.",
+    calendarOnly: `${READ_STATE_WORDS['not-read']} yet, so there's nothing to book here.`,
     calendarWithTrip: (ago: string) =>
       `The trip below was read ${ago}, longer ago than this search's refresh, and doesn't lead.`,
     readWithoutCalendar: (ago: string) =>
@@ -1507,6 +1525,30 @@ export const COPY = {
     testLimit: 'A test email was sent a moment ago. Try again in a minute.',
     testFailed: 'The test email failed to send.',
     testFailedCall: (message: string) => `The test email request failed: ${message}`,
+  },
+  /** The shared trip and calendar rows (Trips and Search plan, Ruling 20): their column names, links and leg words. */
+  rows: {
+    head: { price: 'Price', dates: 'Dates', nights: 'Nights', out: 'Out', back: 'Back' },
+    nights: 'Nights',
+    nightsInline: (n: number) => `· ${n} ${noun(n, 'night', 'nights')}`,
+    out: 'Out',
+    back: 'Back',
+    pair: (origin: string, destination: string) => `${origin} → ${destination}`,
+    detailsFor: (dates: string, pair: string | null) =>
+      pair === null ? `Details for ${dates}` : `Details for ${pair}, ${dates}`,
+    readFlights: 'Read flights',
+    readFlightsFor: (dates: string, pair: string | null) =>
+      pair === null ? `Read flights for ${dates}` : `Read flights for ${pair}, ${dates}`,
+    legTimes: (depart: string, arrive: string) => `${depart} → ${arrive}`,
+    direct: 'direct',
+    changes: (n: number) => `${n} ${noun(n, 'change', 'changes')}`,
+    legJoin: ' · ',
+    carrierJoin: ', ',
+  },
+  /** What a calendar price says of its flights, by the figure's read of them (`readStateWords`, one line each). */
+  readState: {
+    words: READ_STATE_WORDS,
+    failed: (reason: string) => `Flights couldn't be read: ${reason}`,
   },
   /** The health line's words when the report cannot be had or is old (the line itself is `topBar`, from core's barSummary). */
   statusLink: {
