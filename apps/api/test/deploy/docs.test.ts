@@ -142,9 +142,9 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(section1).toContain(AUTH_MISSING);
   });
 
-  it('explains that trial searches allow 0 billed calls and how to verify a cell anyway (N3, ruling 9; WP19: the date pair detail’s verify)', () => {
+  it('explains that trial searches allow 0 billed calls and how to check a trip anyway (N3, ruling 9; stage 2: the Trip page’s check)', () => {
     expect(flat).toContain(
-      'On the trial plan new searches allow 0 billed calls per run, so a date pair\'s "Search <cell> for itineraries" (in its detail, opened from the Dates view) is unavailable until you raise the search\'s call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one cell.',
+      'On the trial plan new searches allow 0 billed calls per run, so the Trip page\'s "Check with SearchApi" is unavailable until you raise the search\'s call cap in its Edit page → Limits and checks → Run budget (Max billed calls per run); 6 covers one cell.',
     );
     const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
     expect(limits).not.toContain('that call cap is the only stop');
@@ -176,7 +176,7 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
 
   it('calls the health check liveness only and says where a degraded app shows', () => {
     expect(flat).toContain('liveness check only, and Docker does not restart an unhealthy container');
-    expect(flat).toContain('the status bar shows it and the log records it');
+    expect(flat).toContain('the health line shows it and the log records it');
   });
 
   it('restores through check-backup, keeping the current database aside', () => {
