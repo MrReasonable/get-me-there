@@ -122,21 +122,26 @@ export function dayModel(day: CalendarDay, pairs: readonly DatePair[]): DayModel
 /**
  * A day's accessible name (Ruling 18): "Wed 11 Nov, £372, Calendar · 3h" (its label kind and age, with the stale words
  * when the wire marks it stale), "…, £412, Seller · 3h, trip with flights read", or the day and why it prints no price
- * ("…, not searched", "…, not seen again"). An out day has no name: it is no button.
+ * ("…, not searched", "…, not seen again"); a price on a day the latest run did not price says the day's mark after it
+ * ("…, trip with flights read, not reached"). An out day has no name: it is no button.
  */
 export function dayName(date: IsoDate, m: DayModel): string {
   const C = COPY.calendar;
   const T = COPY.trip;
   const day = rowDay(date);
+  // why: an out day is never named (it is no button); its words, were it named, would be a mark's all the same
+  const mark = m.mark === 'out' ? 'not-searched' : m.mark;
   const p = m.price;
   if (p !== null) {
     const label = T.labelText(T.label[p.kind], labelAge(p.cell.ageHours));
     const said = p.cell.stale === false ? label : T.labelStale(label, staleWords(p.cell.stale));
-    return C.dayPrice(day, formatPence(p.cell.pricePence), said, p.trip);
+    const priced = C.dayPrice(day, formatPence(p.cell.pricePence), said, p.trip);
+    // why: fix round 1: a price an earlier search found on a day the latest run has not priced (not reached, not
+    // searched) keeps its shade; its name says what the latest run did there
+    return mark === 'priced' ? priced : C.dayMark(priced, C.markWords[mark]);
   }
   if (m.notSeenOnly) return C.dayMark(day, C.notSeenAgain);
-  // why: an out day is never named (it is no button); its words would be a mark's all the same
-  return C.dayMark(day, C.markWords[m.mark === 'out' ? 'not-searched' : m.mark]);
+  return C.dayMark(day, C.markWords[mark]);
 }
 
 /** The heat ramp's steps, cheapest first, or the one flat step of a scale with too few or too close prices. */

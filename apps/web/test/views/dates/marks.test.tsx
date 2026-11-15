@@ -1,10 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { contrast } from '../../contrast.js';
-import { at, bucketsOf, type DatesOptions, pricedPair, verifiedFig } from '../../fixtures.dates.js';
+import {
+  at,
+  bucketsOf,
+  type DatesOptions,
+  priced,
+  pricedPair,
+  runSummary,
+  verifiedFig,
+} from '../../fixtures.dates.js';
 import { renderedCopy } from '../../guards.js';
 import { dayButton, findCalendar, renderDates } from './render.js';
 
@@ -80,12 +88,18 @@ describe('coverage marks never read as no flights (spec §9; Ruling 18)', () => 
 });
 
 describe('nothing by colour alone (spec §9, §11; Ruling 18)', () => {
-  it('not searched and not reached are hatched, a pattern; no price and couldn’t read print their words or glyph', () => {
-    const hatched =
-      /\.cal-day:is\(\[data-mark="not-searched"\], \[data-mark="not-reached"\]\)\s*\{([^}]*)\}/.exec(
-        css,
-      )?.[1];
-    expect(hatched).toMatch(/background-image: repeating-linear-gradient/);
+  it('not searched and not reached are hatched, a pattern, only on a day that prints no price; no price and couldn’t read print their words or glyph', () => {
+    // why: fix round 1 (review I1): a day that prints a price keeps its heat and its ink whatever its mark, so the
+    // hatching (unlayered, and so above the layered heat steps) must never match a day with a heat step
+    const rules = [...css.matchAll(/([^{}]*)\{([^}]*)\}/g)].filter(
+      ([, sel, body]) =>
+        /data-mark="not-(searched|reached)"/.test(sel ?? '') && /background-image/.test(body ?? ''),
+    );
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, sel, body] of rules) {
+      expect(sel).toContain('.cal-day:not([data-heat])');
+      expect(body).toMatch(/background-image: repeating-linear-gradient/);
+    }
     expect(C.noPrice).toBe('no price');
     expect(C.couldntReadGlyph).toBe('×');
     // the trip's dot is a glyph, so it survives forced colours, and the key draws the same one
@@ -96,7 +110,40 @@ describe('nothing by colour alone (spec §9, §11; Ruling 18)', () => {
   it('forced colours keep every day’s edge, and the hatching turns to a dashed edge', () => {
     const forced = /@media \(forced-colors: active\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
     expect(forced).toMatch(/\.cal-day\s*\{[^}]*border: 1px solid CanvasText/);
-    expect(forced).toMatch(/border-style: dashed/);
+    expect(forced).toMatch(
+      /\.cal-day:not\(\[data-heat\]\):is\([^)]*not-searched[^{]*\{[^}]*border-style: dashed/,
+    );
+  });
+
+  it('a price an earlier search found on a day this run has not reached keeps its heat step and its price, and its name says "not reached"', async () => {
+    // why: fix round 1 (review I1): during a run, a day the run has not reached reads "not reached" from the latest
+    // run's buckets while it prints the price an earlier search found
+    renderDates({
+      body: {
+        executions: [runSummary({ status: 'running', finishedAt: null })],
+        rest: { no_data: 4 },
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(verifiedFig()),
+          ...Object.fromEntries(
+            [10, 11, 12].map((n) => [
+              at('2027-03-15', n),
+              {
+                buckets: bucketsOf({ skipped: 4 }),
+                ...(n === 10 ? { figure: priced(36_000, { fromEarlierSearch: true }) } : {}),
+              },
+            ]),
+          ),
+        },
+      },
+    });
+    await findCalendar();
+    const day = dayButton('2027-03-15');
+    expect(day).toHaveAttribute('data-mark', 'not-reached');
+    expect(day).toHaveAttribute('data-heat');
+    expect(within(day).getByTestId('price-cell')).toHaveTextContent('£360');
+    expect(day).toHaveAccessibleName('Mon 15 Mar, £360, Calendar · 2h, not reached');
+    // the hatching matches no day with a heat step, so this day keeps its shade and ink
+    expect(day.matches('.cal-day:not([data-heat])')).toBe(false);
   });
 
   it.each([

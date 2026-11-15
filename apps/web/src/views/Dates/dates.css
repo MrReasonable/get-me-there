@@ -436,8 +436,10 @@
   }
 }
 
-/* Not searched and not reached are hatched: a pattern, not a colour; forced colours turn it to a dashed edge (below) */
-.cal-day:is([data-mark="not-searched"], [data-mark="not-reached"]) {
+/* Not searched and not reached are hatched: a pattern, not a colour; forced colours turn it to a dashed edge (below).
+   Only on a day that prints no price: a day showing a price an earlier search found keeps its heat step and its ink (its
+   name says the run has not reached it). Unlayered, so it would win over the layered heat steps without :not(). */
+.cal-day:not([data-heat]):is([data-mark="not-searched"], [data-mark="not-reached"]) {
   color: var(--t-muted);
   background-image: repeating-linear-gradient(135deg, var(--t-sunk) 0 5px, var(--t-surface) 5px 10px);
   border-color: var(--t-line);
@@ -480,7 +482,7 @@
   .cal-day {
     border: 1px solid CanvasText;
   }
-  .cal-day:is([data-mark="not-searched"], [data-mark="not-reached"]) {
+  .cal-day:not([data-heat]):is([data-mark="not-searched"], [data-mark="not-reached"]) {
     border-style: dashed;
   }
   .cal-day[aria-expanded="true"] {

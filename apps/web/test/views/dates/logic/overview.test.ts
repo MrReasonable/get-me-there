@@ -279,6 +279,23 @@ describe('dayName: each day is a button named by its date and what it shows (Rul
   it('a calendar price: "Sun 14 Mar, £372, Calendar · 2h"', () => {
     expect(dayName(DAY, model({ 10: pricedPair(priced(37_200)) }))).toBe('Sun 14 Mar, £372, Calendar · 2h');
   });
+  // fix round 1 (review I1): a price an earlier search found on a day the latest run has not reached keeps its price,
+  // and the day's name still says what the latest run did there
+  it('a price on a day the latest run did not reach or search: the price, then the day’s mark', () => {
+    const earlier = (b: Parameters<typeof bucketsOf>[0]) => ({
+      10: { buckets: bucketsOf(b), figure: pairingFig({ fromEarlierSearch: true }) },
+      11: { buckets: bucketsOf(b) },
+      12: { buckets: bucketsOf(b) },
+    });
+    const reached = model(earlier({ skipped: 4 }));
+    expect([reached.mark, reached.price?.cell.pricePence]).toEqual(['not-reached', 118_000]);
+    expect(dayName(DAY, reached)).toBe(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read, not reached',
+    );
+    expect(dayName(DAY, model(earlier({})))).toBe(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read, not searched',
+    );
+  });
   it('a trip: "…, £1,180, Seller · 4h, trip with flights read"', () => {
     expect(dayName(DAY, model({ 11: pricedPair(pairingFig()) }))).toBe(
       'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read',

@@ -23,7 +23,14 @@ describe('dayMark (Ruling 18)', () => {
     // one stay with an empty airport pair and three not run: not searched, never "no price"
     ['one empty and three not run', [b({ empty: 1, not_run: 3 })], 'not-searched'],
     ['a stay no price and another not run', [b({ empty: 4 }), b({ not_run: 4 })], 'not-searched'],
-    ['only not reached', [b({ skipped: 4 }), b({ skipped: 2, no_data: 2 })], 'no-price-shown'],
+    // why: fix round 1 (review M1): no cached data outranks skipped (§6.6), so a day not reached beside a stay with no
+    // cached data reads no price; a day whose every stay was skipped reads not reached
+    [
+      'not reached beside no cached data: no price',
+      [b({ skipped: 4 }), b({ skipped: 2, no_data: 2 })],
+      'no-price-shown',
+    ],
+    ['only not reached', [b({ skipped: 4 }), b({ skipped: 4 })], 'not-reached'],
     ['skipped alone', [b({ skipped: 4 })], 'not-reached'],
     ['couldn’t read beats no price', [b({ empty: 4 }), b({ error: 1, empty: 3 })], 'couldnt-read'],
     ['a stay with no airport pair result', [ZERO], 'not-searched'],
