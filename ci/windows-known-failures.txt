@@ -574,7 +574,7 @@ apps/camoufox-worker/test/startRefusal.test.ts > the refusal file (decision 75) 
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) money is formatted only by PriceCell and the cost and cap views
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the estimate sentence formats money only through the estimate panel’s formatter
-apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the tie line formats money only through the estimate panel’s formatter; the flights block formats none
+apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the flight words and the flight reads format no money
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) a really corrupted copy fails the production integrity check, which throws and removes the file (test-strategy M3)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) an integrity failure throws and removes the file it created (test-009)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) copies committed rows still in the WAL while the writer is open (sec-004, test-009)
