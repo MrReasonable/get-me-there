@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { asIsoDate } from '@gmt/core';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import {
@@ -16,6 +16,8 @@ import {
   workedDates,
 } from '../../fixtures.dates.js';
 import { poundsOutsidePrices } from '../../guards.js';
+import { serveDates } from '../../msw/datesHandlers.js';
+import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
 import { dayButton, findCalendar, findLower, renderDates } from './render.js';
 
@@ -221,6 +223,23 @@ describe('the phone calendar (Ruling 18: month buttons beside swipe at 375 px)',
     await waitFor(() =>
       expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument(),
     );
+  });
+
+  // why: CodeRabbit CR8: a re-read whose window holds fewer months than the one shown keeps a month on screen, and
+  // the month buttons work from it at once
+  it('a re-read with fewer months shows its last month, with working month buttons', async () => {
+    setViewportWidth(375);
+    const { user, client } = renderDates({ body: workedDates() });
+    await findCalendar();
+    await user.click(screen.getByRole('button', { name: C.nextMonth }));
+    expect(within(months()).getByRole('table', { name: 'Apr 2027' })).toBeInTheDocument();
+    server.use(serveDates(workedDates({ space: { ...DATES_SPACE, departureTo: asIsoDate('2027-03-31') } })));
+    await act(() => client.refetchQueries({ queryKey: ['date-pairs'] }));
+    await waitFor(() =>
+      expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: C.nextMonth })).toBeDisabled();
+    expect(screen.getByRole('button', { name: C.previousMonth })).toBeDisabled();
   });
 
   it('a desktop draws every month and no month buttons', async () => {

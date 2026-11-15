@@ -72,7 +72,10 @@ export function Calendar({
   const panelId = `${id}-day`;
   const root = useRef<HTMLDivElement>(null);
   const months = useMemo(() => monthsOf(data.space), [data.space]);
-  const [monthIndex, setMonthIndex] = useState(0);
+  const [storedMonth, setMonthIndex] = useState(0);
+  // why: a re-read can hold fewer months than the one shown (the window moved on); the stored index is clamped to a
+  // month that exists, for the month drawn and for the buttons (CodeRabbit CR8)
+  const monthIndex = Math.min(storedMonth, Math.max(0, months.length - 1));
   const [focusDay, setFocusDay] = useState<IsoDate | null>(null);
   const pendingFocus = useRef<IsoDate | null>(null);
   const swipeFrom = useRef<number | null>(null);
@@ -134,7 +137,7 @@ export function Calendar({
     showMonthOf(day);
     focusOn(day);
   };
-  const turn = (d: 1 | -1) => setMonthIndex((i) => Math.min(months.length - 1, Math.max(0, i + d)));
+  const turn = (d: 1 | -1) => setMonthIndex(Math.min(months.length - 1, Math.max(0, monthIndex + d)));
   // why: one set of native listeners for every day (delegation, as the board's overview had), each day a real button,
   // so Enter and Space click it; the listeners read the latest render's handlers through a ref
   const handlers = useRef({

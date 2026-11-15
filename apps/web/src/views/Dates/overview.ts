@@ -168,13 +168,21 @@ export function heatOf(scale: QuintileScale, pence: number): Heat {
 export type StayMark = Exclude<ReducedMark, 'priced'> | 'over-limit' | 'unshown';
 
 /**
- * A stay with no figure, by why it has none: every price left out for the journey limit (`over-limit`), a price found
- * that can't be shown (`unshown`: partly checked or not confirmed), else its own mark (core's `reducedMark`).
+ * A stay with no figure, by why it has none: a price found on an airport pair not over the journey limit that can't be
+ * shown (`unshown`: partly checked or not confirmed); else, with no price left out for the limit, its own mark (core's
+ * `reducedMark`); else what another airport pair's read leaves unknown (not searched, couldn't read, not reached, in
+ * `reducedMark`'s order), and only then `over-limit`: every price found is over the limit (CodeRabbit CR11).
  */
 export function stayMark(p: DatePair): StayMark {
-  if (p.journeyLeftOut > 0) return 'over-limit';
-  const mark = reducedMark(p.buckets);
-  return mark === 'priced' ? 'unshown' : mark;
+  const b = p.buckets;
+  if (b.priced > p.journeyLeftOut) return 'unshown';
+  const mark = reducedMark(b);
+  if (mark !== 'priced' && p.journeyLeftOut === 0) return mark;
+  // why: every price found is over the limit; what another airport pair's read left unknown is said first
+  if (b.not_run > 0) return 'not-searched';
+  if (b.error > 0) return 'couldnt-read';
+  if (b.skipped > 0) return 'not-reached';
+  return 'over-limit';
 }
 
 /**

@@ -385,6 +385,37 @@ describe('stayMark: a stay with no price to show (the day panel’s rows)', () =
       'over-limit',
     ],
     ['a price that can’t be shown', { buckets: bucketsOf({ priced: 1, empty: 3 }) }, 'unshown'],
+    // why: CodeRabbit CR11: a price over the limit on one airport pair never hides what happened on another
+    [
+      'one airport pair over the limit, another couldn’t read',
+      { buckets: bucketsOf({ priced: 1, error: 1, empty: 2 }), journeyLeftOut: 1 },
+      'couldnt-read',
+    ],
+    [
+      'one airport pair over the limit, another priced but not shown',
+      { buckets: bucketsOf({ priced: 2, empty: 2 }), journeyLeftOut: 1 },
+      'unshown',
+    ],
+    [
+      'one airport pair over the limit, the others not searched',
+      { buckets: bucketsOf({ priced: 1, empty: 1 }), journeyLeftOut: 1 },
+      'not-searched',
+    ],
+    [
+      'one airport pair over the limit, another not reached',
+      { buckets: bucketsOf({ priced: 1, skipped: 1, empty: 2 }), journeyLeftOut: 1 },
+      'not-reached',
+    ],
+    [
+      'an earlier price over the limit, the latest run found none',
+      { buckets: bucketsOf({ empty: 4 }), journeyLeftOut: 1 },
+      'over-limit',
+    ],
+    [
+      'two airport pairs over the limit, the others no price',
+      { buckets: bucketsOf({ priced: 2, empty: 1, no_data: 1 }), journeyLeftOut: 2 },
+      'over-limit',
+    ],
   ])('%s', (_name, over, mark) => {
     const [p] = stays({ 10: over });
     if (p === undefined) throw new Error('no stay');
