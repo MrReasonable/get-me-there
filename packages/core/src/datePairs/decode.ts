@@ -159,6 +159,18 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
         arriveOut: columnAt(q.arriveOut, k),
         departBack: columnAt(q.departBack, k),
         arriveBack: columnAt(q.arriveBack, k),
+        legs: {
+          out: {
+            durationMinutes: columnAt(q.outMinutes, k),
+            stops: columnAt(q.outStops, k),
+            carriers: columnAt(q.outCarriers, k),
+          },
+          back: {
+            durationMinutes: columnAt(q.backMinutes, k),
+            stops: columnAt(q.backStops, k),
+            carriers: columnAt(q.backCarriers, k),
+          },
+        },
         mismatch: columnAt(q.mismatch, k),
         provenance: columnAt(r.provenances, columnAt(q.provenance, k)),
         stale: columnAt(q.stale, k),

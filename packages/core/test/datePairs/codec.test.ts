@@ -562,6 +562,10 @@ function withPairings(): DecodedDatePairs {
                   arriveOut: '19:25',
                   departBack: '19:10',
                   arriveBack: '07:15',
+                  legs: {
+                    out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'] },
+                    back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'] },
+                  },
                   mismatch: false,
                   provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
                   // why: final review B-M5: sellers-not-read follows within-older, so its list is fresh
@@ -614,6 +618,23 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
     });
     const back = decodeDatePairs(wire).pairs[3]?.figure?.pairing;
     expect(back?.provenance.fetchedAt).toBe('2027-02-27T09:30:00.000Z');
+  });
+
+  it("Ruling 1: the pairing group carries each way's minutes, stops and airline names, aligned per entry", () => {
+    const wire = encodeDatePairs(withPairings());
+    expect(wire.pairing).toMatchObject({
+      outMinutes: [640, 345],
+      outStops: [1, 0],
+      outCarriers: [['Aer Lingus'], ['Virgin Atlantic', 'Delta']],
+      backMinutes: [415, 480],
+      backStops: [0, 2],
+      backCarriers: [['Virgin Atlantic'], ['Aer Lingus']],
+    });
+    const parsed = datePairsResponseSchema.parse(JSON.parse(JSON.stringify(wire)));
+    expect(decodeDatePairs(parsed).pairs[3]?.figure?.pairing?.legs).toEqual({
+      out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'] },
+      back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'] },
+    });
   });
 
   // why: Ruling 6: the board's pairing group carries the booking page's address, so a read trip's price is its booking

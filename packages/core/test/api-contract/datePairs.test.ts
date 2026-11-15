@@ -602,6 +602,41 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(raggedPairing, 'pairing').mismatch = [];
     expect(issuePaths(raggedPairing)).toEqual(['pairing.mismatch']);
   });
+  it("Ruling 1: each way's legs are columns of the pairing group, held to their rules", () => {
+    expect(groupOf(withPairing(), 'pairing').outMinutes).toEqual([640, 640]);
+    const short = withPairing();
+    groupOf(short, 'pairing').backCarriers = [['Virgin Atlantic']];
+    expect(issuePaths(short)).toEqual(['pairing.backCarriers']);
+    const seven = Array.from({ length: 7 }, () => 'Aer Lingus');
+    // why: a bad name is reported at the name inside the carriers entry, so its path is one longer
+    const bad = [
+      ['outMinutes', -1],
+      ['outMinutes', 0],
+      ['backMinutes', 90.5],
+      ['outStops', 1.5],
+      ['outStops', -1],
+      ['backStops', 6],
+      ['outCarriers', []],
+      ['outCarriers', seven],
+      ['backCarriers', ['Aer\nLingus']],
+    ] as const;
+    for (const [column, value] of bad) {
+      const r = withPairing();
+      const g = groupOf(r, 'pairing');
+      const col: unknown[] = g[column];
+      col[0] = value;
+      expect(issuePaths(r), `${column}: ${JSON.stringify(value)}`).toEqual([
+        `pairing.${column}.0${column === 'backCarriers' ? '.0' : ''}`,
+      ]);
+    }
+    const edge = withPairing();
+    const g = groupOf(edge, 'pairing');
+    g.outStops[0] = 5;
+    g.backStops[0] = 0;
+    g.outMinutes[0] = 1;
+    g.outCarriers[0] = Array.from({ length: 6 }, () => 'Aer Lingus');
+    expect(issuePaths(edge)).toEqual([]);
+  });
   it('pairing: the pairing figure has an entry (an offer\'s or a "from" price); none on a verified figure', () => {
     expect(issuePaths(withPairing({ pairing: null }))).toEqual(['pairing.figure']);
     // why: design 2026-11-08 §4.1: a leading pairing may carry the return's "from" price (no seller), with its offers read

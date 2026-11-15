@@ -146,6 +146,11 @@ const PAIRING = {
   arriveOut: '18:05',
   departBack: '14:20',
   arriveBack: '06:25',
+  // why: Ruling 1: the fixture's chosen outbound (attempt 1's, index 3) and its return 0
+  legs: {
+    out: { durationMinutes: 890, stops: 1, carriers: ['QQ Atlantic'] },
+    back: { durationMinutes: 725, stops: 1, carriers: ['QQ Atlantic'] },
+  },
   mismatch: false,
   provenance: listProvenance(1),
   stale: false,

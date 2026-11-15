@@ -77,6 +77,37 @@ describe('pairingBookingUrl (Ruling 5)', () => {
   });
 });
 
+describe("candidateOf's legs (Ruling 1)", () => {
+  // why: the fixture has four outbounds and two attempts' returns; the chosen outbound (index 3) and return (attempt 1,
+  // return 0) are given values no other flight or return has, so a wrong pick shows
+  const chosenLegs = () => {
+    const list = listWith(null);
+    const returns = structuredClone(PAIRING_FIXTURE.returns);
+    const attempt = returns.attempts[1];
+    const ret = attempt?.returns[0];
+    const out = list.flights[3];
+    if (attempt === undefined || ret === undefined || out === undefined) throw new Error('fixture shape');
+    out.durationMinutes = 640;
+    out.stops = 1;
+    out.carriers = ['Aer Lingus'];
+    ret.durationMinutes = 415;
+    ret.stops = 0;
+    ret.carriers = ['Virgin Atlantic'];
+    return { ...list, returns: returnReadSchema.parse(returns) };
+  };
+
+  it('takes the legs of the outbound and the return it chose, and the group carries them', () => {
+    const c = candidateOf(chosenLegs(), PAIRING_LIMITS, at(0), 168);
+    const expected = {
+      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'] },
+      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'] },
+    };
+    expect(c?.legs).toEqual(expected);
+    if (c === null) throw new Error('a candidate');
+    expect(pairingGroupOf(c).legs).toEqual(expected);
+  });
+});
+
 describe("pairingGroupOf's booking address (final review, deferred minor 13)", () => {
   const candidate = () => {
     const c = candidateOf(listWith({ bookingUrl: SYNTHETIC_BOOKING_URL }), PAIRING_LIMITS, at(0), 168);

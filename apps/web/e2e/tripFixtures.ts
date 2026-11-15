@@ -157,6 +157,10 @@ const pairing = (seller: string, over: Record<string, unknown> = {}) => ({
   arriveOut: '14:55',
   departBack: '18:30',
   arriveBack: '06:25',
+  legs: {
+    out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'] },
+    back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'] },
+  },
   mismatch: false,
   provenance: provList,
   stale: false,

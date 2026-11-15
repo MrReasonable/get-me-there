@@ -7,7 +7,7 @@ import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import type { Provenance, ProviderId } from '../types/provenance.js';
 import type { GridPrice } from './figure.js';
-import { type FigureBasis, PAIRING_READ, type PairingRead } from './pairing.js';
+import { type FigureBasis, type LegFacts, PAIRING_READ, type PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
 
 /**
@@ -32,6 +32,8 @@ export interface DatePairPairing {
   arriveOut: string;
   departBack: string;
   arriveBack: string;
+  /** each way's journey time, changes and airlines, as the list page states them */
+  legs: { out: LegFacts; back: LegFacts };
   mismatch: boolean;
   provenance: Provenance;
   stale: StaleMark;
@@ -225,6 +227,12 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     arriveOut: [],
     departBack: [],
     arriveBack: [],
+    outMinutes: [],
+    outStops: [],
+    outCarriers: [],
+    backMinutes: [],
+    backStops: [],
+    backCarriers: [],
     mismatch: [],
     provenance: [],
     stale: [],
@@ -331,6 +339,12 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairing.arriveOut.push(q.arriveOut);
       pairing.departBack.push(q.departBack);
       pairing.arriveBack.push(q.arriveBack);
+      pairing.outMinutes.push(q.legs.out.durationMinutes);
+      pairing.outStops.push(q.legs.out.stops);
+      pairing.outCarriers.push(q.legs.out.carriers);
+      pairing.backMinutes.push(q.legs.back.durationMinutes);
+      pairing.backStops.push(q.legs.back.stops);
+      pairing.backCarriers.push(q.legs.back.carriers);
       pairing.mismatch.push(q.mismatch);
       pairing.provenance.push(entry(q.provenance));
       pairing.stale.push(q.stale);

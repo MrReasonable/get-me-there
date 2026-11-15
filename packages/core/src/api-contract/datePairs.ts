@@ -197,6 +197,16 @@ const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
  */
 const bookingOptionsSchema = z.strictObject({ figure: counts });
 
+/** Ruling 1: one way's facts: minutes a positive whole number, stops 0 to 5, one to six airline names. */
+const legMinutes = z.number().int().min(1);
+const legStops = z.number().int().min(0).max(5);
+const legCarriers = z.array(pageText).min(1).max(6);
+const legFactsSchema = z.strictObject({
+  durationMinutes: legMinutes,
+  stops: legStops,
+  carriers: legCarriers,
+});
+
 /**
  * Spec rev 56 §10: one entry per pairing figure, the calendar price it replaced (shown beneath it with its own source,
  * age, "not checked" and stale mark); `figure` strictly ascending. Sparse, as `cheaperCached` is (§10's 4 MiB bound).
@@ -238,6 +248,13 @@ const pairingGroupSchema = z.strictObject({
   arriveOut: z.array(hhmm),
   departBack: z.array(hhmm),
   arriveBack: z.array(hhmm),
+  /** Ruling 1: each way's journey time, changes and airlines (names, as the list page states them) */
+  outMinutes: z.array(legMinutes),
+  outStops: z.array(legStops),
+  outCarriers: z.array(legCarriers),
+  backMinutes: z.array(legMinutes),
+  backStops: z.array(legStops),
+  backCarriers: z.array(legCarriers),
   mismatch: z.array(z.boolean()),
   provenance: counts,
   stale: z.array(staleMarkSchema),
@@ -259,6 +276,12 @@ const PAIRING_COLUMNS = [
   'arriveOut',
   'departBack',
   'arriveBack',
+  'outMinutes',
+  'outStops',
+  'outCarriers',
+  'backMinutes',
+  'backStops',
+  'backCarriers',
   'mismatch',
   'provenance',
   'stale',
@@ -878,6 +901,7 @@ const pairingCellSchema = z.strictObject({
   arriveOut: hhmm,
   departBack: hhmm,
   arriveBack: hhmm,
+  legs: z.strictObject({ out: legFactsSchema, back: legFactsSchema }),
   mismatch: z.boolean(),
   provenance: provenanceSchema,
   stale: staleMarkSchema,
