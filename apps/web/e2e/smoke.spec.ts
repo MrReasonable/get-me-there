@@ -339,6 +339,85 @@ test('at 375px the nav is one row of two 44px links, the top bar wraps under it,
   }
 });
 
+// final review I3: the ground is the tokens' page colour on every view, light and dark; the views not yet rebuilt keep
+// their plates, but their heading and crumbs on the ground read in dark too. Shots of each view at 375 px for the report.
+test('at 375px every view sits on the tokens’ ground, its heading and crumbs readable on what they sit on, light and dark @phone', async ({
+  page,
+}) => {
+  const id = await searchId(page);
+  const views = [
+    'searches',
+    'dates',
+    'definitions',
+    'trip',
+    'settings',
+    'providers',
+    'alerts',
+    'status',
+    'history',
+  ];
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const view of views) {
+      const label = `${view}, ${colorScheme}`;
+      if (view === 'trip') await openTripFromDay(page, id);
+      else if (view === 'definitions') await page.goto(`/?view=definitions&edit=${id}`);
+      else
+        await page.goto(
+          view === 'dates' || view === 'history' ? `/?view=${view}&def=${id}` : `/?view=${view}`,
+        );
+      if (view === 'definitions')
+        await expect(page.getByRole('group', { name: COPY.newSearch.whereToLook }), label).toBeVisible();
+      else await expect((LOADED[view] ?? ((p: Page) => p.locator('h1')))(page).first(), label).toBeVisible();
+      const seen = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.style.backgroundColor = 'var(--t-bg)';
+        document.body.append(probe);
+        const bg = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+        const lum = (c: string) => {
+          const [r = 0, g = 0, b = 0] = rgb(c).map((v) => {
+            const x = v / 255;
+            return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        // the colour a heading is painted on: its nearest ancestor with an opaque background
+        const groundOf = (el: Element | null): string => {
+          for (let e = el; e !== null; e = e.parentElement) {
+            const c = getComputedStyle(e).backgroundColor;
+            if (rgb(c).length === 3 || (rgb(c)[3] ?? 0) > 0) return c;
+          }
+          return getComputedStyle(document.body).backgroundColor;
+        };
+        const ratio = (el: Element) => {
+          const [a, b] = [lum(getComputedStyle(el).color), lum(groundOf(el))];
+          return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        };
+        // the heading and each breadcrumb, against what each sits on
+        const read = [...document.querySelectorAll('main h1, .crumbs a, .crumbs [aria-current]')];
+        return {
+          body: getComputedStyle(document.body).backgroundColor,
+          image: getComputedStyle(document.body).backgroundImage,
+          bg,
+          headed: document.querySelector('main h1') !== null,
+          low: read.filter((el) => ratio(el) < 4.5).map((el) => `${el.textContent}: ${ratio(el).toFixed(2)}`),
+        };
+      });
+      expect(seen.image, label).toBe('none');
+      expect(seen.body, label).toBe(seen.bg);
+      expect(seen.headed, label).toBe(true);
+      expect(seen.low, `${label}: the heading and crumbs against what they sit on`).toEqual([]);
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/ground-shots/${view}-375-${colorScheme}.png`,
+        fullPage: true,
+      });
+    }
+  }
+});
+
 test('at 1280px every loaded view fits without scrolling sideways, light and dark, with the limits on the right of the health line', async ({
   page,
 }) => {

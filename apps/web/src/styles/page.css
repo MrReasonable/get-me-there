@@ -1,3 +1,27 @@
+/* The page ground, app-wide (final review I3): the tokens' page colour, light and dark, on every view; the board's
+   brushed steel is gone. The views not yet rebuilt (Price sources, Alerts, System, History: stage 3, Ruling 9) keep their
+   own plates and boards, but what they set straight on the ground reads the ground's context colours, which in dark mode
+   are the tokens' ink, muted ink and line, so nothing dark sits on the dark ground and nothing light on steel. A plate or
+   a board redefines these for its own surface, as before. Layered as the world's base and imported after it, so these
+   win over the steel ground. */
+@layer base {
+  body {
+    background-color: var(--t-bg);
+    background-image: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: var(--t-ink);
+      --fg-2: var(--t-muted);
+      --fg-3: var(--t-muted);
+      --line: var(--t-line);
+      --line-strong: var(--t-muted);
+      --bad: var(--t-bad);
+      --warn: var(--t-warn);
+    }
+  }
+}
+
 /* A page on the shared tokens (design 2026-11-08 §5; the Trips page, Task 6, and the Edit page, Task 7 fix round 1):
    the tokens' ground, the mockups' UI face with tabular figures, a centred 1120 px column, and the board world's
    buttons, plates and notes redrawn on the tokens inside it, light and dark. Layered as components, as the board's
@@ -41,11 +65,6 @@
     .token-page {
       color-scheme: dark;
     }
-  }
-  /* the page's ground is the tokens' page colour, not the board's steel, so the panel sits on its own colour */
-  body:has(.token-page) {
-    background-color: var(--t-bg);
-    background-image: none;
   }
   .token-page [data-cost],
   .token-page .figure {

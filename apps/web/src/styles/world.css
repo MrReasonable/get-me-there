@@ -78,7 +78,8 @@
     -webkit-text-size-adjust: 100%;
   }
 
-  /* Brushed steel: a fine horizontal grain over a soft sheen */
+  /* Brushed steel: a fine horizontal grain over a soft sheen (the ground is now the tokens' page colour app-wide:
+     styles/page.css, final review I3) */
   body {
     min-height: 100vh;
     font: 400 16px / 1.5 var(--font-ui);

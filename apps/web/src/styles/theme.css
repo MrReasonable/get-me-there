@@ -77,10 +77,10 @@
 }
 
 /* Breadcrumbs (Ruling 12): one ordered list in a nav named "Breadcrumb"; its colours follow the page it sits on (the
-   departure board's ink, or the Trip page's tokens through --crumb-ink and --crumb-link). */
+   ground's context ink, light and dark, or a token page's own through --crumb-ink and --crumb-link). */
 .crumbs {
   font-size: 13px;
-  color: var(--crumb-ink, var(--ink-2));
+  color: var(--crumb-ink, var(--fg-2));
   margin-bottom: 6px;
 }
 .crumbs ol {
@@ -99,7 +99,7 @@
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  color: var(--crumb-link, var(--ink));
+  color: var(--crumb-link, var(--fg));
   text-decoration: underline;
 }
 .crumbs a:focus-visible {
@@ -107,7 +107,7 @@
   outline-offset: 2px;
 }
 .crumbs [aria-current] {
-  color: var(--crumb-ink, var(--ink-2));
+  color: var(--crumb-ink, var(--fg-2));
 }
 .trip {
   --crumb-ink: var(--t-muted);
