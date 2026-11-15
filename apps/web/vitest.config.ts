@@ -75,7 +75,7 @@ export default defineConfig({
         'src/views/Dates/overview.ts': FULL,
         // Task 10: the folds' view-model (the lowest calendar price of each of a search's runs)
         'src/views/Dates/folds/priceHistory.ts': FULL,
-        'src/lib/{bookingTarget,legWords,readStateWords}.ts': FULL,
+        'src/lib/{bookingTarget,legWords,limitsWords,readStateWords}.ts': FULL,
         'src/components/rows/*.tsx': FULL,
         'src/lib/**': VIEW_MODEL,
         'src/views/{History,Dates,Trip}/*.ts': VIEW_MODEL,

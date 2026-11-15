@@ -1,10 +1,10 @@
-import { CONFIRM_TARGET, type DecodedDatePairs } from '@gmt/core';
+import { CONFIRM_TARGET, type DecodedDatePairs, type FlightLimits } from '@gmt/core';
 import { useId } from 'react';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { TripRow, TripRowHead } from '../../components/rows/TripRow.js';
 import { COPY } from '../../copy.js';
 import { verifiedDetailOf } from '../../lib/bookingTarget.js';
-import { hoursText } from '../../lib/flightLines.js';
+import { overLimitText } from '../../lib/limitsWords.js';
 import { CLEARED_FILTERS, datesPatch } from '../../state/datesState.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { type FigurePair, nextPage } from './board.js';
@@ -25,9 +25,12 @@ export interface CheapestTripsProps {
   /** How many of them show: five, then ten more per press of "Show 10 more". */
   shown: number;
   onShowMore: () => void;
-  /** The dates in view whose trips were all over the journey limit, and that limit in minutes (Ruling 4). */
+  /**
+   * The dates in view whose trips were all left out by the limits once their flights were read (Ruling 4), and the
+   * limits they were judged by (the journey limit the page's filter applies, else the search's).
+   */
   overLimit: number;
-  limit: number | null;
+  limits: FlightLimits;
   /** The latest run's own read, for the stopping sentence (Ruling 22), once it has answered. */
   run: ExecutionResponse | undefined;
   /** A run is going: a trip an earlier search read says so, and that the running one will replace it (Review Focus 2). */
@@ -42,7 +45,7 @@ export interface CheapestTripsProps {
  * Design 2026-11-08 §5.2 (mockup 02), Rulings 4, 20 and 22: the trips whose flights were read, cheapest first, as shared
  * rows with their airlines: five, then "Show 10 more". Its lead says what they are and how reading stopped (the stopping
  * sentence, "these five" only of the five cheapest shown unfiltered); "N dates' trips are over 25h each way" when the
- * journey limit left trips out; with none, why (Review Focus 3: "No flights read yet for these dates…" when calendar
+ * journey limit (the only one set) left trips out, else "N dates' trips are outside your limits (…)"; with none, why (Review Focus 3: "No flights read yet for these dates…" when calendar
  * prices are below). A trip an earlier search read is styled as such, with its age (Review Focus 2).
  */
 export function CheapestTrips({
@@ -52,7 +55,7 @@ export function CheapestTrips({
   shown,
   onShowMore,
   overLimit,
-  limit,
+  limits,
   run,
   runActive,
   filtered,
@@ -83,6 +86,8 @@ export function CheapestTrips({
           planned: f.planned,
           theseFive: rows.length === CONFIRM_TARGET && !filtered,
         };
+  // why: CodeRabbit CR43: "over 25h each way" only when journey time is the search's only limit, else its limits
+  const overLimitLine = overLimitText(overLimit, limits);
   // why: Review Focus 2: an earlier search's trip says so; "will replace it" only while a search runs
   const earlierNote = (fromEarlier: boolean): string | null =>
     fromEarlier ? (runActive ? S.previousSearchReplaced : S.previousSearchDetail) : null;
@@ -92,11 +97,11 @@ export function CheapestTrips({
         {P.cheapestHeading}
       </h2>
       <ConfirmLine lead={noTrip === null ? P.cheapestLead : noTrip.text} input={stopping} />
-      {overLimit > 0 && limit !== null ? (
+      {overLimitLine === null ? null : (
         <p className="search-section-sub" data-testid="over-limit">
-          {P.overLimit(overLimit, hoursText(limit))}
+          {overLimitLine}
         </p>
-      ) : null}
+      )}
       {noTrip?.clear === true ? (
         <p className="search-section-sub">
           <button

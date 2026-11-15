@@ -209,24 +209,44 @@ describe('Cheapest trips (Rulings 4, 20 and 22; mockup 02)', () => {
     expect(lead(section)).toBe('Flights read for these dates.');
   });
 
-  it("the over-limit line names the search's limit, or the journey filter applied", async () => {
+  const overBody = (): DatesOptions => {
     const over = { pairingRead: 'over-limit' as const, pairing: figurePairing({ which: 'over-limit' }) };
-    const body: DatesOptions = {
+    return {
       pairs: {
         ...trips(2),
         [at('2027-03-20', 10)]: pricedPair(cal(30_000, over)),
         [at('2027-03-21', 10)]: pricedPair(cal(30_100, over)),
       },
     };
-    serve(body);
-    const r = renderDates();
+  };
+  // why: CodeRabbit CR43 (coordinator ruling): "over 25h each way" only when the journey limit is the search's only one
+  const journeyOnly = definition({ constraints: { maxJourneyMinutes: 1500 } });
+
+  it('with the journey limit the only one, the over-limit line names it, or the journey filter applied', async () => {
+    serve(overBody());
+    const r = renderDates({ def: journeyOnly });
     expect(await within(await findTrips()).findByTestId('over-limit')).toHaveTextContent(
       "2 dates' trips are over 25h each way.",
     );
     r.unmount();
-    renderDates({ search: '?view=dates&def=def-0001&d.journey=1200' });
+    renderDates({ def: journeyOnly, search: '?view=dates&def=def-0001&d.journey=1200' });
     expect(await within(await findTrips()).findByTestId('over-limit')).toHaveTextContent(
       "2 dates' trips are over 20h each way.",
+    );
+  });
+
+  it('with another limit set, the over-limit line names the search’s limits as a whole', async () => {
+    serve(overBody());
+    // the worked search: a 25h journey limit and an arrival window
+    const r = renderDates();
+    expect(await within(await findTrips()).findByTestId('over-limit')).toHaveTextContent(
+      "2 dates' trips are outside your limits (your 25h limit each way and your arrival window).",
+    );
+    r.unmount();
+    // a stops limit and no journey limit still says the line
+    renderDates({ def: definition({ constraints: { maxStops: 0 } }) });
+    expect(await within(await findTrips()).findByTestId('over-limit')).toHaveTextContent(
+      "2 dates' trips are outside your limits (your direct-only limit).",
     );
   });
 

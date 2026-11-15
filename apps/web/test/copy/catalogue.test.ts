@@ -149,6 +149,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchPage.journeyChip': ['20h'],
   'searchPage.journeyChipRemove': ['20h'],
   'searchPage.overLimit': [2, '25h'],
+  'searchPage.outsideLimits': [2, 'your 25h limit each way and your 1-change limit'],
   'searchPage.showMore': [10],
   'searchPage.inAll': [155],
   'searchPage.folds.count': [2146],

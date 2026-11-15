@@ -5,18 +5,17 @@ import type { DefinitionResponse, TripResponse } from '../../api/types.js';
 import { BookLink } from '../../components/BookLink.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { VerifyCellButton } from '../../components/VerifyCellButton.js';
-import { listText } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
-import { hoursText } from '../../lib/flightLines.js';
 import { type ListsState, refusalWords } from '../../lib/flightReads.js';
+import { limitsText } from '../../lib/limitsWords.js';
 import { readStateWords } from '../../lib/readStateWords.js';
 import { useNow } from '../../now.js';
 import { FlightRead } from '../Dates/BoardCard.js';
 import { readAt } from '../Dates/stateLines.js';
 import { Amount } from './Amount.js';
-import type { Card, CardState, LimitName } from './cardState.js';
+import type { Card, CardState } from './cardState.js';
 import { Legs } from './Legs.js';
 import { cheapestOutbound, figurePriceOf, readMinutes, type ShownTrip } from './model.js';
 
@@ -47,17 +46,6 @@ const READ_STATES: ReadonlySet<CardState['kind']> = new Set<CardState['kind']>([
 /** "3h ago", or "at a time not known" when the read's age is not known. */
 function agoText(hours: number | 'unknown'): string {
   return hours === 'unknown' ? T.agoUnknown : COPY.agoOf(hours);
-}
-
-/** The limits no flight read met, in words ("your 25h limit each way and your 1-change limit"), else "your limits". */
-function limitsText(failing: readonly LimitName[], limits: TripResponse['limits']): string {
-  const words = failing.flatMap((n): string[] => {
-    if (n === 'journey')
-      return limits.maxJourneyMinutes === null ? [] : [T.limitJourney(hoursText(limits.maxJourneyMinutes))];
-    if (n === 'stops') return limits.maxStops === null ? [] : [T.limitStops(limits.maxStops)];
-    return [n === 'departure' ? T.limitDeparture : T.limitArrival];
-  });
-  return words.length === 0 ? T.limitAny : listText(words);
 }
 
 /** The read by hand (design §6.1): free, about N minutes; shown only when it would go, else the one reason it can't. */

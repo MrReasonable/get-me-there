@@ -21,6 +21,12 @@ describe('readStateWords', () => {
     expect(words('outbound-only')).toBe('Return flights not read');
     expect(words('list-failed')).toBe("Flights couldn't be read");
   });
+  // why: CodeRabbit CR43 (coordinator ruling): `over-limit` means no trip met every limit (journey, stops, the
+  // windows), so its words name the limits as a whole, never the journey limit alone
+  it('says an over-limit read is outside the limits as a whole, as the Trip card does', () => {
+    expect(words('over-limit')).toBe('Flights read, none within your limits');
+    expect(words('over-limit')).not.toMatch(/journey/);
+  });
   it('names the reason of a failed read and never says "not read" of it', () => {
     const w = words('list-failed', 'network');
     expect(w).toBe(`Flights couldn't be read: ${stopDetailClause('network', 'camoufox', true)}`);

@@ -36,7 +36,7 @@ const READ_STATE_WORDS = {
   'within-older': 'Flights read earlier, not the latest',
   'sellers-not-read': 'Flights read, sellers not read',
   'offers-incomplete': 'Flights read, some sellers not read',
-  'over-limit': 'Flights read, over your journey limit',
+  'over-limit': 'Flights read, none within your limits',
   'within-other-limits': 'Flights read under other limits',
 } as const satisfies Record<PairingRead, string>;
 
@@ -691,6 +691,9 @@ export const COPY = {
     stillSearching: 'No prices yet: the search is still going.',
     overLimit: (n: number, limit: string) =>
       `${thousands(n)} ${noun(n, "date's", "dates'")} trips are over ${limit} each way.`,
+    /** Ruling 4's line when the search sets a limit other than journey time (CodeRabbit CR43): its limits in words. */
+    outsideLimits: (n: number, limits: string) =>
+      `${thousands(n)} ${noun(n, "date's", "dates'")} trips are outside your limits (${limits}).`,
     showMore: (n: number) => `Show ${n} more`,
     // Lower on the calendar (Ruling 5)
     lowerHeading: 'Lower on the calendar, flights not read',

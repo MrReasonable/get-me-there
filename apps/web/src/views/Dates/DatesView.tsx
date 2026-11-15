@@ -1,6 +1,7 @@
 import {
   apiContract,
   type DecodedDatePairs,
+  flightLimitsOf,
   IN_FLIGHT_STATUSES,
   type IsoDate,
   type IsoDateTime,
@@ -205,6 +206,10 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
     updateSearchParams({}, 'replace', '');
   }, [model]);
   const today = londonDateOf(now);
+  // why: Ruling 4 (CodeRabbit CR43): the over-limit line's limits are the search's, the journey limit the page's filter
+  // applies (`d.journey`, the scope the read was judged by) in place of the search's own
+  const ownLimits = flightLimitsOf(definition.constraints);
+  const overLimits = { ...ownLimits, maxJourneyMinutes: state.journey ?? ownLimits.maxJourneyMinutes };
   return (
     <div className="dates-view search-page token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
@@ -245,7 +250,7 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
             shown={tripsShown}
             onShowMore={() => setPresses((n) => n + 1)}
             overLimit={model.overLimit}
-            limit={state.journey ?? definition.constraints.maxJourneyMinutes ?? null}
+            limits={overLimits}
             run={run}
             runActive={runActive}
             filtered={filtersActive(state)}
