@@ -38,11 +38,17 @@ export function SentenceRegion({
   sentence,
   wait,
   ids,
+  quiet = false,
 }: {
   sentence: EstimateSentence | null;
   /** Why the press is not ready, or null when it is. */
   wait: string | null;
   ids: SentenceIds;
+  /**
+   * The new-search panel's quiet line (mockup 01): smaller and muted, the sentence not bold; its size and colour are
+   * the panel's (`.estimate-quiet`).
+   */
+  quiet?: boolean;
 }) {
   return (
     <div
@@ -50,7 +56,7 @@ export function SentenceRegion({
       aria-live="polite"
       aria-label={COPY.newSearch.estimateRegion}
       data-cost=""
-      className="estimate-line space-y-1 text-[15px]"
+      className={`estimate-line space-y-1 ${quiet ? 'estimate-quiet' : 'text-[15px]'}`}
     >
       {wait !== null ? (
         <p id={ids.reason} className="text-fg-2">
@@ -58,11 +64,11 @@ export function SentenceRegion({
         </p>
       ) : sentence !== null ? (
         <>
-          <p id={ids.line} className="font-bold">
+          <p id={ids.line} className={quiet ? undefined : 'font-bold'}>
             {sentence.line}
           </p>
           {sentence.notes.length > 0 ? (
-            <ul className="space-y-0.5 text-sm">
+            <ul className={`space-y-0.5 ${quiet ? '' : 'text-sm'}`}>
               {sentence.notes.map((n) => (
                 <li key={n}>{n}</li>
               ))}

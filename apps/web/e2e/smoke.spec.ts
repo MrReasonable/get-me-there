@@ -3,6 +3,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import { z } from 'zod';
 import { PLAN_COPY } from '../src/copy/plan.js';
 import { COPY } from '../src/copy.js';
+import { estimate, estimateResponse } from '../test/fixtures.js';
 import { expectNoSidewaysScroll } from './layout.js';
 import { SMOKE } from './selectors.js';
 
@@ -587,11 +588,32 @@ for (const width of [375, 1280] as const)
       await page.goto(`/?view=definitions&edit=${id}`);
       await expect(page.getByRole('group', { name: COPY.newSearch.whereToLook })).toBeVisible();
       await expect(page.getByRole('navigation', { name: SMOKE.crumbs })).toBeVisible();
-      // the tokens' ground and face, not the board's steel and flap lettering
+      // the tokens' ground and surface and the UI face, not the board's steel and flap lettering: each colour is
+      // compared with the token it must be, resolved by the page itself
       const heading = page.getByRole('heading', { level: 1 });
       expect(await heading.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
-      const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundImage);
-      expect(ground).toBe('none');
+      expect(await heading.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^ui-sans-serif/);
+      const colours = await page.evaluate(() => {
+        const token = (name: string) => {
+          const probe = document.createElement('div');
+          probe.style.backgroundColor = `var(${name})`;
+          document.body.append(probe);
+          const c = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return c;
+        };
+        const plate = document.querySelector('.def-form');
+        return {
+          body: getComputedStyle(document.body).backgroundColor,
+          image: getComputedStyle(document.body).backgroundImage,
+          plate: plate === null ? null : getComputedStyle(plate).backgroundColor,
+          bg: token('--t-bg'),
+          surface: token('--t-surface'),
+        };
+      });
+      expect(colours.image).toBe('none');
+      expect(colours.body).toBe(colours.bg);
+      expect(colours.plate).toBe(colours.surface);
       const date = page.locator('#w-from');
       const [ink, field] = await date.evaluate((el) => [
         getComputedStyle(el).color,
@@ -613,3 +635,54 @@ for (const width of [375, 1280] as const)
         fullPage: true,
       });
     });
+
+// Task 7 fix round 2: the panel filled as mockup 01 shows it (two From airports, To, the dates, SearchApi ticked), its
+// sentence answered from a served estimate, so the chips, the sentence and the costed press are compared with the
+// mockup. Nothing is pressed.
+for (const [width, colorScheme] of [
+  [1280, 'light'],
+  [1280, 'dark'],
+  [375, 'light'],
+] as const)
+  test(`the new-search panel filled at ${width}px, ${colorScheme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ colorScheme });
+    await showEverySource(page);
+    await page.route('**/api/definitions/estimate', (route) =>
+      route.fulfill({
+        json: estimateResponse({
+          estimate: estimate({
+            seconds: 1500,
+            flightLists: {
+              pages: 23,
+              seconds: 100,
+              pairs: 15,
+              returns: true,
+              pagesMax: 580,
+              secondsMax: 1825,
+            },
+          }),
+          billedCalls: [{ providerId: 'searchapi', calls: 12, left: 412, window: 'month' }],
+        }),
+      }),
+    );
+    await page.goto('/');
+    const panel = page.locator(SMOKE.newSearchPanel);
+    await expect(panel.getByRole('heading', { level: 2 })).toBeVisible();
+    await addAirport(page, PLAN_COPY.from, 'LHR');
+    await addAirport(page, PLAN_COPY.from, 'LGW');
+    await addAirport(page, PLAN_COPY.to, 'JFK');
+    await page.locator('#w-from').fill('2027-03-14');
+    await page.locator('#w-to').fill('2027-09-14');
+    await panel.getByRole('checkbox', { name: /^SearchApi · / }).check();
+    await expect(panel.getByRole('status', { name: COPY.newSearch.estimateRegion })).toContainText(
+      'Then flights are read for the cheapest dates until the 5 cheapest stop changing.',
+    );
+    await expect(panel.getByRole('button', { name: 'Search · 12 SearchApi calls' })).toBeVisible();
+    await expectNoSidewaysScroll(page);
+    await panel.screenshot({ path: `test-results/panel-shots/panel-filled-${width}-${colorScheme}.png` });
+    await page.screenshot({
+      path: `test-results/panel-shots/trips-filled-${width}-${colorScheme}.png`,
+      fullPage: true,
+    });
+  });

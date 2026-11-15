@@ -228,12 +228,17 @@
   .search-pair .input {
     width: 100%;
   }
-  /* Leave from and Leave by, side by side while they fit */
+  /* Leave from and Leave by, side by side while they fit (two 140 px fields fit a 375 px phone); a wide form keeps the
+     pair to 424 px rather than stretching each field */
   .leave-dates {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 12px;
+    max-width: 424px;
+  }
+  /* The free coverage check after the folds, below a rule */
+  .coverage-check {
+    border-top: 1px solid var(--line);
   }
   /* Where to look (Ruling 13): one checkbox per source set up, each with its cost; a sentence for the rest. The legend
      floats, so a rule drawn above the group is never broken by it */
@@ -357,6 +362,13 @@
   .token-form .def-fold-group,
   .token-form .def-more {
     border-color: var(--t-line);
+  }
+  /* one rule between the folds and after them (each fold's bottom rule), never two side by side */
+  .token-form .def-more {
+    border-top: 0;
+  }
+  .token-form .coverage-check {
+    border-top: 0;
   }
   .token-form :is(.hint, .text-fg-2, .lede) {
     color: var(--t-muted);

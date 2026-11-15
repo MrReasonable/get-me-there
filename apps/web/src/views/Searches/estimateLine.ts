@@ -58,7 +58,7 @@ export function aboutDuration(seconds: number, c: Copy = ESTIMATE_COPY): string 
 }
 
 /**
- * A length without "about" ("41 minutes", "under a minute", "2½ hours"), by `aboutDuration`'s rounding, for the
+ * A length without "about" ("41 min", "under a minute", "2½ hours"), by `aboutDuration`'s rounding, for the
  * out-and-back clause that says "usually about" once before its pages and time (spec rev 56 §8.1, R-estimate).
  */
 export function plainDuration(seconds: number, c: Copy = ESTIMATE_COPY): string {

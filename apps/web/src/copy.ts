@@ -411,7 +411,6 @@ export const COPY = {
     business: 'business',
     first: 'first',
   } satisfies Record<Cabin, string>,
-  enabled: 'Enabled: scheduled runs happen',
   constraintsHeading: 'Constraints',
   inPounds: (label: string) => `${label} (£)`,
   minutesAsHours: (text: string) => `= ${text}`,
@@ -432,8 +431,6 @@ export const COPY = {
   maxCalls: 'Max billed calls per run',
   maxFreeCalls: 'Max free calls per run',
   maxCost: 'Max cost per run in £',
-  scheduleHeading: 'Schedule',
-  scheduleTz: 'Time zone',
   coverageCheck: 'Check free coverage',
   coverageCheckIntro:
     'Free check of the Aviasales cache for these airport pairs: date pairs with a cached price, of the date pairs in your nights range, per departure month. A count of 0 means the cache has nothing for that airport pair and month, not that there are no flights; "not checked" means the check could not read that month.',
@@ -577,6 +574,8 @@ export const COPY = {
       return `${list.charAt(0).toUpperCase()}${list.slice(1)} ${many ? "aren't" : "isn't"} set up yet; set ${many ? 'them' : 'it'} up in`;
     },
     notSetUpLink: 'Settings',
+    sourceInSearch: 'in this search',
+    sourceInSearchUnset: 'in this search, but not set up here; untick it to stop using it',
     // Ruling 14: one Repeat control over the schedule
     repeat: 'Repeat',
     repeatMode: { never: 'Never', weekly: 'Weekly', other: 'Other' },

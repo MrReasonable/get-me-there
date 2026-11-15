@@ -67,11 +67,6 @@
     gap: 12px;
     padding: 0 0 8px;
   }
-  .new-search .leave-dates {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-  }
   .new-search .def-fold-group {
     padding-top: 0;
     border-top: 0;
@@ -97,8 +92,12 @@
   .new-search .fold > summary {
     padding: 0;
   }
-  .new-search .estimate-line {
+  /* the estimate as mockup 01's quiet line (SentenceRegion's `quiet`) */
+  .estimate-quiet {
     font-size: 13.5px;
+    color: var(--t-muted);
+  }
+  .estimate-quiet .text-fg-2 {
     color: var(--t-muted);
   }
   .new-search-form > .btn {
@@ -239,12 +238,6 @@
   }
 }
 
-/* Unlayered, so it wins over the sentence's own bold utility: the panel's estimate reads as mockup 01's quiet line */
-.new-search .estimate-line :is(p, li) {
-  font-size: 13.5px;
-  font-weight: 400;
-}
-
 /* Unlayered, like the rows' own grid (rows.css), so these win over it */
 /* Beside the 340 px panel a card is about 724 px wide at 1280 px: these minima (as the mockup's) keep each trip row,
    its › included, inside its card; a card narrower than that (a phone, or beside the panel at 900 px) takes the rows'
@@ -285,4 +278,12 @@
   .tcard .row-price .book-link {
     text-align: right;
   }
+}
+
+/* Task 7 fix round 2: a long label ("Google price · just now") wraps inside the card's 130 px price column rather than
+   running into the dates; the pill keeps its rounded ends on two lines */
+.tcard .row-price > .price-label > summary {
+  white-space: normal;
+  line-height: 1.25;
+  border-radius: 10px;
 }

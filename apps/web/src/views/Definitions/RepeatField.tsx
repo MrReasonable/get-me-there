@@ -13,7 +13,10 @@ const kindOf = (v: string): RepeatKind => KINDS.find((k) => k === v) ?? 'other';
  * Repeat (design 2026-11-08 Ruling 14): one control over the schedule, Never / Weekly / Other. Weekly is `DEFAULT_CRON`
  * (Mondays 05:00) in the search's time zone, which a new search takes from `SCHEDULER_TIMEZONE`; Never stores no cron. A
  * stored cron that is neither shows "Other: <its words>" with Change, which opens the schedule picker
- * (`ScheduleField`); picking Other opens it too. `onChange` gets the cron to store (null for Never).
+ * (`ScheduleField`); picking Other opens it too, on its weekly default when the search did not repeat. While the picker
+ * is open the select reads Other and the picker states the schedule; while the picker holds no schedule ("No schedule",
+ * or a custom cron cleared) the select reads Never, so it never says Other over a search that does not repeat.
+ * `onChange` gets the cron to store (null for Never).
  */
 export function RepeatField({
   cron,
@@ -27,7 +30,9 @@ export function RepeatField({
   onIncomplete?: (id: string, incomplete: boolean) => void;
 }) {
   const [picking, setPicking] = useState(false);
-  const kind = picking ? 'other' : repeatKind(cron);
+  // why: fix round 2 — while the picker is open the select reads Other, unless the picker holds no schedule, which
+  // reads Never: the select never says Other over a search that does not repeat
+  const kind: RepeatKind = picking && cron !== null ? 'other' : repeatKind(cron);
   return (
     <div className="repeat-field flex flex-col gap-1">
       <label htmlFor="d-repeat" className="field-label">
@@ -41,7 +46,8 @@ export function RepeatField({
           const next = kindOf(e.target.value);
           setPicking(next === 'other');
           if (next === 'never') onChange(null);
-          if (next === 'weekly') onChange(DEFAULT_CRON);
+          // why: fix round 2 — Other from Never opens the picker on its weekly default, so the search repeats as shown
+          if (next === 'weekly' || (next === 'other' && cron === null)) onChange(DEFAULT_CRON);
         }}
       >
         {KINDS.map((k) => (

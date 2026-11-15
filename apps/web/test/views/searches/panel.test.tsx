@@ -210,21 +210,19 @@ describe('More options (Ruling 13)', () => {
     const { user } = renderPanel();
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     const fold = more();
-    const controls = [...fold.querySelectorAll('input, select')].map(
-      (el) =>
-        (el instanceof HTMLInputElement && el.labels?.[0]?.textContent) || el.getAttribute('aria-label'),
+    // each control by its own name: its label, or the name a part of the journey box carries
+    const controls = [...fold.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')].map(
+      (el) => `${el.tagName}:${el.labels?.[0]?.textContent ?? el.getAttribute('aria-label') ?? ''}`,
     );
     const D = SETUP_COPY.definitions;
     expect(controls).toEqual([
-      D.journeyPart(PLAN_COPY.journey, D.journeyHours),
-      D.journeyPart(PLAN_COPY.journey, D.journeyMinutes),
-      null,
-      null,
-      PLAN_COPY.rollingSwitch,
-      PLAN_COPY.name,
+      `INPUT:${D.journeyPart(PLAN_COPY.journey, D.journeyHours)}`,
+      `INPUT:${D.journeyPart(PLAN_COPY.journey, D.journeyMinutes)}`,
+      `SELECT:${COPY.cabin}`,
+      `SELECT:${N.repeat}`,
+      `INPUT:${PLAN_COPY.rollingSwitch}`,
+      `INPUT:${PLAN_COPY.name}`,
     ]);
-    expect(within(fold).getByLabelText(COPY.cabin).tagName).toBe('SELECT');
-    expect(within(fold).getByLabelText(N.repeat).tagName).toBe('SELECT');
     expect(
       within(fold).getByLabelText(D.journeyPart(PLAN_COPY.journey, D.journeyHours)),
     ).toHaveAccessibleDescription('Trips over this are left out once their flights are read.');
@@ -311,8 +309,10 @@ describe('Repeat (Ruling 14)', () => {
     const alert = await screen.findByText(W.overBudget);
     expect(alert.closest('[role="alert"]')).toHaveTextContent(/about 12000, limit 10000/);
     expect(creates).toEqual([]);
-    // the same estimate, not repeating, is not refused
+    // the same estimate, not repeating, is not refused; the refusal and its figure go with the form they were said of
     await user.selectOptions(screen.getByLabelText(N.repeat), 'never');
+    expect(screen.queryByText(W.overBudget)).toBeNull();
+    expect(screen.queryByText(/about 12000, limit 10000/)).toBeNull();
     await ready();
     await user.click(press());
     await waitFor(() => expect(creates).toHaveLength(1));
@@ -342,6 +342,23 @@ describe('Repeat (Ruling 14)', () => {
     await user.click(press());
     expect(await screen.findByText(W.overBudget)).toBeInTheDocument();
     expect(screen.queryByText(/server text that must not show/)).toBeNull();
+  });
+
+  it('Other from Never opens the picker on its weekly default, so the search repeats as the select says (fix round 2)', async () => {
+    const { estimates } = serve();
+    const { user } = renderPanel();
+    await fill(user);
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.selectOptions(screen.getByLabelText(N.repeat), 'other');
+    expect(screen.getByLabelText(N.repeat)).toHaveValue('other');
+    expect(screen.getByLabelText(SETUP_COPY.schedule.repeat)).toHaveValue('weekly');
+    await waitFor(() =>
+      expect(estimates.at(-1)).toMatchObject({ scheduleCron: DEFAULT_CRON, enabled: true }),
+    );
+    // the picker's "No schedule" stops repeating, and the select says Never
+    await user.selectOptions(screen.getByLabelText(SETUP_COPY.schedule.repeat), 'none');
+    expect(screen.getByLabelText(N.repeat)).toHaveValue('never');
+    await waitFor(() => expect(estimates.at(-1)).toMatchObject({ scheduleCron: null, enabled: false }));
   });
 
   it('a stored daily cron shows "Other: …" with Change, which opens the schedule picker', async () => {
@@ -433,6 +450,47 @@ const renderEdit = (existing: DefinitionResponse) =>
     search: '?view=definitions&edit=def-0001',
   });
 
+describe('a source the search uses with no checkbox of its own (fix round 2)', () => {
+  it('the test source, and SearchApi no longer set up, are listed ticked with why; unticking takes them out', async () => {
+    const { estimates } = serve();
+    // the browser, the Aviasales cache and the test source set up; SearchApi not
+    const free = freeProviders();
+    const first = free.providers[0];
+    if (first === undefined) throw new Error('freeProviders names a source');
+    const withTestSource = providersResponse({
+      ...free,
+      providers: [...free.providers, { ...first, providerId: 'fixture', displayName: 'Fixture' }],
+    });
+    const { user } = renderWithProviders(
+      <DefinitionForm
+        existing={definition({
+          providers: {
+            discovery: ['fixture', 'searchapi'],
+            verification: ['searchapi'],
+            discoveryRefreshHours: { fixture: 168, searchapi: 168 },
+          },
+        })}
+        providers={withTestSource}
+        debounceMs={0}
+      />,
+      { search: '?view=definitions&edit=def-0001' },
+    );
+    const test = screen.getByRole('checkbox', { name: `The test source · ${N.sourceInSearch}` });
+    const sa = screen.getByRole('checkbox', { name: `SearchApi · ${N.sourceInSearchUnset}` });
+    expect(test).toBeChecked();
+    expect(sa).toBeChecked();
+    // SearchApi is still named in the not-set-up sentence
+    expect(screen.getByRole('group', { name: N.whereToLook })).toHaveTextContent(
+      "SearchApi isn't set up yet",
+    );
+    await user.click(sa);
+    await waitFor(() =>
+      expect(estimates.at(-1)).toMatchObject({ providers: { discovery: ['fixture'], verification: [] } }),
+    );
+    expect(screen.queryByRole('checkbox', { name: /^SearchApi · / })).toBeNull();
+  });
+});
+
 describe('Edit shares the form (Ruling 13)', () => {
   it('adds Limits and checks with the rest of the old More options, and keeps the search’s own sources', async () => {
     serve();
@@ -463,7 +521,7 @@ describe('Edit shares the form (Ruling 13)', () => {
     expect(within(limits ?? document.body).getByText(COPY.constraintsHeading)).toBeInTheDocument();
     // the schedule picker, its time zone and the enabled switch are not here: Repeat is
     expect(screen.queryByLabelText(SETUP_COPY.schedule.repeat)).toBeNull();
-    expect(screen.queryByLabelText(COPY.scheduleTz)).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: COPY.enabled })).toBeNull();
+    expect(screen.queryByLabelText('Time zone')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /^Enabled/ })).toBeNull();
   });
 });

@@ -131,12 +131,9 @@ describe('journey time in hours and minutes', () => {
 });
 
 describe('the schedule picker (Repeat’s Other, Ruling 14)', () => {
-  it('a search with no schedule shows none; Weekly starts on Mondays at 05:00, in words', async () => {
+  it('Other on a search with no schedule opens the picker on Mondays at 05:00, in words (fix round 2)', async () => {
     const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
     await openPicker(user);
-    expect(screen.getByLabelText(S.repeat)).toHaveValue('none');
-    expect(screen.getByText(S.none)).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     expect(screen.getByLabelText(S.repeat)).toHaveValue('weekly');
     expect(screen.getByRole('checkbox', { name: 'Mon' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Thu' })).not.toBeChecked();
@@ -167,8 +164,10 @@ describe('the schedule picker (Repeat’s Other, Ruling 14)', () => {
     expect(screen.getByText('On the cron schedule "*/30 6 1 * *" (Europe/London)')).toBeInTheDocument();
     await sent('*/30 6 1 * *');
 
+    // "No schedule" in the picker stops repeating: Repeat reads Never under it
     await user.selectOptions(screen.getByLabelText(S.repeat), 'none');
     expect(screen.getByText(S.none)).toBeInTheDocument();
+    expect(screen.getByLabelText(COPY.newSearch.repeat)).toHaveValue('never');
     await sent(null);
   });
 

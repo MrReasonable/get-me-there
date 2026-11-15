@@ -1,5 +1,5 @@
 import { apiContract } from '@gmt/core';
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import type { BudgetFit, ProvidersResponse } from '../../api/types.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
@@ -37,6 +37,7 @@ export function SearchFields({
   edit,
   budgetFit,
   extra,
+  fromRef,
 }: {
   form: SearchForm;
   providers: ProvidersResponse;
@@ -45,6 +46,8 @@ export function SearchFields({
   edit: boolean;
   budgetFit: BudgetFit | null;
   extra?: ReactNode;
+  /** From's text box, for "+ New search" to move focus to (Ruling 13). */
+  fromRef?: Ref<HTMLInputElement>;
 }) {
   const { draft, setDraft, blank, markBlank } = form;
   return (
@@ -69,6 +72,7 @@ export function SearchFields({
             details={form.details}
             onChange={(origins) => setDraft({ ...draft, origins })}
             errors={form.errorsFor('origins')}
+            {...(fromRef === undefined ? {} : { inputRef: fromRef })}
           />
           <AirportListInput
             id="destinations"

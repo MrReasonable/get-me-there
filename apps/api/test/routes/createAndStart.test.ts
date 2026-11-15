@@ -8,10 +8,12 @@ import {
   type CreateAndStartResponse,
   type DefinitionInput,
   type Estimate,
+  monthlyCapsMissed,
 } from '@gmt/core';
 import type { StartResult } from '@gmt/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runnableTotalsOf } from '../../src/routes/searches.js';
+import { SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 
@@ -352,5 +354,68 @@ describe('POST /definitions/create-and-start (revision 55 §10)', () => {
       requestKey: randomUUID(),
     });
     expect(x.ports.repos.definitions.get(penny.body.definition.id)?.confirmedCostPence).toBeNull();
+  });
+});
+
+// Trips and Search Task 7 (design 2026-11-08 Ruling 14): a new search may repeat. With the Aviasales cache allowed one
+// call a month, a weekly search's monthly load misses that cap while the same search with no schedule fits it.
+describe('a new search that repeats (Ruling 14)', () => {
+  const ONE_CALL_A_MONTH = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, TRAVELPAYOUTS_MONTHLY_CALL_CAP: '1' };
+  const cacheOnly = (over: Partial<DefinitionInput> = {}) =>
+    input({
+      providers: {
+        discovery: ['travelpayouts'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168 },
+      },
+      ...over,
+    });
+
+  it('the estimate route’s budget fit follows the body’s schedule: weekly misses the month cap, no schedule fits', async () => {
+    h = await createHarness({ env: ONE_CALL_A_MONTH });
+    const fitOf = async (def: DefinitionInput) => {
+      const res = await h?.request('/api/definitions/estimate', { json: def });
+      if (res === undefined) throw new Error('no harness');
+      expect(res.status).toBe(200);
+      return apiContract.estimateResponseSchema.parse(await res.json()).budgetFit;
+    };
+    const weekly = await fitOf(cacheOnly({ scheduleCron: '0 5 * * 1', enabled: true }));
+    expect(weekly.runsPerMonth).toBeGreaterThan(4);
+    expect(weekly.perScope).toContainEqual(
+      expect.objectContaining({ scope: 'provider-month:travelpayouts', cap: 1, fits: false }),
+    );
+    expect(monthlyCapsMissed(weekly.perScope, ['travelpayouts'])).toEqual(['provider-month:travelpayouts']);
+    const once = await fitOf(cacheOnly({ scheduleCron: null, enabled: false }));
+    expect(once.runsPerMonth).toBe(0);
+    expect(monthlyCapsMissed(once.perScope, ['travelpayouts'])).toEqual([]);
+  });
+
+  it('create-and-start of a weekly search over a provider-month cap is 422 schedule_over_budget and stores nothing', async () => {
+    h = await createHarness({ env: ONE_CALL_A_MONTH });
+    const x = h;
+    const def = cacheOnly({ scheduleCron: '0 5 * * 1', enabled: true });
+    const shown = shownFor(x, def);
+    const start = vi.spyOn(x.engine, 'start');
+    const res = await x.request(PATH, {
+      json: { ...def, confirmCostPence: shown.pence, confirmCalls: shown.calls, requestKey: randomUUID() },
+    });
+    expect(res.status).toBe(422);
+    const body: unknown = await res.json();
+    expect(body).toMatchObject({ error: { code: 'schedule_over_budget' } });
+    expect(definitions(x)).toEqual([]);
+    expect(x.engine.scheduler.jobs()).toEqual([]);
+    expect(start).not.toHaveBeenCalled();
+    // the same search not repeating is created and started
+    const once = cacheOnly({ scheduleCron: null, enabled: false });
+    const ok = shownFor(x, once);
+    const r = await press(x, {
+      ...once,
+      confirmCostPence: ok.pence,
+      confirmCalls: ok.calls,
+      requestKey: randomUUID(),
+    });
+    expect(r.status).toBe(201);
+    expect(definitions(x)).toHaveLength(1);
+    if (r.body.executionId !== null) await x.engine.cancel(r.body.executionId, { kind: 'cancelled' });
   });
 });

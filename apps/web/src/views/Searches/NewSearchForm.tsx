@@ -1,6 +1,6 @@
 import { monthlyCapsMissed } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { type Ref, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import { qk, useBudget } from '../../api/queries.js';
@@ -63,8 +63,11 @@ export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
 export function NewSearchForm({
   providers,
   debounceMs,
+  fromRef,
 }: {
   providers: ProvidersResponse;
+  /** From's text box, for "+ New search" to move focus to (Ruling 13). */
+  fromRef?: Ref<HTMLInputElement>;
   /** The estimate's debounce; tests that are not about it inject 0 (the debounce test steps the real value). */
   debounceMs?: number;
 }) {
@@ -83,9 +86,13 @@ export function NewSearchForm({
     N.search,
   );
 
-  const [failure, setFailure] = useState<string | null>(null);
-  // why: the over-limit refusal shows the monthly figure it names ("see the monthly figure")
-  const [overFit, setOverFit] = useState<BudgetFit | null>(null);
+  // why: fix round 2 — a refusal (and the monthly figure an over-limit one shows) belongs to the form it was said of:
+  // it is kept with that form's body and shown only while the form is unchanged
+  const bodyKey = JSON.stringify(form.body);
+  const [said, setSaid] = useState<{ key: string; words: string; fit: BudgetFit | null } | null>(null);
+  const failure = said !== null && said.key === bodyKey ? said : null;
+  const setFailure = (words: string | null, fit: BudgetFit | null = null) =>
+    setSaid(words === null ? null : { key: bodyKey, words, fit });
   // why: fix round 1, finding 5 — a second press in the same tick lands before the re-render that disables the button,
   // so the request in flight is held here, synchronously, and released when it settles
   const sending = useRef(false);
@@ -121,8 +128,15 @@ export function NewSearchForm({
   const wait = form.wait;
   return (
     <form onSubmit={(e) => e.preventDefault()} className="new-search-form">
-      <SearchFields form={form} providers={providers} callsLeft={callsLeft} edit={false} budgetFit={null} />
-      <SentenceRegion sentence={sentence} wait={wait} ids={IDS} />
+      <SearchFields
+        form={form}
+        providers={providers}
+        callsLeft={callsLeft}
+        edit={false}
+        budgetFit={null}
+        {...(fromRef === undefined ? {} : { fromRef })}
+      />
+      <SentenceRegion sentence={sentence} wait={wait} ids={IDS} quiet />
       <SentenceButton
         verb={N.search}
         sentence={sentence}
@@ -135,12 +149,10 @@ export function NewSearchForm({
           const fit = est.estimate?.budgetFit;
           const ids = providers.providers.map((p) => p.providerId);
           if (repeats && fit !== undefined && monthlyCapsMissed(fit.perScope, ids).length > 0) {
-            setOverFit(fit);
-            setFailure(COPY.repeatWeekly.overBudget);
+            setFailure(COPY.repeatWeekly.overBudget, fit);
             return;
           }
           sending.current = true;
-          setOverFit(null);
           setFailure(null);
           create.mutate({
             ...form.body,
@@ -153,8 +165,8 @@ export function NewSearchForm({
       />
       {failure !== null ? (
         <div role="alert" className="new-search-refused">
-          <p className="bad-text">{failure}</p>
-          {overFit !== null ? <BudgetFitPanel fit={overFit} /> : null}
+          <p className="bad-text">{failure.words}</p>
+          {failure.fit !== null ? <BudgetFitPanel fit={failure.fit} /> : null}
         </div>
       ) : null}
     </form>

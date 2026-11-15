@@ -53,14 +53,6 @@ const hasSyntheticPrice = (cards: readonly Card[]): boolean =>
   );
 
 /**
- * "+ New search" (Ruling 13): focus moves to the panel's first field, From; while the sources are still loading there is
- * no field yet, so the panel's heading takes it (focus scrolls it into view).
- */
-function focusNewSearch(heading: HTMLHeadingElement | null): void {
-  (document.getElementById('origins-input') ?? heading)?.focus();
-}
-
-/**
  * Spec rev 55 §11 "Searches" (`?view=searches`, the first screen and always the landing view): layout B, the operator's
  * searches as the main column and the new-search panel beside it on the right, sticky; narrower than 900 px the panel sits
  * below the list (design 2026-11-08 Ruling 13). It reads `GET /definitions/cards` and keeps the served order (while a mutation is pending the order is held and
@@ -151,6 +143,7 @@ export function SearchesView() {
   };
 
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const fromRef = useRef<HTMLInputElement>(null);
   const browserConfigured = providers.data !== undefined && sourceConfigured(providers.data, 'camoufox');
   const side = (
     <section aria-labelledby="new-search-heading" className="searches-side new-search token-form">
@@ -162,7 +155,7 @@ export function SearchesView() {
       ) : providers.data === undefined ? (
         <Loading />
       ) : (
-        <NewSearchForm providers={providers.data} />
+        <NewSearchForm providers={providers.data} fromRef={fromRef} />
       )}
     </section>
   );
@@ -213,7 +206,9 @@ export function SearchesView() {
         <button
           type="button"
           className="trip-btn trip-btn-primary"
-          onClick={() => focusNewSearch(headingRef.current)}
+          // why: Ruling 13 — focus moves to the panel's first field, From; while the sources are still loading there is
+          // no field yet, so the panel's heading takes it (focus scrolls it into view)
+          onClick={() => (fromRef.current ?? headingRef.current)?.focus()}
         >
           {S.newSearch}
         </button>

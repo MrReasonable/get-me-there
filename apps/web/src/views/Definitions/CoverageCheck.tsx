@@ -39,7 +39,7 @@ export function CoverageCheck({ draft, available }: { draft: Draft; available: b
   const months = [...new Set((check.data?.pairs ?? []).flatMap((p) => p.months.map((m) => m.month)))].sort();
   const stale = check.data !== undefined && checkedFor !== signature;
   return (
-    <section aria-label={COPY.coverageCheck} className="space-y-2 border-t border-line pt-4 text-sm">
+    <section aria-label={COPY.coverageCheck} className="coverage-check space-y-2 pt-4 text-sm">
       <p className="text-fg-2">{COPY.coverageCheckIntro}</p>
       <button
         type="button"

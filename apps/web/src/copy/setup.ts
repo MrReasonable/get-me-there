@@ -44,8 +44,6 @@ export const SETUP_COPY = {
     expandTopHint: (calls: number) =>
       `SearchApi prices this many of the cheapest outbound flights with their returns: ${calls} ${noun(calls, 'call', 'calls')} per date pair.`,
     providersHeading: 'Price sources',
-    discoveryProviders: 'The first pass across your dates',
-    verificationProviders: 'Checking fares (the cheapest date pairs)',
     /** A source's tick, by its main-path name ("The Aviasales cache"). */
     sourceLabel: (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`,
     refreshLabel: (source: string) => `How often to ask ${source} again (hours)`,

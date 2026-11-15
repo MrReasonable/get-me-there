@@ -47,7 +47,7 @@ function openPage(id: string): void {
  * coverage check and "import example"; the same estimate sentence, asked for automatically. It ends with two presses, both acting on the
  * search being edited and never on another:
  *
- * - **Save and search again**, carrying the cost as Search now does ("Save and search again · about £1.20"): it saves
+ * - **Save and search again**, carrying the cost as the panel's Search does ("Save and search again · about £1.20"): it saves
  *   (a `PUT` storing no confirmation: a confirmation covers that run only, Ian's ruling 3), then starts **that** search
  *   with the sentence's figures, `requireCovered` and `replaceStopped`, and opens its page. A refused start is said
  *   beside the press, as Search again says it, and opens nothing (ruling R1).
