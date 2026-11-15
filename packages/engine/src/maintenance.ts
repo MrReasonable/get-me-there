@@ -3,9 +3,7 @@ import { runConsentNotice } from './consentNotice.js';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { refreshFx } from './fx/refresh.js';
-import { sendSystemNotice } from './notify.js';
 import type { SystemJob } from './scheduler/scheduler.js';
-import type { ConsentCause } from './types.js';
 
 /** Daily at 06:00 in SCHEDULER_TIMEZONE (spec §5.6 "refreshed daily"). */
 export const FX_REFRESH_CRON = '0 6 * * *';

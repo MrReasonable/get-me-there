@@ -305,7 +305,7 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
   const note = left === '' ? null : left;
   const parts: string[] = [];
   if (running !== null) parts.push(running);
-  const skippedRow = l !== null && l.status.startsWith('skipped_');
+  const skippedRow = l?.status.startsWith('skipped_') === true;
   const skipInfo = skippedRow
     ? (SKIPPED[l.status] ?? { reason: 'it did not run', fix: 'start a run now' })
     : null;
