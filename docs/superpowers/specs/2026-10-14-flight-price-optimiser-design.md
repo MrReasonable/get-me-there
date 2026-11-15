@@ -4291,10 +4291,10 @@ Layout: one nav, two links, **Trips** and **Settings**, in one row at every widt
 the current item carries `aria-current="page"` and a thick bar drawn in the text colour, so the cue survives greyscale and
 forced colours. A search's page, its Trip page, its Edit page and History sit under Trips; the Settings page and its three
 sections (Price sources, Alerts, System) sit under Settings. The logo links to Trips and is not a heading; every view's main
-heading is its `h1`. The Trip page is not in the nav: it opens from a trip row's ›, from a row of a calendar day's panel, from
-a Trips card's trip price and from an alert email's link; the Edit page opens from a card or a search's page. There is no
-search selector in the header and no Run now: every run action lives on the search it acts on (its card or its page), so no
-action can run a search other than the one shown. The search last opened is kept in the browser as `gmt.lastSearch`; a view
+heading is its `h1`. The Trip page is not in the nav: it opens from a trip row's › (on a Trips card, in Cheapest trips and in
+a calendar day's panel; the row's price is its booking link) and from an alert email's link; the Edit page opens from a card
+or a search's page. There is no search selector in the header and no Run now: every run action lives on the search it
+acts on (its card or its page), so no action can run a search other than the one shown. The search last opened is kept in the browser as `gmt.lastSearch`; a view
 that needs a search and has no `def=` (History, Alerts) takes it.
 
 **Breadcrumbs** are one component (a `nav` named "Breadcrumb" holding an ordered list, decorative separators, the last item
