@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExecutionResponse } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
 import {
+  checksOf,
   pricedCount,
   readAt,
   runLine,
@@ -194,6 +195,7 @@ describe("runProgressFor: the page's run as RunProgress shows it (Ruling 11)", (
       total: 2184,
       estimatedFinishAt: finish,
       flightsRead: 5,
+      checking: null,
       stop: r.stop,
       resumeAfter: null,
       childRun: 'running',
@@ -210,6 +212,54 @@ describe("runProgressFor: the page's run as RunProgress shows it (Ruling 11)", (
       stop: { sentence: 'Paused.', fix: null },
       flightsRead: null,
     });
+  });
+});
+
+// final review M1: while the run checks fares, the page's line says so with the date pairs checked of those to check
+describe('checksOf and the checking phase', () => {
+  const progress = (
+    stage: 'discovery' | 'verification',
+    total: number,
+    b: Partial<Buckets>,
+  ): ExecutionResponse['progress'][number] => ({
+    stage,
+    providerId: 'searchapi',
+    buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0, ...b },
+    total,
+  });
+
+  it('counts the verification progress only: those not left out are to check, those not waiting are done', () => {
+    const r = run({
+      progress: [
+        progress('discovery', 126, { priced: 126 }),
+        progress('verification', 126, { priced: 2, empty: 1, skipped: 116, not_run: 7 }),
+        progress('verification', 20, { skipped: 18, not_run: 1, priced: 1 }),
+      ],
+    });
+    expect(checksOf(r)).toEqual({ done: 4, total: 12 });
+  });
+
+  it('a run with nothing to check counts none', () => {
+    expect(checksOf(run({ progress: [] }))).toEqual({ done: 0, total: 0 });
+    expect(checksOf(run({ progress: [progress('verification', 5, { skipped: 5 })] }))).toEqual({
+      done: 0,
+      total: 0,
+    });
+  });
+
+  it('runProgressFor checks fares only while the run is running at its verification stage, as stateLine says', () => {
+    const at = run({
+      status: 'running',
+      stage: 'verification',
+      progress: [progress('verification', 10, { priced: 3, not_run: 7 })],
+    });
+    expect(runProgressFor(at, { searched: 10, total: 10 }, null).checking).toEqual({ done: 3, total: 10 });
+    expect(stateLine({ latest: at, spaceChanged: false, noSource: false, c })).toEqual({ kind: 'checking' });
+    for (const other of [
+      { ...at, stage: 'discovery' as const },
+      { ...at, status: 'pending' as const },
+    ])
+      expect(runProgressFor(other, { searched: 10, total: 10 }, null).checking).toBeNull();
   });
 });
 

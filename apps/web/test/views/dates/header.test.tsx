@@ -237,6 +237,27 @@ describe('RunProgress on the page (Ruling 11; Review Focus 2)', () => {
     expect(screen.getByRole('status', { name: P.stateLabel })).toHaveTextContent(P.stateKind.reading);
   });
 
+  // final review M1: the visible line and the hidden status agree while the run checks fares
+  it('checking fares: "Checking fares, N of M done", the hidden status the same', async () => {
+    serveRun({
+      status: 'running',
+      stage: 'verification',
+      estimatedFinishAt: '2026-10-14T15:14:00.000Z',
+      flights: { planned: 10, read: 3, reused: 1, failed: 0, ended: null, confirm: null, stopCause: null },
+    });
+    renderDates({ body: running });
+    const state = await screen.findByTestId('state-line');
+    // the default run checks 10 of its 126 date pairs (116 left out), none done yet
+    await waitFor(() =>
+      expect(within(state).getByTestId('run-line')).toHaveTextContent(
+        /^Checking fares, 0 of 10 done · about 14 min left$/,
+      ),
+    );
+    expect(state).not.toHaveTextContent(/Reading the calendar|Reading flights/);
+    expect(screen.getByRole('status', { name: P.stateLabel })).toHaveTextContent(P.stateKind.checking);
+    expect(P.stateKind.checking).toBe('Checking fares');
+  });
+
   it('stopped: the stop’s sentence and fix, Resume when the fix names it, Search again among the actions, and the run line', async () => {
     const stop = stopText(
       { kind: 'limiter-timeout', providerId: 'searchapi', resumeAfter: null },

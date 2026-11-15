@@ -30,6 +30,7 @@ const run = (over: Partial<RunProgressRun> = {}): RunProgressRun => ({
   total: 2184,
   estimatedFinishAt: asIsoDateTime('2026-10-14T15:14:00.000Z'),
   flightsRead: null,
+  checking: null,
   stop: null,
   resumeAfter: null,
   childRun: null,
@@ -68,6 +69,24 @@ describe('RunProgress while a run is going', () => {
     expect(screen.getByText('Reading flights for the cheapest dates, 9 read so far')).toBeInTheDocument();
     expect(screen.queryByText(/Reading the calendar/)).toBeNull();
     expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  });
+
+  // final review M1: while the run checks fares the line says so, never "Reading the calendar" over a finished calendar
+  it('the checking phase: "Checking fares, 3 of 10 done · about 14 min left", the bar of the fares checked', () => {
+    show({ run: run({ done: 2184, total: 2184, flightsRead: 4, checking: { done: 3, total: 10 } }) });
+    expect(screen.getByText('Checking fares, 3 of 10 done · about 14 min left')).toBeInTheDocument();
+    expect(screen.queryByText(/Reading the calendar|Reading flights/)).toBeNull();
+    const bar = screen.getByRole('progressbar', { name: COPY.runProgress.checkingBarLabel });
+    expect(bar).toHaveAttribute('value', '3');
+    expect(bar).toHaveAttribute('max', '10');
+  });
+
+  it('the checking phase without its counts: "Checking fares", the time left when the run has it, a bar with no value', () => {
+    show({ run: run({ checking: { done: 0, total: 0 } }) });
+    expect(screen.getByText('Checking fares · about 14 min left')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+    const { container } = show({ run: run({ checking: { done: 0, total: 0 }, estimatedFinishAt: null }) });
+    expect(container.querySelector('.run-line')).toHaveTextContent(/^Checking fares$/);
   });
 
   it('a pending run reads like a running one, never the stored status word', () => {
@@ -290,6 +309,18 @@ describe('runProgressOf, a card’s latest run', () => {
       }),
     );
     expect(r.flightsRead).toBe(9);
+  });
+
+  // final review M1: the card's run names its stage, so a run checking fares says so as the page does
+  it('is the checking phase while the run checks fares, with no counts (the card carries none)', () => {
+    const r = runProgressOf(parsedRun({ status: 'running', stage: 'verification' }));
+    expect(r.checking).toEqual({ done: 0, total: 0 });
+    for (const over of [
+      { status: 'running' as const, stage: 'discovery' as const },
+      { status: 'pending' as const, stage: 'verification' as const },
+      { status: 'completed' as const, stage: 'verification' as const },
+    ])
+      expect(runProgressOf(parsedRun(over)).checking, JSON.stringify(over)).toBeNull();
   });
 
   it('keeps a stopped run’s sentence and never reads flights for a run that is not running', () => {

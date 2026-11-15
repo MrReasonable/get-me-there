@@ -50,6 +50,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'runProgress.calendar': [1203, 2184, 'about 14 min left'],
   'runProgress.minutesLeft': [14],
   'runProgress.flights': [9],
+  'runProgress.checking': [{ done: 3, total: 10 }, 'about 2 min left'],
   'runProgress.resumesAt': ['1 Nov 2026 00:00 Europe/London'],
   'runProgress.childRun': ['stopped'],
   requestRowTiles: [14, '14', 14, 0, '£0'],

@@ -12,6 +12,7 @@ import {
   moneyPenceSchema,
   priceCellSchema,
   providerIdSchema,
+  stageSchema,
   triggerSchema,
 } from './common.js';
 import { datePairFigureSchema, verifiedDetailSchema } from './datePairs.js';
@@ -88,6 +89,9 @@ const latestRunSchema = z
     datePairs: count,
     datePairsSearched: count,
     datePairsNeverSearched: count,
+    // why: final review M1: the stage the run is at, as `GET /executions/:id` gives it, so a card says "Checking fares"
+    // by the page's rule (null before the run has one)
+    stage: stageSchema.nullable(),
     // why: ruling R-reading — the run's flight counts as `GET /executions/:id` gives them, so the card and the page
     // word "Reading flights" by one rule
     flights: executionFlightsSchema.nullable(),

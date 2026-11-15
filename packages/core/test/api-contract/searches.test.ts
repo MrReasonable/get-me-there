@@ -170,6 +170,13 @@ describe("a card's latest run marks (Ruling 7)", () => {
     expect(c.latestRun?.browserUnavailable).toBe(3);
   });
 
+  // final review M1: the run's stage, so a card says "Checking fares" as the page does
+  it('carries the run’s stage, null before it has one, and refuses one that names no stage', () => {
+    expect(searchCardSchema.parse(run({ stage: 'verification' })).latestRun?.stage).toBe('verification');
+    expect(searchCardSchema.parse(run({ stage: null })).latestRun?.stage).toBeNull();
+    expect(paths(run({ stage: 'checking' }))).toEqual(['latestRun.stage']);
+  });
+
   it('refuses marks that do not sum to the date pairs, or a missing mark', () => {
     expect(paths(run({ marks: marks({ 'not-searched': 11 }) }))).toEqual(['latestRun.marks']);
     const { 'not-reached': _n, ...four } = marks({});

@@ -5,6 +5,7 @@ import {
   type IsoDateTime,
   RESUMABLE_ACTIVE_STATUSES,
   STOPPED_STATUSES,
+  type Stage,
 } from '@gmt/core';
 import { useEffect, useState } from 'react';
 import type { SearchCard } from '../api/types.js';
@@ -36,6 +37,11 @@ export interface RunProgressRun {
   estimatedFinishAt: IsoDateTime | null;
   /** The flight step's reads so far (`readingCount`) while it is reading; null while the calendar is still being read. */
   flightsRead: number | null;
+  /**
+   * While the run checks fares (running at its verification stage: the page's hidden status says "Checking fares"), the
+   * date pairs checked of those to check; a total of 0 is a run whose checks are not counted (a card's). Null otherwise.
+   */
+  checking: { done: number; total: number } | null;
   /** A stopped run's sentence and fix; null takes `NO_STOP_CAUSE_TEXT` when the status is a stopped one. */
   stop: StopWords | null;
   /** When a paused run resumes by itself, from the run; null when it names none. */
@@ -44,7 +50,14 @@ export interface RunProgressRun {
   childRun: ExecutionStatus | null;
 }
 
-/** A card's latest run as `RunProgress` shows it: its dates, its flight reads and its stop. */
+/**
+ * True while a run checks fares: running at its verification stage. The page's hidden status (`stateLine`'s
+ * *checking*) and `RunProgress`'s line on a card and on the page all take it from here, so the two never disagree.
+ */
+export const isChecking = (run: { status: ExecutionStatus; stage: Stage | null }): boolean =>
+  run.status === 'running' && run.stage === 'verification';
+
+/** A card's latest run as `RunProgress` shows it: its dates, its flight reads, whether it checks fares, and its stop. */
 export function runProgressOf(run: NonNullable<SearchCard['latestRun']>): RunProgressRun {
   const reading = readingCount(run.flights);
   return {
@@ -55,10 +68,36 @@ export function runProgressOf(run: NonNullable<SearchCard['latestRun']>): RunPro
     estimatedFinishAt: run.estimatedFinishAt,
     // why: as the card's state line did (ruling R-reading): the flights line only once the run is reading them
     flightsRead: run.status === 'running' ? reading : null,
+    // why: final review M1: the card carries the run's stage but not its checks, so it says "Checking fares" uncounted
+    checking: isChecking(run) ? { done: 0, total: 0 } : null,
     stop: run.stop,
     resumeAfter: null,
     childRun: null,
   };
+}
+
+/**
+ * The run's bar: the dates read while the calendar is read, the fares checked while they are (when counted); no value
+ * while flights are read or checks are not counted, as an open-ended number has no total, so the bar says only "going".
+ */
+function RunBar({ run }: { run: RunProgressRun }) {
+  if (run.checking !== null)
+    return (
+      <progress
+        className="run-bar"
+        aria-label={R.checkingBarLabel}
+        max={Math.max(run.checking.total, 1)}
+        value={run.checking.total === 0 ? undefined : run.checking.done}
+      />
+    );
+  return (
+    <progress
+      className="run-bar"
+      aria-label={R.barLabel}
+      max={run.total}
+      value={run.flightsRead === null ? run.done : undefined}
+    />
+  );
 }
 
 export interface RunProgressProps {
@@ -83,7 +122,8 @@ function leftOf(finish: IsoDateTime | null, now: IsoDateTime): string | null {
 /**
  * Ruling 11: the one place a run's progress is worded, used by the cards and the Search page. A pending or running run
  * has a bar over "Reading the calendar, 1,203 of 2,184 dates · about 14 min left", then "Reading flights for the
- * cheapest dates, 9 read so far"; a stopped or interrupted one its stop sentence with the fix, when it resumes and
+ * cheapest dates, 9 read so far", then while it checks fares "Checking fares, 3 of 10 done · about 2 min left" (final
+ * review M1: the hidden status's own words); a stopped or interrupted one its stop sentence with the fix, when it resumes and
  * Resume; an active run Cancel, which asks once more. A finished run says nothing. The run's calls and cost, and each
  * source's window, are not here (the Full search log keeps estimate versus ledger).
  */
@@ -110,17 +150,13 @@ export function RunProgress({ run, onCancel, onResume, pending = null, failure =
     <section aria-label={R.label} className="run-progress" data-status={run.status}>
       {inFlight ? (
         <>
-          {/* why: no value while flights are read: their number has no total, so the bar says only "going" */}
-          <progress
-            className="run-bar"
-            aria-label={R.barLabel}
-            max={run.total}
-            value={run.flightsRead === null ? run.done : undefined}
-          />
-          <p className="run-line">
-            {run.flightsRead === null
-              ? R.calendar(run.done, run.total, leftOf(run.estimatedFinishAt, now))
-              : R.flights(run.flightsRead)}
+          <RunBar run={run} />
+          <p className="run-line" data-testid="run-line">
+            {run.checking !== null
+              ? R.checking(run.checking.total === 0 ? null : run.checking, leftOf(run.estimatedFinishAt, now))
+              : run.flightsRead === null
+                ? R.calendar(run.done, run.total, leftOf(run.estimatedFinishAt, now))
+                : R.flights(run.flightsRead)}
           </p>
         </>
       ) : null}

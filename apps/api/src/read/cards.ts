@@ -98,6 +98,7 @@ function latestRunOf(
     // why: §6.6: searched is exactly priced or no price shown, the same count as the marks give
     datePairsSearched: marks.priced + marks['no-price-shown'],
     datePairsNeverSearched: never,
+    stage: run.stage,
     // why: ruling R-reading — the same counts as the run's own read (`flightsOf`), so the card and the page agree
     flights: flightsOf(ports, run),
     estimatedFinishAt: estimatedFinishOf(ports, engine, run),

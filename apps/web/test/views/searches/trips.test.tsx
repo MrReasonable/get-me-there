@@ -315,6 +315,17 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
     expect(within(card).getByRole('list', { name: 'Trips from the previous search' })).toBeInTheDocument();
   });
 
+  // final review M1
+  it('a run checking fares says "Checking fares", with the time it has left', async () => {
+    server.use(
+      serveCards([searchCard({ latestRun: { ...running, stage: 'verification' }, trips: earlier })]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    expect(within(card).getByTestId('run-line')).toHaveTextContent(/^Checking fares · about 14 min left$/);
+    expect(card).not.toHaveTextContent(/Reading the calendar/);
+  });
+
   it('an earlier trip’s label detail says it was read by the previous search, with its age', async () => {
     server.use(serveCards([searchCard({ latestRun: running, trips: earlier })]));
     const { user } = renderInShell(<SearchesView />);

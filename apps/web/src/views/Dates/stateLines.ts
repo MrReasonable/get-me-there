@@ -10,7 +10,7 @@ import {
   toEpochDay,
 } from '@gmt/core';
 import type { ExecutionResponse } from '../../api/types.js';
-import type { RunProgressRun } from '../../components/RunProgress.js';
+import { isChecking, type RunProgressRun } from '../../components/RunProgress.js';
 import type { COPY } from '../../copy.js';
 import { formatIsoDateShort, londonParts } from '../../format.js';
 import { readingCount } from '../../lib/flightsReading.js';
@@ -57,6 +57,22 @@ export function wholeOf(pairs: readonly DatePair[]): WholeCount {
 }
 
 /**
+ * The fares a run checking them has checked (final review M1): over its verification progress, the date pairs to check
+ * are those not left out (`skipped`), and those done are the ones no longer waiting (`not_run`). A total of 0 when the
+ * run counts none.
+ */
+export function checksOf(run: ExecutionResponse): { done: number; total: number } {
+  let total = 0;
+  let waiting = 0;
+  for (const p of run.progress) {
+    if (p.stage !== 'verification') continue;
+    total += p.total - p.buckets.skipped;
+    waiting += p.buckets.not_run;
+  }
+  return total <= 0 ? { done: 0, total: 0 } : { done: Math.max(0, total - waiting), total };
+}
+
+/**
  * Ruling 11: the page's latest run as `RunProgress` shows it, the card's adapter's rules over the execution read: the
  * calendar pass counts the whole search (`whole`, never a filter's scope), the flights line only once the run is reading
  * them (`readingCount`, as the card), and an active one-date child run's status.
@@ -73,6 +89,7 @@ export function runProgressFor(
     total: whole.total,
     estimatedFinishAt: run.estimatedFinishAt,
     flightsRead: run.status === 'running' ? readingCount(run.flights) : null,
+    checking: isChecking(run) ? checksOf(run) : null,
     stop: run.stop,
     resumeAfter: run.resumeAfter,
     childRun,
@@ -174,7 +191,7 @@ export function stateLine(d: {
       : { kind: 'never', text: P.notSearchedYet };
   }
   if (IN_FLIGHT.has(run.status)) {
-    if (run.status === 'running' && run.stage === 'verification') return { kind: 'checking' };
+    if (isChecking(run)) return { kind: 'checking' };
     if (run.status === 'running' && readingCount(run.flights) !== null) return { kind: 'reading' };
     return { kind: 'searching' };
   }

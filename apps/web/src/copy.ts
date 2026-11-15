@@ -251,6 +251,10 @@ export const COPY = {
     minutesLeft: (minutes: number) => `about ${minutes} min left`,
     lessThanAMinuteLeft: 'less than a minute left',
     flights: (read: number) => `Reading flights for the cheapest dates, ${read} read so far`,
+    /** While the run checks fares (the hidden status's "Checking fares"), with the count and time left when known. */
+    checking: (checks: { done: number; total: number } | null, left: string | null) =>
+      `Checking fares${checks === null ? '' : `, ${thousands(checks.done)} of ${thousands(checks.total)} done`}${left === null ? '' : ` · ${left}`}`,
+    checkingBarLabel: 'Fares checked',
     resumesAt: (when: string) => `resumes ${when}`,
     childRun: (status: string) => `Reading flights for one more date: ${status}`,
     cancel: 'Cancel',

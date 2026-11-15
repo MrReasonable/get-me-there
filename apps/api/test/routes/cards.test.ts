@@ -87,6 +87,23 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     expect(cardOf(all, never2.id).latestRun).toBeNull();
   });
 
+  // final review M1: the card's run names its stage, so a card says "Checking fares" as the page does
+  it("a card's latest run carries the run's stage, null before it has one", async () => {
+    h = await createHarness();
+    const x = h;
+    const s = seeder(x.ports);
+    const make = (name: string) =>
+      x.ports.repos.definitions.create(exampleDefinitionInput({ name, ...ONE_PAIR }));
+    const checking = make('checking');
+    const fresh = make('fresh');
+    s.execution('checking', { def: checking, status: 'running', startedAt: at(-1) });
+    s.execution('fresh', { def: fresh, status: 'running', startedAt: at(-2) });
+    x.ports.repos.executions.patch(s.id('checking'), { stage: 'verification' });
+    const all = await cards(x);
+    expect(cardOf(all, checking.id).latestRun?.stage).toBe('verification');
+    expect(cardOf(all, fresh.id).latestRun?.stage).toBeNull();
+  });
+
   it('counts a date pair searched with datePairSearched over its airport pairs: one priced and three not run counts, one empty and three not run does not', async () => {
     h = await createHarness();
     const x = h;

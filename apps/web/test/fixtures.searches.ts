@@ -36,6 +36,7 @@ export function latestRun(over: Partial<RunIn> = {}): RunIn {
     datePairs,
     datePairsSearched: searched,
     datePairsNeverSearched: 85,
+    stage: null,
     flights: null,
     estimatedFinishAt: null,
     stop: null,
