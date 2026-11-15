@@ -348,6 +348,39 @@ for (const width of WIDTHS)
     });
   }
 
+/** Task 8 fix round 2: the widths around the rows' container switch (720 px of list) and the panel's (900 px). */
+const SWEEP = [720, 750, 755, 760, 770, 780, 800, 900, 1024] as const;
+
+/** Every trip and calendar row on the page whose content is wider than its box, as "width: scroll > client". */
+async function overflowingRows(page: Page): Promise<string[]> {
+  return page
+    .locator('.trip-row')
+    .evaluateAll((rows) =>
+      rows.filter((r) => r.scrollWidth > r.clientWidth).map((r) => `${r.scrollWidth} > ${r.clientWidth}`),
+    );
+}
+
+test('the search page fits every trip row in its box at each width from 720 to 1024 px', async ({ page }) => {
+  await serveReadable(page);
+  await openSearch(page, SWEEP[0], 'light', MOCKUP);
+  for (const width of SWEEP) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(SMOKE.tripRow).first()).toBeVisible();
+    expect(await overflowingRows(page), `${width}px`).toEqual([]);
+    await expectNoSidewaysScroll(page);
+  }
+});
+
+test('the Trips page fits every trip row in its box at each width from 720 to 1024 px', async ({ page }) => {
+  await openTrips(page, SWEEP[0], 'light');
+  for (const width of SWEEP) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByTestId('trip-row').first()).toBeVisible();
+    expect(await overflowingRows(page), `${width}px`).toEqual([]);
+    await expectNoSidewaysScroll(page);
+  }
+});
+
 for (const width of WIDTHS)
   test(`a row's label opens in the flow at ${width}px, pushing the rows below it down`, async ({ page }) => {
     await openSearch(page, width, 'light');
