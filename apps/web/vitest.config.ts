@@ -71,6 +71,7 @@ export default defineConfig({
         'src/components/{Provenance,PriceCell,PriceBoundary,BookLink,PriceLabel}.tsx': FULL,
         'src/state/{urlState,resultsState,parse,datesState,tripState}.ts': FULL,
         'src/views/Trip/cardState.ts': FULL,
+        'src/lib/bookingTarget.ts': FULL,
         'src/lib/**': VIEW_MODEL,
         'src/views/{History,Dates,Trip}/*.ts': VIEW_MODEL,
       },

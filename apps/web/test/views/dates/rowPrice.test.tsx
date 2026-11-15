@@ -1,9 +1,8 @@
 import { asIata, asIsoDate } from '@gmt/core';
-import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
+import { SYNTHETIC_BOOKING_URL, SYNTHETIC_SELLER_BOOKING } from '@gmt/core/testing';
 import { within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
-import { rowBookingTarget } from '../../../src/views/Dates/board.js';
 import {
   airportPairIndex,
   at,
@@ -13,7 +12,6 @@ import {
   pricedPair,
   provGrid,
   provSearched,
-  provSynthetic,
   verifiedFig,
 } from '../../fixtures.dates.js';
 import { setViewportWidth } from '../../viewport.js';
@@ -116,6 +114,19 @@ describe.each([
     expect(links[0]).toHaveTextContent('≈');
   });
 
+  // why: Ruling 2: a current verified trip links its own seller's booking from the read's details, as the Trip page does
+  it('links a verified row with a seller\'s booking: "Book on <host> ↗"', async () => {
+    const figure = verifiedFig({
+      price: { ...verifiedFig().price, provenance: provSearched() },
+      hasBookingOptions: true,
+    });
+    const { row } = await rowOf(figure, width);
+    const links = outLinks(row);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAccessibleName(/^£412 · Book on www\.google\.com ↗/);
+    expect(links[0]).toHaveAttribute('href', SYNTHETIC_SELLER_BOOKING.url);
+  });
+
   it('says "Find", never "Book", on a stale verified row whose older trip beneath has a booking page', async () => {
     const { row } = await rowOf(staleVerifiedWithOlderTrip(), width);
     const links = outLinks(row);
@@ -150,51 +161,5 @@ describe.each([
     // why: the row's own click opens its trip; a tap on the label only opens the label
     expect([window.location.search, window.history.length]).toEqual(before);
     expect(outLinks(row)).toHaveLength(1);
-  });
-});
-
-describe("rowBookingTarget (core's one rule over a board row)", () => {
-  const pair = { departureDate: asIsoDate(DEPART), returnDate: asIsoDate('2027-03-24') };
-  it("is the booking page when the group has one, else the Google Flights search for the row's airports", () => {
-    expect(
-      rowBookingTarget(
-        pair,
-        pairingFig({ pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) }),
-        'economy',
-      ),
-    ).toMatchObject({ kind: 'booking-page', url: SYNTHETIC_BOOKING_URL });
-    const search = rowBookingTarget(pair, pairingFig(), 'economy');
-    expect(search).toMatchObject({ kind: 'search', host: 'www.google.com' });
-    expect(search.kind === 'search' ? search.url : '').toContain('LHR');
-  });
-  it('is none for a synthetic price and a calendar price', () => {
-    const f = pairingFig({ pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) });
-    expect(
-      rowBookingTarget(pair, { ...f, price: { ...f.price, provenance: provSynthetic() } }, 'economy'),
-    ).toEqual({ kind: 'none' });
-    // why: the contract only lets a flight list's provenance on a pairing; the rule is defensive, so build one by hand
-    expect(
-      rowBookingTarget(
-        pair,
-        { ...f, pairing: { ...figurePairing(), provenance: provSynthetic() } },
-        'economy',
-      ),
-    ).toEqual({ kind: 'none' });
-    expect(rowBookingTarget(pair, calendarFig(), 'economy')).toEqual({ kind: 'none' });
-  });
-  it("links a verified row to its own cell's search, never to the booking page of the pairing beneath it", () => {
-    const real = { ...verifiedFig().price, provenance: provSearched() };
-    const v = verifiedFig({ price: real });
-    expect(rowBookingTarget(pair, v, 'economy')).toMatchObject({ kind: 'search', host: 'www.google.com' });
-    // why: final review C1: a stale verified figure carries the pairing read in its date pair's best calendar cell,
-    // another trip (maybe another airport pair), so that pairing's booking page is never the verified price's
-    const target = rowBookingTarget(pair, staleVerifiedWithOlderTrip(), 'economy');
-    expect(target).toMatchObject({ kind: 'search', host: 'www.google.com' });
-    expect(target.kind === 'search' ? target.url : '').toContain('LGW');
-    // a synthetic verified price (the fixture provider's) is never linked out
-    expect(rowBookingTarget(pair, verifiedFig(), 'economy')).toEqual({ kind: 'none' });
-  });
-  it('is none when the search link is not for a cabin the browser reads', () => {
-    expect(rowBookingTarget(pair, pairingFig(), 'business')).toEqual({ kind: 'none' });
   });
 });

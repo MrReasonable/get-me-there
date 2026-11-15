@@ -53,7 +53,8 @@ export function TripView({ definition, state }: { definition: DefinitionResponse
   // why: design §6.1: a page that can't load its data shows nothing rather than old prices, so an error blanks the card
   const failed = trip.isError;
   const card = r === undefined ? null : cardOf(r, failed);
-  const shown = r === undefined || card === null ? null : shownTripOf(r, card.state, synthetic);
+  const shown =
+    r === undefined || card === null ? null : shownTripOf(r, card.state, synthetic, definition.cabin);
   const dates = T.heading(dayText(state.departureDate), dayText(state.returnDate));
   const live = r !== undefined && !failed && r.inWindow;
   return (

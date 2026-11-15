@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { CoverageSummary, ExecutionSummary, priceCellSchema } from '../api-contract/common.js';
-import type { DatePairsResponse } from '../api-contract/datePairs.js';
+import type { DatePairsResponse, VerifiedDetail } from '../api-contract/datePairs.js';
 import type { StopDetail } from '../api-contract/stopCause.js';
 import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
@@ -126,6 +126,8 @@ export interface DecodedDatePairs {
   summary: CoverageSummary;
   /** every date pair, index order */
   pairs: DatePair[];
+  /** Ruling 2: each current verified figure's legs and booking, in index order, from its own result row */
+  verifiedDetails: VerifiedDetail[];
 }
 
 /** A canonical string of a JSON-like value: every key at every depth, sorted. */
@@ -157,7 +159,7 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
  * times, booking options, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed
  * by the figure's position (spec rev 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an
- * absent one written `not-read`).
+ * absent one written `not-read`); each current verified figure's details as they are (Ruling 2).
  * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
@@ -384,5 +386,6 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     pairing,
     pairingRead,
     listReason,
+    verifiedDetails: d.verifiedDetails,
   };
 }

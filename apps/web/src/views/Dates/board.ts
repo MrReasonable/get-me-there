@@ -1,11 +1,8 @@
 import {
-  type BookingTarget,
   bestPerWeek,
-  bookingTargetOf,
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
-  type DecodedDatePairs,
   daysBetween,
   type FigureBasis,
   type IsoDate,
@@ -17,7 +14,6 @@ import {
   rankDatePairs,
   resultBasisOf,
   type StopDetail,
-  searchLinkFor,
 } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import type { COPY } from '../../copy.js';
@@ -130,70 +126,6 @@ export function arrival(depart: string | null, arrive: string | null): Arrival |
   const d = localParts(depart);
   const offset = d === null ? 0 : daysBetween(d.date, a.date);
   return { time: a.time, date: a.date, dayOffset: Math.max(0, offset) };
-}
-
-/** A provenance that names the fixture provider or a synthetic source (spec §5.5). */
-const synthetic = (p: { providerId: string; sourceKind: string }) =>
-  p.providerId === 'fixture' || p.sourceKind === 'synthetic';
-
-/**
- * Where a board row's price links (design 2026-11-08 §5.3, Rulings 6 and 10), by core's one rule (`bookingTargetOf`): a
- * pairing row's booking page where its read recorded one ("Book on Google Flights"), else the Google Flights search for
- * the figure's own airports and dates. A verified row always takes that search: the pairing it carries is the one read in
- * the date pair's best calendar cell, another trip (final review C1). The board reads no seller booking, so the "Book on
- * <seller>" tier is absent. A calendar price is not a trip to book, and a synthetic one is never linked out: both give
- * `none`. `cabin` is the search's, for the search link.
- */
-export function rowBookingTarget(
-  pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
-  figure: DatePairFigure,
-  cabin: DefinitionResponse['cabin'],
-): BookingTarget {
-  // why: a calendar price is not a trip to book (design §5.3): nothing is linked out until flights are read
-  if (figure.basis === 'calendar') return { kind: 'none' };
-  const q = figure.pairing;
-  const link = searchLinkFor(
-    'camoufox',
-    {
-      origin: figure.origin,
-      destination: figure.destination,
-      departureDate: pair.departureDate,
-      returnDate: pair.returnDate,
-    },
-    cabin,
-  );
-  return bookingTargetOf({
-    synthetic: synthetic(figure.price.provenance) || (q !== null && synthetic(q.provenance)),
-    booking: null,
-    // why: final review C1: only a pairing figure's pairing is its own trip; a stale verified figure's is another's
-    bookingUrl: figure.basis === 'pairing' ? (q?.bookingUrl ?? null) : null,
-    searchLink: link === null ? null : { url: link.url, host: link.host },
-  });
-}
-
-/**
- * Spec §11 Dates, revision 50: the red synthetic banner shows when any provenance in the read (figures and
- * cheaper-cached prices alike), the discovery providers or any execution read (the shown run's progress) names the
- * fixture provider or a synthetic source; judged on the whole decoded read, never the rows the board shows, and
- * whatever `/providers` says. Revision 56 (R-synthetic, prov-r3-008): every price group in the read, a pairing
- * figure's grid price and every pairing (leading or beneath) included.
- */
-export function isSyntheticRead(
-  d: Pick<DecodedDatePairs, 'pairs' | 'discoveryProviders'>,
-  run: { progress: ReadonlyArray<{ providerId: string }> } | undefined,
-): boolean {
-  if (d.discoveryProviders.includes('fixture')) return true;
-  if (run?.progress.some((p) => p.providerId === 'fixture') === true) return true;
-  return d.pairs.some((p) => {
-    const f = p.figure;
-    if (f === null) return false;
-    return (
-      synthetic(f.price.provenance) ||
-      (f.cheaperCached !== null && synthetic(f.cheaperCached.provenance)) ||
-      (f.gridPrice !== null && synthetic(f.gridPrice.provenance)) ||
-      (f.pairing !== null && synthetic(f.pairing.provenance))
-    );
-  });
 }
 
 /**

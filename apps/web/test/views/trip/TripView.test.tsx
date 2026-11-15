@@ -1,4 +1,4 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { asIata, asIsoDate, BANNED_WORD_ALLOWLIST, findBannedWords, searchLinkFor } from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
@@ -43,6 +43,19 @@ import { jargonIn, mainPathWords } from '../dates/jargon.js';
 // only (London → New York); the booking address is the one made-up address every test shares.
 
 const T = COPY.trip;
+
+/** The Google Flights search the board's row links for these dates from `origin` to JFK (core's `searchLinkFor`). */
+const boardSearch = (origin: string) =>
+  searchLinkFor(
+    'camoufox',
+    {
+      origin: asIata(origin),
+      destination: asIata('JFK'),
+      departureDate: asIsoDate('2026-11-11'),
+      returnDate: asIsoDate('2026-11-28'),
+    },
+    'economy',
+  )?.url;
 const DEF = definition({ name: 'London → New York' });
 const STATE: TripUiState = {
   departureDate: STATE_FIXTURES.trip.departureDate,
@@ -159,7 +172,8 @@ describe('a read trip: the answer card (design §6.1)', () => {
     const c = await card();
     const link = within(c).getByRole('link');
     expect(link).toHaveTextContent('£412 · Find on Google Flights ↗');
-    expect(link).toHaveAttribute('href', SEARCH_LINK.url);
+    // why: Ruling 2: the figure's own trip links what its board row links, the search for its own airports and dates
+    expect(link).toHaveAttribute('href', boardSearch('LHR'));
     expect(c).not.toHaveTextContent(/Book/);
     expect(c).not.toHaveTextContent(T.bookingPageLine);
   });
@@ -201,7 +215,9 @@ describe('a read trip: the answer card (design §6.1)', () => {
     const c = await card();
     const link = within(c).getByRole('link');
     expect(link).toHaveTextContent('£412 · Find on Google Flights ↗');
-    expect(link).toHaveAttribute('href', own.url);
+    // why: Ruling 2: the verified price links what its board row links, the search for its own airports (LGW), never
+    // the list cell's (LHR)
+    expect(link).toHaveAttribute('href', boardSearch('LGW'));
     await user.click(within(c).getByRole('button', { name: /Check with SearchApi/ }));
     await waitFor(() => expect(verifies).toHaveLength(1));
     expect(verifies[0]).toMatchObject({ cell: { origin: 'LGW', destination: 'JFK' } });

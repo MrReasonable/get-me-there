@@ -207,6 +207,8 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
       reused: 0,
     },
     pairs,
+    // why: every figure here is a calendar price, so no verified figure has details (Ruling 2)
+    verifiedDetails: [],
   };
 }
 

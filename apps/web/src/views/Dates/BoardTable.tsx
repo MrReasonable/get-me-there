@@ -22,6 +22,7 @@ import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatFlapDate, formatIsoDate } from '../../format.js';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
+import { rowBookingTarget, verifiedBookingOf } from '../../lib/bookingTarget.js';
 import { type DatesSortKey, type DatesUiState, datesPatch } from '../../state/datesState.js';
 import { tripPatch } from '../../state/tripState.js';
 import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.js';
@@ -42,7 +43,6 @@ import {
   gridFetchedAtOf,
   type ListsState,
   PAGE_SIZE,
-  rowBookingTarget,
   sellerCoverage,
   setsAirlineOrLayover,
 } from './board.js';
@@ -369,7 +369,13 @@ export function BoardTable(props: BoardProps) {
               digits,
               howFar: howFarChecked(p, airportPairs, state.journey),
               notes: definition.destinationNotes,
-              target: rowBookingTarget(p, p.figure, definition.cabin),
+              // why: Ruling 2: a current verified trip links its own seller, from the read's details
+              target: rowBookingTarget(
+                p,
+                p.figure,
+                definition.cabin,
+                verifiedBookingOf(data.verifiedDetails, p, p.figure),
+              ),
               journeyFiltered: filtered,
               lit: lit === p.index,
               onLight,

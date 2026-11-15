@@ -1,13 +1,13 @@
 import { asIsoDate, type DatePair, decodeDatePairs } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../../src/copy.js';
+import { isSyntheticRead } from '../../../../src/lib/bookingTarget.js';
 import {
   arrival,
   boardModel,
   calendarStyled,
   flightReadLine,
   gridFetchedAtOf,
-  isSyntheticRead,
   type ListsState,
   PAGE_SIZE,
   sellerCoverage,

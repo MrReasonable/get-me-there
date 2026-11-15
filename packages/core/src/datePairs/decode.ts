@@ -192,5 +192,6 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     scope: r.scope,
     summary: r.summary,
     pairs,
+    verifiedDetails: r.verifiedDetails,
   };
 }

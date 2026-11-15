@@ -18,6 +18,7 @@ import {
   type Provenance,
   sortedAirportPairs,
 } from '@gmt/core';
+import { SYNTHETIC_SELLER_BOOKING } from '@gmt/core/testing';
 
 // The Dates view's fixtures (WP19 Tasks 19.4–19.9). Every response is built as a `DecodedDatePairs` and written through
 // `@gmt/core`'s `encodeDatePairs`, and the web reads it back only through `decodeDatePairs`, so these fixtures never
@@ -279,6 +280,29 @@ export interface DatesOptions {
     | ((i: number, at: ReturnType<typeof datePairAt>, airportPairs: number) => PairOver);
   /** Every date pair not named: its buckets (default: every airport pair not searched). */
   rest?: Partial<Buckets>;
+  /** Ruling 2's details (default: `verifiedDetailsOf` the date pairs). */
+  verifiedDetails?: DecodedDatePairs['verifiedDetails'];
+}
+
+/**
+ * Ruling 2's details for each current verified figure of `pairs`, as the api sends them: legs not stated (null), and a
+ * seller's booking exactly where the figure has booking options.
+ */
+export function verifiedDetailsOf(pairs: readonly DatePair[]): DecodedDatePairs['verifiedDetails'] {
+  return pairs.flatMap((p) => {
+    const f = p.figure;
+    if (f === null || f.basis !== 'verified' || f.notSeenInLatest !== null) return [];
+    return [
+      {
+        departureDate: p.departureDate,
+        returnDate: p.returnDate,
+        origin: f.origin,
+        destination: f.destination,
+        legs: { out: { durationMinutes: null, stops: null }, back: { durationMinutes: null, stops: null } },
+        booking: f.hasBookingOptions ? SYNTHETIC_SELLER_BOOKING : { kind: 'none' },
+      },
+    ];
+  });
 }
 
 /** A decoded response over a space and a scope, its summary and counts consistent with its pairs. */
@@ -335,6 +359,7 @@ export function decodedDates(o: DatesOptions = {}): DecodedDatePairs {
     },
     summary: summaryOf(pairs),
     pairs,
+    verifiedDetails: o.verifiedDetails ?? verifiedDetailsOf(pairs),
   };
 }
 

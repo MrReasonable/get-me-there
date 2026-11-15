@@ -2,7 +2,7 @@
 // every response a test parses is one the codec produced. Worked-example airports only (LHR, LGW → JFK, EWR).
 
 import type { CoverageSummary } from '../../src/api-contract/common.js';
-import type { DatePairsResponse } from '../../src/api-contract/datePairs.js';
+import type { DatePairsResponse, VerifiedDetail } from '../../src/api-contract/datePairs.js';
 import type {
   DatePair,
   DatePairFigure,
@@ -11,6 +11,7 @@ import type {
 } from '../../src/datePairs/encode.js';
 import { encodeDatePairs } from '../../src/datePairs/encode.js';
 import { type DatePairSpace, datePairAt, datePairCount } from '../../src/datePairs/space.js';
+import { SYNTHETIC_SELLER_BOOKING } from '../../src/testing/booking.js';
 import { asIata, asIsoDate, asIsoDateTime, type Iata } from '../../src/types/ids.js';
 import type { Provenance } from '../../src/types/provenance.js';
 
@@ -202,6 +203,27 @@ export function summaryOf(pairs: readonly DatePair[]): CoverageSummary {
   return s;
 }
 
+/**
+ * Ruling 2's details for each current verified figure of `pairs`, as the api sends them: legs not stated (null), and a
+ * seller's booking exactly where the figure has booking options.
+ */
+export function verifiedDetailsOf(pairs: readonly DatePair[]): VerifiedDetail[] {
+  return pairs.flatMap((p) => {
+    const f = p.figure;
+    if (f === null || f.basis !== 'verified' || f.notSeenInLatest !== null) return [];
+    return [
+      {
+        departureDate: p.departureDate,
+        returnDate: p.returnDate,
+        origin: f.origin,
+        destination: f.destination,
+        legs: { out: { durationMinutes: null, stops: null }, back: { durationMinutes: null, stops: null } },
+        booking: f.hasBookingOptions ? SYNTHETIC_SELLER_BOOKING : { kind: 'none' },
+      },
+    ];
+  });
+}
+
 export interface DecodedOptions {
   space?: DatePairSpace;
   origins?: string[];
@@ -255,6 +277,7 @@ export function decoded(o: DecodedOptions = {}): DecodedDatePairs {
     },
     summary: summaryOf(pairs),
     pairs,
+    verifiedDetails: verifiedDetailsOf(pairs),
   };
 }
 

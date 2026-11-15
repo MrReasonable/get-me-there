@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { columnAt } from '../datePairs/decode.js';
 import { provenanceKey } from '../datePairs/encode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
-import { stayCount } from '../datePairs/space.js';
+import { datePairIndex, stayCount } from '../datePairs/space.js';
 import { flightTextSchema } from '../flights/types.js';
 import { MAX_URL_LENGTH } from '../normalise/vendorUrl.js';
 import { windowDays } from '../space/generate.js';
@@ -12,6 +12,7 @@ import { type Provenance, provenanceSchema } from '../types/provenance.js';
 import { HHMM } from '../types/window.js';
 import {
   ageHoursSchema,
+  bookingSchema,
   coverageSummarySchema,
   executionSummarySchema,
   moneyPenceSchema,
@@ -322,6 +323,26 @@ const LIST_REASON_COLUMNS = ['figure', 'reason'] as const satisfies ReadonlyArra
 /** `within`'s code: exactly a pairing figure's. */
 const WITHIN_CODE = PAIRING_READ.indexOf('within');
 
+/** One way of a verified trip as its result row states it (Ruling 2): its journey time and changes, null where unknown. */
+const verifiedLegSchema = z.strictObject({ durationMinutes: count.nullable(), stops: count.nullable() });
+
+/**
+ * Ruling 2: a current verified figure's details from its own result row (`outboundMinutes`, `inboundMinutes`,
+ * `stopsOut`, `stopsIn`, `booking`), named by its dates and airports, so a verified trip links its seller and shows its
+ * legs on every surface. The booking is re-validated on the wire (`bookingSchema`, decision 54).
+ */
+export const verifiedDetailSchema = z.strictObject({
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema,
+  origin: iataSchema,
+  destination: iataSchema,
+  legs: z.strictObject({ out: verifiedLegSchema, back: verifiedLegSchema }),
+  booking: bookingSchema,
+});
+export type VerifiedDetail = z.output<typeof verifiedDetailSchema>;
+/** Ruling 2: the details of each current verified figure; none for a verified figure the latest search did not see. */
+export const verifiedDetailsSchema = z.array(verifiedDetailSchema);
+
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
   executionId: z.string().nullable(),
@@ -368,6 +389,8 @@ const datePairsBodySchema = z.strictObject({
   pairingRead: pairingReadGroupSchema.exactOptional(),
   /** the 21.6 ruling: a failed list's reason; a body without it (an older api) has no `list-failed` read */
   listReason: listReasonGroupSchema.exactOptional(),
+  /** Ruling 2: one entry for each current verified figure, in figure order */
+  verifiedDetails: verifiedDetailsSchema,
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -861,6 +884,48 @@ function refineGroups(v: DatePairsBody, fail: Fail): void {
     }
   const b = v.bookingOptions;
   for (let k = 0; k < b.figure.length; k += 1) verifiedFigureOf(v, 'bookingOptions', k, fail);
+  refineVerifiedDetails(v, fail);
+}
+
+/**
+ * Ruling 2: exactly one verified detail for each current verified figure (one the latest search saw again), in figure
+ * order, named by that figure's dates and airports, its booking a seller's exactly when the figure has booking options;
+ * none for any other figure. Reported once a rule, at the first offending entry.
+ */
+function refineVerifiedDetails(v: DatePairsBody, fail: Fail): void {
+  const f = v.figures;
+  const details = v.verifiedDetails;
+  const sellers = new Set(v.bookingOptions.figure);
+  const exact = () =>
+    fail('verifiedDetailsExact', ['verifiedDetails'], 'one verified detail for each current verified figure');
+  let k = 0;
+  for (let j = 0; j < f.pair.length; j += 1) {
+    // why: a verified figure is never superseded (`refineFigures`), so it is current exactly when the latest search saw it
+    if (columnAt(f.basis, j) !== 'verified' || columnAt(f.notSeenInLatestAgeHours, j) !== null) continue;
+    const d = details[k];
+    if (d === undefined) {
+      exact();
+      return;
+    }
+    if (
+      datePairIndex(v.space, d.departureDate, d.returnDate) !== columnAt(f.pair, j) ||
+      d.origin !== v.scope.origins[columnAt(f.origin, j)] ||
+      d.destination !== v.scope.destinations[columnAt(f.destination, j)]
+    )
+      fail(
+        'verifiedDetailsFigure',
+        ['verifiedDetails', k],
+        'verified details name the current verified figures, in their order',
+      );
+    if ((d.booking.kind !== 'none') !== sellers.has(j))
+      fail(
+        'verifiedDetailsBooking',
+        ['verifiedDetails', k, 'booking'],
+        "a verified detail's booking is a seller's exactly when its figure has booking options",
+      );
+    k += 1;
+  }
+  if (k < details.length) exact();
 }
 
 /**

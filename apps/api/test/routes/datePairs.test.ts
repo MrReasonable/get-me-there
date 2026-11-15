@@ -4,7 +4,16 @@ import { gunzipSync } from 'node:zlib';
 import { apiContract, asIata, type CellKey, type DatePair, type DecodedDatePairs } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { errorOf } from '../helpers/contract.js';
-import { DATE_PAIRS, datesOf, pairOf, resultsOf, SCOPE_422, seedDatesWorld, W } from '../helpers/dates.js';
+import {
+  DATE_PAIRS,
+  datesOf,
+  emptyVerification,
+  pairOf,
+  resultsOf,
+  SCOPE_422,
+  seedDatesWorld,
+  W,
+} from '../helpers/dates.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
@@ -756,5 +765,90 @@ describe('ported: one set of executions per read (review prov-012)', () => {
     const fresh = pairOf(d, C2.departureDate, C2.returnDate);
     expect(fresh.figure).toMatchObject({ price: { pricePence: 61_000 }, fromEarlierSearch: false });
     expect([fresh.selected, fresh.itinerarySearched]).toEqual([1, 1]);
+  });
+});
+
+describe("a verified figure's details (Ruling 2)", () => {
+  /** A seller's booking SearchApi's booking options gave, as stored; the api re-validates it on the way out. */
+  const SELLER = {
+    kind: 'get',
+    url: 'https://www.google.com/travel/clk?seller=qq',
+    host: 'www.google.com',
+  } as const;
+
+  it("carries a current verified figure's legs and seller booking from its own row, and nothing for one not seen again", async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput(FOUR));
+    const s = seeder(x.ports);
+    const top = (cs: CellKey[]) => cs.map((c) => ({ cell: c, reason: 'top_n' as const }));
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [W.J4], { selected: top([W.J4]), verification: ['searchapi'] });
+    s.verified(
+      'E1',
+      W.J4,
+      [{ hash: 'hOld', pricePence: 55_000, fetchedAt: at(-29), booking: SELLER }],
+      'searchapi',
+    );
+    s.execution('E2', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E2', [W.J1, W.J4, W.J8], { selected: top([W.J1, W.J4, W.J8]), verification: ['searchapi'] });
+    s.verified(
+      'E2',
+      W.J1,
+      [
+        {
+          hash: 'hV',
+          pricePence: 60_000,
+          fetchedAt: at(-2),
+          stopsOut: 1,
+          minutes: { outbound: 500, inbound: 470 },
+          booking: SELLER,
+        },
+      ],
+      'searchapi',
+    );
+    // why: a row whose source stated no travel time and gave no seller: its legs say so, its booking is none
+    s.verified(
+      'E2',
+      W.J8,
+      [{ hash: 'hBare', pricePence: 47_000, fetchedAt: at(-2), minutes: { outbound: null, inbound: null } }],
+      'searchapi',
+    );
+    // why: the latest itinerary search of J4 found no fares, so E1's price is not seen again: not a trip
+    emptyVerification(x, s.id('E2'), W.J4, 'searchapi');
+    const d = await datesOf(x, def.id);
+    expect(pairOf(d, '2026-11-03', '2026-11-14').figure).toMatchObject({
+      basis: 'verified',
+      notSeenInLatest: { ageHours: 2 },
+    });
+    expect(d.verifiedDetails).toEqual([
+      {
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: 500, stops: 1 }, back: { durationMinutes: 470, stops: 0 } },
+        booking: SELLER,
+      },
+      {
+        departureDate: '2026-11-05',
+        returnDate: '2026-11-16',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: null, stops: 0 }, back: { durationMinutes: null, stops: 0 } },
+        booking: { kind: 'none' },
+      },
+    ]);
+  });
+
+  it('carries none for a calendar or a pairing figure', async () => {
+    const { x, def } = await world();
+    const d = await datesOf(x, def.id);
+    const current = d.pairs.filter(
+      (p) => p.figure?.basis === 'verified' && p.figure.notSeenInLatest === null,
+    );
+    expect(d.verifiedDetails.map((v) => `${v.departureDate} ${v.origin}→${v.destination}`)).toEqual(
+      current.map((p) => `${p.departureDate} ${p.figure?.origin}→${p.figure?.destination}`),
+    );
+    expect(d.pairs.some((p) => p.figure?.basis === 'calendar')).toBe(true);
   });
 });

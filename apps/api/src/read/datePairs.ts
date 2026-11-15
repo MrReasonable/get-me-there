@@ -14,6 +14,8 @@ import {
   encodeDatePairs,
   type Figure,
   figuresByDatePair,
+  type IsoDate,
+  isTrip,
   type PairingOf,
   type SearchDefinition,
   sortedAirportPairs,
@@ -38,6 +40,32 @@ import {
 import { currentSpace } from './space.js';
 
 export type DatePairsResponse = z.output<typeof apiContract.datePairsResponseSchema>;
+export type VerifiedDetail = z.output<typeof apiContract.verifiedDetailSchema>;
+
+/**
+ * Ruling 2: a current verified figure's details from its own result row: each way's journey time and changes as the row
+ * states them (null where it does not) and its booking, re-validated when the row was read (`safeBooking`). Null for any
+ * other figure: a calendar or pairing figure, and a verified figure the latest search did not see again (it is not a
+ * trip, so it links nowhere). Never from `figure.pairing`, which may be another airport pair's trip.
+ */
+export function verifiedDetailOf(
+  pair: { departureDate: IsoDate; returnDate: IsoDate },
+  figure: DatePairFigure,
+  row: ResultRow,
+): VerifiedDetail | null {
+  if (figure.basis !== 'verified' || !isTrip(figure)) return null;
+  return {
+    departureDate: pair.departureDate,
+    returnDate: pair.returnDate,
+    origin: figure.origin,
+    destination: figure.destination,
+    legs: {
+      out: { durationMinutes: row.outboundMinutes, stops: row.stopsOut },
+      back: { durationMinutes: row.inboundMinutes, stops: row.stopsIn },
+    },
+    booking: row.booking,
+  };
+}
 
 /** The pairings a read joins to its figures: the lookup for the cells a first pass asked about (`pairingsFor`). */
 export type PairingsRead = (asked: readonly CellKey[]) => PairingOf;
@@ -286,10 +314,11 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
     ports.repos.cells.childVerificationRollUps(def.id),
     { partiallyVerified: partiallyVerifiedCells(loaded) },
   );
-  const { figures, journeyLeftOut } = datePairFigures(loaded, scope, loaded.rc, (asked) =>
+  const { figures, journeyLeftOut, chosen } = datePairFigures(loaded, scope, loaded.rc, (asked) =>
     pairingsFor(ports, def, loaded.executionIds, asked),
   );
   const pairs: DatePair[] = [];
+  const verifiedDetails: VerifiedDetail[] = [];
   const count = datePairCount(scope.space);
   for (let i = 0; i < count; i++) {
     const at = datePairAt(scope.space, i);
@@ -308,6 +337,10 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
       journeyLeftOut: journeyLeftOut.get(i) ?? 0,
       figure: figures.get(i) ?? null,
     });
+    const figure = figures.get(i);
+    const row = chosen.get(i);
+    const detail = figure === undefined || row === undefined ? null : verifiedDetailOf(at, figure, row);
+    if (detail !== null) verifiedDetails.push(detail);
   }
   const indexOf = datePairIndexer(scope.space);
   for (const c of classes) {
@@ -339,6 +372,7 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
     },
     summary: summariseCells(classes),
     pairs,
+    verifiedDetails,
   };
   return encodeDatePairs(decoded);
 }

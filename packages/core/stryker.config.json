@@ -50,6 +50,7 @@
     "src/flights/limits.ts",
     "src/flights/returns.ts",
     "src/datePairs/pairing.ts",
+    "src/datePairs/views.ts",
     "src/api-contract/datePairs.ts"
   ],
   "thresholds": {
