@@ -145,7 +145,7 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
     expect(within(form).getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
     expect(within(form).getByRole('button', { name: SMOKE.searchNow })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelectorAll(SMOKE.searchCard)).toHaveLength(1));
-    // a card's See dates, Search again, Edit and Remove
+    // a card's All trips and dates, Search again, Edit and Remove
     expect(document.querySelectorAll(SMOKE.cardAction).length).toBeGreaterThanOrEqual(4);
     // the form is above the list in the DOM, which is what puts it first below 900 px (spec rev 55 §11)
     expect(

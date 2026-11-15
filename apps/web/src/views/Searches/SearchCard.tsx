@@ -1,47 +1,49 @@
+import type { PointOfSale } from '@gmt/core';
 import { useEffect, useRef } from 'react';
+import { useExecutionActions } from '../../api/queries.js';
 import type { SearchCard as Card } from '../../api/types.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
-import { StopSentence } from '../../components/StopWords.js';
+import { LowerPrice } from '../../components/LowerPrice.js';
+import { RunProgress, runProgressOf } from '../../components/RunProgress.js';
+import { TripRow, TripRowHead } from '../../components/rows/TripRow.js';
 import { COPY } from '../../copy.js';
+import { verifiedDetailOf } from '../../lib/bookingTarget.js';
 import { useNow } from '../../now.js';
-import { writeLastSearch } from '../../state/lastSearch.js';
-import { tripHref } from '../../state/tripState.js';
-import { hrefWith, navigateTo, navigateToQuery } from '../../state/urlState.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
 import { SearchAgainButton } from '../Dates/SearchAgainButton.js';
-import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
 import {
-  announcement,
   isActive,
-  neverSearchedText,
+  isStopped,
+  metaParts,
+  nothingFound,
+  nothingFoundText,
   scheduleText,
-  shownPrice,
-  stateLine,
-  tripText,
-  windowText,
+  tripsLabel,
 } from './cardWords.js';
 import { RemoveSearch } from './RemoveSearch.js';
+import { TurnOnBrowser } from './TurnOnBrowser.js';
 
 const S = COPY.searchesView;
 
 /** The patch of a card's links: its search's page, and its Edit page. */
-const seeDatesPatch = (id: string) => ({ ...navPatch('dates'), def: id });
+const searchPatch = (id: string) => ({ ...navPatch('dates'), def: id });
 const editPatch = (id: string) => ({ view: 'definitions', edit: id });
 
 /**
- * Spec rev 55 §11 "Searches": one saved search as a plate in layout B's main column. The route in words from the
- * airports' cities with the codes beside it, the window, the stay and (only when scheduled) "repeats Mondays 05:00"; its
- * state line in a polite status region; "N of M date pairs never searched" whenever non-zero; its first trip, or with no
- * trip its lowest calendar price (`shownPrice`, interim until Task 6 rebuilds the card), always through `PriceCell`'s
- * compact face so its own source and age show (a pairing figure calendar-styled, worded "cheapest
- * of the sellers read, not checked with the airline" through `basisKindName`: spec rev 56 §11, prov-006, 21.7
- * persona H1); and the actions, with Remove visually apart from
- * Search again. The card owns no mutation of its search: Remove's request, the undo line and the re-read live in the
- * view.
+ * Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 4, 5, 7, 8, 11, 20: one saved search as a card. Its name links to
+ * the Search page; under it the meta line (the route's codes, the window, the stay, when a finished run searched) and
+ * "repeats Mondays 05:00" when scheduled. Then, by state: the run's progress and Cancel (`RunProgress`) while one goes,
+ * or its stop and Resume; "Dates changed since this was last searched"; and for a finished search that found nothing
+ * the first reason that applies (Ruling 8), with its fix. Then its three cheapest trips as shared rows (no airlines), each
+ * price a label and a link, the counts line (trips with flights read; the dates that look lower on the calendar), and the
+ * actions: All trips and dates, Search again (Cancel stands in its place while a run goes), Edit, and Remove, quietly.
+ * The card owns no mutation of its search except the run's Cancel and Resume: Remove's request, the undo line and the
+ * re-read live in the view.
  */
 export function SearchCard({
   card,
+  pointOfSale,
+  browserConfigured,
   removing,
   removeError,
   onRemove,
@@ -49,6 +51,9 @@ export function SearchCard({
   onFocused,
 }: {
   card: Card;
+  pointOfSale: PointOfSale;
+  /** The browser provider is set up on this install (`/providers`): the fix is offered only then (Ruling 8). */
+  browserConfigured: boolean;
   removing: boolean;
   removeError: Error | null;
   onRemove: () => void;
@@ -57,123 +62,162 @@ export function SearchCard({
   onFocused: () => void;
 }) {
   const now = useNow();
-  const details = useAirportDetails([...card.origins, ...card.destinations]);
+  const { cancel, resume } = useExecutionActions();
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (!focusHeading) return;
     headingRef.current?.focus();
     onFocused();
   }, [focusHeading, onFocused]);
+  const pending = cancel.isPending ? 'cancel' : resume.isPending ? 'resume' : null;
   const active = isActive(card);
-  const state = stateLine(card, now);
-  const never = neverSearchedText(card);
-  // why: Ruling 7 (interim until Task 6): the card's first trip where its cheapest was, else its lowest calendar price
-  const cheapest = shownPrice(card);
-  const tripLink =
-    cheapest === null ? null : tripHref(card.id, cheapest.departureDate, cheapest.returnDate, {});
-  const codes = S.codes(card.origins.join(', '), card.destinations.join(', '));
+  const run = card.latestRun;
+  const found = nothingFound(card);
+  const multiAirport = card.origins.length > 1 || card.destinations.length > 1;
+  const link = searchPatch(card.id);
+  const rowSearch = {
+    id: card.id,
+    cabin: card.cabin,
+    multiAirport,
+    pointOfSale,
+    showCarriers: false,
+  } as const;
+  // why: a card's trips are the search's current trips: while another search runs they are the previous search's, and a
+  // trip a search before the latest read says so in its label's detail (Review Focus 2)
+  const earlierNote = (fromEarlier: boolean): string | null =>
+    fromEarlier || active ? (active ? S.previousSearchReplaced : S.previousSearchDetail) : null;
+  const fix = found?.kind === 'browser-off';
   return (
-    <li className="plate plate-pad search-card" data-card={card.id}>
-      <h3 ref={headingRef} tabIndex={-1} className="search-card-name">
-        {card.name}
-      </h3>
-      <p className="search-card-route">
-        {suggestedName(card.origins, card.destinations, details.rows)}{' '}
-        <span className="text-fg-2">({codes})</span>
-      </p>
-      <p className="search-card-facts text-fg-2">
-        {[
-          windowText(card.window),
-          COPY.datesView.scopeNights(card.minNights, card.maxNights),
-          ...(card.schedule === null ? [] : [scheduleText(card.schedule)]),
-        ].join(' · ')}
-      </p>
-      {/* why: the visible line carries the counts and is not live (it changes every poll); the hidden line below
-      announces only the kind of state, or a stop's sentence, so a poll announces nothing new */}
-      <div data-testid="card-state" className="search-card-state">
-        {state.kind === 'stopped' ? (
-          <StopSentence stop={state.stop} className="warn-text" />
-        ) : (
-          <p>{state.words}</p>
-        )}
+    <li className="tcard" data-card={card.id}>
+      <div className="tcard-head">
+        <div className="tcard-title">
+          <h2 ref={headingRef} tabIndex={-1} className="tcard-name">
+            <a href={hrefWith(link)} onClick={navigateTo(link)} className="tcard-name-link">
+              {card.name}
+            </a>
+          </h2>
+          {card.schedule === null ? null : (
+            <span className="tcard-repeat">{scheduleText(card.schedule)}</span>
+          )}
+        </div>
+        <p className="tcard-meta">{metaParts(card, now).join(' · ')}</p>
       </div>
-      <p role="status" className="sr-only">
-        {announcement(state)}
-      </p>
-      {never === null ? null : <p className="text-sm">{never}</p>}
-      {cheapest === null || tripLink === null ? null : (
-        <div className="search-card-cheapest">
-          {/* why: Ruling 7, design 2026-11-08 §5.3: a card's trip price opens that trip's page (its booking targets come
-          with the card redesign); the link stays in this tab, so the way out of the app is the page's own. The card's
-          price is the whole search's cheapest, read under no filters, so the link carries none and its click goes to
-          exactly that address (CodeRabbit PR #58 finding 9) */}
-          <a
-            href={tripLink}
-            onClick={navigateToQuery(tripLink)}
-            data-testid="card-trip-price"
-            className="search-card-price-link"
-          >
-            <PriceBoundary>
-              <PriceCell
-                pricePence={cheapest.price.pricePence}
-                provenance={cheapest.price.provenance}
-                calendar={cheapest.calendar}
-                stale={cheapest.price.stale}
-                truncated={cheapest.price.truncated}
-                destination={cheapest.destination}
-                compact
-              />
-            </PriceBoundary>
-            <span className="sr-only">{S.openThisTrip}</span>
-          </a>
-          <span>{tripText(cheapest.departureDate, cheapest.returnDate)}</span>
-          {/* why: spec rev 56 §11 (prov-006): a card carries no seller, offer count or grid price, so a pairing figure
-          says what it is in words */}
-          {cheapest.priceKind !== null ? (
-            <span data-testid="card-price-kind" className="text-fg-2">
-              {COPY.basisKindName[cheapest.priceKind]}
-            </span>
-          ) : null}
-          {/* why: the first trip is not always the cheapest: a fresh trip with flights read ranks ahead of a cheaper
-          older one. A calendar price shows only when no trip with flights read exists, so it is then the cheapest current
-          calendar price; a trip is worded as the top trip (design 2026-11-08) */}
-          {active ? (
-            <span className="text-fg-2">{cheapest.trip ? S.topTripSoFar : S.cheapestSoFar}</span>
-          ) : null}
+      {run === null ? <p className="tcard-state">{S.notSearchedYet}</p> : null}
+      {run !== null && (active || isStopped(card)) ? (
+        <div className="tcard-run">
+          <RunProgress
+            run={runProgressOf(run)}
+            onCancel={() => cancel.mutate(run.id)}
+            onResume={() => resume.mutate(run.id)}
+            pending={pending}
+            failure={cancel.error?.message ?? resume.error?.message ?? null}
+          />
+        </div>
+      ) : null}
+      {card.spaceChangedSince && run !== null && !active ? (
+        <p className="tcard-state tcard-changed">{S.datesChanged}</p>
+      ) : null}
+      {found === null ? null : (
+        <div className="tcard-state tcard-nothing">
+          <span className="tcard-mark" aria-hidden="true">
+            !
+          </span>
+          <p>
+            {nothingFoundText(found)}
+            {found.kind === 'browser-off' && !browserConfigured ? ` ${S.browserNotSetUp}` : null}
+          </p>
         </div>
       )}
-      <div data-testid="card-actions" className="search-card-actions">
-        <span className="search-card-main-actions">
-          <a
-            href={hrefWith(seeDatesPatch(card.id))}
-            onClick={(e) => {
-              // why: spec §11 — a card's See dates remembers the search as the one last opened, as its page does on mount
-              writeLastSearch(card.id);
-              navigateTo(seeDatesPatch(card.id))(e);
-            }}
-            aria-label={S.seeDatesOf(card.name)}
-            className="btn btn-sm min-h-11"
-          >
-            {S.seeDates}
-          </a>
-          <SearchAgainButton definitionId={card.id} accessibleName={S.searchAgainOf(card.name)} />
+      {card.trips.length === 0 ? null : (
+        <ul className="tcard-trips" aria-label={tripsLabel(card)}>
+          <TripRowHead />
+          {card.trips.map((t) => {
+            const pair = { departureDate: t.departureDate, returnDate: t.returnDate, nights: t.nights };
+            return (
+              <TripRow
+                key={`${t.departureDate}|${t.returnDate}|${t.figure.origin}|${t.figure.destination}`}
+                figure={t.figure}
+                details={verifiedDetailOf(card.verifiedDetails, pair, t.figure)}
+                search={rowSearch}
+                pair={pair}
+                earlierNote={earlierNote(t.figure.fromEarlierSearch)}
+              />
+            );
+          })}
+        </ul>
+      )}
+      <CountsLine card={card} link={link} />
+      <div data-testid="card-actions" className="tcard-foot">
+        <a
+          href={hrefWith(link)}
+          onClick={navigateTo(link)}
+          aria-label={S.allTripsAndDatesOf(card.name)}
+          className="trip-btn tcard-btn"
+        >
+          {S.allTripsAndDates}
+        </a>
+        {active ? null : fix && browserConfigured ? (
+          <TurnOnBrowser definitionId={card.id} name={card.name} />
+        ) : (
+          <SearchAgainButton
+            definitionId={card.id}
+            label={run === null ? COPY.searchAgain.searchNow : COPY.searchAgain.label}
+            accessibleName={S.searchAgainOf(card.name)}
+          />
+        )}
+        <span className="tcard-foot-end">
+          {fix && !browserConfigured ? (
+            <a href={hrefWith(navPatch('settings'))} onClick={navigateTo(navPatch('settings'))}>
+              {S.browserNotSetUpLink}
+            </a>
+          ) : null}
           <a
             href={hrefWith(editPatch(card.id))}
             onClick={navigateTo(editPatch(card.id))}
             aria-label={S.editOf(card.name)}
-            className="btn btn-sm min-h-11"
+            className="trip-btn trip-btn-quiet tcard-btn"
           >
             {S.edit}
           </a>
+          <RemoveSearch
+            name={card.name}
+            active={active}
+            pending={removing}
+            error={removeError}
+            onRemove={onRemove}
+          />
         </span>
-        <RemoveSearch
-          name={card.name}
-          active={active}
-          pending={removing}
-          error={removeError}
-          onRemove={onRemove}
-        />
       </div>
     </li>
+  );
+}
+
+/**
+ * Rulings 5 and 6: under the trips, how many dates have flights read ("23 dates with flights read; these are the
+ * cheapest.") and how many look lower on the calendar, from which price, with its label ("155 dates look lower on the
+ * calendar, from £372 Calendar · 3h, flights not read."); with no trip, "Calendar prices for 2,146 dates, from £372
+ * Calendar · 3h; no flights read yet." Each clause only when its count is not zero; the count links to the Search page.
+ */
+function CountsLine({ card, link }: { card: Card; link: Record<string, string> }) {
+  const lower = card.lowerOnCalendar;
+  if (card.readDates === 0 && lower === null) return null;
+  const to = { href: hrefWith(link), onClick: navigateTo(link) };
+  const noTrip = card.trips.length === 0;
+  return (
+    <div className="tcard-lower" data-testid="card-counts">
+      {card.readDates === 0 ? null : (
+        <>
+          {S.datesWithFlightsRead(card.readDates)}
+          {lower === null ? null : ' '}
+        </>
+      )}
+      {lower === null ? null : (
+        <>
+          <a {...to}>{noTrip ? S.calendarOnlyLink(lower.count) : S.lowerLink(lower.count)}</a>
+          {S.lowerFrom} <LowerPrice lower={lower.cheapest} />
+          {noTrip ? S.calendarOnlyTail : S.lowerTail}
+        </>
+      )}
+    </div>
   );
 }

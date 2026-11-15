@@ -220,7 +220,7 @@ describe('the App (spec §11 layout)', () => {
     // why: WP19 Task 19.7: the Trip page is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3),
     // and a board row opens the Trip page
     await user.click(within(nav).getByRole('link', { name: 'Trips' }));
-    await user.click(await screen.findByRole('link', { name: /^See dates for / }));
+    await user.click(await screen.findByRole('link', { name: /^All trips and dates for / }));
     const board = await screen.findByRole('table', { name: /^Best dates/ });
     const [first] = within(board).getAllByRole('row').slice(1);
     if (first === undefined) throw new Error('the board has a row');

@@ -13,6 +13,9 @@ import './rows.css';
 
 const R = COPY.rows;
 
+/** The board's figure of a date pair, or a card's (the wire's, less its airport-pair index): what a row reads. */
+export type RowFigure = Omit<DatePairFigure, 'airportPair'>;
+
 /** What a row shows of its date pair. */
 export type RowPair = Pick<DatePair, 'departureDate' | 'returnDate' | 'nights'>;
 
@@ -21,7 +24,7 @@ export function RowAmount({
   figure,
   destinationNote,
 }: {
-  figure: DatePairFigure;
+  figure: RowFigure;
   destinationNote: string | null;
 }) {
   const p = figure.price;
@@ -47,15 +50,15 @@ export function RowAmount({
  * The one label of the figure's price (`figureLabelKind`), its tap detail naming the seller where one was read. A
  * provenance that is not one withholds this row's label (and its price: `RowAmount` has its own boundary), never the page.
  */
-export function RowLabel({ figure }: { figure: DatePairFigure }) {
+export function RowLabel({ figure, note }: { figure: RowFigure; note?: string | undefined }) {
   return (
     <PriceBoundary>
-      <ValidLabel figure={figure} />
+      <ValidLabel figure={figure} note={note} />
     </PriceBoundary>
   );
 }
 
-function ValidLabel({ figure }: { figure: DatePairFigure }) {
+function ValidLabel({ figure, note }: { figure: RowFigure; note: string | undefined }) {
   const q = figure.pairing;
   const kind = figureLabelKind(figure);
   const p = figure.price;
@@ -66,14 +69,18 @@ function ValidLabel({ figure }: { figure: DatePairFigure }) {
       ageHours={p.ageHours}
       stale={p.stale}
       provenance={p.provenance}
-      detail={labelDetail(
-        kind,
-        kind === 'seller' && figure.basis === 'pairing' && q !== null && q.seller !== null
-          ? { name: q.seller, offersRead: q.offersRead }
-          : null,
-        // why: only a pairing figure's price is its pairing's; a verified figure's pairing is another trip's
-        figure.basis === 'pairing' && q !== null ? pairingKindOf(q) : null,
-      )}
+      detail={[
+        labelDetail(
+          kind,
+          kind === 'seller' && figure.basis === 'pairing' && q !== null && q.seller !== null
+            ? { name: q.seller, offersRead: q.offersRead }
+            : null,
+          // why: only a pairing figure's price is its pairing's; a verified figure's pairing is another trip's
+          figure.basis === 'pairing' && q !== null ? pairingKindOf(q) : null,
+        ),
+        // why: an earlier search's trip says so in its detail (the card's, while another search runs)
+        ...(note === undefined ? [] : [note]),
+      ].join(' ')}
     />
   );
 }

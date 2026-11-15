@@ -50,7 +50,7 @@ const SMOKE_SEARCH = 'London → New York';
 const smokeCard = (page: Page) =>
   page
     .locator(SMOKE.searchCard)
-    .filter({ has: page.getByRole('heading', { level: 3, name: SMOKE_SEARCH, exact: true }) });
+    .filter({ has: page.getByRole('heading', { level: 2, name: SMOKE_SEARCH, exact: true }) });
 
 const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
 const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });

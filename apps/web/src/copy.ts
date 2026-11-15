@@ -459,7 +459,8 @@ export const COPY = {
   none: 'none',
   // --- WP20: the Searches view, the first screen (spec rev 55 §11); main-path words only ---
   searchesView: {
-    heading: 'Searches',
+    heading: 'Trips',
+    newSearch: '+ New search',
     listLabel: 'Your searches',
     sideHeading: 'New search',
     noSearches: 'No searches yet',
@@ -476,36 +477,46 @@ export const COPY = {
     // the state line
     searching: (done: number, total: number, left: string | null) =>
       `Searching · ${done} of ${total} date ${noun(total, 'pair', 'pairs')}${left === null ? '' : ` · ${left}`}`,
-    readingFlights: (read: number, planned: number) => `Reading flights · ${read} of ${planned}`,
-    // why: design 2026-11-08 §5.5: the confirm step reads an open-ended queue, so the card has no "of N" denominator
-    readingFlightsConfirm: (dates: number, trips: number) =>
-      `Reading flights · ${dates} ${noun(dates, 'date', 'dates')} checked, ${trips} ${noun(trips, 'trip', 'trips')} with flights read`,
     left: (span: string) => `about ${span} left`,
     lessThanAMinuteLeft: 'less than a minute left',
-    searchedAgo: (ago: string) => `Searched ${ago}`,
-    // why: the card's screen-reader line says only the kind of state, so a poll that changes a count announces nothing
-    stateKind: {
-      searching: 'Searching',
-      flights: 'Reading flights',
-      changed: 'Dates changed',
-      searched: 'Searched',
-      never: 'Not searched yet',
-    },
     datesChanged: 'Dates changed since this was last searched',
     notSearchedYet: 'Not searched yet',
-    neverSearched: (never: number, total: number) =>
-      `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,
-    cheapestSoFar: 'cheapest so far',
-    // why: while a search runs the card shows the first-ranked figure, which is not always the cheapest: a fresh trip
-    // with flights read ranks ahead of a cheaper older one, and a verified trip ahead of a cheaper calendar price; so a
-    // pairing or verified figure is "top trip", and only a calendar figure is "cheapest so far" (spec §11 card)
-    topTripSoFar: 'top trip with flights read so far',
-    trip: (departure: string, back: string) => `${departure} → ${back}`,
-    // actions
-    seeDates: 'See dates',
-    seeDatesOf: (name: string) => `See dates for ${name}`,
-    // the card's price is a link to its trip's page; said to a screen reader, after the price
-    openThisTrip: ', open this trip',
+    // why: the card's own words (design 2026-11-08 §5.3, Rulings 5 and 8); a sentence that shows a price takes its
+    // label as a parameter, so the label sits inside the sentence
+    tripsLabel: (name: string) => `Cheapest trips, ${name}`,
+    leaveWindow: (span: string) => `leave ${span}`,
+    searchedMeta: (ago: string) => `searched ${ago}`,
+    allTripsAndDates: 'All trips and dates',
+    allTripsAndDatesOf: (name: string) => `All trips and dates for ${name}`,
+    datesWithFlightsRead: (n: number) =>
+      `${thousands(n)} ${noun(n, 'date', 'dates')} with flights read; these are the cheapest.`,
+    lowerLink: (n: number) =>
+      `${thousands(n)} ${noun(n, 'date', 'dates')} ${noun(n, 'looks', 'look')} lower on the calendar`,
+    lowerFrom: ', from',
+    lowerTail: ', flights not read.',
+    calendarOnlyLink: (n: number) => `Calendar prices for ${thousands(n)} ${noun(n, 'date', 'dates')}`,
+    calendarOnlyTail: '; no flights read yet.',
+    previousRun: 'Trips from the previous search',
+    // Ruling 8: why a finished search with no trip and no lower calendar price found nothing, the first that applies
+    nothingFound: {
+      stoppedBefore: (n: number) => `The search stopped before ${thousands(n)} ${noun(n, 'date', 'dates')}.`,
+      browserUnavailable: (n: number) =>
+        `The browser was unavailable for ${n} ${noun(n, 'date', 'dates')}; the next search tries them again.`,
+      couldntRead: (n: number) =>
+        `${n} ${noun(n, 'date', 'dates')} couldn't be read; the next search tries them again.`,
+      browserOff:
+        "The other sources found nothing, and the browser is off for this search. That isn't the same as no flights.",
+      noPriceShown: "Every date showed no price. That isn't the same as no flights.",
+      noneFit: "Prices were found, but none fit this search's limits.",
+      nothing: "No prices were found. That isn't the same as no flights.",
+    },
+    turnOnBrowser: 'Turn on the browser for this search and search again',
+    turnOnBrowserOf: (name: string) => `Turn on the browser for ${name} and search again`,
+    turnOnBrowserFailed: (message: string) => `Couldn't turn the browser on: ${message}`,
+    browserNotSetUp: 'The browser is not set up yet. Set it up in Settings.',
+    browserNotSetUpLink: 'Settings',
+    previousSearchDetail: 'Read by the previous search.',
+    previousSearchReplaced: 'Read by the previous search; the search running now will replace it.',
     searchAgainOf: (name: string) => `Search again: ${name}`,
     edit: 'Edit',
     editOf: (name: string) => `Edit ${name}`,

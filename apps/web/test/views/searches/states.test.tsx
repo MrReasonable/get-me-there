@@ -14,7 +14,7 @@ import { renderInShell } from './support.js';
 
 const NAME = 'Birmingham → Frankfurt';
 const cardOf = async () => {
-  const heading = await screen.findByRole('heading', { level: 3, name: NAME });
+  const heading = await screen.findByRole('heading', { level: 2, name: NAME });
   const card = heading.closest('li');
   if (card === null) throw new Error('no card');
   return card;

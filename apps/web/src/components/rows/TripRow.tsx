@@ -1,11 +1,19 @@
-import type { DatePairFigure, PointOfSale } from '@gmt/core';
+import type { PointOfSale } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { rowBookingTarget, type VerifiedDetails } from '../../lib/bookingTarget.js';
 import { dayOffsetOf, type LegWordsFacts, legWords } from '../../lib/legWords.js';
 import { tripHref } from '../../state/tripState.js';
 import { BookLink } from '../BookLink.js';
-import { DatesCell, NightsCell, RowAmount, RowLabel, type RowPair, stayDates } from './RowParts.js';
+import {
+  DatesCell,
+  NightsCell,
+  RowAmount,
+  type RowFigure,
+  RowLabel,
+  type RowPair,
+  stayDates,
+} from './RowParts.js';
 
 const R = COPY.rows;
 
@@ -28,11 +36,16 @@ export interface TripRowSearch extends RowSearch {
 
 export interface TripRowProps {
   /** A trip: `isTrip(figure)`, or a verified figure the latest search did not see again (the day panel's). */
-  figure: DatePairFigure;
+  figure: RowFigure;
   /** This verified figure's details from the read (`verifiedDetailOf`), else null. A verified row never reads `figure.pairing`. */
   details: VerifiedDetails | null;
   search: TripRowSearch;
   pair: RowPair;
+  /**
+   * What an earlier search's trip says in its label's detail (Review Focus 2: "read by the previous search"); the row
+   * is then styled as an earlier result. Null for a trip the latest search read.
+   */
+  earlierNote?: string | null;
 }
 
 /**
@@ -41,7 +54,7 @@ export interface TripRowProps {
  * and a not-current verified one show no pairing's legs, which may be another airport pair's.
  */
 function legsOf(
-  figure: DatePairFigure,
+  figure: RowFigure,
   details: VerifiedDetails | null,
   showCarriers: boolean,
 ): Array<{ name: string; words: string }> {
@@ -97,7 +110,7 @@ export function TripRowHead() {
  * each way's times, journey time, changes and (on the Search page) airlines, and › to the Trip page. A search with
  * several airports names the pair and links its own trip.
  */
-export function TripRow({ figure, details, search, pair }: TripRowProps) {
+export function TripRow({ figure, details, search, pair, earlierNote = null }: TripRowProps) {
   const target = rowBookingTarget(pair, figure, search.cabin, details?.booking ?? null, search.pointOfSale);
   const pairName = search.multiAirport ? R.pair(figure.origin, figure.destination) : null;
   const legs = legsOf(figure, details, search.showCarriers === true);
@@ -108,7 +121,11 @@ export function TripRow({ figure, details, search, pair }: TripRowProps) {
     search.multiAirport ? { from: figure.origin, to: figure.destination } : {},
   );
   return (
-    <li className="trip-row" data-testid="trip-row">
+    <li
+      className={earlierNote === null ? 'trip-row' : 'trip-row trip-row-earlier'}
+      data-testid="trip-row"
+      data-earlier={earlierNote === null ? undefined : 'true'}
+    >
       <div className="row-price">
         <BookLink
           target={target}
@@ -120,7 +137,7 @@ export function TripRow({ figure, details, search, pair }: TripRowProps) {
           }
           label={stayDates(pair)}
         />
-        <RowLabel figure={figure} />
+        <RowLabel figure={figure} note={earlierNote ?? undefined} />
       </div>
       <DatesCell pair={pair} figure={figure} multiAirport={search.multiAirport} />
       <NightsCell nights={pair.nights} />

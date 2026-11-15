@@ -7,6 +7,7 @@ import {
   useExecution,
   useExecutionActions,
 } from '../../api/queries.js';
+import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { definitionToDraft, draftToRequest } from '../Definitions/draft.js';
 import { SentenceButton, SentenceRegion, sentenceOf } from '../Searches/EstimateSentence.js';
@@ -35,6 +36,7 @@ export function SearchAgainButton({
   label = COPY.searchAgain.label,
   accessibleName,
   confirmFirst = false,
+  prepare,
 }: {
   definitionId: string;
   /** The visible words: "Search again" by default, "Search now" in the never-searched state. */
@@ -43,11 +45,18 @@ export function SearchAgainButton({
   accessibleName?: string;
   /** Start on the second look: the sentence and the labelled press, with nothing sent until it is pressed. */
   confirmFirst?: boolean;
+  /**
+   * Something that must succeed before the run is started (the Trips card's "Turn on the browser": it saves the search
+   * with the browser added). A failure is said beside the button and nothing is started.
+   */
+  prepare?: (definition: DefinitionResponse) => Promise<void>;
 }) {
   const definitions = useDefinitions();
   const { start } = useExecutionActions();
   const definition = definitions.data?.find((d) => d.id === definitionId);
   const [confirming, setConfirming] = useState(confirmFirst);
+  const [preparing, setPreparing] = useState(false);
+  const [prepareError, setPrepareError] = useState<Error | null>(null);
   // why: ruling R2 — the search is estimated as itself, its own fields as the body
   const estimate = useDefinitionEstimate(
     definitionId,
@@ -69,8 +78,20 @@ export function SearchAgainButton({
   const refusal = start.error === null || needsConfirm ? null : refusalText(start.error);
 
   /** Starts a run with these figures; a `confirm` refusal opens (or refreshes) the second look. */
-  const press = (figures: { pence: number | null; calls: number | null }) => {
+  const press = async (figures: { pence: number | null; calls: number | null }) => {
     if (definition === undefined) return;
+    if (prepare !== undefined) {
+      setPrepareError(null);
+      setPreparing(true);
+      try {
+        await prepare(definition);
+      } catch (e) {
+        setPrepareError(e instanceof Error ? e : new Error(String(e)));
+        return;
+      } finally {
+        setPreparing(false);
+      }
+    }
     start.mutate(
       {
         id: definition.id,
@@ -111,6 +132,11 @@ export function SearchAgainButton({
           {refusal}
         </span>
       ) : null}
+      {prepareError !== null ? (
+        <span role="alert" className="bad-text text-sm">
+          {COPY.searchesView.turnOnBrowserFailed(prepareError.message)}
+        </span>
+      ) : null}
     </>
   );
 
@@ -134,9 +160,9 @@ export function SearchAgainButton({
             verb={label}
             sentence={sentence}
             wait={wait}
-            pending={start.isPending}
+            pending={start.isPending || preparing}
             ids={ids}
-            onPress={(covers) => press({ pence: covers.pence, calls: covers.calls })}
+            onPress={(covers) => void press({ pence: covers.pence, calls: covers.calls })}
           />
           {estimate.error !== null ? (
             <button type="button" className="btn btn-sm min-h-11" onClick={() => void estimate.refetch()}>
@@ -153,15 +179,18 @@ export function SearchAgainButton({
       <button
         type="button"
         className="btn btn-primary btn-sm min-h-11"
-        disabled={definition === undefined || start.isPending}
-        aria-busy={start.isPending ? true : undefined}
+        disabled={definition === undefined || start.isPending || preparing}
+        aria-busy={start.isPending || preparing ? true : undefined}
         // why: while pending the visible "Searching…" is the name, so the busy state is what a screen reader hears
-        aria-label={start.isPending ? undefined : accessibleName}
+        aria-label={start.isPending || preparing ? undefined : accessibleName}
         onClick={() =>
-          press({ pence: definition?.confirmedCostPence ?? null, calls: definition?.confirmedCalls ?? null })
+          void press({
+            pence: definition?.confirmedCostPence ?? null,
+            calls: definition?.confirmedCalls ?? null,
+          })
         }
       >
-        {start.isPending ? COPY.searchAgain.working : label}
+        {start.isPending || preparing ? COPY.searchAgain.working : label}
       </button>
       {status}
     </>

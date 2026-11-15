@@ -66,6 +66,8 @@ export interface TripOver {
   priceKind?: PairingKind;
   /** a verified trip's seller's booking (SearchApi's booking options) */
   hasBookingOptions?: boolean;
+  /** an earlier search read this trip (the card shows it while another search runs) */
+  fromEarlierSearch?: boolean;
 }
 
 /** A read trip's pairing at `pence`, of the kind asked: 07:15 out, 14:20 back, QQ Travel's offer when a seller's. */
@@ -143,7 +145,12 @@ export function cardTrip(o: TripOver = {}, provenance: ProvenanceInput = provSea
           departBack: `${returnDate}T19:00`,
           arriveBack: `${returnDate}T21:40`,
         };
-  return { figure, departureDate, returnDate, nights };
+  return {
+    figure: { ...figure, fromEarlierSearch: o.fromEarlierSearch ?? false },
+    departureDate,
+    returnDate,
+    nights,
+  };
 }
 
 /** Ruling 2's details of each verified trip of `trips`: legs as the row states them, a seller's booking where it has one. */

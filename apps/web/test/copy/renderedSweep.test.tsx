@@ -33,7 +33,17 @@ import {
   usage,
   verifiedRow,
 } from '../fixtures.js';
-import { flightPair, latestRun, pairingList, searchCard } from '../fixtures.searches.js';
+import {
+  calendarOnly,
+  cardTrip,
+  flightListProvenance,
+  flightPair,
+  latestRun,
+  lowerOnCalendar,
+  noPrices,
+  pairingList,
+  searchCard,
+} from '../fixtures.searches.js';
 import { readTrip, tripBody } from '../fixtures.trip.js';
 import { poundsOutsidePrices, renderedCopy } from '../guards.js';
 import { serveDates } from '../msw/datesHandlers.js';
@@ -340,5 +350,56 @@ describe('a search\'s page with the return leg says no banned word, no set-up te
     expect(renderedCopy().replace(/not every seller read/gi, '')).not.toMatch(
       /each seller|every seller|verified/i,
     );
+  });
+});
+
+describe('the Trips cards say no banned word, no set-up term and no "£" outside a price (Task 6)', () => {
+  it('a finished card with trips and a lower calendar price, a running one with earlier trips, a calendar-only one and a nothing-found one', async () => {
+    const read = (o: Parameters<typeof cardTrip>[0] = {}) =>
+      cardTrip(
+        { basis: 'pairing', priceKind: 'seller', ...o },
+        flightListProvenance('2026-10-14T10:44:00.000Z'),
+      );
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'a',
+          name: 'Finished',
+          trips: [read()],
+          readDates: 23,
+          lowerOnCalendar: lowerOnCalendar({ count: 155 }),
+        }),
+        searchCard({
+          id: 'b',
+          name: 'Running',
+          latestRun: latestRun({ status: 'running', finishedAt: null }),
+          trips: [read({ fromEarlierSearch: true })],
+        }),
+        searchCard({ id: 'c', name: 'Calendar only', ...calendarOnly({ count: 2146 }) }),
+        searchCard({
+          id: 'd',
+          name: 'Nothing',
+          ...noPrices,
+          latestRun: latestRun({
+            datePairsSearched: 405,
+            datePairsNeverSearched: 0,
+            marks: {
+              priced: 0,
+              'no-price-shown': 405,
+              'couldnt-read': 0,
+              'not-reached': 0,
+              'not-searched': 0,
+            },
+          }),
+        }),
+        searchCard({ id: 'e', name: 'Never', latestRun: null, ...noPrices }),
+      ]),
+    );
+    renderWithProviders(<App />, { search: '?view=searches' });
+    await screen.findByRole('heading', { level: 2, name: 'Nothing' });
+    await screen.findByText(/Calendar prices for 2,146 dates/);
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(jargonIn(mainPathWords())).toEqual([]);
+    expect(poundsOutsidePrices()).toEqual([]);
   });
 });

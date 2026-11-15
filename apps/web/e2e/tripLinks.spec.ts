@@ -120,7 +120,7 @@ async function openTrips(page: Page, width: number, scheme: 'light' | 'dark') {
     route.fulfill({ status: 200, contentType: 'application/json', body }),
   );
   await page.goto('/?view=searches');
-  await expect(page.getByTestId('card-trip-price')).toBeVisible();
+  await expect(page.getByTestId('trip-row')).toBeVisible();
 }
 
 const noSidewaysScroll = async (page: Page) => {
@@ -157,7 +157,7 @@ for (const width of WIDTHS)
       });
     });
 
-    test(`the Trips page at ${width}px, ${scheme}: the price opens its trip, no sideways scroll`, async ({
+    test(`the Trips page at ${width}px, ${scheme}: a trip's › opens its page, no sideways scroll`, async ({
       page,
     }) => {
       await openTrips(page, width, scheme);
@@ -166,7 +166,10 @@ for (const width of WIDTHS)
         path: `test-results/links-shots/trips-${width}-${scheme}.png`,
         fullPage: true,
       });
-      await page.getByTestId('card-trip-price').click();
+      await page
+        .getByTestId('trip-row')
+        .getByRole('link', { name: /^Details for/ })
+        .click();
       await expect(page).toHaveURL(/view=trip.*depart=2027-03-14/);
     });
   }

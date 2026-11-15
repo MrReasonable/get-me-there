@@ -41,8 +41,8 @@ interface Removed {
 }
 
 /**
- * A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). Every price
- * a card carries counts, whether shown yet or not: each trip and the lower-on-calendar price.
+ * A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). It covers
+ * every price the page shows: each card's trips and its lower-on-calendar price (the only prices a card carries).
  */
 const hasSyntheticPrice = (cards: readonly Card[]): boolean =>
   cards.some(
@@ -75,6 +75,7 @@ export function SearchesView() {
   const [removals, setRemovals] = useState<ReadonlyMap<string, Pending>>(new Map());
   const [undos, setUndos] = useState<ReadonlyMap<string, Pending>>(new Map());
   const served = cards.data?.cards ?? [];
+  const pointOfSale = cards.data?.pointOfSale ?? 'unknown';
 
   // why: the served order is the api's; while a mutation of this view is pending it is held, so a re-read that lands
   // meanwhile cannot move a card under the pointer, and it changes only on the next settled read
@@ -140,8 +141,11 @@ export function SearchesView() {
     return v instanceof Error ? v : null;
   };
 
+  const sideRef = useRef<HTMLElement>(null);
+  const browserConfigured =
+    providers.data?.providers.some((p) => p.providerId === 'camoufox' && p.enabled) === true;
   const side = (
-    <section aria-label={S.sideHeading} className="searches-side">
+    <section ref={sideRef} aria-label={S.sideHeading} className="searches-side">
       {providers.error ? (
         <LoadError error={providers.error} retry={() => void providers.refetch()} />
       ) : providers.data === undefined ? (
@@ -156,7 +160,7 @@ export function SearchesView() {
       {cards.error ? <LoadError error={cards.error} retry={() => void cards.refetch()} /> : null}
       {cards.data === undefined && cards.error === null ? <Loading /> : null}
       {cards.data !== undefined && items.length === 0 ? (
-        <p className="plate notice font-semibold">{S.noSearches}</p>
+        <p className="tcard tcard-empty">{S.noSearches}</p>
       ) : null}
       {items.length > 0 ? (
         <ul aria-label={S.listLabel} className="searches-list">
@@ -165,6 +169,8 @@ export function SearchesView() {
               <SearchCard
                 key={item.card.id}
                 card={item.card}
+                pointOfSale={pointOfSale}
+                browserConfigured={browserConfigured}
                 removing={removals.get(item.card.id) === 'pending'}
                 removeError={errorOf(removals, item.card.id)}
                 onRemove={() => removeCard(item.card)}
@@ -188,10 +194,19 @@ export function SearchesView() {
     </section>
   );
   return (
-    <div className="searches-view space-y-5">
+    <div className="searches-view trips-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
       {hasSyntheticPrice(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
-      <h1 className="h-view">{S.heading}</h1>
+      <div className="trips-head">
+        <h1 className="trips-title">{S.heading}</h1>
+        <button
+          type="button"
+          className="trip-btn trip-btn-primary"
+          onClick={() => sideRef.current?.querySelector<HTMLElement>('input, select, button')?.focus()}
+        >
+          {S.newSearch}
+        </button>
+      </div>
       {/* why: one stable tree with the form first, as a phone shows it (focus order follows what is seen, WCAG 2.4.3);
       from 900 px CSS grid puts it in the right column (searches.css), so crossing the breakpoint never remounts it */}
       <div className="searches-layout">
