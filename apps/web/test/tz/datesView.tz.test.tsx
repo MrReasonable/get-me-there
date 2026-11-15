@@ -100,7 +100,7 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
       { search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28' },
     );
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Sun 14 Mar → Sun 28 Mar · 14 nights' }),
+      await screen.findByRole('heading', { level: 1, name: 'Sun 14 Mar → Sun 28 Mar · 14 nights' }),
     ).toBeInTheDocument();
   });
 });

@@ -101,7 +101,13 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
   return (
     <section aria-label={H.title} className="history flex flex-col gap-4 pt-5">
       <Crumbs items={[tripsCrumb(), searchCrumb(definition), { label: COPY.crumbs.priceOverTime }]} />
-      <ViewHeader title={H.title} variant="span" executions={executions} stale={newestAllStale(fetchLines)} />
+      <ViewHeader
+        title={H.title}
+        variant="span"
+        level={1}
+        executions={executions}
+        stale={newestAllStale(fetchLines)}
+      />
       {span !== null ? (
         <p className="lede text-[15px]">
           <span>

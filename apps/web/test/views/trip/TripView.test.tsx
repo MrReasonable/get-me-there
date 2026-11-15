@@ -152,7 +152,7 @@ describe('a read trip: the answer card (design §6.1)', () => {
   it('the heading names the dates and nights, under Trips › the search › the dates', async () => {
     renderTrip(readTrip());
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Wed 11 Nov → Sat 28 Nov · 17 nights' }),
+      await screen.findByRole('heading', { level: 1, name: 'Wed 11 Nov → Sat 28 Nov · 17 nights' }),
     ).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: COPY.crumbsLabel });
     expect(crumbs).toHaveTextContent('Trips › London → New York › Wed 11 Nov → Sat 28 Nov');
@@ -414,7 +414,7 @@ describe('a price whose provenance is not one is withheld alone (spec §5.5)', (
     expect(c).not.toHaveTextContent('£388');
     expect(c).toHaveTextContent(T.calendarOnly);
     expect(within(c).getByRole('button', { name: T.readFlights(false, 2) })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: /Wed 11 Nov → Sat 28 Nov/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /Wed 11 Nov → Sat 28 Nov/ })).toBeInTheDocument();
     expect(screen.getByTestId('about-price')).toBeInTheDocument();
     expect(screen.getByTestId('search-log')).toBeInTheDocument();
   });

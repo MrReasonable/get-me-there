@@ -51,9 +51,9 @@ export function TripView({ definition, state }: { definition: DefinitionResponse
           { label: dates },
         ]}
       />
-      <h2 className="trip-title">
+      <h1 className="trip-title">
         {dates} {r === undefined ? null : <span className="trip-nights">{T.nights(r.nights)}</span>}
-      </h2>
+      </h1>
       {r === undefined && !failed ? (
         <Loading />
       ) : (

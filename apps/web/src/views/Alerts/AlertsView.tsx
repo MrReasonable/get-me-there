@@ -44,9 +44,9 @@ export function AlertsView(props: { definitionId: string }) {
         <SettingsCrumbs title={COPY.crumbs.alerts} />
       </div>
       <div className="alerts-wide space-y-2">
-        <h2 id="alerts-heading" className="h-view">
+        <h1 id="alerts-heading" className="h-view">
           {C.heading}
-        </h2>
+        </h1>
         <p className="lede">{C.intro}</p>
       </div>
       <RuleForm

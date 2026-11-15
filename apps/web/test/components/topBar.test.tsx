@@ -50,8 +50,8 @@ describe('the health line (Ruling 10)', () => {
     serve(statusReport([warning('backups')]));
     renderWithProviders(<HealthLine />);
     const link = await screen.findByRole('link', { name: 'Backups needs attention · fix' });
-    expect(link).toHaveClass('text-warn');
-    expect(link.className).not.toContain('font-semibold');
+    expect(link).toHaveClass('health-link-warn');
+    expect(link).not.toHaveClass('health-link-bad');
     expect(link).toHaveAttribute('href', expect.stringContaining('view=status'));
   });
 
@@ -59,10 +59,10 @@ describe('the health line (Ruling 10)', () => {
     serve(statusReport([failing('schedule'), { id: 'app', area: 'app', summary: 'up' }]));
     renderWithProviders(<HealthLine />);
     const link = await screen.findByRole('link', { name: 'Schedule failing · fix' });
-    expect(link).toHaveClass('font-semibold', 'text-bad');
+    expect(link).toHaveClass('health-link-bad');
   });
 
-  it('a check with a label is named by it (a search by its name, a provider by its own), the area words otherwise', async () => {
+  it('a check with a label is named by it (a search by its name), else by its area in words', async () => {
     serve(
       statusReport([{ id: 'data-1', area: 'data', label: 'Worked example', state: 'warn', summary: 'x' }]),
     );
@@ -77,7 +77,7 @@ describe('the health line (Ruling 10)', () => {
       ]),
     );
     const second = renderWithProviders(<HealthLine />);
-    expect(await screen.findByRole('link', { name: 'SearchApi failing · fix' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Provider failing · fix' })).toBeInTheDocument();
     second.unmount();
     serve(statusReport([failing('worker')]));
     renderWithProviders(<HealthLine />);
@@ -88,12 +88,12 @@ describe('the health line (Ruling 10)', () => {
     serve(statusReport([warning('consent'), failing('worker')]));
     const first = renderWithProviders(<HealthLine />);
     const red = await screen.findByRole('link', { name: '2 things need you · fix' });
-    expect(red).toHaveClass('font-semibold', 'text-bad');
+    expect(red).toHaveClass('health-link-bad');
     first.unmount();
     serve(statusReport([warning('consent'), warning('data'), warning('backups')]));
     renderWithProviders(<HealthLine />);
     const amber = await screen.findByRole('link', { name: '3 things need you · fix' });
-    expect(amber).toHaveClass('text-warn');
+    expect(amber).toHaveClass('health-link-warn');
   });
 
   it('keeps a glyph beside the words, so a state differs in more than colour', async () => {

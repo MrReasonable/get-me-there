@@ -199,7 +199,7 @@ describe('the Edit page (spec rev 55 §11 Edit)', () => {
   it('is headed by the search’s name, with its fields and its two presses', async () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
     expect(
-      await screen.findByRole('heading', { level: 2, name: COPY.editSearch.heading(definition().name) }),
+      await screen.findByRole('heading', { level: 1, name: COPY.editSearch.heading(definition().name) }),
     ).toBeInTheDocument();
     expect(screen.getByRole('region', { name: PLAN_COPY.heading })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.editSearch.save })).toBeInTheDocument();

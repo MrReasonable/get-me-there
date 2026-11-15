@@ -376,6 +376,25 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
   });
 });
 
+describe('every page has one h1, its own heading; the logo is a link, not a heading', () => {
+  it.each([
+    '?view=searches',
+    '?view=dates&def=def-0001',
+    '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
+    '?view=history&def=def-0001',
+    '?view=definitions&edit=def-0001',
+    '?view=alerts&def=def-0001',
+    '?view=settings',
+    '?view=providers',
+    '?view=status',
+  ])('%s', async (search) => {
+    renderWithProviders(<App />, { search });
+    await screen.findByRole('heading', { level: 1 });
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1));
+    expect(screen.queryByRole('heading', { name: /get-me-there/ })).toBeNull();
+  });
+});
+
 describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
   it('?view=settings is the Settings page: three linked sections, each with its line, and no definition needed', async () => {
     renderWithProviders(<App />, { search: '?view=settings' });

@@ -60,7 +60,7 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
 }) => {
   // (1) the first screen is Searches: fill the new-search form, point both stages at the fixture provider, press Search now
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: COPY.searchesView.heading })).toBeVisible();
   await addAirport(page, PLAN_COPY.from, 'LHR');
   await addAirport(page, PLAN_COPY.to, 'JFK');
   await page.locator('#w-from').fill('2027-03-14');
@@ -101,12 +101,12 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   await expect(page.getByRole('link', { name: OPEN_LINK })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Read flights for this date/ })).toHaveCount(0);
   // the name the form suggested from the two airports picked, now the page's heading
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(searchName);
 
   // (2) Dates: the header line, the banner, the first row's label, the legend, the overview's keyboard and rings
   await page.goto(`/?view=dates&def=${defId}&d.nights=${NIGHTS}`);
   await expect(board(page)).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(searchName);
   await expect(page.getByTestId('dates-run')).toHaveText(/^Searched .+ · \d+ of \d+ date pairs priced/);
   await expect(banner(page)).toBeVisible();
   // the alarm plate: the red of spec §5.5, with white words (styles/world.css --alarm)
@@ -163,7 +163,7 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   await page.goto(`/?view=dates&def=${defId}`);
   await expect(board(page)).toBeVisible();
   await page.goto('/?view=definitions');
-  await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: COPY.searchesView.heading })).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('searches');
   await expect(smokeCard(page)).toHaveCount(1);
   // why: Ruling 9 — the nav names no search; a search's page carries its name in its breadcrumb instead

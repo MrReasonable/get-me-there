@@ -191,7 +191,7 @@ export function SearchesView() {
     <div className="searches-view space-y-5">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
       {hasSyntheticPrice(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
-      <h2 className="h-view">{S.heading}</h2>
+      <h1 className="h-view">{S.heading}</h1>
       {/* why: one stable tree with the form first, as a phone shows it (focus order follows what is seen, WCAG 2.4.3);
       from 900 px CSS grid puts it in the right column (searches.css), so crossing the breakpoint never remounts it */}
       <div className="searches-layout">

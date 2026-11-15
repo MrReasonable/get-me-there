@@ -55,7 +55,7 @@ describe('Alerts', () => {
   it('the heading matches every other view, and every rule field has a visible box', async () => {
     renderWithProviders(<AlertsView definitionId="def-1" />);
     // the departure board: every Set up view's page heading is the same painted-caps title (h-view)
-    expect(await screen.findByRole('heading', { level: 2, name: COPY.alertsView.heading })).toHaveClass(
+    expect(await screen.findByRole('heading', { level: 1, name: COPY.alertsView.heading })).toHaveClass(
       'h-view',
     );
     const form = screen.getByRole('form', { name: COPY.alertsView.formLabel });

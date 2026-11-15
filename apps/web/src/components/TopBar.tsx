@@ -8,7 +8,6 @@ import { formatMicroGbp } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { searchApiCallsLeft } from '../lib/searchApiCallsLeft.js';
 import { hrefWith, navigateTo } from '../state/urlState.js';
-import { cardName } from './StatusCard.js';
 
 const T = COPY.topBar;
 const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
@@ -20,12 +19,9 @@ type Tone = 'ok' | 'warn' | 'bad';
 /** A glyph beside the words, so a state differs in more than colour. */
 const GLYPH: Record<Tone, string> = { ok: '●', warn: '▲', bad: '✕' };
 
-/** The problem's name in words: a search's name or a provider's, else its area (`offName`), never a raw id. */
-function problemName(checks: readonly apiContract.StatusCheck[]): string | null {
-  const one = checks.find((c) => c.state === 'fail' || c.state === 'warn');
-  if (one === undefined) return null;
-  return cardName(one) ?? COPY.statusView.offName[one.area];
-}
+/** Core's `name` in words: an area slug through COPY ("data" is "searches"), a label (a search's name) as it is. */
+const nameWords = (name: string): string =>
+  Object.entries(COPY.statusView.offName).find(([area]) => area === name)?.[1] ?? name;
 
 /**
  * The health line (Ruling 10): one line from the same query as the Status page and core's `barSummary`. All working
@@ -56,7 +52,7 @@ export function HealthLine() {
     const bar = apiContract.barSummary(q.data.checks);
     tone = bar.kind === 'clean' ? 'ok' : bar.kind === 'fail' ? 'bad' : 'warn';
     fix = bar.kind !== 'clean';
-    const name = bar.count === 1 ? problemName(q.data.checks) : null;
+    const name = bar.name === null ? null : nameWords(bar.name);
     text =
       bar.kind === 'clean'
         ? T.allWorking
@@ -76,7 +72,7 @@ export function HealthLine() {
       {fix ? ` · ${T.fix}` : null}
     </>
   );
-  const toneClass = tone === 'bad' ? 'font-semibold text-bad' : tone === 'warn' ? 'text-warn' : '';
+  const toneClass = tone === 'bad' ? 'health-link-bad' : tone === 'warn' ? 'health-link-warn' : '';
   return (
     // why: a status region, so a change (a new problem, "All working" again) is announced politely
     <div role="status" className="health-line">
@@ -86,7 +82,7 @@ export function HealthLine() {
         <a
           href={hrefWith({ view: 'status' })}
           onClick={navigateTo({ view: 'status' })}
-          className={`health-words underline ${toneClass}`}
+          className={`health-words ${toneClass}`}
         >
           {words}
         </a>
@@ -124,7 +120,7 @@ function SearchingNow() {
     <a
       href={hrefWith({ view: 'dates', def: card.id })}
       onClick={navigateTo({ view: 'dates', def: card.id })}
-      className="limit-item inline-flex min-h-11 items-center font-semibold underline"
+      className="limit-item min-h-11 font-semibold underline"
     >
       {T.searching(card.name)}
     </a>
@@ -162,9 +158,7 @@ export function Limits() {
           {month.cap === null
             ? T.spentNoCap(formatMicroGbp(month.costMicroGbp))
             : T.spent(formatMicroGbp(month.costMicroGbp), formatMicroGbp(month.cap))}
-          {near(month.costMicroGbp, month.cap) ? (
-            <span className="tag tag-warn ml-1">{T.nearCap}</span>
-          ) : null}
+          {near(month.costMicroGbp, month.cap) ? <span className="limit-near">{T.nearCap}</span> : null}
         </span>
       )}
     </section>

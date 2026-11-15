@@ -113,3 +113,135 @@
   --crumb-ink: var(--t-muted);
   --crumb-link: var(--t-accent);
 }
+
+/* The top bar (design §3, mockups 01 and 02): a plain bar on the shared tokens, light and dark; only the logo keeps its
+   flap lettering. One row at a desktop (logo, nav, then the health line and the limits to the right, wrapping); under
+   the nav on a phone (Ruling 10). */
+.topbar {
+  background: var(--t-surface);
+  color: var(--t-ink);
+  border-bottom: 1px solid var(--t-line);
+  font: 400 14px / 1.4 var(--font-ui);
+}
+.topbar-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  padding: 8px var(--gutter);
+}
+.brand-link:focus-visible,
+.nav-link:focus-visible,
+.health-words:focus-visible,
+.limit-item:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  font: 600 15px / 1 var(--font-ui);
+  color: var(--t-muted);
+  text-decoration: none;
+  border-radius: 6px 6px 0 0;
+  border-bottom: 4px solid transparent;
+}
+.nav-link:hover {
+  color: var(--t-ink);
+  background: var(--t-sunk);
+}
+/* The current item: a bar drawn in currentColor, so the cue survives forced colours and greyscale */
+.nav-link[aria-current="page"] {
+  color: var(--t-ink);
+  background: var(--t-sunk);
+  border-bottom: 4px solid currentColor;
+}
+.topbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0 18px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--t-muted);
+}
+.health-line {
+  display: flex;
+  align-items: center;
+}
+.health-words {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.health-glyph {
+  font-size: 12px;
+  line-height: 1;
+}
+.health-ok {
+  color: var(--t-ok);
+}
+.health-warn {
+  color: var(--t-warn);
+}
+.health-bad {
+  color: var(--t-bad);
+}
+a.health-words {
+  color: var(--t-ink);
+  text-decoration: underline;
+}
+a.health-link-warn {
+  color: var(--t-warn);
+}
+a.health-link-bad {
+  color: var(--t-bad);
+  font-weight: 600;
+}
+.limits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 18px;
+}
+.limit-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+a.limit-item {
+  color: var(--t-accent);
+}
+.limit-item b,
+.limit-item[data-cost] {
+  color: var(--t-ink);
+  font-weight: 600;
+}
+.limit-near {
+  margin-left: 6px;
+  color: var(--t-warn);
+  font-weight: 600;
+}
+@media (max-width: 899px) {
+  .topbar-in {
+    padding-top: 6px;
+    padding-bottom: 4px;
+  }
+  .topbar-status {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .health-words {
+    min-height: 32px;
+  }
+  .limits {
+    column-gap: 12px;
+  }
+}

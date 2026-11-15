@@ -98,7 +98,7 @@ export function ProvidersView() {
     <div className="providers pt-5">
       <SettingsCrumbs title={COPY.crumbs.priceSources} />
       <div className="space-y-2">
-        <h2 className="h-view">{COPY.providersHeading}</h2>
+        <h1 className="h-view">{COPY.providersHeading}</h1>
         <p className="lede">{P.intro}</p>
       </div>
       {q.data.providers.length === 0 ? <NoProviders /> : null}

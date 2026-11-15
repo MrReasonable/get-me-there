@@ -95,9 +95,9 @@ export function App() {
         <a href="#main" className="skip-link">
           {COPY.skipToContent}
         </a>
-        <div className="steel-strip topbar">
-          <header className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <h1 className="brand">
+        <div className="topbar">
+          <header className="topbar-in">
+            <div className="brand">
               {/* why: the logo links to Trips (Ruling 9). The name is the link's words; on a phone, where flap cells
               would be too small to read, the words are shown in painted caps and the cells hidden */}
               <a
@@ -109,12 +109,12 @@ export function App() {
                 <span className="brand-words">{COPY.appTitle}</span>
                 <Flaps text={COPY.appTitle} className="brand-flaps" />
               </a>
-            </h1>
+            </div>
             <Nav current={navItemOf(view)} />
+            {/* why: Ruling 10 — one health line and the limits on every view; a run's progress is the page's own
+            (RunProgress), not the bar's */}
+            <TopBar />
           </header>
-          {/* why: Ruling 10 — one health line and the limits on every view; a run's progress is the page's own
-          (RunProgress), not the bar's */}
-          <TopBar />
         </div>
         <main id="main" tabIndex={-1} className="view-main pt-5">
           <AppBoundary>

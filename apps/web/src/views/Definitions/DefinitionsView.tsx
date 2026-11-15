@@ -26,7 +26,7 @@ export function DefinitionsView() {
   if (editing === 'new')
     return (
       <div className="space-y-5 pt-6">
-        <h2 className="h-view">{COPY.searchesView.sideHeading}</h2>
+        <h1 className="h-view">{COPY.searchesView.sideHeading}</h1>
         <NewSearchForm providers={providers.data} />
       </div>
     );
@@ -36,9 +36,9 @@ export function DefinitionsView() {
       {existing === null ? null : (
         <Crumbs items={[tripsCrumb(), searchCrumb(existing), { label: COPY.crumbs.edit }]} />
       )}
-      <h2 className="h-view">
+      <h1 className="h-view">
         {existing === null ? PLAN_COPY.viewHeading : COPY.editSearch.heading(existing.name)}
-      </h2>
+      </h1>
       {/* why: an old link to a deleted or unknown search must not look like a fresh form (a duplicate waiting to happen) */}
       {existing === null ? (
         <p role="alert" className="plate notice font-semibold text-bad">

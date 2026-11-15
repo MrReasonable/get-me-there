@@ -32,7 +32,7 @@ export function SettingsView() {
   return (
     <div className="settings pt-5">
       <div className="space-y-2">
-        <h2 className="h-view">{S.heading}</h2>
+        <h1 className="h-view">{S.heading}</h1>
         <p className="lede">{S.lede}</p>
       </div>
       <ul aria-label={S.sectionsLabel} className="settings-sections">

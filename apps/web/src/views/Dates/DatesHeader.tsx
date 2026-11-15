@@ -173,7 +173,7 @@ export function DatesHeader({
   return (
     <div className="dates-head space-y-2" data-testid="dates-head">
       <Crumbs items={[tripsCrumb(), { label: definition.name }]} />
-      <h2 className="name-board">
+      <h1 className="name-board">
         <span className="sr-only">{definition.name}</span>
         {/* why: the search's name in large flaps, a word to a group so a long name wraps between words */}
         <span aria-hidden="true" className="flap-strip">
@@ -181,7 +181,7 @@ export function DatesHeader({
             <Flaps key={i} text={word} />
           ))}
         </span>
-      </h2>
+      </h1>
       <p className="search-route" data-testid="dates-route">
         {route}
       </p>
