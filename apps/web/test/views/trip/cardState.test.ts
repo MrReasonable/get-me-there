@@ -99,6 +99,19 @@ describe('a calendar figure follows its flight read (design §6.1)', () => {
     expect(stateOf(r).kind).toBe(EXPECTED[read]);
   });
 
+  // why: concern 2 of the CodeRabbit round (coordinator ruling): a trip read beneath the calendar price says why it
+  // doesn't lead in its own words; only the older read is "longer ago than this search's refresh"
+  it.each([
+    ['within-older', 'older'],
+    ['sellers-not-read', 'sellers-not-read'],
+    ['offers-incomplete', 'offers-incomplete'],
+  ] as const)('a trip beneath the calendar price after %s says why it does not lead (%s)', (read, why) => {
+    expect(stateOf(trip({ figure: calendarFigure({ pairingRead: read }) }))).toEqual({
+      kind: 'calendar-with-trip',
+      why,
+    });
+  });
+
   it('a superseded calendar figure with no usable read is gone, never a price', () => {
     for (const read of ['not-read', 'list-failed'] as const)
       expect(stateOf(trip({ figure: calendarFigure({ pairingRead: read, superseded: true }) })).kind).toBe(

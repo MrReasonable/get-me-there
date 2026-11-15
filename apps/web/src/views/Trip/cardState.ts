@@ -16,7 +16,8 @@ export type CardState =
   | { kind: 'verified' }
   | { kind: 'trip' }
   | { kind: 'reading' }
-  | { kind: 'calendar-with-trip' }
+  /** A trip read beneath the calendar price, and why it doesn't lead: an older read, sellers not read, or offers partly read. */
+  | { kind: 'calendar-with-trip'; why: 'older' | 'sellers-not-read' | 'offers-incomplete' }
   | { kind: 'none-within'; failing: LimitName[] }
   | { kind: 'other-limits' }
   | { kind: 'outbound-only' }
@@ -61,14 +62,14 @@ function failingLimits(r: TripResponse): LimitName[] {
  * What a calendar figure's flight read makes of the card, one value per `PairingRead` (the Record keeps this
  * exhaustive: a new read is a compile error here). `within` is exactly a pairing figure's read, which the card decided
  * before this table, so the contract never gives it to a calendar figure. `sellers-not-read` and `offers-incomplete`
- * are never produced today (`pairingReadOf` names them for a pairing beneath a figure); they map to the same card as
- * `within-older`, a trip shown beneath the calendar price.
+ * show a trip beneath the calendar price as `within-older` does, each saying in its own words why it doesn't lead (only
+ * the older read is "longer ago than this search's refresh").
  */
 const CALENDAR_READ: Record<PairingRead, (r: TripResponse) => CardState> = {
   within: () => ({ kind: 'trip' }),
-  'within-older': () => ({ kind: 'calendar-with-trip' }),
-  'sellers-not-read': () => ({ kind: 'calendar-with-trip' }),
-  'offers-incomplete': () => ({ kind: 'calendar-with-trip' }),
+  'within-older': () => ({ kind: 'calendar-with-trip', why: 'older' }),
+  'sellers-not-read': () => ({ kind: 'calendar-with-trip', why: 'sellers-not-read' }),
+  'offers-incomplete': () => ({ kind: 'calendar-with-trip', why: 'offers-incomplete' }),
   'over-limit': (r) => ({ kind: 'none-within', failing: failingLimits(r) }),
   'within-other-limits': () => ({ kind: 'other-limits' }),
   'outbound-only': () => ({ kind: 'outbound-only' }),

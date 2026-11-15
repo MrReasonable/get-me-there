@@ -318,9 +318,20 @@ const READ_CARD: Partial<Record<(typeof PAIRING_READ)[number], readonly [CardSta
     'other-limits',
     /Flights were read \S+ ago under different limits from yours now\./,
   ],
-  'within-older': ['calendar-with-trip', /The trip below was read \S+ ago/],
-  'sellers-not-read': ['calendar-with-trip', /The trip below was read \S+ ago/],
-  'offers-incomplete': ['calendar-with-trip', /The trip below was read \S+ ago/],
+  'within-older': [
+    'calendar-with-trip',
+    /The trip below was read 2d ago, longer ago than this search's refresh/,
+  ],
+  // why: concern 2 (coordinator ruling): a current read whose sellers or booking options weren't all read says so,
+  // never "longer ago than this search's refresh"
+  'sellers-not-read': [
+    'calendar-with-trip',
+    /^(?!.*longer ago).*The trip below was read 3h ago, but its sellers weren't read\./,
+  ],
+  'offers-incomplete': [
+    'calendar-with-trip',
+    /^(?!.*longer ago).*The trip below was read 3h ago, but its booking options were only partly read\./,
+  ],
 };
 
 /** Ruling 5: where the card and a calendar row describe the same read, they use the same words (`readStateWords`). */
