@@ -76,8 +76,17 @@ describe('Crumbs', () => {
 });
 
 describe('the shared steps', () => {
+  // why: CodeRabbit CR19: the steps read the URL when they are built, so they are built while rendering, after the
+  // test's URL is set, never as arguments evaluated before it
+  function TripsThenX() {
+    return <Crumbs items={[tripsCrumb(), { label: 'x' }]} />;
+  }
+  function SearchThenX() {
+    return <Crumbs items={[searchCrumb({ id: 'def-0001', name: 'Worked example' }), { label: 'x' }]} />;
+  }
+
   it('Trips names no search and keeps the other parameters (the filters travel back)', () => {
-    renderWithProviders(<Crumbs items={[tripsCrumb(), { label: 'x' }]} />, {
+    renderWithProviders(<TripsThenX />, {
       search: '?view=dates&def=def-0001&d.to=JFK&edit=def-0001',
     });
     const href = screen.getByRole('link', { name: COPY.crumbs.trips }).getAttribute('href') ?? '';
@@ -89,12 +98,7 @@ describe('the shared steps', () => {
   });
 
   it('a search’s name links to its page', () => {
-    renderWithProviders(
-      <Crumbs items={[searchCrumb({ id: 'def-0001', name: 'Worked example' }), { label: 'x' }]} />,
-      {
-        search: '?view=definitions&edit=def-0001',
-      },
-    );
+    renderWithProviders(<SearchThenX />, { search: '?view=definitions&edit=def-0001' });
     const href = screen.getByRole('link', { name: 'Worked example' }).getAttribute('href') ?? '';
     const params = new URL(href, 'http://x').searchParams;
     expect(params.get('view')).toBe('dates');

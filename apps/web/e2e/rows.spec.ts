@@ -1,5 +1,4 @@
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import react from '@vitejs/plugin-react';
@@ -74,7 +73,7 @@ for (const width of [375, 1280] as const)
       }
       const shot = await page.screenshot({ fullPage: true });
       await testInfo.attach(`rows-${width}-${scheme}.png`, { body: shot, contentType: 'image/png' });
-      // why: a passing run drops its attachments; ROWS_SHOTS names a folder to keep them in for a task report
-      const keep = process.env.ROWS_SHOTS;
-      if (keep !== undefined) await writeFile(join(keep, `rows-${width}-${scheme}.png`), shot);
+      // why: a passing run drops its attachments, so the shot is also kept in the test's own output folder
+      // (apps/web/test-results/, ignored by git) for a task report; the spec reads no environment (CodeRabbit CR3)
+      await writeFile(testInfo.outputPath(`rows-${width}-${scheme}.png`), shot);
     });

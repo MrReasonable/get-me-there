@@ -23,6 +23,7 @@ import { flightList, flightPair } from '../../fixtures.searches.js';
 import { type Requests, serveDatesBy } from '../../msw/datesHandlers.js';
 import { serveFlightLists, serveFlightRead } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
+import { settled } from '../../render.js';
 import { calendarRows, findLower, findTrips, renderDates, rowText, tripRows } from './render.js';
 
 // Design 2026-11-08 §5.2 (mockup 02), Rulings 3–6, 16, 20–22 and Review Focus 1–3: a search's page's two sections,
@@ -494,15 +495,26 @@ describe('Read flights on a calendar row (spec rev 55 §8.1; Ruling 20)', () => 
     expect(document.body).not.toHaveTextContent('refused');
   });
 
-  it('no button on a date a read would not go for now (readNow false)', async () => {
-    serve(lowBody);
-    server.use(serveFlightLists((dep, ret) => flightPair(dep, ret, { readNow: false })));
-    renderDates({ def: ONE_PAIR });
-    const lower = await findLower();
-    await within(lower).findAllByTestId('calendar-row');
-    await waitFor(() => expect(within(lower).queryByTestId('flights-unavailable')).toBeNull());
-    expect(within(lower).queryByRole('button', { name: /^Read flights/ })).toBeNull();
-  });
+  // why: CodeRabbit CR32: the flight lists' answer is awaited (recorded, then handed to the page) before the button
+  // is looked for, and the same fixture with readNow true shows it, so the check can fail when the gate is wrong
+  it.each([
+    [false, 0],
+    [true, 1],
+  ])(
+    'a Read flights button exactly when a read would go for the date now (readNow %s)',
+    async (readNow, buttons) => {
+      serve(lowBody);
+      const asked: URL[] = [];
+      server.use(serveFlightLists((dep, ret) => flightPair(dep, ret, { readNow }), {}, asked));
+      const { client } = renderDates({ def: ONE_PAIR });
+      const lower = await findLower();
+      await within(lower).findAllByTestId('calendar-row');
+      await waitFor(() => expect(asked.length).toBeGreaterThan(0));
+      await settled(client);
+      expect(within(lower).queryByTestId('flights-unavailable')).toBeNull();
+      expect(within(lower).queryAllByRole('button', { name: /^Read flights/ })).toHaveLength(buttons);
+    },
+  );
 });
 
 describe("the page's words (the plan's main-path words, over the header, the filter row and both sections)", () => {

@@ -3,12 +3,21 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { updateSearchParams } from '../../../src/state/urlState.js';
-import { airportPairIndex, at, calendarFig, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
+import {
+  airportPairIndex,
+  at,
+  calendarFig,
+  figurePairing,
+  pairingFig,
+  priced,
+  pricedPair,
+  workedDates,
+} from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
 import { heldDates, serveDatesBy } from '../../msw/datesHandlers.js';
 import { server } from '../../msw/server.js';
 import { settled } from '../../render.js';
-import { calendarRows, findLower, findTrips, renderDates } from './render.js';
+import { calendarRows, findLower, findTrips, renderDates, rowText, tripRows } from './render.js';
 
 // Design 2026-11-08 Ruling 16 (mockup 02) and §9's honesty rule for the web: the one filter row (stay, From, To, One per
 // week, and a removable chip for a journey limit applied from elsewhere); a filtered read is never shown with the
@@ -93,15 +102,23 @@ describe('the filter row (Ruling 16)', () => {
   });
 
   it('narrowing the stay applies in the browser, with no request, to both sections', async () => {
+    const trip = (pence: number) =>
+      pricedPair(pairingFig({ pairing: figurePairing({ pricePence: pence, fromPence: pence }) }));
     const { user, requests, client } = renderDates({
       body: {
         pairs: {
           [at('2027-03-14', 10)]: pricedPair(priced(30_000)),
           [at('2027-03-15', 11)]: pricedPair(priced(31_000)),
           [at('2027-03-16', 12)]: pricedPair(priced(32_000)),
+          // why: CodeRabbit CR24: a trip with flights read inside the stay filter and one outside it
+          [at('2027-03-17', 10)]: trip(40_000),
+          [at('2027-03-18', 11)]: trip(41_000),
         },
       },
     });
+    const dates = async () =>
+      tripRows(await findTrips()).map((r) => /\w{3} \d+ Mar → \w{3} \d+ Mar/.exec(rowText(r))?.[0]);
+    expect(await dates()).toEqual(['Wed 17 Mar → Sat 27 Mar', 'Thu 18 Mar → Mon 29 Mar']);
     await findLower();
     await user.clear(stay('min'));
     await user.type(stay('min'), '11');
@@ -111,6 +128,7 @@ describe('the filter row (Ruling 16)', () => {
     expect(
       calendarRows(await findLower()).map((r) => r.querySelector('[data-testid="price-cell"]')?.textContent),
     ).toEqual(['£310', '£320']);
+    expect(await dates()).toEqual(['Thu 18 Mar → Mon 29 Mar']);
     await settled(client);
     expect(requests).toHaveLength(1);
   });

@@ -165,8 +165,14 @@ describe('re-reads during a run keep the rows with their ages (Ruling 17, Review
     const lower = await findLower();
     // the operator is in the section: the pointer over it, the focus on a row's label
     fireEvent.pointerEnter(lower);
-    const label = within(calendarRows(lower)[0] ?? lower).getAllByRole('group')[0];
-    label?.focus();
+    // why: CodeRabbit CR30: the label's summary takes the focus (its details element cannot), and the test checks
+    // that it did, so the re-read is shown to apply with the focus in the section
+    const label = within(calendarRows(lower)[0] ?? lower)
+      .getAllByRole('group')[0]
+      ?.querySelector('summary');
+    if (label === null || label === undefined) throw new Error('the row has a label');
+    label.focus();
+    expect(label).toHaveFocus();
     await act(async () => time.advance(31 * S));
     await progressTo(2);
     await waitFor(() => expect(requests).toHaveLength(2));
@@ -189,6 +195,8 @@ describe('re-reads during a run keep the rows with their ages (Ruling 17, Review
     await act(async () => time.advance(31 * S));
     await progressTo(2);
     await waitFor(() => expect(requests).toHaveLength(2));
+    // why: CodeRabbit CR29: the second read has drawn (its repriced date moved) before the trip is checked again
+    await waitFor(async () => expect(await lowerPrices()).toEqual(['£310', '£315', '£320']));
     await check();
   });
 });

@@ -1,9 +1,10 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { asIata, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import {
+  airportPairIndex,
   at,
   bucketsOf,
   DATES_SPACE,
@@ -202,7 +203,16 @@ describe('the day panel (Ruling 18)', () => {
         rest: { no_data: 4 },
         pairs: {
           [at('2027-03-14', 10)]: pricedPair(pairingFig()),
-          [at('2027-03-14', 11)]: pricedPair(priced(50_000, { basis: 'verified', hasBookingOptions: true })),
+          // why: CodeRabbit CR23: the second trip on another airport pair, so a link built from the first's fails
+          [at('2027-03-14', 11)]: pricedPair(
+            priced(50_000, {
+              basis: 'verified',
+              hasBookingOptions: true,
+              origin: asIata('LGW'),
+              destination: asIata('EWR'),
+              airportPair: airportPairIndex('LGW', 'EWR'),
+            }),
+          ),
         },
       },
     });
@@ -210,14 +220,21 @@ describe('the day panel (Ruling 18)', () => {
     await user.click(dayButton('2027-03-14'));
     const panel = await findDayPanel('Sun 14 Mar: 3 stays');
     const trips = tripRows(panel);
+    // the cheapest first: the verified £500 on LGW → EWR, then the read trip on LHR → JFK
     expect(trips.map((r) => within(r).getByTestId('row-airports').textContent)).toEqual([
-      'LHR → JFK',
+      'LGW → EWR',
       'LHR → JFK',
     ]);
-    expect(within(trips[0] ?? panel).getByRole('link', { name: /^Details for LHR → JFK, / })).toHaveAttribute(
-      'href',
-      expect.stringContaining('from=LHR'),
-    );
+    const tripPair = (row: HTMLElement | undefined, name: RegExp) => {
+      const href =
+        within(row ?? panel)
+          .getByRole('link', { name })
+          .getAttribute('href') ?? '';
+      const q = new URL(href, 'http://x').searchParams;
+      return [q.get('t.from'), q.get('t.to')];
+    };
+    expect(tripPair(trips[0], /^Details for LGW → EWR, /)).toEqual(['LGW', 'EWR']);
+    expect(tripPair(trips[1], /^Details for LHR → JFK, /)).toEqual(['LHR', 'JFK']);
     expect(within(calendarRows(panel)[0] ?? panel).queryByTestId('row-airports')).toBeNull();
   });
 });

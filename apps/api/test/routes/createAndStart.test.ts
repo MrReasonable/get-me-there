@@ -361,6 +361,9 @@ describe('POST /definitions/create-and-start (revision 55 §10)', () => {
 // call a month, a weekly search's monthly load misses that cap while the same search with no schedule fits it.
 describe('a new search that repeats (Ruling 14)', () => {
   const ONE_CALL_A_MONTH = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, TRAVELPAYOUTS_MONTHLY_CALL_CAP: '1' };
+  // why: CodeRabbit CR2: a run reads two cache calls, so four a month lets one run start while a weekly search (about
+  // nine a month) still misses the cap
+  const FOUR_CALLS_A_MONTH = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, TRAVELPAYOUTS_MONTHLY_CALL_CAP: '4' };
   const cacheOnly = (over: Partial<DefinitionInput> = {}) =>
     input({
       providers: {
@@ -391,7 +394,7 @@ describe('a new search that repeats (Ruling 14)', () => {
   });
 
   it('create-and-start of a weekly search over a provider-month cap is 422 schedule_over_budget and stores nothing', async () => {
-    h = await createHarness({ env: ONE_CALL_A_MONTH });
+    h = await createHarness({ env: FOUR_CALLS_A_MONTH });
     const x = h;
     const def = cacheOnly({ scheduleCron: '0 5 * * 1', enabled: true });
     const shown = shownFor(x, def);
@@ -416,6 +419,13 @@ describe('a new search that repeats (Ruling 14)', () => {
     });
     expect(r.status).toBe(201);
     expect(definitions(x)).toHaveLength(1);
-    if (r.body.executionId !== null) await x.engine.cancel(r.body.executionId, { kind: 'cancelled' });
+    // CodeRabbit CR2: it started, with no refusal, the unscheduled search's own run
+    expect(r.body.refusal).toBeNull();
+    const executionId = r.body.executionId;
+    if (executionId === null) throw new Error('the unscheduled search did not start');
+    expect(x.ports.repos.definitions.get(r.body.definition.id)).toMatchObject({ scheduleCron: null });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(r.body.definition.id, expect.objectContaining({ trigger: 'manual' }));
+    await x.engine.cancel(executionId, { kind: 'cancelled' });
   });
 });

@@ -1,4 +1,4 @@
-import { asIsoDateTime, type ExecutionStatus } from '@gmt/core';
+import { asIsoDateTime, type ExecutionStatus, NO_STOP_CAUSE_TEXT } from '@gmt/core';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
@@ -211,8 +211,8 @@ describe('RunProgress for a stopped run', () => {
 
   it('a stopped run with no stored cause says core’s "no cause" sentence, never a status word', () => {
     show({ run: run({ status: 'paused_error', stop: null }) });
-    expect(screen.getByTestId('stop-sentence').textContent).not.toMatch(/paused: error/);
-    expect(screen.getByTestId('stop-sentence').textContent).not.toBe('');
+    // why: CodeRabbit CR17: exactly core's sentence, so a fallback word ("unknown", the status) fails
+    expect(screen.getByTestId('stop-sentence').textContent?.trim()).toBe(NO_STOP_CAUSE_TEXT.sentence);
   });
 
   it('a native fix command shows as code', () => {

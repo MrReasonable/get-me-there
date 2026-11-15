@@ -156,7 +156,8 @@ describe("tripPatch and tripHref (one builder: Ruling 9's parameters)", () => {
   it('the trip’s own pair scopes the Trip page over the page’s filter; the way back and the nav drop it', () => {
     expect(
       parse(
-        'view=trip&def=d1&depart=2027-03-14&return=2027-03-24&d.from=LGW&d.journey=900&t.from=LGW&t.to=EWR',
+        // why: CodeRabbit CR22: the page's From (LHR) differs from the trip's own (LGW), so the trip's must win
+        'view=trip&def=d1&depart=2027-03-14&return=2027-03-24&d.from=LHR&d.journey=900&t.from=LGW&t.to=EWR',
       ),
     ).toEqual({ ...DATES, from: ['LGW'], to: ['EWR'], journey: 900 });
     // an airport outside the search is dropped, as the page's filter's is

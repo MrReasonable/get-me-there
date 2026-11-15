@@ -307,6 +307,22 @@ const isKind = (k: string): k is CardState['kind'] => Object.hasOwn(EXPECT, k);
 /** Every state of the card, from the table above (a `Record` over the union, so none is left out). */
 const KINDS = Object.keys(EXPECT).filter(isKind);
 
+/**
+ * CodeRabbit CR35: what the card says, affirmatively, for each read whose flights were read: its state and the sentence
+ * that says the flights were read (so a card that leaves the read out fails).
+ */
+const READ_CARD: Partial<Record<(typeof PAIRING_READ)[number], readonly [CardState['kind'], RegExp]>> = {
+  within: ['trip', /Cheapest trip read/],
+  'over-limit': ['none-within', /Flights were read \S+ ago: none within your limits\./],
+  'within-other-limits': [
+    'other-limits',
+    /Flights were read \S+ ago under different limits from yours now\./,
+  ],
+  'within-older': ['calendar-with-trip', /The trip below was read \S+ ago/],
+  'sellers-not-read': ['calendar-with-trip', /The trip below was read \S+ ago/],
+  'offers-incomplete': ['calendar-with-trip', /The trip below was read \S+ ago/],
+};
+
 /** Ruling 5: where the card and a calendar row describe the same read, they use the same words (`readStateWords`). */
 describe('the card and the calendar row agree on every flight read', () => {
   it.each(PAIRING_READ)('%s', async (read) => {
@@ -345,10 +361,15 @@ describe('the card and the calendar row agree on every flight read', () => {
         expect(text).toMatch(/no return/i);
         expect(row).toMatch(/no return/i);
         break;
-      default:
-        // a read with flights: neither says the flights were not read
+      default: {
+        // a read with flights: neither says the flights were not read, and the card says they were
         expect(text).not.toMatch(/flights not read/i);
         expect(row).toMatch(/^Flights read/);
+        const said = READ_CARD[read];
+        if (said === undefined) throw new Error(`no card words listed for ${read}`);
+        expect((await card()).dataset.state).toBe(said[0]);
+        expect(text).toMatch(said[1]);
+      }
     }
     if (read === 'list-failed') expect(text).not.toContain('not read yet');
   });

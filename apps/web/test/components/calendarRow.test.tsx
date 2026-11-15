@@ -20,12 +20,33 @@ describe('CalendarRow', () => {
     );
     const row = screen.getByRole('listitem');
     expect(row).toHaveTextContent('£312');
-    expect(screen.getByTestId('price-label')).toHaveTextContent('Calendar');
+    // why: CodeRabbit CR13: the whole visible label, kind and age, not stale
+    const summary = screen.getByTestId('price-label').querySelector('summary');
+    expect(summary).toHaveTextContent(/^Calendar · 2h$/);
+    expect(summary?.querySelector('.price-label-stale')).toBeNull();
     expect(row).toHaveTextContent('Tue 17 Nov → Fri 27 Nov');
     expect(row).toHaveTextContent('Nights 10');
     expect(row).toHaveTextContent('Flights not read');
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  // why: CodeRabbit CR13: a stale price's age turns amber and its label's name says why (the wire's mark)
+  it('marks a stale price: its age amber and the label named with why', () => {
+    renderWithProviders(
+      <ul>
+        <CalendarRow
+          figure={calendarFig({ price: { ...calendarFig().price, stale: 'setting', ageHours: 80 } })}
+          search={search}
+          pair={pair}
+          onRead={null}
+        />
+      </ul>,
+    );
+    const summary = screen.getByTestId('price-label').querySelector('summary');
+    expect(summary).toHaveTextContent(/^Calendar · 3d$/);
+    expect(summary?.querySelector('.price-label-stale')).toHaveTextContent('3d');
+    expect(summary).toHaveAttribute('aria-label', 'Calendar · 3d, older than your stale setting');
   });
 
   it('says a cached price is Cached, and a failed read\'s reason, never "not read"', () => {

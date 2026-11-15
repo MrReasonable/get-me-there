@@ -3,6 +3,7 @@
 // the board's ranking, the stop's words from the stored cause (Review Focus 4: a row stopped before migration 0011 reads
 // NO_STOP_CAUSE_TEXT, never its error_text).
 import {
+  addDays,
   apiContract,
   asIsoDate,
   type DefinitionInput,
@@ -33,6 +34,16 @@ const ONE_PAIR = {
 const FOUR = { origins: [LHR, LGW], destinations: [JFK, EWR], ...ONE_PAIR };
 const cellsOf = (def: SearchDefinition) =>
   def.origins.flatMap((o) => def.destinations.map((d) => cell(o, d, '2026-11-02', '2026-11-12')));
+/** Every cell of an absolute window's space: each departure day, each stay and each airport pair. */
+function spaceCellsOf(def: SearchDefinition) {
+  if (def.window.kind !== 'absolute') throw new Error('an absolute window only');
+  const out: ReturnType<typeof cell>[] = [];
+  for (let day = def.window.from; day <= def.window.to; day = addDays(day, 1))
+    for (let n = def.minNights; n <= def.maxNights; n++)
+      for (const o of def.origins)
+        for (const d of def.destinations) out.push(cell(o, d, day, addDays(day, n)));
+  return out;
+}
 
 async function cards(x: Harness): Promise<SearchCard[]> {
   const res = await x.request('/api/definitions/cards');
@@ -403,6 +414,7 @@ describe('the cards are read through grouped statements (revision 55 §10, R2)',
     runs: number,
     fill: (s: ReturnType<typeof seeder>, name: string, def: SearchDefinition) => void = () => {},
     space: Partial<DefinitionInput> = {},
+    cellsFor: (def: SearchDefinition) => ReturnType<typeof cell>[] = cellsOf,
   ): Promise<string[]> {
     const x = await createHarness();
     const s = seeder(x.ports);
@@ -413,7 +425,7 @@ describe('the cards are read through grouped statements (revision 55 §10, R2)',
       for (let r = 0; r < runs; r++) {
         const name = `d${d}r${r}`;
         s.execution(name, { def, status: 'completed', startedAt: at(-10 + r), finishedAt: at(-9 + r) });
-        s.cells(name, cellsOf(def));
+        s.cells(name, cellsFor(def));
         fill(s, name, def);
       }
     }
@@ -460,16 +472,28 @@ describe('the cards are read through grouped statements (revision 55 §10, R2)',
 
   // why: Task 3 minor: the marks are counted over each run's whole space in the same statement, so a space of 21 date
   // pairs (seven departure days, three stays) reads as many statements as one of a single date pair
+  // CodeRabbit CR1: each measurement seeds and searches every date pair of its space, counted before comparing
   it('the marks add no statement as the space grows: 21 date pairs read as many statements as one', async () => {
+    const seeded = new Set<string>();
     const searched = (s: ReturnType<typeof seeder>, name: string, def: SearchDefinition) =>
-      cellsOf(def).forEach((c, i) => {
+      spaceCellsOf(def).forEach((c, i) => {
+        seeded.add(`${c.departureDate}/${c.returnDate}`);
         s.tile(name, c, { status: 'empty', fetchedAt: at(-1), tileIndex: i });
       });
-    const one = await statements(2, 2, searched);
-    const wide = await statements(2, 2, searched, {
-      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-08') },
-      maxNights: 12,
-    });
+    const one = await statements(2, 2, searched, {}, spaceCellsOf);
+    expect(seeded.size).toBe(1);
+    seeded.clear();
+    const wide = await statements(
+      2,
+      2,
+      searched,
+      {
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-08') },
+        maxNights: 12,
+      },
+      spaceCellsOf,
+    );
+    expect(seeded.size).toBe(21);
     expect(rollUpReads(wide)).toHaveLength(1);
     expect(wide.length).toBe(one.length);
   });
