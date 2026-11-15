@@ -16,8 +16,8 @@ afterEach(() => vi.useRealTimers());
 
 const serve = (body: JsonBodyType, status = 200) =>
   server.use(http.get(`${API}/status`, () => HttpResponse.json(body, { status })));
-const ago = (seconds: number) =>
-  new Date(Date.parse('2026-10-14T15:00:00.000Z') - seconds * 1000).toISOString();
+/** A report generated 3 min 5 s before the tests' clock (15:00:00Z), as a fixed instant. */
+const THREE_MIN_AGO = '2026-10-14T14:56:55.000Z';
 const failing = (area: 'schedule' | 'worker' | 'app') => ({
   id: area,
   area,
@@ -118,7 +118,7 @@ describe('the health line (Ruling 10)', () => {
   });
 
   it('after a failed refresh it says the report is stale and how old, even when the old report was clean', async () => {
-    serve(statusReport([{ id: 'app', area: 'app', summary: 'up' }], { generatedAt: ago(185) }));
+    serve(statusReport([{ id: 'app', area: 'app', summary: 'up' }], { generatedAt: THREE_MIN_AGO }));
     const { client } = renderWithProviders(<HealthLine />);
     expect(await screen.findByText('All working')).toBeInTheDocument();
     expect(screen.queryByRole('link')).toBeNull();
@@ -218,10 +218,10 @@ describe('the health line (Ruling 10)', () => {
   });
 
   it('refreshes every 60 s: a later answer changes the line', async () => {
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
-      shouldAdvanceTime: true,
-    });
+    // why: the clock is fixed and the refresh interval moves only when stepped (CodeRabbit CR15); timeouts stay real,
+    // so Testing Library's waits run on the DOM's events as elsewhere
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], shouldAdvanceTime: false });
+    vi.setSystemTime(Date.parse('2026-10-14T15:00:00.000Z'));
     let hits = 0;
     server.use(
       http.get(`${API}/status`, () => {
@@ -231,6 +231,7 @@ describe('the health line (Ruling 10)', () => {
     );
     renderWithProviders(<HealthLine />);
     await screen.findByRole('link', { name: 'Searches needs attention · fix' });
+    expect(hits).toBe(1);
     await act(() => vi.advanceTimersByTimeAsync(STATUS_REFRESH_MS));
     expect(await screen.findByRole('link', { name: 'Browser provider failing · fix' })).toBeInTheDocument();
   });
@@ -343,7 +344,7 @@ describe('the limits (Ruling 10)', () => {
     expect(screen.queryByText(/^Searching:/)).toBeNull();
   });
 
-  it('reads results and coverage again when the running search stops going, and not while it still runs', async () => {
+  it('reads results, coverage and date pairs again when the running search stops going, and not while it still runs', async () => {
     const running = searchCard({ name: 'Worked example', latestRun: latestRun({ status: 'running' }) });
     server.use(serveCards([running]));
     const { client } = renderWithProviders(<Limits />);
@@ -354,6 +355,7 @@ describe('the limits (Ruling 10)', () => {
       await client.invalidateQueries({ queryKey: ['cards'] });
     });
     expect(spy).not.toHaveBeenCalledWith({ queryKey: ['results'] });
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['date-pairs'] });
     server.use(
       serveCards([searchCard({ name: 'Worked example', latestRun: latestRun({ status: 'completed' }) })]),
     );
@@ -363,6 +365,8 @@ describe('the limits (Ruling 10)', () => {
     await waitFor(() => expect(screen.queryByText(/^Searching:/)).toBeNull());
     await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['results'] }));
     expect(spy).toHaveBeenCalledWith({ queryKey: ['coverage'] });
+    // why: CodeRabbit CR36: a run the search's page does not track (started elsewhere) still refreshes its date pairs
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['date-pairs'] });
     expect(screen.queryByText(/^Searching:/)).toBeNull();
   });
 });

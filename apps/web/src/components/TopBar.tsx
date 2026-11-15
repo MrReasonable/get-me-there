@@ -100,8 +100,8 @@ export function HealthLine() {
 
 /**
  * "Searching: <name>", linking to the page of a search whose run is pending or running; nothing when none is. When a run
- * that was going stops going (finished, stopped, cancelled), the results and coverage it produced change, so they are
- * read again: the old run line did this for the run it showed, and nothing else on the page watches every search.
+ * that was going stops going (finished, stopped, cancelled), the results, coverage and date pairs it produced change, so
+ * they are read again: the old run line did this for the run it showed, and nothing else on the page watches every search.
  */
 function SearchingNow() {
   const cards = useCards();
@@ -120,6 +120,9 @@ function SearchingNow() {
     if (before.some((id) => !now.has(id))) {
       void qc.invalidateQueries({ queryKey: ['results'] });
       void qc.invalidateQueries({ queryKey: ['coverage'] });
+      // why: CodeRabbit CR36: a search's page re-reads at the end of the run its own read names; a run it does not
+      // track (started in another tab or by the schedule) ends here too. Only mounted queries refetch.
+      void qc.invalidateQueries({ queryKey: ['date-pairs'] });
     }
   }, [key, qc]);
   if (card === undefined) return null;
