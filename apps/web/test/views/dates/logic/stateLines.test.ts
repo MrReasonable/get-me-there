@@ -126,7 +126,7 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
     expect(state({ latest: null, noSource: true })).toEqual({
       kind: 'never',
       text: 'No price source is set up, so nothing was searched',
-      fix: 'Set up a price source (Providers)',
+      fix: 'Set up a price source (Settings → Price sources)',
     });
   });
 

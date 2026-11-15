@@ -92,8 +92,8 @@ export const COPY = {
     alerts: 'Alerts',
     system: 'System',
   },
-  noDefinitions: 'No searches yet. Plan one under Searches.',
-  definitionNotFound: 'The search in this link no longer exists. Pick one under Searches.',
+  noDefinitions: 'No searches yet. Plan one under Trips.',
+  definitionNotFound: 'The search in this link no longer exists. Pick one under Trips.',
   loading: 'Loading…',
   loadFailed: (message: string) => `Could not load: ${message}`,
   retryLoad: 'Try again',
@@ -547,7 +547,8 @@ export const COPY = {
     refused: {
       active: 'Already searching',
       cap: 'A spending limit stops this search from starting. Raise the limit in Edit, or search again when it resets.',
-      disabled: 'No price source is set up, so nothing was searched. Set up a price source (Providers).',
+      disabled:
+        'No price source is set up, so nothing was searched. Set up a price source (Settings → Price sources).',
       window: 'None of the dates in this search are still ahead. Change the dates in Edit.',
       'shutting-down': 'The app is shutting down, so nothing was started.',
       not_found: 'This search no longer exists.',
@@ -655,7 +656,7 @@ export const COPY = {
     stateLabel: 'Search state',
     notSearchedYet: 'Not searched yet',
     noSource: 'No price source is set up, so nothing was searched',
-    noSourceFix: 'Set up a price source (Providers)',
+    noSourceFix: 'Set up a price source (Settings → Price sources)',
     // why: the hidden live line says only the kind of state, so a poll that moves a count announces nothing new
     stateKind: {
       searching: 'Searching',
@@ -857,7 +858,7 @@ export const COPY = {
     outsideSpace: "These dates are no longer in this search's dates",
     readFailed: "The flights couldn't be read just now; try again later",
     // one line under the list when flight lists cannot be read here
-    unavailable: 'Flight times need the browser worker; set it up in Providers',
+    unavailable: 'Flight times need the browser worker; set it up in Settings → Price sources',
     unavailableCabin: 'Flight times are read for economy searches only',
     datesShort: (departure: string, back: string) => `${departure} → ${back}`,
   },
@@ -933,7 +934,7 @@ export const COPY = {
     },
     // states
     noSearch: 'No search yet.',
-    noSearchLink: 'Plan one under Searches',
+    noSearchLink: 'Plan one under Trips',
     onDemandOnly: (n: number) =>
       `Not searched yet: ${thousands(n)} ${noun(n, 'date was', 'dates were')} checked on ${noun(n, 'its', 'their')} own so far, and the prices found are below.`,
     tooManyCells: (cells: number, bound: number) =>
@@ -1322,8 +1323,8 @@ export const COPY = {
     copy: 'Copy',
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
-    providersLink: 'Providers view',
-    coverageLink: 'Coverage in the Dates view',
+    providersLink: 'Price sources',
+    coverageLink: 'Its full search log',
     sendTest: 'Send test',
     sending: 'Sending…',
     testSent: 'Test email sent. Check the inbox, and the spam folder.',

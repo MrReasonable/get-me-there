@@ -203,12 +203,12 @@ describe('shell (spec §11 layout)', () => {
   it('no definitions, and a def= that names a missing one, say different things', async () => {
     server.use(http.get(`${API}/definitions`, () => HttpResponse.json([])));
     const { unmount } = renderWithProviders(<App />, { search: '?view=history' });
-    expect(await screen.findAllByText('No searches yet. Plan one under Searches.')).not.toHaveLength(0);
+    expect(await screen.findAllByText('No searches yet. Plan one under Trips.')).not.toHaveLength(0);
     unmount();
     server.resetHandlers();
     renderWithProviders(<App />, { search: '?view=dates&def=gone' });
     expect(
-      await screen.findByText('The search in this link no longer exists. Pick one under Searches.'),
+      await screen.findByText('The search in this link no longer exists. Pick one under Trips.'),
     ).toBeInTheDocument();
   });
 });

@@ -38,7 +38,7 @@ describe('the page’s states (spec §11)', () => {
   it('no search: "No search yet" with a link to Searches', async () => {
     renderDates({ def: null });
     expect(screen.getByText(/^No search yet\./)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'Plan one under Searches' });
+    const link = screen.getByRole('link', { name: 'Plan one under Trips' });
     expect(link.getAttribute('href')).toContain('view=searches');
   });
 

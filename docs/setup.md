@@ -139,7 +139,7 @@ where the browser is set up), a calendar of the window (each day prints its chea
 else its lowest calendar price; pick a day to see its stays) and three folds, Price over time,
 What was searched and Alert. **Repeat weekly…** adds a schedule: it registers when you press
 Save, and the page shows when it next runs. Where the browser worker is not set up, the page says
-"Flight times need the browser worker; set it up in Providers".
+"Flight times need the browser worker; set it up in Settings → Price sources".
 
 ### The commands
 

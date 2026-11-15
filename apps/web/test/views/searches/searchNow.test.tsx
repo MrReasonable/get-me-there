@@ -229,7 +229,7 @@ function renderRefused(code: string) {
 }
 
 describe('the page’s words for a refused Search now (spec rev 55 §11; Review Focus 1; ruling A24)', () => {
-  it('disabled: "No price source is set up, so nothing was searched" with "Set up a price source (Providers)"', async () => {
+  it('disabled: "No price source is set up, so nothing was searched" with "Set up a price source (Settings → Price sources)"', async () => {
     renderRefused('disabled');
     const fix = within(await block(R.disabled)).getByRole('link', { name: R.disabledFix });
     expect(fix.getAttribute('href')).toContain('view=providers');

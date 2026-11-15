@@ -16,7 +16,7 @@ import { airportRows } from './support.js';
 // Review Focus 1 end to end (WP20 Task 20.5, fix round 1 finding 13): an install with no price source at all. The
 // first screen's form is filled and Search now pressed; the search is saved and its start refused `disabled`, and the
 // new search's page opens with "No price source is set up, so nothing was searched" and the fix "Set up a price source
-// (Providers)", never engine text and never a blank board. Through the App and msw, on Vitest's fake clock.
+// (Settings → Price sources)", never engine text and never a blank board. Through the App and msw, on Vitest's fake clock.
 
 afterEach(() => {
   vi.useRealTimers();
