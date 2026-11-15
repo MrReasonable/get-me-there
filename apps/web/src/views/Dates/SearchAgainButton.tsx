@@ -42,7 +42,7 @@ export function SearchAgainButton({
   definitionId: string;
   /** The visible words: "Search again" by default, "Search now" in the never-searched state. */
   label?: string;
-  /** The name a screen reader hears when several cards each carry the button ("Search again: Birmingham → Frankfurt"). */
+  /** The name a screen reader hears when several cards each carry the button ("Search again: London → New York"). */
   accessibleName?: string;
   /** Start on the second look: the sentence and the labelled press, with nothing sent until it is pressed. */
   confirmFirst?: boolean;

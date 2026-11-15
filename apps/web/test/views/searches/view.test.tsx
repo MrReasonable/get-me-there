@@ -145,7 +145,7 @@ describe('the synthetic banner (Ruling 7)', () => {
   it('shows no banner for real prices', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
   });
 });
@@ -214,7 +214,7 @@ describe('the poll', () => {
       ),
     );
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     expect(requests).toHaveLength(1);
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS - 1));
     expect(requests).toHaveLength(1);
@@ -227,7 +227,7 @@ describe('the poll', () => {
     const requests: CardRequests = [];
     server.use(serveCards([searchCard()], requests));
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 3));
     expect(requests).toHaveLength(1);
   });
@@ -247,6 +247,6 @@ describe('the schedule in words', () => {
   ])('%s', async (_name, cron, words) => {
     server.use(serveCards([searchCard({ schedule: { cron, tz: 'Europe/London' } })]));
     renderInShell(<SearchesView />);
-    expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent(words);
+    expect(await cardOf('London → New York')).toHaveTextContent(words);
   });
 });

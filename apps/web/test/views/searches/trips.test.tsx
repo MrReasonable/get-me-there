@@ -79,11 +79,11 @@ describe('a finished search with trips', () => {
   it('the name links to the Search page; the meta line and the repeat tag state the route, dates, stay and age', async () => {
     server.use(serveCards([searchCard({ trips })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    const name = within(card).getByRole('link', { name: 'Birmingham → Frankfurt' });
+    const card = await cardOf('London → New York');
+    const name = within(card).getByRole('link', { name: 'London → New York' });
     expect(name).toHaveAttribute('href', '/?view=dates&def=def-0001');
     expect(card.querySelector('.tcard-meta')).toHaveTextContent(
-      'BHX → FRA · leave 10 Jan – 31 Mar · 10–14 nights · searched 2h ago',
+      'LHR → JFK · leave 10 Jan – 31 Mar · 10–14 nights · searched 2h ago',
     );
     expect(card.querySelector('.tcard-repeat')).toHaveTextContent('repeats Mondays 05:00');
   });
@@ -131,7 +131,7 @@ describe('a finished search with trips', () => {
       http.get(`${API}/definitions`, () => HttpResponse.json([definition({ id: 'def-0001' })])),
     );
     renderInShell(<SearchesView />);
-    const again = await within(await cardOf('Birmingham → Frankfurt')).findByRole('button', {
+    const again = await within(await cardOf('London → New York')).findByRole('button', {
       name: /^Search again/,
     });
     await waitFor(() => expect(again).toBeEnabled());
@@ -155,7 +155,7 @@ describe('a finished search with trips', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card.querySelector('.tcard-repeat')).toBeNull();
     expect(card.querySelector('.tcard-meta')).toHaveTextContent('rolling: 182 days from 7 days ahead');
   });
@@ -163,8 +163,8 @@ describe('a finished search with trips', () => {
   it('shows three trip rows, each with its label and dates, and no airlines', async () => {
     server.use(serveCards([searchCard({ trips })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    const list = within(card).getByRole('list', { name: 'Cheapest trips, Birmingham → Frankfurt' });
+    const card = await cardOf('London → New York');
+    const list = within(card).getByRole('list', { name: 'Cheapest trips, London → New York' });
     const rows = within(list).getAllByTestId('trip-row');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent('£412');
@@ -178,17 +178,17 @@ describe('a finished search with trips', () => {
   it('the actions: All trips and dates, Search again, Edit, then Remove, quietly', async () => {
     server.use(serveCards([searchCard({ trips })]));
     renderInShell(<SearchesView />, { search: '?view=searches' });
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const actions = within(card).getByTestId('card-actions');
     expect(
-      within(actions).getByRole('link', { name: 'All trips and dates for Birmingham → Frankfurt' }),
+      within(actions).getByRole('link', { name: 'All trips and dates for London → New York' }),
     ).toHaveAttribute('href', '/?view=dates&def=def-0001');
     expect(within(actions).getByRole('button', { name: /^Search again/ })).toBeInTheDocument();
-    expect(within(actions).getByRole('link', { name: 'Edit Birmingham → Frankfurt' })).toHaveAttribute(
+    expect(within(actions).getByRole('link', { name: 'Edit London → New York' })).toHaveAttribute(
       'href',
       '/?view=definitions&edit=def-0001',
     );
-    const remove = within(actions).getByRole('button', { name: 'Remove Birmingham → Frankfurt' });
+    const remove = within(actions).getByRole('button', { name: 'Remove London → New York' });
     const edit = within(actions).getByRole('link', { name: /^Edit/ });
     expect(edit.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(remove).toHaveClass('btn-quiet');
@@ -210,7 +210,7 @@ describe('the counts line (Rulings 5 and 6)', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const line = within(await cardOf('Birmingham → Frankfurt')).getByTestId('card-counts');
+    const line = within(await cardOf('London → New York')).getByTestId('card-counts');
     expect(line).toHaveTextContent(
       /^23 dates with flights read; these are the cheapest\. 155 dates look lower on the calendar, from £372 Cached.*.$/,
     );
@@ -250,7 +250,7 @@ describe('the counts line (Rulings 5 and 6)', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const line = within(card).getByTestId('card-counts');
     expect(line).toHaveTextContent(
       /^Calendar prices for 2,146 dates, from £372 Cached.*; no flights read yet\.$/,
@@ -289,7 +289,7 @@ describe('the counts line (Rulings 5 and 6)', () => {
   it('a card with neither shows no counts line', async () => {
     server.use(serveCards([searchCard({ ...noPrices })]));
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     expect(screen.queryByTestId('card-counts')).toBeNull();
   });
 });
@@ -337,7 +337,7 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
   it('shows the run’s progress and Cancel in place of Search again, with the earlier trips beneath', async () => {
     server.use(serveCards([searchCard({ latestRun: running, trips: earlier })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(card).getByRole('progressbar')).toBeInTheDocument();
     expect(card).toHaveTextContent('Reading the calendar, 120 of 405 dates · about 14 min left');
     expect(within(card).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -353,7 +353,7 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
       serveCards([searchCard({ latestRun: { ...running, stage: 'verification' }, trips: earlier })]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(card).getByTestId('run-line')).toHaveTextContent(/^Checking fares · about 14 min left$/);
     expect(card).not.toHaveTextContent(/Reading the calendar/);
   });
@@ -361,7 +361,7 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
   it('an earlier trip’s label detail says it was read by the previous search, with its age', async () => {
     server.use(serveCards([searchCard({ latestRun: running, trips: earlier })]));
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const label = within(card).getByTestId('price-label');
     expect(label).toHaveTextContent('2d');
     await user.click(within(label).getByText(/Seller/));
@@ -379,7 +379,7 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
       }),
     );
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     await user.click(within(card).getByRole('button', { name: 'Cancel' }));
     expect(cancels).toEqual([]);
     await user.click(within(card).getByRole('button', { name: COPY.runProgress.confirmCancel }));
@@ -403,7 +403,7 @@ describe('earlier trips on a running card (Review Focus 2)', () => {
       ]),
     );
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const rows = within(card).getAllByTestId('trip-row');
     const current = at(rows, 0);
     const earlier = at(rows, 1);
@@ -422,7 +422,7 @@ describe('earlier trips on a running card (Review Focus 2)', () => {
   it('a settled card’s trip from an earlier search says so without "will replace it"', async () => {
     server.use(serveCards([searchCard({ trips: [readTrip({ fromEarlierSearch: true })] })]));
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     await user.click(within(card).getByText(/Seller/));
     expect(card).toHaveTextContent('Read by the previous search.');
     expect(card).not.toHaveTextContent('will replace it');
@@ -468,7 +468,7 @@ describe('a truncated or stale price keeps its mark (decision 36, Ruling 19)', (
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(within(card).getByTestId('card-counts')).getByTestId('price-cell')).toHaveTextContent(
       COPY.truncatedNote,
     );
@@ -480,7 +480,7 @@ describe('a truncated or stale price keeps its mark (decision 36, Ruling 19)', (
   it('a complete price carries none', async () => {
     server.use(serveCards([searchCard({ trips: [readTrip()], lowerOnCalendar: lowerOnCalendar() })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     for (const cell of within(card).getAllByTestId('price-cell')) expect(cell).not.toHaveTextContent('…');
   });
 
@@ -494,7 +494,7 @@ describe('a truncated or stale price keeps its mark (decision 36, Ruling 19)', (
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const labels = within(card).getAllByTestId('price-label');
     expect(labels).toHaveLength(2);
     for (const label of labels) {
@@ -508,7 +508,7 @@ describe('the other states', () => {
   it('never searched: "Not searched yet" and Search now, no counts and no reason', async () => {
     server.use(serveCards([searchCard({ latestRun: null, ...noPrices })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card).toHaveTextContent('Not searched yet');
     expect(within(card).getByRole('button', { name: /^Search again/ })).toHaveTextContent('Search now');
     expect(card.querySelector('.tcard-nothing')).toBeNull();
@@ -536,7 +536,7 @@ describe('the other states', () => {
       }),
     );
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(card).getByTestId('stop-sentence')).toHaveTextContent(/^Stopped at 14 Oct 15:00/);
     await user.click(within(card).getByRole('button', { name: COPY.runProgress.resume }));
     await waitFor(() => expect(resumes).toEqual(['exec-0001']));
@@ -550,7 +550,7 @@ describe('the other states', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card).toHaveTextContent('No reason was recorded for this run.');
     expect(card.textContent).not.toContain('paused: error');
   });
@@ -578,7 +578,7 @@ describe('the other states', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card).toHaveTextContent('Dates changed since this was last searched');
     expect(card).not.toHaveTextContent('Every date showed no price');
     expect(card).not.toHaveTextContent('stopped before');
@@ -687,7 +687,7 @@ describe('a finished search that found nothing says why (Ruling 8)', () => {
   ])('%s', async (_name, over, words) => {
     server.use(serveCards([empty(over)]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card.querySelector('.tcard-nothing')).toHaveTextContent(words);
   });
 
@@ -707,7 +707,7 @@ describe('a finished search that found nothing says why (Ruling 8)', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(card).getByTestId('stop-sentence')).toHaveTextContent('Cancelled at 14 Oct 14:00.');
     expect(card.querySelector('.tcard-nothing')).toBeNull();
   });
@@ -727,7 +727,7 @@ describe('a finished search that found nothing says why (Ruling 8)', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card.querySelector('.tcard-nothing')).toHaveTextContent('The search stopped before 75 dates.');
   });
 });
@@ -796,7 +796,7 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
     const bodies: unknown[] = [];
     server.use(serveCards([offAndEmpty()]), ...serveOrder(order, bodies));
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const fix = await within(card).findByRole('button', { name: /^Turn on the browser for/ });
     expect(fix).toHaveTextContent('Turn on the browser for this search and search again');
     await waitFor(() => expect(fix).toBeEnabled());
@@ -840,7 +840,7 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
       }),
     );
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const fix = await within(card).findByRole('button', { name: /^Turn on the browser for/ });
     await waitFor(() => expect(fix).toBeEnabled());
     await user.click(fix);
@@ -856,7 +856,7 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
     const order: string[] = [];
     server.use(serveCards([offAndEmpty()]), ...serveOrder(order, [], 500));
     const { user } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     const fix = await within(card).findByRole('button', { name: /^Turn on the browser for/ });
     await waitFor(() => expect(fix).toBeEnabled());
     await user.click(fix);
@@ -869,7 +869,7 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
   it('with the browser not set up, no fix: one sentence and a link to Settings', async () => {
     server.use(serveCards([offAndEmpty()]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(card.querySelector('.tcard-nothing')).toHaveTextContent(S.browserNotSetUp);
     expect(within(card).queryByRole('button', { name: /^Turn on the browser/ })).toBeNull();
     const link = within(card).getByRole('link', { name: 'Settings' });
@@ -888,7 +888,7 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
       http.get(`${API}/providers`, () => HttpResponse.json(withBrowser())),
     );
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
+    const card = await cardOf('London → New York');
     expect(within(card).queryByRole('button', { name: /^Turn on the browser/ })).toBeNull();
     expect(card.querySelector('.tcard-nothing')).not.toHaveTextContent('browser is off');
     await act(async () => undefined);

@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 const S = COPY.searchesView;
-const NAME = 'Birmingham → Frankfurt';
+const NAME = 'London → New York';
 const cardOf = async (name: string) => {
   const heading = await screen.findByRole('heading', { level: 2, name });
   const card = heading.closest('li');

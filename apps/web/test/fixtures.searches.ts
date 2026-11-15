@@ -14,7 +14,7 @@ import { datePairFigure, type ProvenanceInput, provCalendar, provSearch } from '
 
 // Fixtures for the Searches view (WP20 Task 20.3, spec rev 55 §10 `GET /definitions/cards`). Every builder ends in the
 // contract schema's parse, so a card that drifts from core/api-contract fails here. Worked examples only:
-// Birmingham → Frankfurt (BHX → FRA) and London → New York (LHR, LGW → JFK, EWR); the clock is NOW (render.tsx).
+// London → New York (LHR, LGW → JFK, EWR); the clock is NOW (render.tsx).
 
 type CardIn = z.input<typeof apiContract.searchCardSchema>;
 type RunIn = NonNullable<CardIn['latestRun']>;
@@ -103,8 +103,8 @@ function pairingOf(pence: number, kind: PairingKind, provenance: ProvenanceInput
 }
 
 /**
- * One trip of a card (Ruling 7): by default the worked example's verified £86, 12 → 23 January 2027 (11 nights), BHX →
- * FRA, from a SearchApi itinerary read; `basis: 'pairing'` makes it a read trip (pass a flight list's provenance).
+ * One trip of a card (Ruling 7): by default the worked example's verified £86, 12 → 23 January 2027 (11 nights), LHR →
+ * JFK, from a SearchApi itinerary read; `basis: 'pairing'` makes it a read trip (pass a flight list's provenance).
  */
 export function cardTrip(o: TripOver = {}, provenance: ProvenanceInput = provSearch): TripIn {
   const pricePence = o.pricePence ?? 8600;
@@ -117,7 +117,7 @@ export function cardTrip(o: TripOver = {}, provenance: ProvenanceInput = provSea
     ageHours: o.ageHours ?? 2,
     truncated: o.truncated ?? false,
   };
-  const airports = { origin: o.origin ?? 'BHX', destination: o.destination ?? 'FRA' };
+  const airports = { origin: o.origin ?? 'LHR', destination: o.destination ?? 'JFK' };
   const nights = (Date.parse(returnDate) - Date.parse(departureDate)) / 86_400_000;
   const figure: TripIn['figure'] =
     o.basis === 'pairing'
@@ -189,7 +189,7 @@ export interface LowerOver {
 }
 
 /**
- * The card's "lower on the calendar" line (Ruling 5): by default three dates, from £86 on 12 → 23 January (BHX → FRA), a
+ * The card's "lower on the calendar" line (Ruling 5): by default three dates, from £86 on 12 → 23 January (LHR → JFK), a
  * calendar price from the Aviasales cache (pass another provenance for another source; its label kind follows it).
  */
 export function lowerOnCalendar(o: LowerOver = {}, provenance: ProvenanceInput = provCalendar): LowerIn {
@@ -208,8 +208,8 @@ export function lowerOnCalendar(o: LowerOver = {}, provenance: ProvenanceInput =
       },
       departureDate: o.departureDate ?? '2027-01-12',
       returnDate: o.returnDate ?? '2027-01-23',
-      origin: o.origin ?? 'BHX',
-      destination: o.destination ?? 'FRA',
+      origin: o.origin ?? 'LHR',
+      destination: o.destination ?? 'JFK',
       kind,
     },
   };
@@ -229,17 +229,17 @@ export const calendarOnly = (
 export const noPrices: Partial<CardIn> = { trips: [], readDates: 0, lowerOnCalendar: null };
 
 /**
- * One card: Birmingham → Frankfurt, 10 Jan – 31 Mar 2027, 10–14 nights, scheduled Mondays 05:00, finished 2 h ago, its one
- * trip the verified £86 (`cardTrip()`). Unless stated, each verified trip's details follow its trips and the dates with
+ * One card: London → New York (LHR → JFK), 10 Jan – 31 Mar 2027, 10–14 nights, scheduled Mondays 05:00, finished 2 h
+ * ago, its one trip the verified £86 (`cardTrip()`). Unless stated, each verified trip's details follow its trips and the dates with
  * flights read are the trips.
  */
 export function searchCard(over: Partial<CardIn> = {}): SearchCard {
   const trips = over.trips ?? [cardTrip()];
   return apiContract.searchCardSchema.parse({
     id: 'def-0001',
-    name: 'Birmingham → Frankfurt',
-    origins: ['BHX'],
-    destinations: ['FRA'],
+    name: 'London → New York',
+    origins: ['LHR'],
+    destinations: ['JFK'],
     window: {
       kind: 'absolute',
       departureFrom: '2027-01-10',
