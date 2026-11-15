@@ -37,6 +37,16 @@ const run = (over: Partial<RunProgressRun> = {}): RunProgressRun => ({
   ...over,
 });
 
+// why: concern 3 of the CodeRabbit round: a run whose whole-search counts aren't known reads the calendar uncounted
+describe('a run with no whole-search count', () => {
+  it('says "Reading the calendar" with its time left and no count, and its bar has no value', () => {
+    show({ run: run({ done: null, total: null }) });
+    const line = screen.getByTestId('run-line');
+    expect(line.textContent).toBe('Reading the calendar · about 14 min left');
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  });
+});
+
 function show(props: RunProgressProps) {
   const user = userEvent.setup();
   const result = render(

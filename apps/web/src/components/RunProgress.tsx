@@ -30,9 +30,12 @@ export interface RunProgressRun {
   /** The run's id: the Cancel confirmation is bound to it, so it can never cancel another run. */
   id: string;
   status: ExecutionStatus;
-  /** The calendar pass: dates read so far, and the dates in the search. */
-  done: number;
-  total: number;
+  /**
+   * The calendar pass: dates read so far, and the dates in the search; both null when the whole search's counts are not
+   * known (a narrowed page read with no card of this run), so no part is given as the whole.
+   */
+  done: number | null;
+  total: number | null;
   /** Now plus the run's remaining time while it is pending or running; null leaves "about N min left" out. */
   estimatedFinishAt: IsoDateTime | null;
   /** The flight step's reads so far (`readingCount`) while it is reading; null while the calendar is still being read. */
@@ -95,8 +98,8 @@ function RunBar({ run }: { run: RunProgressRun }) {
     <progress
       className="run-bar"
       aria-label={R.barLabel}
-      max={run.total}
-      value={run.flightsRead === null ? run.done : undefined}
+      max={run.total ?? 1}
+      value={run.flightsRead === null && run.done !== null ? run.done : undefined}
     />
   );
 }
@@ -155,9 +158,11 @@ export function RunProgress({ run, onCancel, onResume, pending = null, failure =
           <p className="run-line" data-testid="run-line">
             {run.checking !== null
               ? R.checking(run.checking.total === 0 ? null : run.checking, leftOf(run.estimatedFinishAt, now))
-              : run.flightsRead === null
-                ? R.calendar(run.done, run.total, leftOf(run.estimatedFinishAt, now))
-                : R.flights(run.flightsRead)}
+              : run.flightsRead !== null
+                ? R.flights(run.flightsRead)
+                : run.done === null || run.total === null
+                  ? R.calendarUncounted(leftOf(run.estimatedFinishAt, now))
+                  : R.calendar(run.done, run.total, leftOf(run.estimatedFinishAt, now))}
           </p>
         </>
       ) : null}

@@ -247,6 +247,8 @@ export const COPY = {
     barLabel: 'Dates read',
     calendar: (done: number, total: number, left: string | null) =>
       `Reading the calendar, ${thousands(done)} of ${thousands(total)} ${noun(total, 'date', 'dates')}${left === null ? '' : ` · ${left}`}`,
+    /** The calendar pass when the whole search's counts are not known (never the narrowed read's). */
+    calendarUncounted: (left: string | null) => `Reading the calendar${left === null ? '' : ` · ${left}`}`,
     minutesLeft: (minutes: number) => `about ${minutes} min left`,
     lessThanAMinuteLeft: 'less than a minute left',
     flights: (read: number) => `Reading flights for the cheapest dates, ${read} read so far`,

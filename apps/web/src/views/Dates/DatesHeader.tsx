@@ -112,9 +112,12 @@ export function DatesHeader({ definition, data, model, run, now, refused, card, 
   const sameRun =
     cardRun !== null && latest !== undefined && cardRun.id === latest.id && cardRun.status === status;
   const pairs = data?.pairs ?? [];
-  const whole: WholeCount = sameRun
+  // why: concern 3 of the CodeRabbit round, as CR6 below: RunProgress counts the whole search, never a narrowed read
+  const whole: WholeCount | null = sameRun
     ? { searched: cardRun.datePairsSearched, total: cardRun.datePairs }
-    : wholeOf(pairs);
+    : scoped
+      ? null
+      : wholeOf(pairs);
   const calendar = sameRun
     ? { priced: cardRun.marks.priced, total: cardRun.datePairs }
     : scoped

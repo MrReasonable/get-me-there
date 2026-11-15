@@ -266,6 +266,20 @@ describe('a run going (Ruling 11; Review Focus 2)', () => {
     expect(document.querySelectorAll('button[data-day][data-mark="not-searched"]')).toHaveLength(30);
   });
 
+  // why: concern 3 of the CodeRabbit round (coordinator ruling), as CR6 for the run line: an airport filter narrows
+  // the read, so without the card's counts for this run the progress names no count rather than the narrowed one
+  it('with an airport filter and no card of this run, the progress counts nothing rather than the narrowed read', async () => {
+    server.use(serveCards([searchCard({ id: 'def-0001', latestRun: latestRun({ id: 'exec-0000' }) })]));
+    running({}, '?view=dates&def=def-0001&d.from=LHR');
+    const state = await stateLine();
+    await waitFor(() =>
+      expect(within(state).getByTestId('run-line').textContent).toBe(
+        'Reading the calendar · about 100 min left',
+      ),
+    );
+    expect(within(state).getByRole('progressbar')).not.toHaveAttribute('value');
+  });
+
   it('with the card’s latest run this very run, the progress says the card’s counts (the same as the first screen)', async () => {
     server.use(
       serveCards([

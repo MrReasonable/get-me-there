@@ -79,14 +79,14 @@ export function checksOf(run: ExecutionResponse): { done: number; total: number 
  */
 export function runProgressFor(
   run: ExecutionResponse,
-  whole: WholeCount,
+  whole: WholeCount | null,
   childRun: ExecutionStatus | null,
 ): RunProgressRun {
   return {
     id: run.id,
     status: run.status,
-    done: whole.searched,
-    total: whole.total,
+    done: whole === null ? null : whole.searched,
+    total: whole === null ? null : whole.total,
     estimatedFinishAt: run.estimatedFinishAt,
     flightsRead: run.status === 'running' ? readingCount(run.flights) : null,
     checking: isChecking(run) ? checksOf(run) : null,

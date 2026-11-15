@@ -48,6 +48,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'topBar.spentNoCap': ['£32'],
   'topBar.searching': ['London → New York'],
   'runProgress.calendar': [1203, 2184, 'about 14 min left'],
+  'runProgress.calendarUncounted': ['about 14 min left'],
   'runProgress.minutesLeft': [14],
   'runProgress.flights': [9],
   'runProgress.checking': [{ done: 3, total: 10 }, 'about 2 min left'],
