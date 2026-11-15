@@ -7,10 +7,12 @@ import {
   londonDateOf,
   type StartRefusalCode,
 } from '@gmt/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import {
   DATES_DRAWN_MARK,
+  qk,
   useCards,
   useDatePairs,
   useLatestRun,
@@ -144,7 +146,10 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   const card: SearchCard | null =
     useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id) ?? null;
 
-  // why: Price over time reads the route history, which the run's end changes: it is re-read with the page's own read
+  // why: Price over time reads the route history, which the run's end changes: it is re-read with the page's own read;
+  // the run's end also re-reads the card (final review M5), whose whole-space counts the run line takes once the card
+  // describes the run as it now stands, so the page never depends on the top bar's own cards poll to get them
+  const qc = useQueryClient();
   useRunRereads(
     run,
     () => {
@@ -152,6 +157,7 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
       history.refetch();
     },
     clock,
+    () => void qc.invalidateQueries({ queryKey: qk.cards }),
   );
 
   // why: Ruling 19: a link that asks for a fold (the run line's, `d.fold=`) or lands on the full search log
@@ -339,15 +345,22 @@ function Pending({ query }: { query: ReturnType<typeof useDatePairs> }) {
 /**
  * Spec §11 Run landing, Ruling 17: while the latest parent run is pending or running, a progress change from its poll
  * re-reads the route at most once every 30 s (a trailing read keeps the last change), and the run leaving pending or
- * running is read at once. Each read shows as it lands; rows carry their ages. The state machine is refresh.ts; this
- * hook feeds it and keeps its timer.
+ * running is read at once, when `ended` is called too. Each read shows as it lands; rows carry their ages. The state
+ * machine is refresh.ts; this hook feeds it and keeps its timer.
  */
-function useRunRereads(run: ExecutionResponse | undefined, reread: () => void, clock: RereadClock): void {
+function useRunRereads(
+  run: ExecutionResponse | undefined,
+  reread: () => void,
+  clock: RereadClock,
+  ended: () => void,
+): void {
   const machine = useRef<Reread>(IDLE);
   const seen = useRef<{ signature: string; active: boolean } | null>(null);
   const timer = useRef<(() => void) | null>(null);
   const latestReread = useRef(reread);
   latestReread.current = reread;
+  const latestEnded = useRef(ended);
+  latestEnded.current = ended;
   const signature = run === undefined ? null : `${run.id}|${run.status}|${JSON.stringify(run.progress)}`;
   const active = run !== undefined && RUNNING.has(run.status);
   useEffect(() => {
@@ -361,15 +374,12 @@ function useRunRereads(run: ExecutionResponse | undefined, reread: () => void, c
     }
     if (before.signature === signature) return;
     const at = clock.now();
-    const step =
-      before.active && !active
-        ? onTerminal(machine.current, at)
-        : active
-          ? onProgress(machine.current, at)
-          : null;
+    const terminal = before.active && !active;
+    const step = terminal ? onTerminal(machine.current, at) : active ? onProgress(machine.current, at) : null;
     if (step === null) return;
     machine.current = step.state;
     if (step.read) latestReread.current();
+    if (terminal) latestEnded.current();
     const due = step.state.trailingAt;
     if (due !== null && timer.current === null) {
       timer.current = clock.setTimer(() => {

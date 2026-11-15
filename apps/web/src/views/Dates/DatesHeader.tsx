@@ -101,7 +101,10 @@ export function DatesHeader({ definition, data, model, run, now, refused, card }
   const own = run !== undefined && latest !== undefined && run.id === latest.id ? run : undefined;
   const status = own?.status ?? latest?.status;
   // why: the card's counts only while it describes this run as it now stands (a card read before the run moved is not);
-  // they count the run's whole space (Ruling 7), which a read narrowed by From or To cannot
+  // they count the run's whole space (Ruling 7), which a read narrowed by From or To cannot. Right after a run ends the
+  // run's poll says so before the card does, so for a moment the line counts the read in view (one origin, say), until
+  // the card's own re-read lands: the page asks for it itself at the run's end (`useRunRereads`' `ended`, final review
+  // M5), never waiting on the top bar's cards poll
   const cardRun = card?.latestRun ?? null;
   const sameRun =
     cardRun !== null && latest !== undefined && cardRun.id === latest.id && cardRun.status === status;

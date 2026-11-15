@@ -13,7 +13,9 @@ import {
   runSummary,
 } from '../../fixtures.dates.js';
 import { API, execution } from '../../fixtures.js';
+import { searchCard } from '../../fixtures.searches.js';
 import { type Requests, serveDatesBy } from '../../msw/datesHandlers.js';
+import { type CardRequests, serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { calendarRows, findLower, findTrips, renderDates, rowText, tripRows } from './render.js';
 
@@ -136,6 +138,24 @@ describe('the 30 s re-read during a run', () => {
     await progressTo(1, 'completed');
     await waitFor(() => expect(requests).toHaveLength(2));
     await waitFor(async () => expect(await lowerPrices()).toEqual(['£310', '£315', '£320']));
+  });
+});
+
+// final review M5: the run line's whole-space counts come from the card, which the page re-reads itself at the run's end
+// (without a top bar mounted, whose own cards poll would otherwise be the only one to refresh it)
+describe('the run’s end re-reads the card too', () => {
+  it('the cards are read again at once when the run leaves running, and not on a progress change', async () => {
+    const cards: CardRequests = [];
+    server.use(serveCards([searchCard({ id: 'def-0001' })], cards));
+    const { time, progressTo } = await start([first, second]);
+    await waitFor(() => expect(cards.length).toBeGreaterThan(0));
+    const before = cards.length;
+    await act(async () => time.advance(40 * S));
+    await progressTo(2);
+    await act(async () => time.advance(40 * S));
+    expect(cards).toHaveLength(before);
+    await progressTo(2, 'completed');
+    await waitFor(() => expect(cards).toHaveLength(before + 1));
   });
 });
 
