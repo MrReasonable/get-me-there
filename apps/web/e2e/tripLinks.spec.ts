@@ -538,6 +538,17 @@ for (const width of WIDTHS)
       await expect(page.locator('.sfold-table tr')).toHaveCount(6);
       await page.getByRole('button', { name: SMOKE.fullLog }).click();
       await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
+      // Task 10 re-review: the log's cells are ruled as the fold's own rows (a line under each), with no boxed column
+      const sides = await page
+        .getByRole('table', { name: COPY.coverageHeading })
+        .locator('th, td')
+        .evaluateAll((cells) =>
+          cells.flatMap((c) => {
+            const s = getComputedStyle(c);
+            return [s.borderLeftWidth, s.borderRightWidth, s.borderTopWidth];
+          }),
+        );
+      expect(new Set(sides)).toEqual(new Set(['0px']));
       // Alert: both rules in words, and email not set up
       await expect(page.locator('.sfold-rules > li')).toHaveCount(2);
       await expect(page.getByText(COPY.searchPage.folds.emailNotSet)).toBeVisible();

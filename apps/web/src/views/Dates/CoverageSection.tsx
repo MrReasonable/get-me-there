@@ -156,7 +156,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                 <th scope="col" className="text-right">
                   {COPY.coverageCells}
                 </th>
-                <th scope="col" className="border-l border-line-strong text-right">
+                <th scope="col" className="text-right">
                   {COPY.coverageSearched}
                 </th>
                 <th scope="col" className="text-right">
@@ -183,7 +183,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                       </td>
                     ))}
                     <td className="text-right tabular-nums">{s.total}</td>
-                    <td className="border-l border-line-strong text-right tabular-nums">{searched}</td>
+                    <td className="text-right tabular-nums">{searched}</td>
                     <td className="text-right tabular-nums">
                       {COPY.withPriceValue(s.buckets.priced, s.total)}
                     </td>
