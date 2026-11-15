@@ -39,6 +39,8 @@ export {
 export {
   datePairBuckets,
   datePairSearched,
+  markCounts,
+  REDUCED_MARKS,
   type ReducedMark,
   reducedMark,
   searchedDatePairCount,

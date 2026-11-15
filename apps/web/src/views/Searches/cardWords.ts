@@ -4,6 +4,9 @@ import {
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
   NO_STOP_CAUSE_TEXT,
+  type PairingKind,
+  pairingKindOf,
+  resultBasisOf,
   STOPPED_STATUSES,
 } from '@gmt/core';
 import type { SearchCard } from '../../api/types.js';
@@ -115,4 +118,47 @@ export function neverSearchedText(card: SearchCard): string | null {
 /** What the card's hidden live line says: the kind of state, or a stop's sentence (counts are never announced). */
 export function announcement(line: StateLine): string {
   return line.kind === 'stopped' ? line.stop.sentence : S.stateKind[line.kind];
+}
+
+/**
+ * The one price the card shows until Task 6 rebuilds it (Ruling 7, interim): its first trip, or with no trip the lowest
+ * calendar price that looks lower; null when it has neither. `calendar` styles it as a calendar price (a read trip is
+ * one too: its sellers' prices are not checked with the airline); `priceKind` is a read trip's pairing kind, else null;
+ * `trip` whether it is a trip with flights read.
+ */
+export interface ShownPrice {
+  price: SearchCard['trips'][number]['figure']['price'];
+  departureDate: string;
+  returnDate: string;
+  destination: string;
+  calendar: boolean;
+  priceKind: PairingKind | null;
+  trip: boolean;
+}
+
+export function shownPrice(card: SearchCard): ShownPrice | null {
+  const [first] = card.trips;
+  if (first !== undefined) {
+    const f = first.figure;
+    return {
+      price: f.price,
+      departureDate: first.departureDate,
+      returnDate: first.returnDate,
+      destination: f.destination,
+      calendar: resultBasisOf(f.basis) === 'calendar',
+      priceKind: f.basis === 'pairing' && f.pairing !== null ? pairingKindOf(f.pairing) : null,
+      trip: true,
+    };
+  }
+  const lower = card.lowerOnCalendar?.cheapest;
+  if (lower === undefined) return null;
+  return {
+    price: lower.price,
+    departureDate: lower.departureDate,
+    returnDate: lower.returnDate,
+    destination: lower.destination,
+    calendar: true,
+    priceKind: null,
+    trip: false,
+  };
 }

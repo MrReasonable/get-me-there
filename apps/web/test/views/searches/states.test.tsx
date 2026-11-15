@@ -33,7 +33,7 @@ describe('the Searches view’s states', () => {
     server.use(
       http.get(CARDS_URL, () =>
         ok
-          ? HttpResponse.json({ cards: [] })
+          ? HttpResponse.json({ cards: [], pointOfSale: 'GB' })
           : HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 }),
       ),
     );

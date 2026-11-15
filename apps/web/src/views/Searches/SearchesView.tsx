@@ -5,6 +5,7 @@ import type { SearchCard as Card } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
+import { syntheticProvenance } from '../../lib/bookingTarget.js';
 import '../Definitions/definitions.css';
 import { NewSearchForm } from './NewSearchForm.js';
 import { RemovedLine } from './RemovedLine.js';
@@ -39,12 +40,15 @@ interface Removed {
   restored: boolean;
 }
 
-/** A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). */
-const hasSyntheticCheapest = (cards: readonly Card[]): boolean =>
+/**
+ * A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). Every price
+ * a card carries counts, whether shown yet or not: each trip and the lower-on-calendar price.
+ */
+const hasSyntheticPrice = (cards: readonly Card[]): boolean =>
   cards.some(
     (c) =>
-      c.cheapest !== null &&
-      (c.cheapest.provenance.providerId === 'fixture' || c.cheapest.provenance.sourceKind === 'synthetic'),
+      c.trips.some((t) => syntheticProvenance(t.figure.price.provenance)) ||
+      (c.lowerOnCalendar !== null && syntheticProvenance(c.lowerOnCalendar.cheapest.price.provenance)),
   );
 
 /**
@@ -186,7 +190,7 @@ export function SearchesView() {
   return (
     <div className="searches-view space-y-5">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
-      {hasSyntheticCheapest(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
+      {hasSyntheticPrice(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
       <h2 className="h-view">{S.heading}</h2>
       {/* why: one stable tree with the form first, as a phone shows it (focus order follows what is seen, WCAG 2.4.3);
       from 900 px CSS grid puts it in the right column (searches.css), so crossing the breakpoint never remounts it */}

@@ -1,4 +1,3 @@
-import { resultBasisOf } from '@gmt/core';
 import { useEffect, useRef } from 'react';
 import type { SearchCard as Card } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
@@ -17,6 +16,7 @@ import {
   isActive,
   neverSearchedText,
   scheduleText,
+  shownPrice,
   stateLine,
   tripText,
   windowText,
@@ -32,8 +32,9 @@ const editPatch = (id: string) => ({ view: 'definitions', edit: id });
 /**
  * Spec rev 55 §11 "Searches": one saved search as a plate in layout B's main column. The route in words from the
  * airports' cities with the codes beside it, the window, the stay and (only when scheduled) "repeats Mondays 05:00"; its
- * state line in a polite status region; "N of M date pairs never searched" whenever non-zero; the cheapest found, always
- * through `PriceCell`'s compact face so its own source and age show (a pairing figure calendar-styled, worded "cheapest
+ * state line in a polite status region; "N of M date pairs never searched" whenever non-zero; its first trip, or with no
+ * trip its lowest calendar price (`shownPrice`, interim until Task 6 rebuilds the card), always through `PriceCell`'s
+ * compact face so its own source and age show (a pairing figure calendar-styled, worded "cheapest
  * of the sellers read, not checked with the airline" through `basisKindName`: spec rev 56 §11, prov-006, 21.7
  * persona H1); and the actions, with Remove visually apart from
  * Search again. The card owns no mutation of its search: Remove's request, the undo line and the re-read live in the
@@ -66,7 +67,8 @@ export function SearchCard({
   const active = isActive(card);
   const state = stateLine(card, now);
   const never = neverSearchedText(card);
-  const cheapest = card.cheapest;
+  // why: Ruling 7 (interim until Task 6): the card's first trip where its cheapest was, else its lowest calendar price
+  const cheapest = shownPrice(card);
   const tripLink =
     cheapest === null ? null : tripHref(card.id, cheapest.departureDate, cheapest.returnDate, {});
   const codes = S.codes(card.origins.join(', '), card.destinations.join(', '));
@@ -113,11 +115,11 @@ export function SearchCard({
           >
             <PriceBoundary>
               <PriceCell
-                pricePence={cheapest.pricePence}
-                provenance={cheapest.provenance}
-                calendar={resultBasisOf(cheapest.basis) === 'calendar'}
-                stale={cheapest.stale}
-                truncated={cheapest.truncated}
+                pricePence={cheapest.price.pricePence}
+                provenance={cheapest.price.provenance}
+                calendar={cheapest.calendar}
+                stale={cheapest.price.stale}
+                truncated={cheapest.price.truncated}
                 destination={cheapest.destination}
                 compact
               />
@@ -132,14 +134,11 @@ export function SearchCard({
               {COPY.basisKindName[cheapest.priceKind]}
             </span>
           ) : null}
-          {/* why: the first-ranked figure is not always the cheapest: a fresh trip with flights read ranks ahead of a
-          cheaper older one, and a verified trip ahead of a cheaper calendar price. A calendar figure ranks first only
-          when no trip with flights read exists, so it is then the cheapest current calendar price; every other figure is
-          worded as the top trip (design 2026-11-08) */}
+          {/* why: the first trip is not always the cheapest: a fresh trip with flights read ranks ahead of a cheaper
+          older one. A calendar price shows only when no trip with flights read exists, so it is then the cheapest current
+          calendar price; a trip is worded as the top trip (design 2026-11-08) */}
           {active ? (
-            <span className="text-fg-2">
-              {cheapest.basis === 'calendar' ? S.cheapestSoFar : S.topTripSoFar}
-            </span>
+            <span className="text-fg-2">{cheapest.trip ? S.topTripSoFar : S.cheapestSoFar}</span>
           ) : null}
         </div>
       )}

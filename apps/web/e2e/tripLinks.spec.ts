@@ -13,7 +13,7 @@ import {
   provSearched,
   verifiedFig,
 } from '../test/fixtures.dates.js';
-import { cardsResponse, cheapest, flightListProvenance, searchCard } from '../test/fixtures.searches.js';
+import { cardsResponse, cardTrip, flightListProvenance, searchCard } from '../test/fixtures.searches.js';
 import { FIXTURE_SEARCH, TRIP_NOW } from './tripFixtures.js';
 
 // Design 2026-11-08 §5.1, §5.3 (trip-page plan Task 8): the search page's rows and the Trips page's cards in a real
@@ -100,18 +100,20 @@ async function openTrips(page: Page, width: number, scheme: 'light' | 'dark') {
     name: `London → New York, ${LONG_SELLER} fares`,
     origins: ['LHR'],
     destinations: ['JFK'],
-    cheapest: cheapest(
-      {
-        basis: 'pairing',
-        priceKind: 'seller',
-        pricePence: 118_000,
-        origin: 'LHR',
-        destination: 'JFK',
-        departureDate: '2027-03-14',
-        returnDate: '2027-03-24',
-      },
-      flightListProvenance('2026-10-14T12:00:00.000Z'),
-    ),
+    trips: [
+      cardTrip(
+        {
+          basis: 'pairing',
+          priceKind: 'seller',
+          pricePence: 118_000,
+          origin: 'LHR',
+          destination: 'JFK',
+          departureDate: '2027-03-14',
+          returnDate: '2027-03-24',
+        },
+        flightListProvenance('2026-10-14T12:00:00.000Z'),
+      ),
+    ],
   });
   const body = JSON.stringify(apiContract.searchCardsResponseSchema.parse(cardsResponse([card])));
   await page.route('**/api/definitions/cards', (route) =>

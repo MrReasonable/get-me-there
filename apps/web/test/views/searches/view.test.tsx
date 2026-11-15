@@ -8,12 +8,14 @@ import { POLL_MS } from '../../../src/api/queries.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
-import { API, definition as definitionFixture } from '../../fixtures.js';
+import { API, definition as definitionFixture, provSynthetic } from '../../fixtures.js';
 import {
-  calendarCheapest,
-  cheapest,
+  calendarOnly,
+  cardTrip,
   flightListProvenance,
   latestRun,
+  lowerOnCalendar,
+  noPrices,
   searchCard,
 } from '../../fixtures.searches.js';
 import { type CardRequests, serveCards, serveCardsBy } from '../../msw/searchesHandlers.js';
@@ -41,7 +43,7 @@ describe('the cards list (spec rev 55 §11)', () => {
       serveCards([
         searchCard({ id: 'd2', name: 'Second' }),
         searchCard({ id: 'd1', name: 'First' }),
-        searchCard({ id: 'd3', name: 'Third', latestRun: null, cheapest: null }),
+        searchCard({ id: 'd3', name: 'Third', latestRun: null, ...noPrices }),
       ]),
     );
     renderInShell(<SearchesView />);
@@ -209,7 +211,7 @@ describe('what a card shows', () => {
       },
       'Dates changed since this was last searched',
     ],
-    ['not searched yet', { latestRun: null, cheapest: null }, 'Not searched yet'],
+    ['not searched yet', { latestRun: null, ...noPrices }, 'Not searched yet'],
   ])('the state line, %s', async (_name, over, line) => {
     server.use(serveCards([searchCard(over)]));
     renderInShell(<SearchesView />);
@@ -272,7 +274,7 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     server.use(
       serveCards([
         searchCard({ id: 'a', name: 'Priced' }),
-        searchCard({ id: 'b', name: 'Bare', cheapest: null }),
+        searchCard({ id: 'b', name: 'Bare', ...noPrices }),
       ]),
     );
     renderInShell(<SearchesView />);
@@ -287,11 +289,30 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(within(await cardOf('Bare')).queryByTestId('price-cell')).toBeNull();
   });
 
+  // why: Ruling 7 (interim until Task 6): the card shows its first trip, in the api's rank order, where its cheapest was
+  it('shows the first of its trips, never a later one', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          name: 'Two trips',
+          trips: [
+            cardTrip({ pricePence: 9500 }),
+            cardTrip({ pricePence: 8000, departureDate: '2027-01-13' }),
+          ],
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Two trips');
+    expect(within(card).getByTestId('price-cell')).toHaveTextContent('£95');
+    expect(card).not.toHaveTextContent('£80');
+  });
+
   it('a calendar price says "not checked"; a stale one carries the stale mark', async () => {
     server.use(
       serveCards([
-        searchCard({ id: 'a', name: 'Calendar', cheapest: calendarCheapest() }),
-        searchCard({ id: 'b', name: 'Old', cheapest: cheapest({ stale: 'setting' }) }),
+        searchCard({ id: 'a', name: 'Calendar', ...calendarOnly() }),
+        searchCard({ id: 'b', name: 'Old', trips: [cardTrip({ stale: 'setting' })] }),
       ]),
     );
     renderInShell(<SearchesView />);
@@ -306,8 +327,8 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
   it('a calendar cheapest from a truncated tile carries the truncated note; a complete one does not', async () => {
     server.use(
       serveCards([
-        searchCard({ id: 'a', name: 'Cut short', cheapest: calendarCheapest({ truncated: true }) }),
-        searchCard({ id: 'b', name: 'Whole', cheapest: calendarCheapest() }),
+        searchCard({ id: 'a', name: 'Cut short', ...calendarOnly({ truncated: true }) }),
+        searchCard({ id: 'b', name: 'Whole', ...calendarOnly() }),
       ]),
     );
     renderInShell(<SearchesView />);
@@ -320,7 +341,7 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
       serveCards([
         searchCard({
           latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: calendarCheapest(),
+          ...calendarOnly(),
         }),
       ]),
     );
@@ -336,10 +357,18 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
           origins: ['LHR', 'LGW'],
           destinations: ['JFK', 'EWR'],
           latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              {
+                basis: 'pairing',
+                priceKind: 'seller',
+                pricePence: 120_400,
+                origin: 'LHR',
+                destination: 'JFK',
+              },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );
@@ -357,7 +386,7 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
           origins: ['LHR', 'LGW'],
           destinations: ['JFK', 'EWR'],
           latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: cheapest({ origin: 'LHR', destination: 'JFK' }),
+          trips: [cardTrip({ origin: 'LHR', destination: 'JFK' })],
         }),
       ]),
     );
@@ -374,10 +403,18 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
           name: 'London → New York',
           origins: ['LHR', 'LGW'],
           destinations: ['JFK', 'EWR'],
-          cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              {
+                basis: 'pairing',
+                priceKind: 'seller',
+                pricePence: 120_400,
+                origin: 'LHR',
+                destination: 'JFK',
+              },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );
@@ -385,22 +422,48 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(await cardOf('London → New York')).not.toHaveTextContent(/so far/);
   });
 
-  it('shows the red synthetic banner when any card’s cheapest is the fixture provider’s', async () => {
-    const synthetic = cheapest(
-      {},
-      {
-        providerId: 'fixture',
-        sourceKind: 'synthetic',
-        fetchedAt: '2026-10-14T13:00:00.000Z',
-        maxAgeHours: 0,
-        fx: { converted: false },
-        pointOfSale: 'unknown',
-        cabin: 'economy',
-      },
-    );
-    server.use(serveCards([searchCard({ id: 'a', name: 'Fake', cheapest: synthetic })]));
+  it('shows the red synthetic banner when any card’s trip is the fixture provider’s', async () => {
+    server.use(serveCards([searchCard({ id: 'a', name: 'Fake', trips: [cardTrip({}, provSynthetic)] })]));
     renderInShell(<SearchesView />);
     await cardOf('Fake');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
+  });
+
+  // why: Ruling 7 (a page's synthetic check covers every price it carries): the lower-on-calendar price counts too
+  it('shows the banner when a card’s lower-on-calendar price is synthetic, beside a real trip', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'a',
+          name: 'Fake below',
+          lowerOnCalendar: lowerOnCalendar({ pricePence: 5000 }, provSynthetic),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    await cardOf('Fake below');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
+  });
+
+  it('shows the banner when only a later trip is synthetic', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'a',
+          name: 'Fake second',
+          trips: [cardTrip(), cardTrip({ pricePence: 9000, departureDate: '2027-01-13' }, provSynthetic)],
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    await cardOf('Fake second');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
+  });
+
+  it('shows the banner on a card with no trip whose lower-on-calendar price is synthetic', async () => {
+    server.use(serveCards([searchCard({ id: 'a', name: 'Fake only', ...calendarOnly({}, provSynthetic) })]));
+    renderInShell(<SearchesView />);
+    await cardOf('Fake only');
     expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
@@ -543,7 +606,7 @@ describe('the schedule in words', () => {
   it('a trip across two months names both', async () => {
     server.use(
       serveCards([
-        searchCard({ cheapest: cheapest({ departureDate: '2027-01-28', returnDate: '2027-02-08' }) }),
+        searchCard({ trips: [cardTrip({ departureDate: '2027-01-28', returnDate: '2027-02-08' })] }),
       ]),
     );
     renderInShell(<SearchesView />);
@@ -633,7 +696,7 @@ describe('what a card announces (review finding 16)', () => {
 
 describe('the cheapest names its airport (review finding 9)', () => {
   it('the compact face carries the destination code the card serves', async () => {
-    server.use(serveCards([searchCard({ cheapest: cheapest({ destination: 'FRA' }) })]));
+    server.use(serveCards([searchCard({ trips: [cardTrip({ destination: 'FRA' })] })]));
     renderInShell(<SearchesView />);
     const cell = within(await cardOf('Birmingham → Frankfurt')).getByTestId('price-cell');
     expect(cell).toHaveTextContent('FRA');

@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
-import { cheapest, flightListProvenance, searchCard } from '../../fixtures.searches.js';
+import { cardTrip, flightListProvenance, searchCard } from '../../fixtures.searches.js';
 import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { renderInShell } from './support.js';
@@ -23,10 +23,12 @@ describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)
         searchCard({
           id: 'k',
           name: 'Kind',
-          cheapest: cheapest(
-            { basis: 'pairing', priceKind, pricePence: 118_000 },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              { basis: 'pairing', priceKind, pricePence: 118_000 },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );
@@ -45,18 +47,20 @@ describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)
           name: 'Pairing',
           origins: ['LHR'],
           destinations: ['JFK'],
-          cheapest: cheapest(
-            {
-              basis: 'pairing',
-              priceKind: 'seller',
-              pricePence: 118_000,
-              origin: 'LHR',
-              destination: 'JFK',
-              departureDate: '2027-03-14',
-              returnDate: '2027-03-24',
-            },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              {
+                basis: 'pairing',
+                priceKind: 'seller',
+                pricePence: 118_000,
+                origin: 'LHR',
+                destination: 'JFK',
+                departureDate: '2027-03-14',
+                returnDate: '2027-03-24',
+              },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );
@@ -90,18 +94,20 @@ describe('a card’s trip price (Ruling 7)', () => {
           name: 'Pairing',
           origins: ['LHR'],
           destinations: ['JFK'],
-          cheapest: cheapest(
-            {
-              basis: 'pairing',
-              priceKind: 'seller',
-              pricePence: 118_000,
-              origin: 'LHR',
-              destination: 'JFK',
-              departureDate: '2027-03-14',
-              returnDate: '2027-03-24',
-            },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              {
+                basis: 'pairing',
+                priceKind: 'seller',
+                pricePence: 118_000,
+                origin: 'LHR',
+                destination: 'JFK',
+                departureDate: '2027-03-14',
+                returnDate: '2027-03-24',
+              },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );
@@ -132,18 +138,20 @@ describe('a card’s trip price (Ruling 7)', () => {
           name: 'Pairing',
           origins: ['LHR'],
           destinations: ['JFK'],
-          cheapest: cheapest(
-            {
-              basis: 'pairing',
-              priceKind: 'seller',
-              pricePence: 118_000,
-              origin: 'LHR',
-              destination: 'JFK',
-              departureDate: '2027-03-14',
-              returnDate: '2027-03-24',
-            },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
+          trips: [
+            cardTrip(
+              {
+                basis: 'pairing',
+                priceKind: 'seller',
+                pricePence: 118_000,
+                origin: 'LHR',
+                destination: 'JFK',
+                departureDate: '2027-03-14',
+                returnDate: '2027-03-24',
+              },
+              flightListProvenance('2026-10-14T10:44:00.000Z'),
+            ),
+          ],
         }),
       ]),
     );

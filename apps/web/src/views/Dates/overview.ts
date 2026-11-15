@@ -1,6 +1,7 @@
 import {
   addDays,
   type Buckets,
+  markCounts as coreMarkCounts,
   type DatePair,
   type DatePairSpace,
   datePairIndex,
@@ -239,15 +240,8 @@ export function pairsAt(
  * they are the same counts as the header line and the card (`datePairSearched` is priced or no price shown).
  */
 export function keyCounts(pairs: readonly DatePair[]): Record<ReducedMark, number> {
-  const counts: Record<ReducedMark, number> = {
-    priced: 0,
-    'no-price-shown': 0,
-    'couldnt-read': 0,
-    'not-reached': 0,
-    'not-searched': 0,
-  };
-  for (const p of pairs) counts[reducedMark(p.buckets)] += 1;
-  return counts;
+  // why: Ruling 7: one count of the marks for the key and the cards (core's `markCounts`)
+  return coreMarkCounts(pairs.map((p) => p.buckets));
 }
 
 /**

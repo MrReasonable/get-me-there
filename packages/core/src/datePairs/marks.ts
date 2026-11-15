@@ -6,7 +6,14 @@ import { datePairAt, datePairCount } from './space.js';
  * Spec revision 55 §3 and §6.6 "The main path's reading of a date pair": the five marks a date pair shows on the main
  * path, in place of the six coverage buckets (which stay in every response and in the coverage section).
  */
-export type ReducedMark = 'priced' | 'no-price-shown' | 'couldnt-read' | 'not-reached' | 'not-searched';
+export const REDUCED_MARKS = [
+  'priced',
+  'no-price-shown',
+  'couldnt-read',
+  'not-reached',
+  'not-searched',
+] as const;
+export type ReducedMark = (typeof REDUCED_MARKS)[number];
 
 /**
  * A date pair's mark from the six buckets over its airport pairs in scope: the §6.6 precedence bucket (priced, then not
@@ -23,6 +30,23 @@ export function reducedMark(buckets: Buckets): ReducedMark {
   if (buckets.empty > 0 || buckets.no_data > 0) return 'no-price-shown';
   if (buckets.skipped > 0) return 'not-reached';
   return 'not-searched';
+}
+
+/**
+ * How many date pairs read each mark (Ruling 7; spec rev 55 §11's key): each date pair once, by `reducedMark` over its
+ * buckets, every mark present, so the counts sum to the date pairs given. A card's latest run and the Dates key count
+ * through it.
+ */
+export function markCounts(pairs: Iterable<Buckets>): Record<ReducedMark, number> {
+  const counts: Record<ReducedMark, number> = {
+    priced: 0,
+    'no-price-shown': 0,
+    'couldnt-read': 0,
+    'not-reached': 0,
+    'not-searched': 0,
+  };
+  for (const b of pairs) counts[reducedMark(b)] += 1;
+  return counts;
 }
 
 /**

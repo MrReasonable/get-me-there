@@ -19,7 +19,7 @@ import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rankedPairsFor } from '../../src/read/ranked.js';
 import { currentSpace } from '../../src/read/space.js';
-import { datesOf, pairOf, resultsOf } from '../helpers/dates.js';
+import { datesOf, emptyVerification, pairOf, resultsOf } from '../helpers/dates.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
@@ -158,6 +158,11 @@ const PAIRING = {
 };
 const figureA = async (x: Harness, def: SearchDefinition): Promise<DatePairFigure | null> =>
   pairOf(await datesOf(x, def.id), '2026-11-02', '2026-11-12').figure;
+/** The search's card, as `GET /definitions/cards` sends it, parsed by the contract. */
+const cardFor = async (x: Harness, def: SearchDefinition) =>
+  apiContract.searchCardsResponseSchema
+    .parse(await (await x.request('/api/definitions/cards')).json())
+    .cards.find((c) => c.id === def.id);
 
 describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
   it('a fresh, complete pairing under the current limits leads: the offer price, the list provenance, the grid beneath', async () => {
@@ -510,41 +515,53 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     expect(r.datePairFigure).toEqual(expected);
   });
 
-  it("the card's cheapest is the pairing, with the list's provenance, and parses the card schema", async () => {
+  it("the card's trip is the pairing, the board's own figure with the list's provenance, and parses the card schema", async () => {
     const { x, def } = await setup({ bPence: 200_000 });
     store(x, def, A, PAIRING_FIXTURE.returns);
-    const res = await x.request('/api/definitions/cards');
-    const card = apiContract.searchCardsResponseSchema
-      .parse(await res.json())
-      .cards.find((c) => c.id === def.id);
-    expect(card?.cheapest).toMatchObject({
-      pricePence: 118_000,
-      provenance: listProvenance(1),
+    const card = await cardFor(x, def);
+    const board = await figureA(x, def);
+    if (board === null) throw new Error('a figure');
+    const { airportPair: _p, ...figure } = board;
+    expect(card?.trips).toEqual([
+      { figure, departureDate: '2026-11-02', returnDate: '2026-11-12', nights: 10 },
+    ]);
+    expect(card?.trips[0]?.figure).toMatchObject({
+      price: { pricePence: 118_000, provenance: listProvenance(1) },
       basis: 'pairing',
-      priceKind: 'seller',
-      departureDate: '2026-11-02',
       origin: 'LHR',
       destination: 'JFK',
-      fromLatestRun: true,
+      fromEarlierSearch: false,
+      pairing: { seller: 'QQ Travel', isFrom: false },
     });
+    // why: a pairing trip has no verified details; the other date pair's £2,000 calendar price is not lower
+    expect(card?.verifiedDetails).toEqual([]);
+    expect(card?.readDates).toBe(1);
+    expect(card?.lowerOnCalendar).toBeNull();
   });
 
-  // why: design 2026-11-08 §5.1: the card's cheapest is the board's first-ranked figure, so a read trip (here at Google's
-  // price, no seller read) is the cheapest even beside a cheaper calendar price on another date pair
-  it("the card's cheapest is a fresh pairing at Google's price before a cheaper calendar price on another pair", async () => {
+  // why: design 2026-11-08 §5.1: a read trip (here at Google's price, no seller read) is the card's trip even beside a
+  // cheaper calendar price on another date pair, which the card counts as lower on the calendar (Ruling 5)
+  it("the card's trip is a fresh pairing at Google's price; a cheaper calendar price on another pair is lower on the calendar", async () => {
     const { x, def } = await setup({ bPence: 56_500 });
     store(x, def, A, fixture(null));
-    const res = await x.request('/api/definitions/cards');
-    const card = apiContract.searchCardsResponseSchema
-      .parse(await res.json())
-      .cards.find((c) => c.id === def.id);
-    expect(card?.cheapest).toMatchObject({
-      pricePence: 118_000,
-      basis: 'pairing',
-      priceKind: 'google-unread',
-      departureDate: '2026-11-02',
-      provenance: listProvenance(1),
-      ageHours: 1,
+    const card = await cardFor(x, def);
+    expect(card?.trips.map((t) => t.figure)).toMatchObject([
+      {
+        price: { pricePence: 118_000, provenance: listProvenance(1), ageHours: 1 },
+        basis: 'pairing',
+        pairing: { isFrom: true, offersRead: 0 },
+      },
+    ]);
+    expect(card?.lowerOnCalendar).toMatchObject({
+      count: 1,
+      cheapest: {
+        price: { pricePence: 56_500, provenance: { providerId: 'fixture' } },
+        departureDate: '2026-11-03',
+        returnDate: '2026-11-13',
+        origin: 'LGW',
+        destination: 'EWR',
+        kind: 'calendar',
+      },
     });
   });
 
@@ -695,10 +712,236 @@ describe('the pairing figure: Task 21.6 fix round 1', () => {
     });
     const r = await resultsOf(x, def.id, '?departureDate=2026-11-02&returnDate=2026-11-12');
     expect(r.datePairFigure).toMatchObject({ basis: 'verified', pairing: null, pairingRead: 'not-read' });
-    const res = await x.request('/api/definitions/cards');
-    const card = apiContract.searchCardsResponseSchema
-      .parse(await res.json())
-      .cards.find((c) => c.id === def.id);
-    expect(card?.cheapest).toMatchObject({ pricePence: 39_000, basis: 'verified' });
+    const card = await cardFor(x, def);
+    expect(card?.trips[0]?.figure).toMatchObject({ price: { pricePence: 39_000 }, basis: 'verified' });
+    // why: Ruling 2: the verified trip's details from its own row (the seeder's 480 minutes each way, direct, no seller)
+    expect(card?.verifiedDetails).toEqual([
+      {
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: 480, stops: 0 }, back: { durationMinutes: 480, stops: 0 } },
+        booking: { kind: 'none' },
+      },
+    ]);
+  });
+});
+
+describe("the card's trips and calendar counts (Ruling 7, through Task 2's rules)", () => {
+  /** A seller's booking SearchApi's booking options gave, as stored; the api re-validates it on the way out. */
+  const SELLER = {
+    kind: 'get',
+    url: 'https://www.google.com/travel/clk?seller=qq',
+    host: 'www.google.com',
+  } as const;
+  /** Eight departure days on LHR → JFK, ten nights each: one date pair a day. */
+  const day = (d: number) => cell(LHR, JFK, `2026-11-0${d}`, `2026-11-${d + 10}`);
+  const [D1, D2, D3, D4, D5, D6, D7, D8] = [2, 3, 4, 5, 6, 7, 8, 9].map(day);
+
+  /**
+   * Task 2's hand-written set, each on its own date pair: a read trip at £450 (2 Nov), a verified £600 with a seller's
+   * booking (3 Nov), calendar prices £300 not read (4 Nov), £380 outbound only (5 Nov), £400 whose list failed (6 Nov),
+   * £500 over the journey limit (7 Nov), £250 superseded by a later search (8 Nov), and a verified £420 the latest
+   * search did not see again (9 Nov).
+   */
+  async function world() {
+    h = await createHarness({ env: WORKER_ENV });
+    const x = h;
+    if ([D1, D2, D3, D4, D5, D6, D7, D8].some((c) => c === undefined)) throw new Error('no cells');
+    const all = [D1, D2, D3, D4, D5, D6, D7, D8].flatMap((c) => (c === undefined ? [] : [c]));
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        ...SPACE,
+        origins: [LHR],
+        destinations: [JFK],
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-09') },
+        providers: {
+          discovery: ['fixture', 'camoufox'],
+          verification: [],
+          discoveryRefreshHours: { fixture: 168, camoufox: 168 },
+        },
+      }),
+    );
+    const s = seeder(x.ports);
+    const top = (cs: Array<CellKey | undefined>) =>
+      cs.flatMap((c) => (c === undefined ? [] : [{ cell: c, reason: 'top_n' as const }]));
+    const tile = (
+      name: string,
+      c: CellKey | undefined,
+      i: number,
+      o: { pricePence?: number; hoursAgo: number },
+    ) => {
+      if (c === undefined) throw new Error('no cell');
+      s.tile(name, c, {
+        status: o.pricePence === undefined ? 'empty' : 'priced',
+        fetchedAt: at(-o.hoursAgo),
+        tileIndex: i,
+        ...(o.pricePence === undefined ? {} : { pricePence: o.pricePence }),
+      });
+    };
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', all, { selected: top([D8]), verification: ['searchapi'] });
+    tile('Eold', D7, 0, { pricePence: 25_000, hoursAgo: 29 });
+    if (D8 === undefined || D2 === undefined) throw new Error('no cell');
+    s.verified('Eold', D8, [{ hash: 'hGone', pricePence: 42_000, fetchedAt: at(-29) }], 'searchapi');
+    const e = s.execution('E', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E', all, { selected: top([D2, D8]), verification: ['searchapi'] });
+    tile('E', D1, 0, { pricePence: 46_000, hoursAgo: 2 });
+    tile('E', D2, 1, { pricePence: 65_000, hoursAgo: 2 });
+    tile('E', D3, 2, { pricePence: 30_000, hoursAgo: 2 });
+    tile('E', D4, 3, { pricePence: 38_000, hoursAgo: 2 });
+    tile('E', D5, 4, { pricePence: 40_000, hoursAgo: 2 });
+    tile('E', D6, 5, { pricePence: 50_000, hoursAgo: 2 });
+    // why: the latest search found 8 Nov empty, so the older £250 is superseded (decision 54)
+    tile('E', D7, 6, { hoursAgo: 2 });
+    s.verified(
+      'E',
+      D2,
+      [
+        {
+          hash: 'hV',
+          pricePence: 60_000,
+          fetchedAt: at(-2),
+          stopsOut: 1,
+          minutes: { outbound: 500, inbound: 470 },
+          booking: SELLER,
+        },
+      ],
+      'searchapi',
+    );
+    // why: the latest itinerary search of 9 Nov found no fares, so the older £420 is not seen again: not a trip
+    emptyVerification(x, e, D8, 'searchapi');
+    const [first, second] = PAIRING_FIXTURE.returns.attempts;
+    const r0 = second?.returns[0];
+    if (first === undefined || second === undefined || r0 === undefined || D1 === undefined)
+      throw new Error('fixture');
+    // why: the fixture's pairing with its return at Google's £450 and no seller read, so the trip's price is £450
+    store(
+      x,
+      def,
+      D1,
+      fixture(null, { attempts: [first, { ...second, returns: [{ ...r0, fromMinor: 45_000 }] }] }),
+    );
+    if (D4 === undefined || D5 === undefined || D6 === undefined) throw new Error('no cell');
+    store(x, def, D4, null);
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...D5,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'failed',
+      reason: 'network',
+      listed: null,
+      minMinor: null,
+      tabMinor: null,
+      cheapestView: null,
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: null,
+      flights: [],
+      returns: null,
+    });
+    store(x, def, D6, fixture(null, { attempts: [first] }));
+    return { x, def };
+  }
+
+  it("sends the two trips, the verified one's details, three dates with flights read and three lower on the calendar from £300", async () => {
+    const { x, def } = await world();
+    const board = await datesOf(x, def.id);
+    // the board reads each date pair as Task 2's set says
+    expect(
+      board.pairs.map((p) => [
+        p.departureDate,
+        p.figure?.basis,
+        p.figure?.price.pricePence,
+        p.figure?.pairingRead,
+      ]),
+    ).toEqual([
+      ['2026-11-02', 'pairing', 45_000, 'within'],
+      ['2026-11-03', 'verified', 60_000, 'not-read'],
+      ['2026-11-04', 'calendar', 30_000, 'not-read'],
+      ['2026-11-05', 'calendar', 38_000, 'outbound-only'],
+      ['2026-11-06', 'calendar', 40_000, 'list-failed'],
+      ['2026-11-07', 'calendar', 50_000, 'over-limit'],
+      ['2026-11-08', 'calendar', 25_000, 'not-read'],
+      ['2026-11-09', 'verified', 42_000, 'not-read'],
+    ]);
+    const card = await cardFor(x, def);
+    const figureOf = (dep: string, ret: string) => {
+      const f = pairOf(board, dep, ret).figure;
+      if (f === null) throw new Error('a figure');
+      const { airportPair: _p, ...rest } = f;
+      return rest;
+    };
+    expect(card?.trips).toEqual([
+      {
+        figure: figureOf('2026-11-02', '2026-11-12'),
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        nights: 10,
+      },
+      {
+        figure: figureOf('2026-11-03', '2026-11-13'),
+        departureDate: '2026-11-03',
+        returnDate: '2026-11-13',
+        nights: 10,
+      },
+    ]);
+    expect(card?.trips.map((t) => t.figure.price.pricePence)).toEqual([45_000, 60_000]);
+    expect(card?.verifiedDetails).toEqual([
+      {
+        departureDate: '2026-11-03',
+        returnDate: '2026-11-13',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: 500, stops: 1 }, back: { durationMinutes: 470, stops: 0 } },
+        booking: SELLER,
+      },
+    ]);
+    // why: Ruling 6: the two trips and the over-limit date, whose flights were read and left out for the limit
+    expect(card?.readDates).toBe(3);
+    // why: Ruling 5: £300, £380 and £400 are below the £450 trip and their flights unread; £250 is superseded and £500
+    // was read; the lowest's full price cell is the board's own
+    expect(card?.lowerOnCalendar).toEqual({
+      count: 3,
+      cheapest: {
+        price: figureOf('2026-11-04', '2026-11-14').price,
+        departureDate: '2026-11-04',
+        returnDate: '2026-11-14',
+        origin: 'LHR',
+        destination: 'JFK',
+        kind: 'calendar',
+      },
+    });
+    expect(card?.lowerOnCalendar?.cheapest.price.pricePence).toBe(30_000);
+  });
+
+  it('keeps the first three trips in rank order', async () => {
+    const { x, def } = await world();
+    // why: two more read trips (4 and 5 Nov), so four trips in all; the card keeps the three first-ranked
+    const [first, second] = PAIRING_FIXTURE.returns.attempts;
+    const r0 = second?.returns[0];
+    if (first === undefined || second === undefined || r0 === undefined) throw new Error('fixture');
+    const at = (pence: number) =>
+      fixture(null, { attempts: [first, { ...second, returns: [{ ...r0, fromMinor: pence }] }] });
+    const [d4, d5] = [day(5), day(6)];
+    if (d4 === undefined || d5 === undefined) throw new Error('no cell');
+    store(x, def, d4, at(47_000), { hoursAgo: 0.5 });
+    store(x, def, d5, at(48_000), { hoursAgo: 0.5 });
+    const card = await cardFor(x, def);
+    expect(card?.trips.map((t) => [t.departureDate, t.figure.price.pricePence])).toEqual([
+      ['2026-11-02', 45_000],
+      ['2026-11-05', 47_000],
+      ['2026-11-06', 48_000],
+    ]);
+    // why: the verified £600 trip is fourth, so the card carries no details
+    expect(card?.verifiedDetails).toEqual([]);
+    expect(card?.readDates).toBe(5);
+    expect(card?.lowerOnCalendar).toMatchObject({ count: 1, cheapest: { price: { pricePence: 30_000 } } });
   });
 });

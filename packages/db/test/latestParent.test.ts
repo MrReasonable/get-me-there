@@ -1,6 +1,7 @@
 // Spec revision 55 §10 (the cards): `latestParentPerDefinition` is the newest parent run of each definition, by
 // created_at then rowid, children and tool runs left out, read in one statement; `searchedDatePairs` is each card's
-// searched date pairs, by core's one predicate, in one statement bounded by the spaces read.
+// searched date pairs, by core's one predicate, and its latest run's counts per date pair (Ruling 7), in one statement
+// bounded by the spaces read.
 import {
   asIata,
   asIsoDate,
@@ -93,6 +94,16 @@ describe('SEARCHED_DATE_PAIR_SQL is core’s datePairSearched (revision 55 §6.6
   });
 });
 
+/** The latest run's counts of one date pair: its six buckets (`reused` 0) and its skips by cause. */
+const counts = (
+  b: Partial<Omit<Buckets, 'reused'>>,
+  skips: { budgetSkips?: number; browserSkips?: number } = {},
+) => ({
+  buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0, ...b },
+  budgetSkips: skips.budgetSkips ?? 0,
+  browserSkips: skips.browserSkips ?? 0,
+});
+
 describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounded read)', () => {
   const D14 = { departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-24') };
   const D15 = { departureDate: asIsoDate('2027-03-15'), returnDate: asIsoDate('2027-03-25') };
@@ -106,7 +117,8 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     maxNights: 10,
   };
   type Pair = typeof D14;
-  /** One parent run seeding `cells` (each `[origin, destination, pair, status]`), then completed. */
+  type Seeded = readonly [string, string, Pair, CellOutcomeStatus, string?];
+  /** One parent run seeding `cells` (each `[origin, destination, pair, status, reason?]`), then completed. */
   function world() {
     const db = freshDb();
     const clock = fixedClock(T0);
@@ -114,10 +126,7 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     const repo = new ExecutionsRepo(db, clock);
     const cells = new CellsRepo(db, clock, { allowSynthetic: true });
     const def = defs.create(exampleDefinitionInput());
-    const run = (
-      seeded: ReadonlyArray<readonly [string, string, Pair, CellOutcomeStatus]>,
-      o: { trigger?: 'manual' | 'tool'; child?: boolean } = {},
-    ) => {
+    const run = (seeded: ReadonlyArray<Seeded>, o: { trigger?: 'manual' | 'tool'; child?: boolean } = {}) => {
       const [first] = seeded;
       const e = repo.create({
         definitionId: def.id,
@@ -143,10 +152,10 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
       );
       // why: the read under test reads only the stored roll-up; each status is set on it directly
       const set = db.raw.prepare(
-        'UPDATE search_cells SET discovery_status = ? WHERE execution_id = ? AND origin = ? AND destination = ? AND departure_date = ?',
+        'UPDATE search_cells SET discovery_status = ?, discovery_reason = ? WHERE execution_id = ? AND origin = ? AND destination = ? AND departure_date = ?',
       );
-      for (const [origin, destination, pair, status] of seeded)
-        set.run(status, e.id, origin, destination, pair.departureDate);
+      for (const [origin, destination, pair, status, reason] of seeded)
+        set.run(status, reason ?? null, e.id, origin, destination, pair.departureDate);
       repo.setStatus(e.id, 'completed', { finishedAt: clock.now() });
       clock.advance(1000);
       return e.id;
@@ -187,7 +196,37 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     const got = cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: SPACE }]);
     expect(got.get(def.id)).toEqual({
       ever: new Set(['2027-03-15|2027-03-25', '2027-03-16|2027-03-26']),
-      mine: new Set(['2027-03-16|2027-03-26']),
+      // why: Ruling 7: the latest run's own counts of each date pair it seeded; 15 Mar, which it never seeded, has none
+      latest: new Map([
+        ['2027-03-14|2027-03-24', counts({ error: 1, empty: 3 })],
+        ['2027-03-16|2027-03-26', counts({ priced: 1, not_run: 3 })],
+      ]),
+    });
+  });
+
+  it("counts the latest run's buckets per date pair, an airport pair it never seeded as not run, and its skips by cause", () => {
+    const { def, run, cells } = world();
+    const latest = run([
+      ['LHR', 'JFK', D14, 'no_data'],
+      ['LHR', 'EWR', D14, 'empty'],
+      ['LGW', 'JFK', D14, 'empty'],
+      // LGW → EWR on 14 Mar never seeded: not run
+      ['LHR', 'JFK', D15, 'skipped', 'provider_unavailable'],
+      ['LHR', 'EWR', D15, 'skipped', 'scheduled_only'],
+      ['LGW', 'JFK', D15, 'skipped', 'budget'],
+      ['LGW', 'EWR', D15, 'skipped', 'departed'],
+      ['LHR', 'JFK', D16, 'not_run'],
+      ['LHR', 'EWR', D16, 'error'],
+    ]);
+    expect(
+      cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: SPACE }]).get(def.id),
+    ).toEqual({
+      ever: new Set(),
+      latest: new Map([
+        ['2027-03-14|2027-03-24', counts({ no_data: 1, empty: 2, not_run: 1 })],
+        ['2027-03-15|2027-03-25', counts({ skipped: 4 }, { budgetSkips: 1, browserSkips: 2 })],
+        ['2027-03-16|2027-03-26', counts({ not_run: 3, error: 1 })],
+      ]),
     });
   });
 
@@ -211,16 +250,28 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     const narrow = { ...SPACE, origins: [asIata('LGW')] };
     expect(
       cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: narrow }]).get(def.id),
-    ).toEqual({ ever: new Set(), mine: new Set() });
+    ).toEqual({ ever: new Set(), latest: new Map() });
     expect(
       cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: SPACE }]).get(def.id),
-    ).toEqual({ ever: new Set(['2027-03-14|2027-03-24']), mine: new Set(['2027-03-14|2027-03-24']) });
+    ).toEqual({
+      ever: new Set(['2027-03-14|2027-03-24']),
+      latest: new Map([['2027-03-14|2027-03-24', counts({ priced: 1, not_run: 3 })]]),
+    });
   });
 
-  it('returns one row per searched date pair however many runs searched it (bounded by the space, not the history)', () => {
+  it('returns at most one row per date pair of the space however many runs searched it (bounded by the space, not the history)', () => {
     const { db, def, run, cells } = world();
-    let latest = '';
-    for (let i = 0; i < 5; i++) latest = run([['LHR', 'JFK', D14, 'priced']]);
+    // why: five runs each searched 14 and 15 Mar; the latest also seeded 16 Mar, unsearched: three date pairs, three rows
+    for (let i = 0; i < 4; i++)
+      run([
+        ['LHR', 'JFK', D14, 'priced'],
+        ['LHR', 'JFK', D15, 'priced'],
+      ]);
+    const latest = run([
+      ['LHR', 'JFK', D14, 'priced'],
+      ['LHR', 'JFK', D15, 'priced'],
+      ['LHR', 'JFK', D16, 'not_run'],
+    ]);
     const rows: number[] = [];
     const prepare = db.raw.prepare.bind(db.raw);
     vi.spyOn(db.raw, 'prepare').mockImplementation((sql: string) => {
@@ -235,7 +286,7 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     });
     cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: SPACE }]);
     vi.restoreAllMocks();
-    expect(rows).toEqual([1]);
+    expect(rows).toEqual([3]);
   });
 
   it('answers an empty set for a card none of whose runs searched anything, and nothing for no cards', () => {
@@ -243,7 +294,7 @@ describe('CellsRepo.searchedDatePairs (revision 55 §10, the cards in one bounde
     const latest = run([['LHR', 'JFK', D14, 'not_run']]);
     expect(
       cells.searchedDatePairs([{ definitionId: def.id, latestRunId: latest, space: SPACE }]).get(def.id),
-    ).toEqual({ ever: new Set(), mine: new Set() });
+    ).toEqual({ ever: new Set(), latest: new Map([['2027-03-14|2027-03-24', counts({ not_run: 4 })]]) });
     expect(cells.searchedDatePairs([]).size).toBe(0);
   });
 });

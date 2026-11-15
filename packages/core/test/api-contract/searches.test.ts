@@ -10,57 +10,203 @@ import {
   searchCardsResponseSchema,
   startRefusalCodes,
 } from '../../src/api-contract/searches.js';
+import { calendarFigure } from '../helpers/datePairs.js';
 import {
-  cardCheapest,
+  cardTrip,
   cardWindow,
   createAndStartBody,
   definitionResponse,
+  LOWER_CHEAPEST,
   latestRun,
+  lowerOnCalendar,
+  PAIRING_450,
   searchCard,
+  VERIFIED_600,
+  verifiedDetail,
 } from '../helpers/searches.js';
 
-describe("a card's cheapest figure takes the board's three bases (spec rev 56 §10)", () => {
-  it("accepts basis 'pairing' (an offer's price, the flight list's provenance), refuses another word", () => {
-    const pairing = cardCheapest({
-      basis: 'pairing',
-      priceKind: 'seller',
-      pricePence: 118_000,
-      provenance: {
-        providerId: 'camoufox',
-        sourceKind: 'scraped-self',
-        fetchedAt: '2027-02-28T09:30:00.000Z',
-        maxAgeHours: 0,
-        fx: { converted: false },
-        pointOfSale: 'GB',
-        cabin: 'economy',
+/** The paths of the issues `searchCardSchema` reports for `card` ([] when it parses). */
+const paths = (card: unknown): string[] => {
+  const r = searchCardSchema.safeParse(card);
+  return r.success ? [] : r.error.issues.map((i) => i.path.join('.'));
+};
+
+describe("a card's trips (Ruling 7)", () => {
+  it('carries the trips with their figures, dates and nights, the verified details, the read dates and the lower line', () => {
+    const c = searchCardSchema.parse(searchCard());
+    expect(
+      c.trips.map((t) => [t.figure.basis, t.figure.price.pricePence, t.departureDate, t.nights]),
+    ).toEqual([
+      ['pairing', 45_000, '2027-03-14', 10],
+      ['verified', 60_000, '2027-03-15', 10],
+    ]);
+    expect(c.trips[1]?.figure).toMatchObject({ origin: 'LHR', destination: 'JFK', fromEarlierSearch: false });
+    expect(c.verifiedDetails).toEqual([verifiedDetail()]);
+    expect(c.readDates).toBe(3);
+    expect(c.lowerOnCalendar).toEqual({
+      count: 3,
+      cheapest: {
+        price: {
+          pricePence: 30_000,
+          provenance: expect.objectContaining({ providerId: 'travelpayouts' }),
+          stale: false,
+          ageHours: 50,
+          truncated: false,
+        },
+        departureDate: '2027-03-16',
+        returnDate: '2027-03-26',
+        origin: 'LHR',
+        destination: 'JFK',
+        kind: 'cached',
       },
     });
-    expect(searchCardSchema.safeParse(searchCard({ cheapest: pairing })).success).toBe(true);
+  });
+
+  it('refuses a fourth trip', () => {
+    const four = [cardTrip(), cardTrip(), cardTrip(), cardTrip()];
+    const details = [verifiedDetail(), verifiedDetail(), verifiedDetail(), verifiedDetail()];
+    expect(paths(searchCard({ trips: four, verifiedDetails: details }))).toContain('trips');
+    expect(paths(searchCard({ trips: four.slice(1), verifiedDetails: details.slice(1) }))).toEqual([]);
+  });
+
+  it('refuses a calendar price, or a verified one not seen again, as a trip', () => {
+    const calendar = cardTrip(calendarFigure({ price: { ...calendarFigure().price, pricePence: 30_000 } }));
+    expect(paths(searchCard({ trips: [calendar], verifiedDetails: [] }))).toEqual(['trips.0.figure']);
+    const gone = cardTrip({ ...VERIFIED_600, notSeenInLatest: { ageHours: 30 } });
+    expect(paths(searchCard({ trips: [gone], verifiedDetails: [] }))).toEqual(['trips.0.figure']);
+  });
+
+  it("refuses a trip whose figure breaks the board's figure rules", () => {
+    const pairing = cardTrip({ ...PAIRING_450, pairingRead: 'not-read' });
+    expect(paths(searchCard({ trips: [pairing], verifiedDetails: [] }))).toContain(
+      'trips.0.figure.pairingRead',
+    );
+  });
+
+  it("carries a detail exactly for each verified trip, in order, its booking a seller's exactly with booking options", () => {
+    expect(paths(searchCard({ verifiedDetails: [] }))).toEqual(['verifiedDetails']);
+    expect(paths(searchCard({ verifiedDetails: [verifiedDetail(), verifiedDetail()] }))).toEqual([
+      'verifiedDetails.1',
+    ]);
+    expect(paths(searchCard({ verifiedDetails: [verifiedDetail({ origin: 'LGW' })] }))).toEqual([
+      'verifiedDetails.0',
+    ]);
+    expect(paths(searchCard({ verifiedDetails: [verifiedDetail({ booking: { kind: 'none' } })] }))).toEqual([
+      'verifiedDetails.0.booking',
+    ]);
+    const bare = cardTrip({ ...VERIFIED_600, hasBookingOptions: false });
     expect(
-      searchCardSchema.safeParse(searchCard({ cheapest: cardCheapest({ basis: 'offer' }) })).success,
-    ).toBe(false);
-    // why: final review B-M5: a card's pairing figure is the board's leading one, a flight list's; spec rev 62: at any
-    // age, so an older one is stale and still the card's cheapest
-    const paths = (c: unknown) => {
-      const r = searchCardSchema.safeParse(searchCard({ cheapest: c }));
-      return r.success ? [] : r.error.issues.map((i) => i.path.join('.'));
+      paths(searchCard({ trips: [bare], verifiedDetails: [verifiedDetail({ booking: { kind: 'none' } })] })),
+    ).toEqual([]);
+  });
+
+  it('refuses fewer dates with flights read than trips', () => {
+    expect(paths(searchCard({ readDates: 1 }))).toEqual(['readDates']);
+    expect(paths(searchCard({ readDates: 2 }))).toEqual([]);
+  });
+
+  it('a card with no trip carries none, and no details', () => {
+    expect(paths(searchCard({ trips: [], verifiedDetails: [], readDates: 0 }))).toEqual([]);
+  });
+});
+
+describe("a card's lower-on-calendar line (Ruling 5, Ruling 7)", () => {
+  it('is null when nothing looks lower', () => {
+    expect(paths(searchCard({ lowerOnCalendar: null }))).toEqual([]);
+  });
+
+  it('refuses a bare-number minimum, a price without provenance, a count of zero', () => {
+    const cheapest = (o: Record<string, unknown>) =>
+      searchCard({ lowerOnCalendar: lowerOnCalendar({ cheapest: { ...LOWER_CHEAPEST, ...o } }) });
+    expect(paths(cheapest({ price: 30_000 }))).toContain('lowerOnCalendar.cheapest.price');
+    expect(paths(cheapest({ pricePence: 30_000 }))).toContain('lowerOnCalendar.cheapest');
+    const { provenance: _p, ...noProvenance } = LOWER_CHEAPEST.price;
+    expect(paths(cheapest({ price: noProvenance }))).toContain('lowerOnCalendar.cheapest.price.provenance');
+    expect(paths(searchCard({ lowerOnCalendar: lowerOnCalendar({ count: 0 }) }))).toEqual([
+      'lowerOnCalendar.count',
+    ]);
+  });
+
+  it("names its label kind by the price's source: the Aviasales cache is cached, any other calendar is calendar", () => {
+    const at = (kind: string, providerId?: string) => {
+      const c = LOWER_CHEAPEST;
+      const provenance =
+        providerId === undefined
+          ? c.price.provenance
+          : {
+              ...c.price.provenance,
+              providerId,
+              sourceKind: 'scraped-self',
+              maxAgeHours: 0,
+              pointOfSale: 'GB',
+            };
+      return searchCard({
+        lowerOnCalendar: lowerOnCalendar({ cheapest: { ...c, price: { ...c.price, provenance }, kind } }),
+      });
     };
-    expect(paths({ ...pairing, stale: 'refresh' })).toEqual([]);
-    // why: design 2026-11-08 §5.6: the price kind exactly on a pairing figure, any of the three kinds
-    for (const priceKind of ['seller', 'google-unread', 'google-incomplete'])
-      expect(paths({ ...pairing, priceKind })).toEqual([]);
-    expect(paths({ ...pairing, priceKind: null })).toEqual(['cheapest.priceKind']);
-    expect(paths({ ...pairing, priceKind: 'offer' })).toContain('cheapest.priceKind');
-    expect(paths({ ...cardCheapest(), priceKind: 'seller' })).toEqual(['cheapest.priceKind']);
-    expect(paths({ ...pairing, provenance: cardCheapest().provenance })).toEqual(['cheapest.provenance']);
+    expect(paths(at('cached'))).toEqual([]);
+    expect(paths(at('calendar'))).toEqual(['lowerOnCalendar.cheapest.kind']);
+    expect(paths(at('calendar', 'camoufox'))).toEqual([]);
+    expect(paths(at('cached', 'camoufox'))).toEqual(['lowerOnCalendar.cheapest.kind']);
+    expect(paths(at('seller'))).toContain('lowerOnCalendar.cheapest.kind');
+  });
+});
+
+describe("a card's latest run marks (Ruling 7)", () => {
+  const marks = (o: Record<string, number>) => ({
+    priced: 300,
+    'no-price-shown': 84,
+    'couldnt-read': 6,
+    'not-reached': 5,
+    'not-searched': 10,
+    ...o,
+  });
+  const run = (o: Record<string, unknown>) =>
+    searchCard({ latestRun: latestRun({ datePairsNeverSearched: 10, marks: marks({}), ...o }) });
+
+  it('carries the five marks over the whole space, summing to the date pairs, and the browser-unavailable count', () => {
+    const c = searchCardSchema.parse(run({ browserUnavailable: 3 }));
+    expect(c.latestRun?.marks).toEqual(marks({}));
+    expect(c.latestRun?.browserUnavailable).toBe(3);
+  });
+
+  it('refuses marks that do not sum to the date pairs, or a missing mark', () => {
+    expect(paths(run({ marks: marks({ 'not-searched': 11 }) }))).toEqual(['latestRun.marks']);
+    const { 'not-reached': _n, ...four } = marks({});
+    expect(paths(run({ marks: four }))).toContain('latestRun.marks.not-reached');
+  });
+
+  it('refuses a searched count that is not the priced and no-price marks', () => {
+    expect(paths(run({ datePairsSearched: 383 }))).toEqual(['latestRun.datePairsSearched']);
+  });
+
+  it('refuses more browser-unavailable date pairs than not reached', () => {
+    expect(paths(run({ browserUnavailable: 5 }))).toEqual([]);
+    expect(paths(run({ browserUnavailable: 6 }))).toEqual(['latestRun.browserUnavailable']);
   });
 });
 
 describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', () => {
-  it('parses the worked-example card, and one never run', () => {
-    expect(searchCardsResponseSchema.safeParse({ cards: [searchCard()] }).success).toBe(true);
-    const never = searchCard({ latestRun: null, cheapest: null });
-    expect(searchCardsResponseSchema.safeParse({ cards: [never] }).success).toBe(true);
+  it("parses the worked-example card, and one never run, with the install's point of sale", () => {
+    expect(searchCardsResponseSchema.safeParse({ cards: [searchCard()], pointOfSale: 'GB' }).success).toBe(
+      true,
+    );
+    const never = searchCard({
+      latestRun: null,
+      trips: [],
+      verifiedDetails: [],
+      readDates: 0,
+      lowerOnCalendar: null,
+    });
+    expect(searchCardsResponseSchema.safeParse({ cards: [never], pointOfSale: 'unknown' }).success).toBe(
+      true,
+    );
+  });
+
+  // why: Task 6's card links fall back to the Google Flights search in the install's market, as /date-pairs does
+  it('refuses a response without its point of sale, or with one that is not a country code', () => {
+    expect(searchCardsResponseSchema.safeParse({ cards: [] }).success).toBe(false);
+    expect(searchCardsResponseSchema.safeParse({ cards: [], pointOfSale: 'gb' }).success).toBe(false);
   });
 
   it('parses a scheduled card with a stopped run and its stop text', () => {
@@ -138,30 +284,19 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
     expect(searchCardSchema.safeParse(w({ departureTo: '2027-03-06' })).success).toBe(false);
   });
 
-  it('refuses a cheapest price without provenance', () => {
-    const { provenance: _p, ...rest } = cardCheapest();
-    expect(searchCardSchema.safeParse(searchCard({ cheapest: rest })).success).toBe(false);
-  });
-
-  // why: decision 36 — a calendar cheapest read from a truncated tile is a partial minimum and says so; a verified
-  // figure is never truncated (the date-pairs figure's own rule)
-  it("carries the cheapest price's truncated mark: required, and only on the calendar basis", () => {
-    const { truncated: _t, ...without } = cardCheapest();
-    expect(searchCardSchema.safeParse(searchCard({ cheapest: without })).success).toBe(false);
-    const ok = (o: Record<string, unknown>) =>
-      searchCardSchema.safeParse(searchCard({ cheapest: cardCheapest(o) })).success;
-    expect(ok({ truncated: true })).toBe(true);
-    expect(ok({ basis: 'verified', truncated: false })).toBe(true);
-    expect(ok({ basis: 'verified', truncated: true })).toBe(false);
-  });
-
-  it('refuses an unknown key on the card, its run and its cheapest price (no error_text ever travels)', () => {
+  it('refuses an unknown key on the card, its run, a trip and the lower line (no error_text ever travels)', () => {
     expect(searchCardSchema.safeParse(searchCard({ errorText: 'paused: error' })).success).toBe(false);
     const run = searchCard({ latestRun: latestRun({ errorText: 'x' }) });
     expect(searchCardSchema.safeParse(run).success).toBe(false);
-    const cheapest = searchCard({ cheapest: cardCheapest({ verdictClass: 'verified' }) });
-    expect(searchCardSchema.safeParse(cheapest).success).toBe(false);
-    expect(searchCardsResponseSchema.safeParse({ cards: [], total: 0 }).success).toBe(false);
+    // why: the old single cheapest is gone (Ruling 7); a card naming it is refused, not read
+    expect(searchCardSchema.safeParse(searchCard({ cheapest: null })).success).toBe(false);
+    const trip = searchCard({ trips: [cardTrip(VERIFIED_600, { verdictClass: 'verified' })] });
+    expect(searchCardSchema.safeParse(trip).success).toBe(false);
+    const lower = searchCard({ lowerOnCalendar: lowerOnCalendar({ cheapestNow: 1 }) });
+    expect(searchCardSchema.safeParse(lower).success).toBe(false);
+    expect(searchCardsResponseSchema.safeParse({ cards: [], pointOfSale: 'GB', total: 0 }).success).toBe(
+      false,
+    );
   });
 });
 
