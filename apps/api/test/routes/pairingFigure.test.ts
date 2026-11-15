@@ -927,17 +927,48 @@ describe("the card's trips and calendar counts (Ruling 7, through Task 2's rules
     const [first, second] = PAIRING_FIXTURE.returns.attempts;
     const r0 = second?.returns[0];
     if (first === undefined || second === undefined || r0 === undefined) throw new Error('fixture');
-    const at = (pence: number) =>
-      fixture(null, { attempts: [first, { ...second, returns: [{ ...r0, fromMinor: pence }] }] });
+    // why: Task 1 minor: each read trip's return has its own legs, so legs dropped or shared on a later pairing show
+    const at = (pence: number, back: { durationMinutes: number; stops: number; carriers: string[] }) =>
+      fixture(null, { attempts: [first, { ...second, returns: [{ ...r0, fromMinor: pence, ...back }] }] });
     const [d4, d5] = [day(5), day(6)];
     if (d4 === undefined || d5 === undefined) throw new Error('no cell');
-    store(x, def, d4, at(47_000), { hoursAgo: 0.5 });
-    store(x, def, d5, at(48_000), { hoursAgo: 0.5 });
+    store(x, def, d4, at(47_000, { durationMinutes: 700, stops: 0, carriers: ['Virgin Atlantic'] }), {
+      hoursAgo: 0.5,
+    });
+    store(
+      x,
+      def,
+      d5,
+      at(48_000, { durationMinutes: 710, stops: 1, carriers: ['Aer Lingus', 'QQ Atlantic'] }),
+      {
+        hoursAgo: 0.5,
+      },
+    );
     const card = await cardFor(x, def);
     expect(card?.trips.map((t) => [t.departureDate, t.figure.price.pricePence])).toEqual([
       ['2026-11-02', 45_000],
       ['2026-11-05', 47_000],
       ['2026-11-06', 48_000],
+    ]);
+    expect(card?.trips.map((t) => t.figure.pairing?.legs.back)).toEqual([
+      {
+        durationMinutes: r0.durationMinutes,
+        stops: r0.stops,
+        carriers: r0.carriers,
+        arrivesDayOffset: r0.arrivesDayOffset,
+      },
+      {
+        durationMinutes: 700,
+        stops: 0,
+        carriers: ['Virgin Atlantic'],
+        arrivesDayOffset: r0.arrivesDayOffset,
+      },
+      {
+        durationMinutes: 710,
+        stops: 1,
+        carriers: ['Aer Lingus', 'QQ Atlantic'],
+        arrivesDayOffset: r0.arrivesDayOffset,
+      },
     ]);
     // why: the verified £600 trip is fourth, so the card carries no details
     expect(card?.verifiedDetails).toEqual([]);

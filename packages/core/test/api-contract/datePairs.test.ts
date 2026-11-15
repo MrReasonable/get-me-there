@@ -514,6 +514,20 @@ describe("datePairsResponseSchema: a verified figure's details (Ruling 2)", () =
         withDetails([{ ...detail(0), legs: { ...legs, out: { durationMinutes: -1, stops: 1 } } }, detail(1)]),
       ),
     ).toEqual(['verifiedDetails.0.legs.out.durationMinutes']);
+    // Task 2 minor: a leg's journey time is positive; an unknown one is null, never 0
+    expect(
+      issuePaths(
+        withDetails([{ ...detail(0), legs: { ...legs, back: { durationMinutes: 0, stops: 0 } } }, detail(1)]),
+      ),
+    ).toEqual(['verifiedDetails.0.legs.back.durationMinutes']);
+    expect(
+      issuePaths(
+        withDetails([
+          { ...detail(0), legs: { ...legs, back: { durationMinutes: null, stops: null } } },
+          detail(1),
+        ]),
+      ),
+    ).toEqual([]);
     expect(
       issuePaths(
         withDetails([
@@ -746,6 +760,9 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const bad = [
       ['outMinutes', -1],
       ['outMinutes', 0],
+      // the list's own cap (ListedFlight, 6000 minutes): the leg is the list's
+      ['outMinutes', 6001],
+      ['backMinutes', 6001],
       ['backMinutes', 90.5],
       ['outStops', 1.5],
       ['outStops', -1],
@@ -774,6 +791,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     g.outStops[0] = 5;
     g.backStops[0] = 0;
     g.outMinutes[0] = 1;
+    g.backMinutes[0] = 6000;
     g.outCarriers[0] = Array.from({ length: 6 }, () => 'Aer Lingus');
     // the return's offset runs from −1 (a date-line return), the outbound's from 0; both to 3
     g.outArrivesDayOffset[0] = 3;

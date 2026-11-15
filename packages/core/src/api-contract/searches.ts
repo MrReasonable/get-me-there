@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ReducedMark } from '../datePairs/marks.js';
 import { isTrip } from '../datePairs/views.js';
+import { toEpochDay } from '../dates/epochDay.js';
 import { priceLabelKind } from '../labels/priceLabel.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { pointOfSaleSchema } from '../types/provenance.js';
@@ -133,6 +134,11 @@ const cardTripSchema = z
   .refine((t) => isTrip(t.figure), {
     message: 'a card trip is a trip with flights read',
     path: ['figure'],
+  })
+  // why: Task 3 minor: a trip's nights are its dates' own, so a card never says a stay its dates do not have
+  .refine((t) => toEpochDay(t.returnDate) - toEpochDay(t.departureDate) === t.nights, {
+    message: "a card trip's nights are the days between its dates",
+    path: ['nights'],
   });
 
 /** The label kinds a calendar price takes when it is current (`priceLabelKind`): its own source's. */

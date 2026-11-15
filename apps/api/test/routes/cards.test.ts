@@ -5,6 +5,7 @@
 import {
   apiContract,
   asIsoDate,
+  type DefinitionInput,
   NO_STOP_CAUSE_TEXT,
   type SearchCard,
   type SearchDefinition,
@@ -401,11 +402,14 @@ describe('the cards are read through grouped statements (revision 55 §10, R2)',
     defs: number,
     runs: number,
     fill: (s: ReturnType<typeof seeder>, name: string, def: SearchDefinition) => void = () => {},
+    space: Partial<DefinitionInput> = {},
   ): Promise<string[]> {
     const x = await createHarness();
     const s = seeder(x.ports);
     for (let d = 0; d < defs; d++) {
-      const def = x.ports.repos.definitions.create(exampleDefinitionInput({ name: `s${d}`, ...FOUR }));
+      const def = x.ports.repos.definitions.create(
+        exampleDefinitionInput({ name: `s${d}`, ...FOUR, ...space }),
+      );
       for (let r = 0; r < runs; r++) {
         const name = `d${d}r${r}`;
         s.execution(name, { def, status: 'completed', startedAt: at(-10 + r), finishedAt: at(-9 + r) });
@@ -452,5 +456,21 @@ describe('the cards are read through grouped statements (revision 55 §10, R2)',
     );
     expect(rollUpReads(searched)).toHaveLength(1);
     expect(searched.length).toBe(unsearched.length);
+  });
+
+  // why: Task 3 minor: the marks are counted over each run's whole space in the same statement, so a space of 21 date
+  // pairs (seven departure days, three stays) reads as many statements as one of a single date pair
+  it('the marks add no statement as the space grows: 21 date pairs read as many statements as one', async () => {
+    const searched = (s: ReturnType<typeof seeder>, name: string, def: SearchDefinition) =>
+      cellsOf(def).forEach((c, i) => {
+        s.tile(name, c, { status: 'empty', fetchedAt: at(-1), tileIndex: i });
+      });
+    const one = await statements(2, 2, searched);
+    const wide = await statements(2, 2, searched, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-08') },
+      maxNights: 12,
+    });
+    expect(rollUpReads(wide)).toHaveLength(1);
+    expect(wide.length).toBe(one.length);
   });
 });

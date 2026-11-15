@@ -29,6 +29,25 @@ import type { ParsedScope } from './scope.js';
 export type RankedFigure = DatePair & { figure: DatePairFigure; chosen: ResultRow };
 
 /**
+ * Date pair `i`'s figure and its own row, or null when it has neither. `datePairFigures` sets the two together, so one
+ * without the other is a broken read: a RangeError, never a date pair silently left out of the ranking (Task 2 minor).
+ */
+export function pairedAt<F, R>(
+  figures: ReadonlyMap<number, F>,
+  chosen: ReadonlyMap<number, R>,
+  i: number,
+): { figure: F; row: R } | null {
+  const figure = figures.get(i);
+  const row = chosen.get(i);
+  if (figure === undefined && row === undefined) return null;
+  if (figure === undefined || row === undefined)
+    throw new RangeError(
+      `date pair ${i} has a ${figure === undefined ? 'row' : 'figure'} without its ${figure === undefined ? 'figure' : 'row'}`,
+    );
+  return { figure, row };
+}
+
+/**
  * The board's ranked date pairs of `def` over `space` with the journey limit, best first, leaving out those departing on
  * or before today in London (the board offers no past departure as a pick). One `loadRows` over the space's cells.
  * Spec rev 56 §6.9: with `pairings` (the default: a card's cheapest, the flights block's cells) the figures take the
@@ -52,10 +71,9 @@ export function rankedFigures(
   const today = ports.clock.todayLondon();
   const pairs: RankedFigure[] = [];
   for (let i = 0, n = datePairCount(q.space); i < n; i++) {
-    const figure = figures.get(i);
-    const row = chosen.get(i);
-    // why: datePairFigures sets a figure and its row together, so one is never there without the other
-    if (figure === undefined || row === undefined) continue;
+    const paired = pairedAt(figures, chosen, i);
+    if (paired === null) continue;
+    const { figure, row } = paired;
     const at = datePairAt(q.space, i);
     if (at.departureDate <= today) continue;
     pairs.push({

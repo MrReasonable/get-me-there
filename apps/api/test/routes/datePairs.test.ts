@@ -1,7 +1,15 @@
 // Spec §10 `GET /definitions/:id/date-pairs` (WP19 Task 19.2): decision 53's honesty, the figure and its marks, the
 // distinct-cell counts, the journey limit, the 422s, gzip, and the calendar route's rules ported before it goes.
 import { gunzipSync } from 'node:zlib';
-import { apiContract, asIata, type CellKey, type DatePair, type DecodedDatePairs } from '@gmt/core';
+import {
+  apiContract,
+  asIata,
+  asIsoDate,
+  type CellKey,
+  type DatePair,
+  type DecodedDatePairs,
+} from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { errorOf } from '../helpers/contract.js';
 import {
@@ -848,15 +856,75 @@ describe("a verified figure's details (Ruling 2)", () => {
     ]);
   });
 
+  // why: Task 2 minor: a pairing figure is seeded beside a current verified one and a calendar one, so a details entry
+  // for the pairing (or the calendar price) would show
   it('carries none for a calendar or a pairing figure', async () => {
-    const { x, def } = await world();
+    const x = await harness({
+      CAMOUFOX_ENABLED: 'true',
+      CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+      CAMOUFOX_WORKER_KEY: 'test-worker-key-0123456789abcdef0123456789abcdef',
+    });
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        origins: [LHR, LGW],
+        destinations: [JFK, EWR],
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-04') },
+        minNights: 10,
+        maxNights: 10,
+        // the shared pairing fixture's limits: 25 h a leg, at most one stop
+        constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+        providers: {
+          discovery: ['fixture', 'camoufox'],
+          verification: ['searchapi'],
+          discoveryRefreshHours: { fixture: 168, camoufox: 168 },
+        },
+      }),
+    );
+    const [pairing, verified, calendar] = [
+      cell(LHR, JFK, '2026-11-02', '2026-11-12'),
+      cell(LGW, EWR, '2026-11-03', '2026-11-13'),
+      cell(LHR, EWR, '2026-11-04', '2026-11-14'),
+    ];
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E', [pairing, verified, calendar], {
+      selected: [{ cell: verified, reason: 'top_n' }],
+      verification: ['searchapi'],
+    });
+    s.tile('E', pairing, { status: 'priced', pricePence: 40_000, fetchedAt: at(-2), tileIndex: 0 });
+    s.tile('E', verified, { status: 'priced', pricePence: 41_000, fetchedAt: at(-2), tileIndex: 1 });
+    s.tile('E', calendar, { status: 'priced', pricePence: 42_000, fetchedAt: at(-2), tileIndex: 2 });
+    s.verified('E', verified, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-2) }], 'searchapi');
+    const flights = PAIRING_FIXTURE.flights;
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...pairing,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'read',
+      reason: null,
+      listed: 'flights',
+      minMinor: Math.min(...flights.map((f) => f.amountMinor)),
+      tabMinor: null,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: flights.length,
+      flights,
+      returns: PAIRING_FIXTURE.returns,
+    });
     const d = await datesOf(x, def.id);
-    const current = d.pairs.filter(
-      (p) => p.figure?.basis === 'verified' && p.figure.notSeenInLatest === null,
-    );
-    expect(d.verifiedDetails.map((v) => `${v.departureDate} ${v.origin}→${v.destination}`)).toEqual(
-      current.map((p) => `${p.departureDate} ${p.figure?.origin}→${p.figure?.destination}`),
-    );
-    expect(d.pairs.some((p) => p.figure?.basis === 'calendar')).toBe(true);
+    expect(d.pairs.map((p) => [p.departureDate, p.figure?.basis])).toEqual([
+      ['2026-11-02', 'pairing'],
+      ['2026-11-03', 'verified'],
+      ['2026-11-04', 'calendar'],
+    ]);
+    expect(d.verifiedDetails.map((v) => `${v.departureDate} ${v.origin}→${v.destination}`)).toEqual([
+      '2026-11-03 LGW→EWR',
+    ]);
   });
 });

@@ -52,8 +52,11 @@ import { jargonIn, mainPathWords } from '../dates/jargon.js';
 
 const T = COPY.trip;
 
-/** The Google Flights search the board's row links for these dates from `origin` to JFK (core's `searchLinkFor`). */
-const boardSearch = (origin: string) =>
+/**
+ * The Google Flights search the board's row links for these dates from `origin` to JFK (core's `searchLinkFor`), in the
+ * market the trip read carries (the install's configured point of sale; Task 2 minor: named, never a default).
+ */
+const boardSearch = (origin: string, pointOfSale = trip().pointOfSale) =>
   searchLinkFor(
     'camoufox',
     {
@@ -63,6 +66,7 @@ const boardSearch = (origin: string) =>
       returnDate: asIsoDate('2026-11-28'),
     },
     'economy',
+    pointOfSale,
   )?.url;
 const DEF = definition({ name: 'London → New York' });
 const STATE: TripUiState = {
@@ -184,6 +188,14 @@ describe('a read trip: the answer card (design §6.1)', () => {
     expect(link).toHaveAttribute('href', boardSearch('LHR'));
     expect(c).not.toHaveTextContent(/Book/);
     expect(c).not.toHaveTextContent(T.bookingPageLine);
+  });
+
+  // Task 2 minor: the search a trip falls back to is in the install's market, as the trip read carries it
+  it('the search a trip falls back to is in the market the trip read carries', async () => {
+    renderTrip(readTrip({ figure: pairingFigure(readPairing({ bookingUrl: null })), pointOfSale: 'US' }));
+    const link = within(await card()).getByRole('link');
+    expect(link).toHaveAttribute('href', boardSearch('LHR', 'US'));
+    expect(boardSearch('LHR', 'US')).not.toBe(boardSearch('LHR'));
   });
 
   it('a verified figure with a GET booking says "Book on <host> ↗"', async () => {

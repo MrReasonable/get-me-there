@@ -29,11 +29,12 @@ export const flightTextSchema = z
 const hhmm = z.string().regex(HHMM);
 
 /**
- * Spec revision 56 §5.1: the leg fields an outbound and a return share, with their checks (module-private; spread by
- * both schemas). Split around the day offset, whose range differs per leg, so the outbound's stored key order stays.
+ * Spec revision 56 §5.1: the leg fields an outbound and a return share, with their checks (spread by both schemas).
+ * Split around the day offset, whose range differs per leg, so the outbound's stored key order stays. `legRest` is
+ * exported for the date-pairs contract, whose pairing legs are the list's own (Ruling 1); off the package barrel.
  */
 const legTimes = { departsLocal: hhmm, arrivesLocal: hhmm };
-const legRest = {
+export const legRest = {
   durationMinutes: z.number().int().min(1).max(6000),
   stops: z.number().int().min(0).max(5),
   carriers: z.array(flightTextSchema).min(1).max(6),

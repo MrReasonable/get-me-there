@@ -3,12 +3,12 @@ import { columnAt } from '../datePairs/decode.js';
 import { provenanceKey } from '../datePairs/encode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
 import { datePairIndex, stayCount } from '../datePairs/space.js';
-import { flightTextSchema } from '../flights/types.js';
+import { flightTextSchema, legRest, listedFlightSchema, listedReturnSchema } from '../flights/types.js';
 import { MAX_URL_LENGTH } from '../normalise/vendorUrl.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
-import { type Provenance, provenanceSchema } from '../types/provenance.js';
+import { type Provenance, pointOfSaleSchema, provenanceSchema } from '../types/provenance.js';
 import { HHMM } from '../types/window.js';
 import {
   ageHoursSchema,
@@ -198,12 +198,13 @@ const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
  */
 const bookingOptionsSchema = z.strictObject({ figure: counts });
 
-/** Ruling 1: one way's facts: minutes a positive whole number, stops 0 to 5, one to six airline names. */
-const legMinutes = z.number().int().min(1);
-const legStops = z.number().int().min(0).max(5);
-const legCarriers = z.array(pageText).min(1).max(6);
-const outOffset = z.number().int().min(0).max(3);
-const backOffset = z.number().int().min(-1).max(3);
+/**
+ * Ruling 1: one way's facts, held to the flight list's own rules (they are the list's): minutes 1 to 6000, stops 0 to 5,
+ * one to six airline names, and each leg's arrival day offset (the outbound's 0 to 3, the return's −1 to 3).
+ */
+const { durationMinutes: legMinutes, stops: legStops, carriers: legCarriers } = legRest;
+const outOffset = listedFlightSchema.shape.arrivesDayOffset;
+const backOffset = listedReturnSchema.shape.arrivesDayOffset;
 const legFactsSchema = (arrivesDayOffset: typeof outOffset) =>
   z.strictObject({
     durationMinutes: legMinutes,
@@ -333,7 +334,11 @@ const LIST_REASON_COLUMNS = ['figure', 'reason'] as const satisfies ReadonlyArra
 const WITHIN_CODE = PAIRING_READ.indexOf('within');
 
 /** One way of a verified trip as its result row states it (Ruling 2): its journey time and changes, null where unknown. */
-const verifiedLegSchema = z.strictObject({ durationMinutes: count.nullable(), stops: count.nullable() });
+// why: Task 2 minor: a journey time is positive; one the row does not state is null, never 0
+const verifiedLegSchema = z.strictObject({
+  durationMinutes: z.number().int().min(1).nullable(),
+  stops: count.nullable(),
+});
 
 /**
  * Ruling 2: a current verified figure's details from its own result row (`outboundMinutes`, `inboundMinutes`,
@@ -362,13 +367,7 @@ const datePairsBodySchema = z.strictObject({
   verificationProviderConfigured: z.boolean(),
   staleAfterHours: count,
   /** fix round 1 (Ruling 2): the install's POINT_OF_SALE, the market of the Google Flights search a trip falls back to */
-  pointOfSale: z
-    .string()
-    // why: provenance's `pointOfSaleSchema` rule, as one refinement so its refusal says what is wrong
-    .refine(
-      (v) => v === 'unknown' || /^[A-Z]{2}$/.test(v),
-      'pointOfSale is a two-letter country code or unknown',
-    ),
+  pointOfSale: pointOfSaleSchema,
   /** the current resolved space's dates and stays */
   space: z.strictObject({
     departureFrom: isoDateSchema,

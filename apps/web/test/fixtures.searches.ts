@@ -2,6 +2,7 @@ import {
   apiContract,
   listedReturnSchema,
   type PairingKind,
+  priceLabelKind,
   type ReturnRead,
   returnAttemptSchema,
   returnReadSchema,
@@ -192,6 +193,9 @@ export interface LowerOver {
  * calendar price from the Aviasales cache (pass another provenance for another source; its label kind follows it).
  */
 export function lowerOnCalendar(o: LowerOver = {}, provenance: ProvenanceInput = provCalendar): LowerIn {
+  // why: Task 3 minor: the label kind is core's, as the api's (`priceLabelKind` of a current calendar price)
+  const kind = priceLabelKind({ kind: 'calendar', providerId: provenance.providerId }, false);
+  if (kind !== 'calendar' && kind !== 'cached') throw new Error(`a calendar price is labelled ${kind}`);
   return {
     count: o.count ?? 3,
     cheapest: {
@@ -206,7 +210,7 @@ export function lowerOnCalendar(o: LowerOver = {}, provenance: ProvenanceInput =
       returnDate: o.returnDate ?? '2027-01-23',
       origin: o.origin ?? 'BHX',
       destination: o.destination ?? 'FRA',
-      kind: provenance.providerId === 'travelpayouts' ? 'cached' : 'calendar',
+      kind,
     },
   };
 }

@@ -76,6 +76,15 @@ describe("a card's trips (Ruling 7)", () => {
     expect(paths(searchCard({ trips: [gone], verifiedDetails: [] }))).toEqual(['trips.0.figure']);
   });
 
+  // Task 3 minor: a trip's nights are its dates' own
+  it('refuses a trip whose nights are not the days between its dates', () => {
+    for (const nights of [9, 11])
+      expect(paths(searchCard({ trips: [cardTrip(VERIFIED_600, { nights })] })), String(nights)).toEqual([
+        'trips.0.nights',
+      ]);
+    expect(paths(searchCard({ trips: [cardTrip(VERIFIED_600, { nights: 10 })] }))).toEqual([]);
+  });
+
   it("refuses a trip whose figure breaks the board's figure rules", () => {
     const pairing = cardTrip({ ...PAIRING_450, pairingRead: 'not-read' });
     expect(paths(searchCard({ trips: [pairing], verifiedDetails: [] }))).toContain(
