@@ -2,8 +2,8 @@
 
 Written 2026-11-08. Status: stage 1 (the Trip page, the labels and the booking link, §5 and §6) is folded into the
 main design spec (`2026-10-14-flight-price-optimiser-design.md`) as revision 69; the main spec governs what is built.
-Stages 2 to 4 (§7) are folded in as their own revisions when they ship; until then, where the two differ, the main
-spec governs. Choices marked *(my call)* were made by
+Stage 2 (the Trips and Search pages, §7.1) is folded into revision 70. Stages 3 and 4 (§7.2) are folded in as their own
+revisions when they ship; until then, where the two differ, the main spec governs. Choices marked *(my call)* were made by
 the author, not the operator. The operator approved the direction and the mockups on 2026-11-08 ("that's MUCH
 better"); the mockups are in `2026-11-08-ux-redesign-mockups/` (London → New York example data, light and dark,
 375 px and desktop; pink dashed boxes are notes, not design). Where a mockup and this document differ (labels of the other returns, the connecting city), this
@@ -26,7 +26,7 @@ the answer:
    price rows only and never the browser's flight lists.)
 2. **Nothing can be booked.** No price is a link; the only way out is a Google Flights search link at the bottom of
    a closed fold.
-3. **Each price carries 6–10 lines of qualifiers.** Ten board rows are about 3,500 px tall; every row says "NOT
+3. **Each price carries 6–10 lines of qualifiers.** Ten rows of the old search page were about 3,500 px tall; every row says "NOT
    CHECKED", even those whose flights were read.
 4. **What he asked for is buried.** Journey time each way and changes sit in grey prose; the Journey column shows
    the round-trip total.
@@ -150,8 +150,8 @@ was read in ("UK market").
 **Actions**: "Read flights again · free, ~2 min" (the existing on-demand read, for the airport pair whose flights the
 card reads) and, on a read trip, a verified price or a calendar price, only when SearchApi can run for this search,
 "Check with SearchApi · 1 credit" (the existing verify, for the card's own airport pair: a stale verified price's is
-its own, not the calendar pair it is weighed against). An action that can't run isn't shown (§3). The calendar-gap
-banner's links open the Trip page on the gap's own airport pair, so its calendar price can be checked there.
+its own, not the calendar pair it is weighed against). An action that can't run isn't shown (§3). A calendar price below the
+cheapest trip (Lower on the calendar, §7.1) opens the Trip page on its own airport pair, so it can be checked there.
 The on-demand read today refuses a pair whose newest list is inside the refresh interval (`fresh`) and a pair with
 no figure (`no_price`). Asked for from the Trip page, it runs in both cases: the operator asking is the reason to
 read *(my call: a free read the operator starts by hand needs no freshness guard)*.
@@ -179,9 +179,9 @@ read: 6 over your 25h limit, 3 dearer. Show them". These rows link out to the Go
   isn't recorded, so the log says "flights not read" and never guesses a reason *(my call: no new record)*.
 
 **States of the answer card** (the rest of the page stays; most are mocked at the bottom of `03-trip.html`). The
-card's state follows the figure the board gives these dates (its basis and its `pairingRead` result), so the card
-and the row never disagree. It reads the flight list of the cell whose flights the board read for these dates (the
-figure's own cell when the board read none). The first matching row wins:
+card's state follows the figure the search page gives these dates (its basis and its `pairingRead` result), so the card
+and the row never disagree. It reads the flight list of the cell whose flights the search page read for these dates (the
+figure's own cell when it read none). The first matching row wins:
 
 | Figure / read result | Card says |
 |---|---|
@@ -194,13 +194,13 @@ figure's own cell when the board read none). The first matching row wins:
 | Flights read, none within the limits (`over-limit`) | "£388 · Calendar · 3h. Flights were read 3h ago: none within your 25h limit each way. The cheapest read was £455 · Google list, 27h 10m out." [Read flights again] The limit named is the one every flight failed. |
 | Outbounds read, returns not (`outbound-only`) | "£388 · Calendar · 3h. Outbound flights were read 3h ago, but not their returns." [Read flights] |
 | Read, no return listed (`no-pairing-read`) | "£388 · Calendar · 3h. Flights were read 3h ago, but Google listed no return for the outbounds tried." [Read flights again] |
-| Couldn't read (the newest list failed), where the board shows a failed read | "The flights page didn't load at 16:42 (timed out). Nothing was saved." [Try again], above the card below it: the calendar price when the figure has one. An older read trip does not lead past a failed newest list; it shows again once the dates are read again. The line appears only where the board shows the failed read. |
+| Couldn't read (the newest list failed), where the search page shows a failed read | "The flights page didn't load at 16:42 (timed out). Nothing was saved." [Try again], above the card below it: the calendar price when the figure has one. An older read trip does not lead past a failed newest list; it shows again once the dates are read again. The line appears only where the search page shows the failed read. |
 | Calendar price only (no read) | "£388 · Calendar · 3h. Flights not read yet, so there's nothing to book here. [Read flights · free, ~2 min]" |
 | Price gone (the figure is superseded / not seen in the latest run) | the price greyed, "Not seen again · 5d", and [Read flights] |
-| No figure, flights read by hand that yield a trip within the limits | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The board ranks no such dates: it has no figure for them.) |
+| No figure, flights read by hand that yield a trip within the limits | The trip, as the answer card, under "No calendar price for these dates; their flights were read by hand 2h ago." (The search page ranks no such dates: it has no figure for them.) |
 | No figure, flights read by hand that yield no trip within the limits | The matching sentence above with no calendar price: outbounds without returns, no return listed, none within the limits, or read under other limits. A failed read by hand falls to the rows below, under its couldn't-read line. |
 | No figure, every price found is over the journey limit set on the search's page | "Every price found for these dates is over the journey limit set on the search's page." |
-| No figure, an airport pair of these dates not run | The "Not searched" sentence below: a partly searched date pair is not searched, as the board's mark reads it (main spec §6.6 row 2), never "no price". |
+| No figure, an airport pair of these dates not run | The "Not searched" sentence below: a partly searched date pair is not searched, as the search page's mark reads it (main spec §6.6 row 2), never "no price". |
 | No figure, a cell errored | "Google's page for these dates couldn't be read in the latest search. Nothing was saved." It is never worded "no price". |
 | No figure, no price listed | "Google's calendar listed no price for these dates in the latest search. That doesn't mean there are no flights. [Read flights]" |
 | No figure, the sources had no data | "The price sources had no data for these dates in the latest search. That doesn't mean there are no flights." |
@@ -275,18 +275,75 @@ real run after the merge is the check that the address is captured.
 - The main spec's §11 says what the Trip page shows, in a new revision; the Results view's description is removed.
 - The banned-word and main-path-word sweeps pass over the new copy.
 
-## 7. Later stages
+## 7. Stage 2, built, and the later stages
 
-Each gets its own plan, from this design and the mockups, when the previous one has shipped.
+Stage 2 is built and folded into the main spec's revision 70, which governs what is shown; this section keeps the design
+in one place. Stages 3 and 4 each get their own plan, from this design and the mockups, when the previous one has shipped.
 
-- **Stage 2: Trips and Search.** Trips cards: three cheapest read trips each (price as link, label, dates, nights,
-  Out and Back time · changes, ›), one line naming how many dates look lower on the calendar, Search again / Edit,
-  and every card state in the proposal (running with progress and Cancel, nothing found with the reason and fix,
-  never searched, stopped at a limit). New search in a side panel (below the searches on a phone): four fields,
-  where to look (three checkboxes with their cost), More options (journey limit each way, cabin, repeat, rolling
-  dates, name), a one-sentence estimate. Search page: one filter row, Cheapest trips (5, then "Show 10 more"),
-  Lower on the calendar (3, each with Read flights), a calendar with prices printed and a three-item legend, and the
-  folds Price over time, What was searched, Alert. The nav becomes Trips and Settings, with the top bar.
+### 7.1 Stage 2: Trips and Search (`01-searches.html`, `02-search.html`)
+
+**What counts.** One set of rules in `core` decides what every surface says, so a card, a section, the run line, a fold and
+a calendar day never disagree. A *trip* is a date pair whose flights were read: every read pairing figure (an older read trip
+is a trip, shown with its age, never "Not seen again") and a verified figure the latest search saw again. *Flights read* is a
+trip, or a calendar price whose flight list's returns were looked at. A date *looks lower on the calendar* when it has a
+current calendar price whose flights were not read, priced below the cheapest trip of any age (all of them when there is no
+trip). Dates whose trips were left out for the journey limit are counted ("38 dates' trips are over 25h each way"). A read trip
+carries each way's journey time, changes, airlines and arrival day, and a verified trip carries the same from its own result
+row, with its booking, so a trip's price links the same target everywhere.
+
+**Trips.** Each card: the search's name and meta line; run progress with Cancel while it runs (and the previous trips, styled
+as earlier results with their age, "Read by the previous search"); a stopped run's sentence with its fix and Resume; "Dates
+changed since this was last searched"; for a finished search that found nothing, one reason (cancelled or failed, not reached,
+the browser unavailable, couldn't read, the browser off, every date showed no price, prices found but none within the limits)
+with its fix, "Turn on the browser for this search and search again" showing only when the browser is set up and off for this
+search. Otherwise its three cheapest trips (price as the booking link with its label, dates, nights, "Out 07:15 → 17:55 · 10h
+40m · 1 change" and "Back …", ›; no airlines on a card; the pair on a search with more than one origin or destination), and
+one line: "23 dates with flights read; these are the cheapest." and "155 dates look lower on the calendar, from £372 Calendar · 3h,
+flights not read." or, with no trip, "Calendar prices for 2,146 dates, from £372 Calendar · 3h; no flights read yet." Actions:
+All trips and dates, Search again, Edit, and a quiet Remove (with undo).
+
+**The new-search panel** sits beside the cards (below them on a phone): From, To, Leave between, Stay; Where to look, one
+checkbox for each set-up source with its cost ("Google Flights, in your browser · free, takes a while", "Aviasales cache ·
+free, prices from other people's searches, often days old", "SearchApi · uses calls, 91 left"), a source not set up named with
+a link to Settings; More options (the longest journey each way, cabin, Repeat, rolling dates, the name); one estimate sentence
+("About 25 min, free. Then flights are read for the cheapest dates until the 5 cheapest stop changing."); and Search. Repeat is
+Never, Weekly or Other, and a new search may repeat, refused before anything is stored when it would miss a monthly cap. Edit
+is the same form plus a Limits and checks fold.
+
+**The Search page.** A header (breadcrumb, name, meta line with the search's own journey limit, Search again, Edit, Repeat) and
+a run line ("Searched today 16:40–17:02 · calendar prices for 2,146 of 2,184 dates · 23 dates with flights read · what was
+searched"). One filter row: the stay (showing the search's own range when unfiltered), From, To (each all, or one airport) and
+One per week; a journey limit applied from elsewhere shows as a removable chip. **Cheapest trips**: five, then "Show 10 more",
+with the stopping sentence in its lead (every branch of today's wording, "these five" only when five trips show unfiltered).
+**Lower on the calendar**: three, each with its read state ("Flights not read", "Return flights not read", "Flights couldn't be
+read: <reason>") and Read flights where a read would go now, "155 dates in all". Trip rows' › open the Trip page and carry the
+page's filters.
+
+**The calendar** prints one price a day: the cheapest trip's, with a dot, else the lowest current calendar price. A day's mark
+(priced, no price, couldn't read, not reached, not searched) comes from core over its stays; a day that prints a price keeps its
+shade whatever its mark, and hatching is only for days that print none. The key: the heat scale, "● a trip with flights read;
+other prices are calendar prices, not fares", "× couldn't read", "no price (not 'no flights')", "hatched: not searched or not
+reached". Each day is a button named with its price, label and age; arrow keys move between days; month buttons beside swipe at
+375 px. A day opens a panel ("Wed 11 Nov: 12 stays"): trips, calendar prices, and rows saying why a stay has no price, five then
+the rest; a second press on the open day, Escape or Close closes it. A rolling window says "(moves forward each day)".
+
+**Folds** (native, closed by default, opened by a link that asks): *Price over time* (the lowest calendar price of up to six
+runs, "These are calendar prices, not trips with flights read.", Full price history); *What was searched* (the latest run's
+five marks over its whole space, the dates with flights read across every search so far, the thin-coverage line, Full search
+log); *Alert* (off, or the rules that are on in plain words with their cooldown in days; "Alerts watch calendar prices, not
+trips with flights read." only when every listed rule watches calendar prices; Change alerts; "Email isn't set up yet").
+
+**The nav and the top bar.** Two nav items, Trips and Settings, in one row at every width; breadcrumbs on every page below
+them. The top bar's left is one health line ("All working", "<name> needs attention · fix", "<name> failing · fix", "N things
+need you · fix", linking to Settings › System, with the blocked-schedule line among the checks); its right the SearchApi calls
+left and the month's spend; while a search runs, "Searching: <name>". Settings is an interim page of three links until stage 3.
+
+**Gone from the Search page's main path:** the split-flap lettering, rank, sort, the How far, Journey and Airports columns,
+the qualifier lines, "cached from", the per-row flights block, tie lines, the phone card key, Update board, the calendar-gap
+banner (and its route), the 15-entry legend, the readout and the stay-strip overview.
+
+### 7.2 Later stages
+
 - **Stage 3: Settings** (`04-settings.html`): price sources with on/off, keys stored in the database and write-only
   in the UI, SearchApi credit read from its `/me` endpoint, the browser's stopping rule, limits, email (Gmail app
   password or SMTP, send only, a test email), alert rules, and System health. New searches inherit the source
@@ -302,8 +359,9 @@ The operator approved the direction without answering these; each is decided as 
 otherwise:
 
 1. **Booking page address**: recorded (§6.3), and tested by the operator clicking a price.
-2. **SearchApi's job**: off by default; a per-search switch arrives with stage 3. With 38 credits left, checking
-   every search's cheapest trips by default would spend them in a few runs.
+2. **SearchApi's job**: answered by Where to look (§7.1): SearchApi is a checkbox on each search, unticked in a new
+   search, with its calls left beside it; Edit keeps a search's own choice. With 38 credits left, checking every
+   search's cheapest trips by default would spend them in a few runs. Stage 3 adds the install-wide switch.
 3. **The word "Seller"** for a seller's price as Google's booking page lists it, not checked with the seller: kept.
    The tap detail says it wasn't checked with the seller or airline.
 4. **Alerts**: one kind, "email me when a trip with flights read is under £X", from stage 4; the percentage and

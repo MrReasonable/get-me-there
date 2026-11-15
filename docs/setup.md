@@ -102,7 +102,7 @@ Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`),
 password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
 prints it to the terminal only. If scrollback or a shared screen may have kept it,
 `pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app and
-use the new-search form on Searches (From, To, the dates), then press **Search now**; the
+use the new-search panel on Trips (From, To, the dates), then press **Search**; the
 sentence beside the button says what the search will use before you press. A new search runs
 once, when you press the button; nothing runs on a schedule until you add one from the search's
 page (**Repeat weekly…**, which registers the schedule when you press Save). Setup offers to open the browser.
@@ -121,20 +121,25 @@ section 3 for Tailscale and TLS.
 
 ### Your first search, and a search's page
 
-Searches is the first screen: your searches as cards (the route, the dates, the stay, its state
-and the cheapest price found, with its source and age), and the new-search form beside them
-(above them on a phone). **Search now** saves the search and runs it once; the press is the
-confirmation of the figures beside the button, for that run only. A card's **Search again**
-runs a saved search again, **Edit** changes it and **Remove** takes it away (with an Undo for 30
-seconds).
+Trips is the first screen: your searches as cards (the route, the dates, the stay, its state
+and its three cheapest trips, each price a link with its label), and the new-search panel beside
+them (below them on a phone). **Where to look** in the panel has one checkbox for each price
+source you have set up, each with its cost; SearchApi starts unticked. **Search** saves the
+search and runs it once; the press is the confirmation of the figures beside the button, for that
+run only, and **Repeat** (Never, Weekly or Other) in More options schedules it. A card's **Search
+again** runs a saved search again, **Edit** changes it and **Remove** takes it away (with an Undo
+for 30 seconds); while a run goes the card shows its progress and **Cancel**.
 
-A search's page (the card's **See dates**) shows the state of the latest run in one line
-(Searching, Reading flights, Searched, or why it stopped, with Resume or Cancel where they
-apply), the board of the cheapest date pairs, the months overview (its key says "brighter is
-cheaper") and, under the board, the flights read for the cheapest date pairs with a link to open
-the same search in Google Flights. **Repeat weekly…** adds a schedule: it registers when you
-press Save, and the page shows when it next runs. Where the browser worker is not set up, the
-page says "Flight times need the browser worker; set it up in Providers".
+A search's page (the card's name, or **All trips and dates**) shows the state of the latest run
+(its progress and Cancel, or why it stopped, with Resume where it applies), then **Cheapest
+trips** (the trips whose flights were read, five then "Show 10 more", each price a link to the
+booking page or to the same search in Google Flights), **Lower on the calendar** (dates whose
+calendar price is below the cheapest trip but whose flights were not read, with **Read flights**
+where the browser is set up), a calendar of the window (each day prints its cheapest trip's price,
+else its lowest calendar price; pick a day to see its stays) and three folds, Price over time,
+What was searched and Alert. **Repeat weekly…** adds a schedule: it registers when you press
+Save, and the page shows when it next runs. Where the browser worker is not set up, the page says
+"Flight times need the browser worker; set it up in Providers".
 
 ### The commands
 
@@ -347,9 +352,8 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1�
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
 `trial` allowance and scheduled runs leave SearchApi out. On the trial plan new searches
-allow 0 billed calls per run, so a date pair's "Search <cell> for itineraries" (in its detail, opened from the
-Dates view) is unavailable until you raise the
-search's call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one
+allow 0 billed calls per run, so the Trip page's "Check with SearchApi" is unavailable until you raise the
+search's call cap in its Edit page → Limits and checks → Run budget (Max billed calls per run); 6 covers one
 cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
 on `40usd` the app refuses to start with it (exit 78).
 
@@ -529,7 +533,7 @@ On the £0 configuration, replace the `providers` block before importing:
 "providers": { "discovery": ["travelpayouts"], "verification": [], "discoveryRefreshHours": { "travelpayouts": 168 } }
 ```
 
-The form shows the estimate before you press Search now; pressing it is your
+The panel shows the estimate before you press Search; pressing it is your
 confirmation of that cost.
 
 ## 6. The data directory and backups
@@ -743,12 +747,12 @@ section 0.*
 
 ### Status first
 
-The app reports on itself. Open the **Status** view (the nav's last link), or run `pnpm gmt status` (add
+The app reports on itself. Open **Settings › System** (the Status view), or run `pnpm gmt status` (add
 `--only <area>` for one area, `--json` for the report as the app sent it). Both show the same checks, worst first,
 each with a plain summary and what to do about it; in a native install the fix is a `pnpm gmt` command with a
-copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The status bar on every
-view links to it: "Status: 2 failing" when any check fails, the quieter "Status: consent to check" when something is
-worth a look, nothing when nothing needs a look, and "Status: stale, checked 3 min ago" or "Status: app not answering" when the
+copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The health line at the
+top of every view links to it: "All working", "Browser needs attention · fix" or "Browser failing · fix" for one problem,
+"2 things need you · fix" for several, and "Status: stale, checked 3 min ago" or "Status: app not answering" when the
 report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or the app does not answer; with the app
 down it still prints the local facts (with `--json`, a JSON object whose `appAnswering` is false) and says what to try.
 `pnpm gmt update` prints the report at its end but exits on its own steps and the app's health, not on an unrelated
@@ -801,7 +805,7 @@ failing check.
   `curl -u operator http://127.0.0.1:3000/api/health` adds the detail: the database, each
   provider, and the scheduler's job count, next run, last run and `degraded` flag. A
   `degraded` app (scheduled jobs missing, a run stuck past `STUCK_AFTER_HOURS`) keeps serving;
-  the status bar shows it and the log records it. Look at the detail when the newest run in
+  the health line shows it and the log records it. Look at the detail when the newest run in
   History is older than your schedule says it should be.
 - **Logs.** The app writes one JSON object a line; compose keeps 5 files of 10 MB. To follow
   one run: `docker compose logs --no-log-prefix app | jq -R 'fromjson? | select(.executionId == "<id>")'`.
