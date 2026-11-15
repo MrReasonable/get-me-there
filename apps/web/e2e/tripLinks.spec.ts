@@ -6,6 +6,7 @@ import {
   at,
   bucketsOf,
   calendarFig,
+  DATES_SPACE,
   type DatesOptions,
   datesResponse,
   figurePairing,
@@ -22,21 +23,35 @@ import { SMOKE } from './selectors.js';
 import { FIXTURE_SEARCH, TRIP_NOW } from './tripFixtures.js';
 
 // Design 2026-11-08 §5.1–§5.3 (trip-page plan Task 8; Trips and Search Tasks 8 and 9): the Search page's sections, its
-// day panel and the Trips page's cards in a real layout, at 375 px and 1280 px, light and dark, with the longest seller name: nothing scrolls
-// sideways, a row's label opens in the flow, and a price is a link only where it can be booked. The date-pairs, run and
-// cards reads are served by route interception (the fixture provider reads no flights); the search is the one the smoke
-// made.
+// day panel and the Trips page's cards in a real layout, at 375 px and 1280 px, light and dark, with the longest seller
+// name: nothing scrolls sideways, a row's label opens in the flow, and a price is a link only where it can be booked.
+// The date-pairs, run and cards reads are served by route interception (the fixture provider reads no flights) for a
+// search of this spec's own whose window and stays are the served data's.
 
-const ids = z.array(z.object({ id: z.string() }));
+/**
+ * The search these pages are drawn for (Task 9 fix round 1, ruling): its window and stay range are exactly the served
+ * date pairs' (DATES_SPACE: leave 14 Mar – 13 Apr 2027, 10–12 nights, LHR → JFK), so the page's header, leads and rows
+ * agree. Found by name, else saved, so the smoke's own search (14–15 Mar, 10–11 nights) is never the one drawn here.
+ */
+const LAYOUT_SEARCH = {
+  ...FIXTURE_SEARCH,
+  name: 'London → New York (Search page layout)',
+  window: { kind: 'absolute', from: DATES_SPACE.departureFrom, to: DATES_SPACE.departureTo },
+  minNights: DATES_SPACE.minNights,
+  maxNights: DATES_SPACE.maxNights,
+};
+const saved = z.array(z.object({ id: z.string(), name: z.string() }));
 async function searchId(request: APIRequestContext): Promise<string> {
-  const [first] = ids.parse(await (await request.get('/api/definitions')).json());
-  if (first !== undefined) return first.id;
-  const saved = await request.post('/api/definitions', {
-    data: FIXTURE_SEARCH,
+  const mine = saved
+    .parse(await (await request.get('/api/definitions')).json())
+    .find((d) => d.name === LAYOUT_SEARCH.name);
+  if (mine !== undefined) return mine.id;
+  const created = await request.post('/api/definitions', {
+    data: LAYOUT_SEARCH,
     headers: { 'X-Requested-With': 'get-me-there' },
   });
-  expect(saved.ok(), await saved.text()).toBe(true);
-  return z.object({ id: z.string() }).parse(await saved.json()).id;
+  expect(created.ok(), await created.text()).toBe(true);
+  return z.object({ id: z.string() }).parse(await created.json()).id;
 }
 
 let id = '';
