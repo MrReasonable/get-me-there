@@ -27,6 +27,7 @@ export type {
   StopText,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
+export * from './budget/monthlyFit.js';
 export * from './budget/window.js';
 export * from './camoufox/builds.js';
 export * from './camoufox/consentFix.js';

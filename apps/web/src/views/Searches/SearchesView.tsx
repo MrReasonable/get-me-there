@@ -153,7 +153,7 @@ export function SearchesView() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const browserConfigured = providers.data !== undefined && sourceConfigured(providers.data, 'camoufox');
   const side = (
-    <section aria-labelledby="new-search-heading" className="searches-side new-search">
+    <section aria-labelledby="new-search-heading" className="searches-side new-search token-form">
       <h2 id="new-search-heading" ref={headingRef} tabIndex={-1} className="new-search-heading">
         {S.sideHeading}
       </h2>
@@ -205,11 +205,11 @@ export function SearchesView() {
     </section>
   );
   return (
-    <div className="searches-view trips-page">
+    <div className="searches-view token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
       {hasSyntheticPrice(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
-      <div className="trips-head">
-        <h1 className="trips-title">{S.heading}</h1>
+      <div className="token-page-head">
+        <h1 className="token-page-title">{S.heading}</h1>
         <button
           type="button"
           className="trip-btn trip-btn-primary"

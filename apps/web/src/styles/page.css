@@ -1,0 +1,158 @@
+/* A page on the shared tokens (design 2026-11-08 §5; the Trips page, Task 6, and the Edit page, Task 7 fix round 1):
+   the tokens' ground, the mockups' UI face with tabular figures, a centred 1120 px column, and the board world's
+   buttons, plates and notes redrawn on the tokens inside it, light and dark. Layered as components, as the board's
+   own rules are, and imported after them (styles.css), so these win a tie with the board's while a page's own rules and
+   the utilities still win. */
+@layer components {
+  .token-page {
+    color-scheme: light;
+    color: var(--t-ink);
+    /* the ground is the body's (the tokens' page colour); the column is centred, the view's own gutter is the page's */
+    padding: 4px 0 64px;
+    margin: 0 auto;
+    /* the mockup's UI face with tabular figures: the board's faces (flap lettering, the slashed zero) stay off the cards */
+    font:
+      400 15px / 1.45 ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      sans-serif;
+    font-variant-numeric: tabular-nums;
+    max-width: 1120px;
+    overflow-wrap: anywhere;
+    /* the older board-world parts inside (the search form, Search again, Remove, Save) read these context tokens */
+    --fg: var(--t-ink);
+    --fg-2: var(--t-muted);
+    --fg-3: var(--t-muted);
+    --ink: var(--t-ink);
+    --ink-2: var(--t-muted);
+    --ink-3: var(--t-muted);
+    --line: var(--t-line);
+    --line-strong: var(--t-muted);
+    --bad: var(--t-bad);
+    --warn: var(--t-warn);
+    /* the crumbs above the page's heading (Edit) on the same tokens */
+    --crumb-ink: var(--t-muted);
+    --crumb-link: var(--t-accent);
+  }
+  @media (prefers-color-scheme: dark) {
+    .token-page {
+      color-scheme: dark;
+    }
+  }
+  /* the page's ground is the tokens' page colour, not the board's steel, so the panel sits on its own colour */
+  body:has(.token-page) {
+    background-color: var(--t-bg);
+    background-image: none;
+  }
+  .token-page [data-cost],
+  .token-page .figure {
+    font-family: inherit;
+    font-weight: inherit;
+    letter-spacing: 0;
+  }
+  .token-page a {
+    color: var(--t-accent);
+    text-decoration: none;
+  }
+  .token-page a:hover {
+    text-decoration: underline;
+  }
+  .token-page :is(a, button, summary, input, select):focus-visible {
+    outline: 2px solid var(--t-focus);
+    outline-offset: 2px;
+  }
+  .token-page-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .token-page-title {
+    font-size: 24px;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  /* The board world's buttons, plates and notes, redrawn on the tokens inside this page */
+  .token-page .btn {
+    min-height: 40px;
+    padding: 0 14px;
+    font: 600 14px / 1.1 var(--font-ui);
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--t-ink);
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 8px;
+    box-shadow: none;
+  }
+  .token-page .btn:hover {
+    background: var(--t-surface);
+    border-color: var(--t-muted);
+  }
+  .token-page .btn:disabled {
+    color: var(--t-muted);
+    background: var(--t-surface);
+    border-style: dashed;
+  }
+  /* a press waiting for its estimate: still focusable, its reason beside it; quiet, never the board's steel */
+  .token-page .btn:not(.btn-primary)[aria-disabled="true"] {
+    color: var(--t-muted);
+    background: var(--t-surface);
+    border-style: dashed;
+    border-color: var(--t-muted);
+    cursor: not-allowed;
+  }
+  .token-page .btn-primary {
+    color: var(--t-accent-ink);
+    background: var(--t-accent);
+    border-color: var(--t-accent);
+  }
+  .token-page .btn-primary:hover {
+    background: var(--t-accent-hover);
+    border-color: var(--t-accent-hover);
+  }
+  .token-page .btn-primary:disabled {
+    color: var(--t-accent-ink);
+    background: var(--t-accent);
+    border-style: solid;
+    cursor: progress;
+  }
+  .token-page .btn-danger {
+    color: var(--t-bad);
+    background: var(--t-surface);
+    border-color: var(--t-bad);
+  }
+  .token-page .btn-quiet {
+    color: var(--t-accent);
+    background: transparent;
+    border-color: transparent;
+    padding: 0 8px;
+  }
+  .token-page .btn-quiet:hover {
+    background: transparent;
+    text-decoration: underline;
+  }
+  .token-page .plate {
+    color: var(--t-ink);
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 10px;
+    box-shadow: none;
+  }
+  .token-page .warn-text {
+    color: var(--t-warn);
+  }
+  .token-page .bad-text {
+    color: var(--t-bad);
+  }
+  .token-page .text-fg-2 {
+    color: var(--t-muted);
+  }
+}

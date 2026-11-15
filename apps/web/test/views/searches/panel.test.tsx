@@ -105,12 +105,14 @@ const more = () => {
 const source = (name: RegExp) => screen.getByRole('checkbox', { name });
 const BROWSER = /^Google Flights, in your browser · free, takes a while$/;
 const CACHE = /^Aviasales cache · free, prices from other people's searches, often days old$/;
-const SEARCHAPI = /^SearchApi · up to/;
+const SEARCHAPI = /^SearchApi · uses calls/;
 
 describe('the panel: what is in view (Ruling 13)', () => {
   it('outside More options only From, To, Leave from, Leave by, Stay, Where to look and Search', async () => {
     serve();
     renderPanel();
+    // the calls left arrive with the budget read
+    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName(/9,385 left$/));
     const form = press().closest('form');
     if (form === null) throw new Error('no form');
     const fold = more();
@@ -131,7 +133,7 @@ describe('the panel: what is in view (Ruling 13)', () => {
       PLAN_COPY.longest,
       `${N.source.camoufox} · ${N.sourceNote.camoufox}`,
       `${N.source.travelpayouts} · ${N.sourceNote.travelpayouts}`,
-      expect.stringMatching(/^SearchApi · up to 2,000 calls a run/),
+      expect.stringMatching(/^SearchApi · uses calls, 9,385 left$/),
       N.search,
     ]);
     expect(fold).not.toHaveAttribute('open');
@@ -196,11 +198,9 @@ describe('the panel: what is in view (Ruling 13)', () => {
     const left = searchApiCallsLeft(searchApiMonth(), allSources());
     expect(left?.left).toBe(9385);
     const bar = await screen.findByRole('region', { name: COPY.topBar.limitsLabel });
-    // the bar words it ungrouped (Task 4's words), the panel grouped as its other counts: the same figure
-    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9385 of 10000 calls left this month'));
-    await waitFor(() =>
-      expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · up to 2,000 calls a run, 9,385 left'),
-    );
+    // the same figure, grouped alike in both
+    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9,385 of 10,000 calls left this month'));
+    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · uses calls, 9,385 left'));
   });
 });
 

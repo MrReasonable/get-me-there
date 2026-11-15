@@ -1,8 +1,16 @@
 /* =====================================================================================================================
    The shared trip and calendar rows (design 2026-11-08 §5.2, mockups 01-searches and 02-search; Ruling 20): list items
-   in a grid at a desktop, two-column cards under 720 px. They read the shared tokens (styles/theme.css), light and dark.
+   in a grid where their list is wide, two-column cards where it is under 720 px. They read the shared tokens
+   (styles/theme.css), light and dark.
    The price's link and label are trip.css's (`.row-price`). Spec §4's CSP blocks inline styles: nothing is set from markup.
    ===================================================================================================================== */
+
+/* Every list of rows is the container its rows lay out by (Trips and Search Task 7 fix round 1): a card beside the
+   new-search panel at 900 px, a Search page section and a day panel each take the layout their own width allows, from
+   this one set of rules, whatever the window's width */
+:where(ul, ol):has(> .trip-row) {
+  container: rows / inline-size;
+}
 
 .trip-row {
   display: grid;
@@ -108,7 +116,7 @@
   white-space: nowrap;
 }
 
-@media (max-width: 720px) {
+@container rows (max-width: 720px) {
   .trip-row {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "dates pc" "out out" "back go";

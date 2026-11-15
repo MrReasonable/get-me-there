@@ -42,17 +42,17 @@ export function withSource(draft: Draft, id: Source, on: boolean, refreshHours: 
   };
 }
 
-/** A source's cost words: free ones say so; SearchApi says its calls a run (the draft's cap) and the window's left. */
-function noteOf(id: Source, draft: Draft, callsLeft: CallsLeft | null): string {
-  if (id === 'searchapi') return N.searchapiNote(draft.budget.maxCalls, callsLeft?.left ?? null);
+/** A source's cost words: free ones say so; SearchApi that it uses calls, and how many its window has left. */
+function noteOf(id: Source, callsLeft: CallsLeft | null): string {
+  if (id === 'searchapi') return N.searchapiNote(callsLeft?.left ?? null);
   return N.sourceNote[id];
 }
 
 /**
  * "Where to look" (design 2026-11-08 Ruling 13, mockup 01): one checkbox per source the install has set up, each with
  * its cost — "Google Flights, in your browser · free, takes a while", "Aviasales cache · free, prices from other
- * people's searches, often days old", "SearchApi · up to N calls a run, M left" (N the draft's per-run call cap, M the
- * top bar's figure from `searchApiCallsLeft`). A source that is not set up has no checkbox; one sentence names it and
+ * people's searches, often days old", "SearchApi · uses calls, M left" (M the top bar's figure from
+ * `searchApiCallsLeft`; once it is ticked the estimate sentence states the run's own SearchApi calls). A source that is not set up has no checkbox; one sentence names it and
  * links to Settings. The new-search panel and Edit share it, so Edit shows the search's own sources.
  */
 export function WhereToLook({
@@ -82,7 +82,7 @@ export function WhereToLook({
             }
           />
           <span>
-            {N.source[id]} <span className="source-note">· {noteOf(id, draft, callsLeft)}</span>
+            {N.source[id]} <span className="source-note">· {noteOf(id, callsLeft)}</span>
           </span>
         </label>
       ))}

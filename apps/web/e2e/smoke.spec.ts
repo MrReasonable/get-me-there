@@ -574,14 +574,42 @@ test('"+ New search" moves focus to From in the panel', async ({ page }) => {
   await expect(page.getByRole('combobox', { name: PLAN_COPY.from })).toBeInViewport();
 });
 
-test('the Edit page shares the form, with Limits and checks, at 1280px', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const id = await searchId(page);
-  await page.goto(`/?view=definitions&edit=${id}`);
-  await expect(page.getByRole('group', { name: COPY.newSearch.whereToLook })).toBeVisible();
-  await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
-  await page.getByText(COPY.newSearch.limitsHeading, { exact: true }).click();
-  await expect(page.getByLabel(COPY.maxCalls)).toBeVisible();
-  await expectNoSidewaysScroll(page);
-  await page.screenshot({ path: 'test-results/panel-shots/edit-1280-light.png', fullPage: true });
-});
+// Task 7 fix round 1: the Edit page is the panel's form on the same tokens and face, at 375 and 1280 px, light and dark
+for (const width of [375, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const)
+    test(`the Edit page shares the form, with Limits and checks, at ${width}px, ${colorScheme}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showEverySource(page);
+      const id = await searchId(page);
+      await page.goto(`/?view=definitions&edit=${id}`);
+      await expect(page.getByRole('group', { name: COPY.newSearch.whereToLook })).toBeVisible();
+      await expect(page.getByRole('navigation', { name: SMOKE.crumbs })).toBeVisible();
+      // the tokens' ground and face, not the board's steel and flap lettering
+      const heading = page.getByRole('heading', { level: 1 });
+      expect(await heading.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
+      const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundImage);
+      expect(ground).toBe('none');
+      const date = page.locator('#w-from');
+      const [ink, field] = await date.evaluate((el) => [
+        getComputedStyle(el).color,
+        getComputedStyle(el).backgroundColor,
+      ]);
+      expect(ink).not.toBe(field);
+      if (colorScheme === 'dark') expect(field).not.toBe('rgb(255, 255, 255)');
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/panel-shots/edit-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+      await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
+      await page.getByText(COPY.newSearch.limitsHeading, { exact: true }).click();
+      await expect(page.getByLabel(COPY.maxCalls)).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/panel-shots/edit-${width}-${colorScheme}-limits.png`,
+        fullPage: true,
+      });
+    });

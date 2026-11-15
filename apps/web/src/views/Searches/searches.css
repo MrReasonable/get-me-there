@@ -3,147 +3,6 @@
    them from 900 px (sticky); narrower it stacks in the DOM's order, the cards first (Ruling 13). Spec
    §4's CSP blocks inline styles: nothing here is set from markup. */
 @layer components {
-  .trips-page {
-    color-scheme: light;
-    color: var(--t-ink);
-    /* the ground is the body's (the tokens' page colour); the column is centred, the view's own gutter is the page's */
-    padding: 4px 0 64px;
-    margin: 0 auto;
-    /* the mockup's UI face with tabular figures: the board's faces (flap lettering, the slashed zero) stay off the cards */
-    font:
-      400 15px / 1.45 ui-sans-serif,
-      system-ui,
-      -apple-system,
-      "Segoe UI",
-      Roboto,
-      "Helvetica Neue",
-      sans-serif;
-    font-variant-numeric: tabular-nums;
-    max-width: 1120px;
-    overflow-wrap: anywhere;
-    /* the older board-world parts inside (the new-search form, Search again, Remove) read these context tokens */
-    --fg: var(--t-ink);
-    --fg-2: var(--t-muted);
-    --fg-3: var(--t-muted);
-    --ink: var(--t-ink);
-    --ink-2: var(--t-muted);
-    --ink-3: var(--t-muted);
-    --line: var(--t-line);
-    --line-strong: var(--t-muted);
-    --bad: var(--t-bad);
-    --warn: var(--t-warn);
-  }
-  @media (prefers-color-scheme: dark) {
-    .trips-page {
-      color-scheme: dark;
-    }
-  }
-  /* the page's ground is the tokens' page colour, not the board's steel, so the panel sits on its own colour */
-  body:has(.trips-page) {
-    background-color: var(--t-bg);
-    background-image: none;
-  }
-  .trips-page [data-cost],
-  .trips-page .figure {
-    font-family: inherit;
-    font-weight: inherit;
-    letter-spacing: 0;
-  }
-  .trips-page a {
-    color: var(--t-accent);
-    text-decoration: none;
-  }
-  .trips-page a:hover {
-    text-decoration: underline;
-  }
-  .trips-page :is(a, button, summary, input, select):focus-visible {
-    outline: 2px solid var(--t-focus);
-    outline-offset: 2px;
-  }
-  .trips-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 18px;
-  }
-  .trips-title {
-    font-size: 24px;
-    font-weight: 650;
-    line-height: 1.2;
-    letter-spacing: -0.01em;
-  }
-
-  /* The board world's buttons, plates and notes, redrawn on the tokens inside this page */
-  .trips-page .btn {
-    min-height: 40px;
-    padding: 0 14px;
-    font: 600 14px / 1.1 var(--font-ui);
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--t-ink);
-    background: var(--t-surface);
-    border: 1px solid var(--t-line);
-    border-radius: 8px;
-    box-shadow: none;
-  }
-  .trips-page .btn:hover {
-    background: var(--t-surface);
-    border-color: var(--t-muted);
-  }
-  .trips-page .btn:disabled {
-    color: var(--t-muted);
-    background: var(--t-surface);
-    border-style: dashed;
-  }
-  .trips-page .btn-primary {
-    color: var(--t-accent-ink);
-    background: var(--t-accent);
-    border-color: var(--t-accent);
-  }
-  .trips-page .btn-primary:hover {
-    background: var(--t-accent-hover);
-    border-color: var(--t-accent-hover);
-  }
-  .trips-page .btn-primary:disabled {
-    color: var(--t-accent-ink);
-    background: var(--t-accent);
-    border-style: solid;
-    cursor: progress;
-  }
-  .trips-page .btn-danger {
-    color: var(--t-bad);
-    background: var(--t-surface);
-    border-color: var(--t-bad);
-  }
-  .trips-page .btn-quiet {
-    color: var(--t-accent);
-    background: transparent;
-    border-color: transparent;
-    padding: 0 8px;
-  }
-  .trips-page .btn-quiet:hover {
-    background: transparent;
-    text-decoration: underline;
-  }
-  .trips-page .plate {
-    color: var(--t-ink);
-    background: var(--t-surface);
-    border: 1px solid var(--t-line);
-    border-radius: 10px;
-    box-shadow: none;
-  }
-  .trips-page .warn-text {
-    color: var(--t-warn);
-  }
-  .trips-page .bad-text {
-    color: var(--t-bad);
-  }
-  .trips-page .text-fg-2 {
-    color: var(--t-muted);
-  }
-
   .searches-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
@@ -177,8 +36,8 @@
     }
   }
 
-  /* The new-search panel (Ruling 13, mockup 01 #new): a plain card on the tokens, its fields drawn on them too, so the
-     inputs, chips, list and checkboxes read in light and dark (the Edit plate keeps the board world's fields) */
+  /* The new-search panel (Ruling 13, mockup 01 #new): a plain card; its fields are the token form's (definitions.css),
+     here only what makes the panel narrow and quiet */
   .new-search {
     padding: 16px 18px 18px;
     background: var(--t-surface);
@@ -213,16 +72,6 @@
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 12px;
   }
-  .new-search :is(.field-label, .def-group-title, .where-to-look-title, .def-fold-legend) {
-    margin: 0;
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.3;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--t-ink);
-  }
   .new-search .def-fold-group {
     padding-top: 0;
     border-top: 0;
@@ -236,123 +85,17 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .new-search .hint,
-  .new-search .text-fg-2 {
-    font-size: 12.5px;
-    color: var(--t-muted);
-  }
   .new-search .where-to-look {
     margin-top: 2px;
     padding-top: 12px;
     border-top: 1px solid var(--t-line);
   }
-  .new-search .source-check {
-    font-size: 14px;
-  }
-  .new-search .source-note,
-  .new-search .source-unset {
-    font-size: 13px;
-    color: var(--t-muted);
-  }
-  .new-search input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--t-accent);
-  }
-  .new-search .input {
-    padding: 0 10px;
-    font-family: inherit;
-    font-size: 15px;
-    color: var(--t-ink);
-    background: var(--t-surface);
-    border: 1px solid var(--t-line);
-    border-radius: 8px;
-    box-shadow: none;
-  }
-  .new-search .leave-date .input {
-    width: 100%;
-  }
-  .new-search .input[aria-invalid="true"] {
-    border: 2px solid var(--t-bad);
-  }
-  /* the airport chips and their list, as mockup 01's chips */
-  .new-search .airport-chip {
-    gap: 6px;
-    padding-left: 10px;
-    color: var(--t-ink);
-    background: var(--t-sunk);
-    border: 1px solid var(--t-line);
-    border-radius: 999px;
-    box-shadow: none;
-  }
-  .new-search .airport-chip-code {
-    font-family: inherit;
-    font-size: 13.5px;
-    font-weight: 650;
-    letter-spacing: 0;
-  }
-  .new-search .airport-chip-name {
-    font-size: 13.5px;
-    color: var(--t-ink);
-  }
-  .new-search .airport-chip-remove {
-    color: var(--t-muted);
-    border-left: 0;
-    border-radius: 0 999px 999px 0;
-  }
-  .new-search .airport-chip-remove:hover {
-    color: var(--t-ink);
-    background: transparent;
-  }
-  .new-search :is(.combo-list, .combo-message) {
-    color: var(--t-ink);
-    background: var(--t-surface);
-    border-radius: 8px;
-    box-shadow:
-      0 0 0 1px var(--t-line),
-      0 8px 24px rgb(0 0 0 / 0.12);
-  }
-  .new-search .combo-option[aria-selected="true"] {
-    background: var(--t-sunk);
-    border-left-color: var(--t-accent);
-  }
-  .new-search .combo-option-metro {
-    border-bottom-color: var(--t-line);
-  }
-  .new-search .combo-code {
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: 650;
-    letter-spacing: 0;
-  }
-  .new-search .combo-meta {
-    color: var(--t-muted);
-  }
-  .new-search .def-errors {
-    background: var(--t-surface);
-    border-color: var(--t-bad);
-    border-radius: 8px;
-  }
-  /* More options: the mockup's accent summary with a small arrow, no rules around it */
+  /* More options: the mockup's accent summary with no rules around it */
   .new-search .def-more {
     border: 0;
   }
   .new-search .fold > summary {
-    gap: 4px;
     padding: 0;
-    font-weight: 600;
-    color: var(--t-accent);
-  }
-  .new-search .fold > summary::before {
-    content: "▸";
-    width: 16px;
-    height: auto;
-    font: inherit;
-    color: var(--t-muted);
-    background: none;
-  }
-  .new-search .fold[open] > summary::before {
-    content: "▾";
   }
   .new-search .estimate-line {
     font-size: 13.5px;
@@ -361,21 +104,7 @@
   .new-search-form > .btn {
     width: 100%;
   }
-  .new-search .repeat-other {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-    font-size: 13px;
-    color: var(--t-muted);
-  }
-  .new-search .btn-text {
-    color: var(--t-accent);
-  }
   .searches-list {
-    /* the cards' rows lay out by the list's own width, not the window's: beside the panel at 900 px a card is narrower
-       than a phone's window is wide */
-    container: cards / inline-size;
     display: grid;
     gap: 16px;
     margin: 0;
@@ -511,66 +240,18 @@
 }
 
 /* Unlayered, so it wins over the sentence's own bold utility: the panel's estimate reads as mockup 01's quiet line */
-.new-search .estimate-line p {
+.new-search .estimate-line :is(p, li) {
+  font-size: 13.5px;
   font-weight: 400;
 }
 
 /* Unlayered, like the rows' own grid (rows.css), so these win over it */
 /* Beside the 340 px panel a card is about 724 px wide at 1280 px: these minima (as the mockup's) keep each trip row,
-   its › included, inside its card. A narrower list (a phone, or beside the panel from 900 px to about 1140 px) takes
-   the rows' own two-column layout, as rows.css draws it under 720 px, by the list's width (Ruling 13) */
-@container cards (min-width: 720px) {
+   its › included, inside its card; a card narrower than that (a phone, or beside the panel at 900 px) takes the rows'
+   own two-column layout (rows.css, by the row list's width) */
+@container rows (min-width: 721px) {
   .tcard .trip-row {
     grid-template-columns: 130px minmax(150px, 1.3fr) 52px minmax(110px, 1fr) minmax(110px, 1fr) 24px;
-  }
-}
-@container cards (max-width: 719px) {
-  .tcard .trip-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "dates pc" "out out" "back go";
-    padding: 12px 16px;
-  }
-  .tcard .trip-row-head {
-    display: none;
-  }
-  .tcard .trip-row .row-dates {
-    grid-area: dates;
-  }
-  .tcard .trip-row .row-price {
-    grid-area: pc;
-    align-items: flex-end;
-  }
-  .tcard .trip-row .row-nights {
-    display: none;
-  }
-  .tcard .trip-row .row-nights-inline {
-    display: inline;
-  }
-  .tcard .trip-row .row-out {
-    grid-area: out;
-  }
-  .tcard .trip-row .row-back {
-    grid-area: back;
-  }
-  .tcard .trip-row .row-go {
-    grid-area: go;
-    align-self: end;
-  }
-  .tcard .trip-row .row-leg-tag {
-    position: static;
-    display: inline-block;
-    width: 38px;
-    height: auto;
-    overflow: visible;
-    clip-path: none;
-    color: var(--t-muted);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-  /* more specific than the left alignment below, which is a desktop card's */
-  .tcard .trip-row .row-price .book-link {
-    text-align: right;
   }
 }
 /* A card's price reads "£412 ↗" at every width (mockup 01); the booking words stay in the link's accessible name */
@@ -587,10 +268,21 @@
   font-size: 13px;
 }
 
-/* A card's price and its label, left-aligned (the board's rule puts the label on the amount's right) */
+/* A card's price and its label, left-aligned on a wide card (the board's rule puts the label on the amount's right);
+   right-aligned on a narrow one, as mockup 01's phone */
 .tcard .row-price > .price-label:not([open]) {
   margin-inline-start: 0;
 }
-.tcard .row-price .book-link {
-  text-align: left;
+@container rows (min-width: 721px) {
+  .tcard .row-price .book-link {
+    text-align: left;
+  }
+}
+@container rows (max-width: 720px) {
+  .tcard .row-price {
+    align-items: flex-end;
+  }
+  .tcard .row-price .book-link {
+    text-align: right;
+  }
 }

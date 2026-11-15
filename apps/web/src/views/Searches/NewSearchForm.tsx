@@ -1,4 +1,4 @@
-import { budgetScopeLabel } from '@gmt/core';
+import { monthlyCapsMissed } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
@@ -48,28 +48,17 @@ export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
 }
 
 /**
- * Whether repeating would go over a monthly limit: the draft's budget fit (at its schedule's runs a month) misses a
- * provider's month cap, the rule the api refuses a schedule by (`schedule_over_budget`, routes/definitions.ts
- * `validateForSave`), so the press can refuse before anything is sent, in Repeat weekly's words.
- */
-export function overMonthlyLimit(fit: BudgetFit, providers: ProvidersResponse): boolean {
-  const months = new Set(
-    providers.providers.map((p) => budgetScopeLabel({ kind: 'provider-month', providerId: p.providerId })),
-  );
-  return fit.perScope.some((s) => months.has(s.scope) && !s.fits);
-}
-
-/**
  * The new-search panel's form (spec rev 55 §11 "The new-search form and Search now"; design 2026-11-08 Rulings 13–14):
  * From, To, Leave from and Leave by, Stay and Where to look, the rest under More options; the estimate is asked for
  * `ESTIMATE_DEBOUNCE_MS` after the last change and shown as one sentence above the press. **The press is the
  * confirmation** of exactly the figures beside it: `POST /definitions/create-and-start` with the form (its schedule
  * when Repeat says Weekly, in the install's time zone), the sentence's shown runnable totals and a fresh request key. A
  * search set to repeat that would go over a monthly limit is refused with Repeat weekly's words and the monthly figure,
- * and nothing is sent; the api refuses it too (`schedule_over_budget`) before storing anything. The new search's page
- * then opens (`?view=dates&def=<id>`); a refused start keeps the saved search and opens its page with `refused=<code>`,
- * where the refusal is worded (the refusal itself is left in the query cache for the page's "it resets on <date>"). A
- * 422 keeps the form with its field errors; any other failure says "Couldn't save the search" beside the button.
+ * and nothing is sent, by core's `monthlyCapsMissed`, the rule the api refuses it by too (`schedule_over_budget`). The
+ * new search's page then opens (`?view=dates&def=<id>`); a refused start keeps the saved search and opens its page with
+ * `refused=<code>`, where the refusal is worded (the refusal itself is left in the query cache for the page's "it resets
+ * on <date>"). A 422 keeps the form with its field errors; any other failure says "Couldn't save the search" beside the
+ * button.
  */
 export function NewSearchForm({
   providers,
@@ -142,8 +131,10 @@ export function NewSearchForm({
         ids={IDS}
         onPress={(covers) => {
           if (form.body === null || sending.current) return;
-          const fit = est.estimate?.budgetFit ?? null;
-          if (repeats && fit !== null && overMonthlyLimit(fit, providers)) {
+          // why: Ruling 14 — core's one rule, the api's refusal too: a repeating search over a monthly cap is not sent
+          const fit = est.estimate?.budgetFit;
+          const ids = providers.providers.map((p) => p.providerId);
+          if (repeats && fit !== undefined && monthlyCapsMissed(fit.perScope, ids).length > 0) {
             setOverFit(fit);
             setFailure(COPY.repeatWeekly.overBudget);
             return;

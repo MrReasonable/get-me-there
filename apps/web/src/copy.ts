@@ -230,9 +230,9 @@ export const COPY = {
     limitsLabel: 'Limits',
     /** The window in use: a monthly plan's month, or a trial's one-off allowance (`searchApiCallsLeft`). */
     callsLeftMonth: (left: number, cap: number) =>
-      `SearchApi: ${left} of ${cap} ${noun(cap, 'call', 'calls')} left this month`,
+      `SearchApi: ${thousands(left)} of ${thousands(cap)} ${noun(cap, 'call', 'calls')} left this month`,
     callsLeftTrial: (left: number, cap: number) =>
-      `SearchApi: ${left} of ${cap} trial ${noun(cap, 'call', 'calls')} left`,
+      `SearchApi: ${thousands(left)} of ${thousands(cap)} trial ${noun(cap, 'call', 'calls')} left`,
     spent: (used: string, cap: string) => `Spent ${used} of ${cap} this month`,
     spentNoCap: (used: string) => `Spent ${used} this month`,
     nearCap: 'near cap',
@@ -563,8 +563,8 @@ export const COPY = {
       camoufox: 'free, takes a while',
       travelpayouts: "free, prices from other people's searches, often days old",
     },
-    searchapiNote: (perRun: number, left: number | null) =>
-      `up to ${thousands(perRun)} ${noun(perRun, 'call', 'calls')} a run${left === null ? '' : `, ${thousands(left)} left`}`,
+    // why: fix round 1 — the run budget's cap is not what a run uses; the sentence states the run's own calls once ticked
+    searchapiNote: (left: number | null) => `uses calls${left === null ? '' : `, ${thousands(left)} left`}`,
     /** A source not set up on this install, by the name the sentence gives it (lower case: the sentence capitalises). */
     sourceUnset: {
       camoufox: 'the browser',

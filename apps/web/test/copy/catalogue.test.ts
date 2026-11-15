@@ -98,7 +98,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'newSearch.estimateFailed': ['database is locked'],
   'newSearch.saveFailed': ['database is locked'],
   // Trips and Search Task 7 (Rulings 13–14): Where to look and Repeat
-  'newSearch.searchapiNote': [2000, 9385],
+  'newSearch.searchapiNote': [9385],
   'newSearch.notSetUp': [['the browser', 'SearchApi']],
   'newSearch.repeatOther': ['Every day at 06:30 (Europe/London)'],
   'editSearch.heading': ['Birmingham → Frankfurt'],

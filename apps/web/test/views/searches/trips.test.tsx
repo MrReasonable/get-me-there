@@ -384,6 +384,18 @@ describe('earlier trips on a running card (Review Focus 2)', () => {
     expect(card).not.toHaveTextContent('will replace it');
   });
 
+  it('rows lay out by their list’s width, not the window’s: one set of container rules (Task 7 fix round 1)', () => {
+    const read = (path: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), path), 'utf8');
+    const rows = read('../../../src/components/rows/rows.css');
+    expect(rows).toMatch(/:where\(ul, ol\):has\(> \.trip-row\) \{\s*container: rows \/ inline-size;/);
+    expect(rows).toContain('@container rows (max-width: 720px)');
+    expect(rows).not.toMatch(/@media[^{]*width/);
+    // the cards keep only their desktop minima, by the same container; no copy of the two-column rules
+    const cards = read('../../../src/views/Searches/searches.css');
+    expect(cards).not.toMatch(/@media[^{]*width[^{]*\{[^}]*\.trip-row/);
+    expect(cards).not.toContain('grid-template-areas: "dates pc"');
+  });
+
   it('the earlier-result styling is in no media query, so it applies at every width', () => {
     const css = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../../../src/components/rows/rows.css'),

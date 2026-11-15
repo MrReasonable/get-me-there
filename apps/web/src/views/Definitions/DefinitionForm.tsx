@@ -157,7 +157,7 @@ export function DefinitionForm({
 
   const pending = save.isPending || saveAndSearch.isPending;
   return (
-    <form onSubmit={(e) => e.preventDefault()} className="plate plate-pad def-form text-[15px]">
+    <form onSubmit={(e) => e.preventDefault()} className="plate plate-pad def-form token-form text-[15px]">
       <div className="def-main">
         {saved.notices.length > 0 ? (
           <ul aria-label={COPY.definitionNotices} className="def-notices">
