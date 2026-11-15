@@ -4,14 +4,44 @@ import { useCallback, useId, useMemo } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { CalendarRow } from '../../components/rows/CalendarRow.js';
 import { COPY } from '../../copy.js';
-import { unavailableWords, useBoardFlights } from '../../lib/flightReads.js';
+import { pairKey } from '../../lib/flightLines.js';
+import { type BoardFlights, unavailableWords, useBoardFlights } from '../../lib/flightReads.js';
 import { type FigurePair, LOWER_SHOWN } from './board.js';
-import { pairKey } from './flightLines.js';
 
 const P = COPY.searchPage;
 
 /** The calendar's region id: "See all on the calendar" lands there (Task 9 keeps it on the new calendar). */
 export const CALENDAR_ID = 'calendar';
+
+/**
+ * The flight lists of the lower dates the section shows (Ruling 20: Read flights where a read would go now), owned by
+ * the page so its words outlive the section (`ReadSaid`) and the no-trip lead knows whether flights can be read here. A
+ * read that lands calls the page's re-read, so the date leaves Lower on the calendar and shows as a trip.
+ */
+export function useLowerFlights(definition: DefinitionResponse, lower: readonly FigurePair[]): BoardFlights {
+  const qc = useQueryClient();
+  const keys = lower.slice(0, LOWER_SHOWN).map(pairKey).join(',');
+  const pages = useMemo(() => (keys === '' ? [] : [keys.split(',')]), [keys]);
+  const limits = useMemo(() => flightLimitsOf(definition.constraints), [definition.constraints]);
+  // why: a landed read made the date a trip on the server; the page's read says so once read again
+  const onLanded = useCallback(
+    () => void qc.invalidateQueries({ queryKey: ['date-pairs', definition.id] }),
+    [qc, definition.id],
+  );
+  return useBoardFlights(definition.id, pages, limits, onLanded);
+}
+
+/**
+ * What a pressed read ends in (a refusal in words, or that it ended), in a polite status the page keeps mounted in one
+ * place whatever the sections show, and never hidden while empty, so its words are announced when they arrive.
+ */
+export function ReadSaid({ flights }: { flights: BoardFlights }) {
+  return (
+    <p role="status" className="search-read-said" data-testid="read-said">
+      {flights.said?.words ?? ''}
+    </p>
+  );
+}
 
 export interface LowerOnCalendarProps {
   definition: DefinitionResponse;
@@ -20,36 +50,21 @@ export interface LowerOnCalendarProps {
   lower: readonly FigurePair[];
   /** The page has a trip, so these are "lower" than it; without one they are the lowest calendar prices. */
   hasTrip: boolean;
+  /** The shown dates' flight lists and the read on demand (`useLowerFlights`, the page's). */
+  flights: BoardFlights;
 }
 
 /**
  * Design 2026-11-08 §5.2 (mockup 02), Rulings 5 and 20: the calendar prices below the cheapest trip whose flights were not
  * read, cheapest first: three as shared calendar rows, each saying what is known of its flights (`readStateWords`) with
  * "Read flights" where a read would go now (the flight lists' `readNow`), the count of them all, and "See all on the
- * calendar". A pressed read is said in a polite status (its refusal in words, or that it ended); when it lands the page
- * reads its dates again, so the date leaves this list and shows as a trip (the status stays, should it take the last
- * one). Where flight lists cannot be read here one line says why, and no row offers a read.
+ * calendar". Where flight lists cannot be read here one line says why, and no row offers a read. Nothing without a
+ * lower date.
  */
-export function LowerOnCalendar({ definition, data, lower, hasTrip }: LowerOnCalendarProps) {
+export function LowerOnCalendar({ definition, data, lower, hasTrip, flights }: LowerOnCalendarProps) {
   const id = useId();
-  const qc = useQueryClient();
   const rows = lower.slice(0, LOWER_SHOWN);
-  const keys = rows.map(pairKey).join(',');
-  const pages = useMemo(() => (keys === '' ? [] : [keys.split(',')]), [keys]);
-  const limits = useMemo(() => flightLimitsOf(definition.constraints), [definition.constraints]);
-  // why: a landed read made the date a trip on the server; the page's read says so once read again
-  const onLanded = useCallback(
-    () => void qc.invalidateQueries({ queryKey: ['date-pairs', definition.id] }),
-    [qc, definition.id],
-  );
-  const flights = useBoardFlights(definition.id, pages, limits, onLanded);
-  const said = (
-    <p role="status" className="search-section-sub" data-testid="read-said">
-      {flights.said?.words ?? ''}
-    </p>
-  );
-  // why: a read that lands may take the last lower date away; its words stay said where the section was
-  if (rows.length === 0) return said;
+  if (rows.length === 0) return null;
   const search = {
     id: definition.id,
     cabin: definition.cabin,
@@ -96,7 +111,6 @@ export function LowerOnCalendar({ definition, data, lower, hasTrip }: LowerOnCal
           {unavailableWords(flights.meta.unavailableReason)}
         </p>
       ) : null}
-      {said}
     </section>
   );
 }

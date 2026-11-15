@@ -14,8 +14,8 @@ import {
   sameFlightLimits,
   selectOutbound,
 } from '@gmt/core';
-import type { FlightList } from '../../api/types.js';
-import type { COPY } from '../../copy.js';
+import type { FlightList } from '../api/types.js';
+import type { COPY } from '../copy.js';
 
 // Spec rev 56 §6.9 "Flight lists and the date pair's figure" and §11 "Flights" (WP21 Task 21.7): the pure side of a
 // search's pairing section. Which pairing a list read and what its booking read kept (core's one rule set, as the api

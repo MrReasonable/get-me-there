@@ -258,6 +258,31 @@ describe('RunProgress on the page (Ruling 11; Review Focus 2)', () => {
     expect(screen.getByRole('status', { name: P.stateLabel })).toHaveTextContent(P.stateKind.stopped);
   });
 
+  it('a completed run with a one-date child run still going says the child line (Ruling 11; fix round 1)', async () => {
+    serveRun({
+      status: 'completed',
+      startedAt: '2026-10-14T12:00:00.000Z',
+      finishedAt: '2026-10-14T13:00:00.000Z',
+    });
+    renderDates({
+      body: {
+        ...workedDates(),
+        executions: [
+          runSummary(),
+          runSummary({ id: 'child-1', isChild: true, status: 'running', finishedAt: null }),
+        ],
+      },
+    });
+    const state = await screen.findByTestId('state-line');
+    await waitFor(() =>
+      expect(state).toHaveTextContent(COPY.runProgress.childRun(COPY.barStatusName.running)),
+    );
+    // the parent finished: no bar, no Cancel, and its run line stays
+    expect(within(state).queryByRole('progressbar')).toBeNull();
+    expect(within(state).queryByRole('button', { name: COPY.runProgress.cancel })).toBeNull();
+    expect(await screen.findByTestId('dates-run')).toHaveTextContent(/^Searched today 13:00–14:00 · /);
+  });
+
   it('dates changed since the latest run: the card’s own judgement, in count-free words', async () => {
     server.use(serveCards([{ ...wholeCard(), spaceChangedSince: true }]));
     renderDates({ body: workedDates() });

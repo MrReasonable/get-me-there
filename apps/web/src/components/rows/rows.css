@@ -14,7 +14,8 @@
 
 .trip-row {
   display: grid;
-  grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 1fr) minmax(130px, 1fr) 28px;
+  /* the price column holds "Find on Google Flights ↗" on one line (Task 8 fix round 1); the other minima give it room */
+  grid-template-columns: 180px minmax(150px, 1.3fr) 60px minmax(110px, 1fr) minmax(110px, 1fr) 28px;
   gap: 4px 14px;
   align-items: center;
   padding: 11px 18px;
@@ -40,7 +41,13 @@
   letter-spacing: 0.04em;
 }
 .trip-row-cal {
-  grid-template-columns: 150px minmax(170px, 1.3fr) 60px minmax(130px, 2fr) auto;
+  grid-template-columns: 180px minmax(150px, 1.3fr) 60px minmax(110px, 2fr) auto;
+}
+/* A calendar price is no link: bold in the body ink, as a trip's price is bold in the link's (mockup 02) */
+.trip-row-cal .row-price .book-price {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--t-ink);
 }
 .trip-row .row-price {
   display: flex;
@@ -50,6 +57,10 @@
 }
 .trip-row .book-link {
   color: var(--t-accent);
+}
+/* a long seller host may wrap, but never leaves "↗" alone on its line */
+.trip-row .book-link .book-words {
+  text-wrap: pretty;
 }
 .trip-row .book-link:hover {
   color: var(--t-accent-hover);

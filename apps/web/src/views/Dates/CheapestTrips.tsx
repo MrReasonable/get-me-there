@@ -4,12 +4,12 @@ import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { TripRow, TripRowHead } from '../../components/rows/TripRow.js';
 import { COPY } from '../../copy.js';
 import { verifiedDetailOf } from '../../lib/bookingTarget.js';
+import { hoursText } from '../../lib/flightLines.js';
 import { CLEARED_FILTERS, datesPatch } from '../../state/datesState.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { type FigurePair, nextPage } from './board.js';
 import { ConfirmLine } from './ConfirmLine.js';
 import { confirmStepGoing } from './confirmWords.js';
-import { hoursText } from './flightLines.js';
 
 const P = COPY.searchPage;
 const S = COPY.searchesView;

@@ -283,13 +283,7 @@ export function Overview({ definition, data, model, state, ringed, lit, onLight 
       <div className="frame space-y-4">
         <div className="ov-key grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)] lg:items-start">
           <Legend scale={scale} counts={counts} />
-          <Readout
-            id={readoutId}
-            cell={activeCell}
-            airportPairs={data.scope.airportPairs}
-            journeyLimit={state.journey}
-            notes={definition.destinationNotes}
-          />
+          <Readout id={readoutId} cell={activeCell} notes={definition.destinationNotes} />
         </div>
         {openMonth !== null && openBand !== undefined && openBand !== null ? (
           <button type="button" className="btn btn-quiet min-h-11" onClick={() => setOpen(null)}>

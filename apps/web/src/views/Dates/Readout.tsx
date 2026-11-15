@@ -44,9 +44,6 @@ export function Readout({
 }: {
   id: string;
   cell: CellView | null;
-  /** Unread since "how far checked" went (Ruling 21); the calendar still passes them until Task 9 replaces it. */
-  airportPairs: number;
-  journeyLimit: number | null;
   notes: DefinitionResponse['destinationNotes'];
 }) {
   const lead = cell?.model.lead ?? null;

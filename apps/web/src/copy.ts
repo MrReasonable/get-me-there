@@ -44,6 +44,8 @@ const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))
 /** A small count in words ("five"), as mockup 02 says the trips the reading stopped at; digits past ten. */
 const SMALL_NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const countWord = (n: number): string => SMALL_NUMBERS[n] ?? thousands(n);
+/** Review Focus 3's first sentence, said alone where flight lists can't be read for the search (Task 8 fix round 1). */
+const NO_TRIP_LEAD = 'No flights read yet for these dates.';
 
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
@@ -670,8 +672,8 @@ export const COPY = {
     // Cheapest trips (Rulings 4 and 22)
     cheapestHeading: 'Cheapest trips',
     cheapestLead: 'Flights read for these dates.',
-    noTrip:
-      'No flights read yet for these dates. Read flights on a date below to see trips with flights read.',
+    noTrip: `${NO_TRIP_LEAD} Read flights on a date below to see trips with flights read.`,
+    noTripLead: NO_TRIP_LEAD,
     noPriceInFilters: 'No date in these filters has a price found so far.',
     stillSearching: 'No prices yet: the search is still going.',
     overLimit: (n: number, limit: string) =>

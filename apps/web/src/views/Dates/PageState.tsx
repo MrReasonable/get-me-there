@@ -14,9 +14,9 @@ const RUN_KINDS: ReadonlySet<StateLine['kind']> = new Set(['searching', 'reading
  * Spec rev 55 §11 "State line", Ruling 11: what a search's page says about its latest run under the run line. A refused
  * Search now (while the search has no run); the never-run state with Search now, or the way to set up a source; "Dates
  * changed since this was last searched"; and, while a run goes or once it stopped, `RunProgress`: the bar, "Reading the
- * calendar …", "Reading flights for the cheapest dates …", Cancel, the stop's sentence and fix, and Resume. A hidden
- * polite status says only the kind of state, so a poll that moves a count announces nothing new (the stop's sentence
- * is announced by `RunProgress` itself).
+ * calendar …", "Reading flights for the cheapest dates …", Cancel, the stop's sentence and fix, and Resume; under a
+ * finished parent, its line for a one-date child run still going. A hidden polite status says only the kind of state,
+ * so a poll that moves a count announces nothing new (the stop's sentence is announced by `RunProgress` itself).
  */
 export function PageState({
   definition,
@@ -32,6 +32,17 @@ export function PageState({
 }) {
   const { cancel, resume } = useExecutionActions();
   const pending = cancel.isPending ? 'cancel' : resume.isPending ? 'resume' : null;
+  // why: Ruling 11: a one-date child run still going is said under any finished parent (RunProgress words it alone)
+  const run =
+    progress !== null && line !== null && (RUN_KINDS.has(line.kind) || progress.childRun !== null) ? (
+      <RunProgress
+        run={progress}
+        onCancel={() => cancel.mutate(progress.id)}
+        onResume={() => resume.mutate(progress.id)}
+        pending={pending}
+        failure={cancel.error?.message ?? resume.error?.message ?? null}
+      />
+    ) : null;
   const said =
     refused !== null ? null : line === null ? '' : line.kind === 'never' ? line.text : P.stateKind[line.kind];
   return (
@@ -42,16 +53,13 @@ export function PageState({
         ) : line === null ? null : line.kind === 'never' ? (
           <NeverRun definition={definition} line={line} />
         ) : line.kind === 'changed' ? (
-          <p className="search-state">{line.text}</p>
-        ) : progress !== null && RUN_KINDS.has(line.kind) ? (
-          <RunProgress
-            run={progress}
-            onCancel={() => cancel.mutate(progress.id)}
-            onResume={() => resume.mutate(progress.id)}
-            pending={pending}
-            failure={cancel.error?.message ?? resume.error?.message ?? null}
-          />
-        ) : null}
+          <>
+            <p className="search-state">{line.text}</p>
+            {run}
+          </>
+        ) : (
+          run
+        )}
       </div>
       {said === null ? null : (
         <p role="status" aria-label={P.stateLabel} className="sr-only">

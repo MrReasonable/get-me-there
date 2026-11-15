@@ -295,6 +295,30 @@ for (const width of WIDTHS)
       await expect(read).toHaveCount(3);
       expect((await read.first().boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
       await expect(page.locator(SMOKE.runLine)).toContainText('calendar prices for');
+      // fix round 1 (B): where the booking words show (≥720 px) they sit on one line with their arrow
+      if (width >= 720) {
+        const lines = await trips
+          .locator('.book-words')
+          .evaluateAll((all) => all.map((w) => w.getClientRects().length));
+        expect(lines.length).toBeGreaterThan(0);
+        expect(
+          lines.every((n) => n === 1),
+          JSON.stringify(lines),
+        ).toBe(true);
+      }
+      // fix round 1 (D): a lower date's price is bold in the body ink, never a link
+      const price = lower.locator(SMOKE.calendarRow).first().locator('.book-price');
+      await expect(price.locator('a')).toHaveCount(0);
+      const look = await price.evaluate((el) => {
+        const row = el.closest('.trip-row');
+        return {
+          weight: Number(getComputedStyle(el).fontWeight),
+          color: getComputedStyle(el).color,
+          ink: row === null ? '' : getComputedStyle(row).color,
+        };
+      });
+      expect(look.weight).toBeGreaterThanOrEqual(600);
+      expect(look.color).toBe(look.ink);
       // each row's box stays inside the window, at every width
       for (const row of await page.locator(`${SMOKE.tripRow}, ${SMOKE.calendarRow}`).all()) {
         const box = await row.boundingBox();

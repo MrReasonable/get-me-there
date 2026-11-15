@@ -146,6 +146,15 @@
   .search-section-sub:empty {
     display: none;
   }
+  /* a read's words: never hidden while empty (a live region taken out of the tree is not announced when it fills) */
+  .search-read-said {
+    min-height: 0;
+    font-size: 13.5px;
+    color: var(--t-muted);
+  }
+  .search-read-said:not(:empty) {
+    margin-top: 12px;
+  }
   .search-card {
     background: var(--t-surface);
     border: 1px solid var(--t-line);

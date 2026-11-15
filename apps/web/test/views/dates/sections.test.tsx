@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { asIata, type ConfirmSummary } from '@gmt/core';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
@@ -132,6 +134,14 @@ describe('Cheapest trips (Rulings 4, 20 and 22; mockup 02)', () => {
     expect(lead(filtered)).not.toContain('these five');
   });
 
+  it('"these five" still applies when the stay names the search\'s own range (no filter)', async () => {
+    serve({ pairs: trips(5) });
+    serveRun({ status: 'completed', flights: flights(summary({ confirmed: 5 })) });
+    renderDates({ search: '?view=dates&def=def-0001&d.nights=10-21' });
+    const section = await findTrips();
+    await waitFor(() => expect(lead(section)).toMatch(/nothing cheaper than these five\.$/));
+  });
+
   it('"these five" never when fewer than five trips show', async () => {
     serve({ pairs: trips(4) });
     serveRun({ status: 'completed', flights: flights(summary({ confirmed: 5 })) });
@@ -221,7 +231,9 @@ describe('Cheapest trips (Rulings 4, 20 and 22; mockup 02)', () => {
 
   it('Review Focus 3: calendar prices and no trip: "No flights read yet…", and nothing reads as "no flights"', async () => {
     serve({ pairs: { [at('2027-03-14', 10)]: pricedPair(cal(37_200)) } });
+    server.use(serveFlightLists((dep, ret) => flightPair(dep, ret)));
     renderDates();
+    await within(await findLower()).findByRole('button', { name: /^Read flights for/ });
     const section = await findTrips();
     expect(lead(section)).toBe(
       'No flights read yet for these dates. Read flights on a date below to see trips with flights read.',
@@ -403,6 +415,11 @@ describe('Read flights on a calendar row (spec rev 55 §8.1; Ruling 20)', () => 
     const button = await within(lower).findByRole('button', {
       name: 'Read flights for Mon 15 Mar → Thu 25 Mar',
     });
+    // fix round 1 (Important 1): the read's status is one node, mounted before the press and never hidden while empty
+    const said = screen.getByTestId('read-said');
+    expect(said).toHaveAttribute('role', 'status');
+    expect(said).toBeEmptyDOMElement();
+    expect(lower.contains(said)).toBe(false);
     landed = true;
     await user.click(button);
     expect(posted).toEqual([
@@ -414,7 +431,31 @@ describe('Read flights on a calendar row (spec rev 55 §8.1; Ruling 20)', () => 
     await waitFor(() => expect(tripRows(section)).toHaveLength(2));
     expect(rowText(tripRows(section)[0] ?? section)).toContain('Mon 15 Mar → Thu 25 Mar');
     expect(screen.queryByRole('region', { name: P.lowerHeading })).toBeNull();
-    expect(await screen.findByText('Flights read for 15 → 25 Mar')).toBeInTheDocument();
+    expect(await screen.findByText('Flights read for 15 → 25 Mar')).toBe(said);
+    // the same element node said it: it stayed mounted while the last lower date left
+    expect(screen.getByTestId('read-said')).toBe(said);
+  });
+
+  it("the read's status is never display:none (a hidden live region is not announced when it fills)", () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/views/Dates/dates.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]*)\{([^}]*)\}/g)].filter(([, sel]) =>
+      sel?.includes('search-read-said'),
+    );
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, sel, body] of rules) expect(body, sel).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+  });
+
+  it("Minor 1 ruling: where flight lists can't be read here, the no-trip lead keeps only its first sentence", async () => {
+    serve({ ...lowBody, pairs: { [at('2027-03-15', 10)]: pricedPair(cal(30_000), {}, 1) } });
+    const r = renderDates({ def: ONE_PAIR });
+    // the default flight lists: not available for this search
+    await within(await findLower()).findByTestId('flights-unavailable');
+    await waitFor(async () => expect(lead(await findTrips())).toBe(P.noTripLead));
+    r.unmount();
+    server.use(serveFlightLists((dep, ret) => flightPair(dep, ret)));
+    renderDates({ def: ONE_PAIR });
+    await within(await findLower()).findByRole('button', { name: /^Read flights for/ });
+    expect(lead(await findTrips())).toBe(P.noTrip);
   });
 
   it('while a read goes the pressed row says so and the other rows wait', async () => {
@@ -448,8 +489,9 @@ describe('Read flights on a calendar row (spec rev 55 §8.1; Ruling 20)', () => 
     const { user } = renderDates({ def: ONE_PAIR });
     const lower = await findLower();
     await user.click(await within(lower).findByRole('button', { name: /^Read flights for/ }));
-    expect(await within(lower).findByText(words)).toBeInTheDocument();
-    expect(lower).not.toHaveTextContent('refused');
+    await waitFor(() => expect(screen.getByTestId('read-said')).toHaveTextContent(words));
+    expect(screen.getByTestId('read-said')).toHaveAttribute('role', 'status');
+    expect(document.body).not.toHaveTextContent('refused');
   });
 
   it('no button on a date a read would not go for now (readNow false)', async () => {
@@ -476,6 +518,7 @@ describe("the page's words (the plan's main-path words, over the header, the fil
     ['superseded', /\bsuperseded\b/i],
     ['billed calls', /\bbilled calls?\b/i],
     ['on-demand', /\bon-demand\b/i],
+    ['trips you can book', /\btrips you can book\b/i],
   ];
   const swept = () =>
     [

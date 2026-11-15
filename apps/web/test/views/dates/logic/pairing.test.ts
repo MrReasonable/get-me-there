@@ -3,7 +3,7 @@ import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import { describe, expect, it } from 'vitest';
 import type { FlightList } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
-import { pairingOf, readDoneWords, returnNote } from '../../../../src/views/Dates/pairing.js';
+import { pairingOf, readDoneWords, returnNote } from '../../../../src/lib/pairing.js';
 import {
   flightList,
   listedFlight,

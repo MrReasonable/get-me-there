@@ -4,8 +4,8 @@ import { ApiError } from '../api/client.js';
 import { type FlightReadRequest, useFlightLists, useFlightRead } from '../api/flights.js';
 import type { FlightListsResponse } from '../api/types.js';
 import { COPY } from '../copy.js';
-import { datesShort, type FlightPair, pairKey } from '../views/Dates/flightLines.js';
-import { readDoneWords } from '../views/Dates/pairing.js';
+import { datesShort, type FlightPair, pairKey } from './flightLines.js';
+import { readDoneWords } from './pairing.js';
 
 // Spec rev 55 §8.1 "Reading one date pair's flights", §11 (Ruling 21: moved here from the search page's flights block,
 // beside its users, the Search page's "Lower on the calendar" and the Trip page): the flight lists of the dates a page

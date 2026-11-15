@@ -138,7 +138,7 @@ function pairingOf(pence: number): NonNullable<DatePairFigure['pairing']> {
   };
 }
 
-/** A price for date pair `i`; `seed` changes the whole order, so a second read re-ranks every row. */
+/** A price for date pair `i`; `seed` changes the whole order. */
 function priceOf(i: number, seed: number): number {
   // why: a multiplicative hash over £300–£799 in whole pounds; another seed moves every date pair's rank
   return 30_000 + ((i * 7_919 + seed * 104_729) % 500) * 100;
@@ -416,12 +416,10 @@ export function resultsBody(c: PerfCase): string {
   );
 }
 
-/** The running parent run; `tick` changes its progress, which the Dates view re-reads on (spec §11 Run landing). */
-export function executionBody(c: PerfCase, tick: number): string {
+/** The running parent run, ten cells from done: the page polls it as it would a real one. */
+export function executionBody(c: PerfCase): string {
   const total = c.days * (c.maxNights - c.minNights + 1) * c.origins.length * c.destinations.length;
-  // why: the run still has ten cells to search, and each tick searches one more, so every tick is a progress change
-  // the Dates view's re-read sees (spec §11 Run landing), whatever the case's figures
-  const priced = total - 10 + Math.min(10, tick);
+  const priced = total - 10;
   return JSON.stringify(
     apiContract.executionResponseSchema.parse({
       id: PERF_EXECUTION_ID,
@@ -445,15 +443,15 @@ export function executionBody(c: PerfCase, tick: number): string {
           total,
         },
       ],
-      budget: [usage('execution-calls', 1 + tick, 2000), usage('execution-free-calls', 1 + tick, 2000)],
+      budget: [usage('execution-calls', 1, 2000), usage('execution-free-calls', 1, 2000)],
       estimate: estimate(total),
       ledger: {
-        calls: 1 + tick,
+        calls: 1,
         costMicroGbp: 0,
         costPence: 0,
-        tiles: 1 + tick,
+        tiles: 1,
         cacheHits: 0,
-        perProvider: [{ providerId: 'fixture', stage: 'discovery', calls: 1 + tick, costMicroGbp: 0 }],
+        perProvider: [{ providerId: 'fixture', stage: 'discovery', calls: 1, costMicroGbp: 0 }],
       },
       parityBreak: false,
       overrun: false,
@@ -467,12 +465,10 @@ export function executionBody(c: PerfCase, tick: number): string {
 
 /**
  * Serves a case's bodies through the browser's route interception: the definition, providers, results, the running
- * execution (its progress from `state.tick`) and the date pairs (`state.datePairs`, which a test may swap for a
- * re-read). Any other api path answers 404 and is recorded in `state.unknown`.
+ * execution and the date pairs (`state.datePairs`). Any other api path answers 404 and is recorded in `state.unknown`.
  */
 export async function servePerfCase(page: Page, c: PerfCase) {
-  const bodies = { first: datePairsBody(c, 0), second: datePairsBody(c, 1) };
-  const state = { datePairs: bodies.first, tick: 0, unknown: new Set<string>() };
+  const state = { datePairs: datePairsBody(c, 0), unknown: new Set<string>() };
   const json = (body: string) => ({ status: 200, contentType: 'application/json', body });
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -481,8 +477,7 @@ export async function servePerfCase(page: Page, c: PerfCase) {
     if (path === `/api/definitions/${PERF_DEFINITION_ID}/date-pairs`)
       return route.fulfill(json(state.datePairs));
     if (path === `/api/definitions/${PERF_DEFINITION_ID}/results`) return route.fulfill(json(resultsBody(c)));
-    if (path === `/api/executions/${PERF_EXECUTION_ID}`)
-      return route.fulfill(json(executionBody(c, state.tick)));
+    if (path === `/api/executions/${PERF_EXECUTION_ID}`) return route.fulfill(json(executionBody(c)));
     state.unknown.add(path);
     return route.fulfill({
       status: 404,
@@ -490,5 +485,5 @@ export async function servePerfCase(page: Page, c: PerfCase) {
       body: JSON.stringify({ error: { code: 'not_found', message: 'not served by the performance test' } }),
     });
   });
-  return { bodies, state };
+  return { state };
 }

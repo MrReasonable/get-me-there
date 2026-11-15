@@ -59,6 +59,17 @@ describe('the filter row (Ruling 16)', () => {
     expect(within(row()).getByRole('combobox', { name: P.to })).toBeInTheDocument();
   });
 
+  it('every airport named one by one (an old link) reads as every airport: one option of each name', async () => {
+    renderDates({ body: workedDates(), search: '?view=dates&def=def-0001&d.from=LGW,LHR' });
+    await findTrips();
+    const from = within(row()).getByRole('combobox', { name: P.from });
+    expect(from).toHaveValue('');
+    await waitFor(() => {
+      const names = [...from.querySelectorAll('option')].map((o) => o.textContent);
+      expect(names).toEqual(['Heathrow, Gatwick', 'Heathrow', 'Gatwick']);
+    });
+  });
+
   it('is operable by keyboard: One per week by Space, From by its select', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findTrips();
@@ -71,7 +82,17 @@ describe('the filter row (Ruling 16)', () => {
     expect(url().get('d.from')).toBeNull();
   });
 
-  it('a stay applies in the browser, with no request, to both sections', async () => {
+  it("with no stay filter the fields show the search's own range (mockup 02: 10 – 21)", async () => {
+    renderDates({ body: workedDates() });
+    await findTrips();
+    expect([stay('min'), stay('max')].map((f) => (f instanceof HTMLInputElement ? f.value : null))).toEqual([
+      '10',
+      '21',
+    ]);
+    expect(url().get('d.nights')).toBeNull();
+  });
+
+  it('narrowing the stay applies in the browser, with no request, to both sections', async () => {
     const { user, requests, client } = renderDates({
       body: {
         pairs: {
@@ -82,7 +103,9 @@ describe('the filter row (Ruling 16)', () => {
       },
     });
     await findLower();
+    await user.clear(stay('min'));
     await user.type(stay('min'), '11');
+    await user.clear(stay('max'));
     await user.type(stay('max'), '12');
     expect(url().get('d.nights')).toBe('11-12');
     expect(
@@ -92,14 +115,27 @@ describe('the filter row (Ruling 16)', () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("a stay equal to the search's own range is no filter: nothing goes in the URL", async () => {
+    const { user } = renderDates({ body: workedDates(), search: '?view=dates&def=def-0001&d.nights=11-12' });
+    await findTrips();
+    await user.clear(stay('min'));
+    await user.type(stay('min'), '10');
+    await user.clear(stay('max'));
+    await user.type(stay('max'), '21');
+    expect(url().get('d.nights')).toBeNull();
+  });
+
   it('a reversed stay is explained beside the fields and not applied', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findTrips();
+    await user.clear(stay('min'));
     await user.type(stay('min'), '12');
+    await user.clear(stay('max'));
     await user.type(stay('max'), '10');
     expect(stay('max')).toHaveAccessibleDescription(P.stayInvalid);
     expect(stay('max')).toHaveAttribute('aria-invalid', 'true');
-    expect(url().get('d.nights')).toBeNull();
+    // the last range it could apply stays (12 to 21, typed on the way); 12 to 10 never reaches the URL
+    expect(url().get('d.nights')).toBe('12-21');
   });
 
   it("From refetches the scope: a date whose best figure is LGW still shows its price, LHR's, with From = LHR", async () => {
@@ -144,11 +180,10 @@ describe('the filter row (Ruling 16)', () => {
   it('back and forward set the typed stay from the URL, half-typed text included', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findTrips();
+    const values = () =>
+      [stay('min'), stay('max')].map((f) => (f instanceof HTMLInputElement ? f.value : null));
     act(() => updateSearchParams({ 'd.nights': '11-12' }, 'push'));
-    expect([stay('min'), stay('max')].map((f) => (f instanceof HTMLInputElement ? f.value : null))).toEqual([
-      '11',
-      '12',
-    ]);
+    expect(values()).toEqual(['11', '12']);
     // half-typed text the filter can't apply yet (11 to 5) is replaced too, never left beside another filter
     await user.clear(stay('max'));
     await user.type(stay('max'), '5');
@@ -157,32 +192,32 @@ describe('the filter row (Ruling 16)', () => {
     act(() => window.history.back());
     await act(() => popped);
     expect(url().get('d.nights')).toBeNull();
-    expect([stay('min'), stay('max')].map((f) => (f instanceof HTMLInputElement ? f.value : null))).toEqual([
-      '',
-      '',
-    ]);
+    // back to no filter: the search's own range again
+    expect(values()).toEqual(['10', '21']);
   });
 
   it('typing a stay keeps the text as typed while the URL follows it', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findTrips();
+    await user.clear(stay('min'));
     await user.type(stay('min'), '011');
+    await user.clear(stay('max'));
     await user.type(stay('max'), '12');
     expect(url().get('d.nights')).toBe('11-12');
     expect(stay('min')).toHaveValue('011');
   });
 
-  it("the empty state's Clear filters empties the typed stay too", async () => {
+  it("the empty state's Clear filters puts the search's own range back in the fields", async () => {
     const { user } = renderDates({
       body: { destinations: ['JFK'] },
       search: '?view=dates&def=def-0001&d.to=JFK&d.nights=10-10',
     });
     const trips = await findTrips();
-    expect(stay('min')).toHaveValue('10');
+    expect(stay('max')).toHaveValue('10');
     await user.click(within(trips).getByRole('button', { name: COPY.clearFilters }));
     expect([url().get('d.nights'), url().get('d.to')]).toEqual([null, null]);
-    expect(stay('min')).toHaveValue('');
-    expect(stay('max')).toHaveValue('');
+    expect(stay('min')).toHaveValue('10');
+    expect(stay('max')).toHaveValue('21');
   });
 });
 

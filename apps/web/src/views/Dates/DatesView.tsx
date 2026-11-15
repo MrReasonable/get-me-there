@@ -24,12 +24,12 @@ import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '.
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
 import { nothingFound, nothingFoundText } from '../Searches/cardWords.js';
-import { type BoardModel, boardModel, shownCount } from './board.js';
+import { type BoardModel, boardModel, type FigurePair, shownCount } from './board.js';
 import { CheapestTrips, type NoTrip } from './CheapestTrips.js';
 import { CoverageSection } from './CoverageSection.js';
 import { DatesHeader } from './DatesHeader.js';
-import { Filters } from './Filters.js';
-import { CALENDAR_ID, LowerOnCalendar } from './LowerOnCalendar.js';
+import { Filters, isOwnStay } from './Filters.js';
+import { CALENDAR_ID, LowerOnCalendar, ReadSaid, useLowerFlights } from './LowerOnCalendar.js';
 import { Overview } from './OverviewGrid.js';
 import { IDLE, onProgress, onTerminal, onTimer, type Reread } from './refresh.js';
 import { NoSearch, TooManyCells } from './States.js';
@@ -38,6 +38,7 @@ import './dates.css';
 const D = COPY.datesView;
 const P = COPY.searchPage;
 const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+const NO_ROWS: readonly FigurePair[] = [];
 
 /** A clock and a timer the run re-reads go through; tests inject both (WP19 §0: no fixed waits, injected clocks). */
 export interface RereadClock {
@@ -79,7 +80,14 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   const params = useSearchParams();
   // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened
   useEffect(() => writeLastSearch(definition.id), [definition.id]);
-  const state = useMemo(() => parseDatesState(params, definition), [params, definition]);
+  // why: fix round 1 (A): a stay equal to the search's own range (an old link) is no filter
+  const state = useMemo(() => {
+    const parsed = parseDatesState(params, definition);
+    const n = parsed.nights;
+    return n !== null && isOwnStay(n, { min: definition.minNights, max: definition.maxNights })
+      ? { ...parsed, nights: null }
+      : parsed;
+  }, [params, definition]);
   // why: spec rev 55 §11 URLs — a refused Search now opens the new search's page with `refused=<code>`; a value that is
   // no refusal code is ignored, never an error
   const refused = refusalOf(params.get('refused'));
@@ -125,6 +133,10 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
     [shown, options],
   );
   const tripsShown = model === null ? 0 : shownCount(model.trips.length, presses);
+  const lowerFlights = useLowerFlights(definition, model?.lower ?? NO_ROWS);
+  // why: fix round 1 (Minor 1 ruling): the no-trip lead offers a read only once the flight lists say one can be made
+  // here (a search that reads no flight lists, or before they answer, keeps its first sentence alone)
+  const canRead = lowerFlights.meta?.available === true;
   useEffect(() => {
     // why: WP19 §6: the performance test measures from the response mark to this one, after the header and both
     // sections commit, and again after a filter change or "Show 10 more"
@@ -172,16 +184,20 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
             run={run}
             runActive={runActive}
             filtered={filtersActive(state)}
-            noTrip={noTripOf(model, state, runActive, card)}
+            noTrip={noTripOf(model, state, runActive, card, canRead)}
           />
           <LowerOnCalendar
             definition={definition}
             data={data}
             lower={model.lower}
             hasTrip={model.trips.length > 0}
+            flights={lowerFlights}
           />
         </>
       )}
+      {/* why: one place, mounted whatever the sections show, so a read's words are announced (a landed read may take
+      Lower on the calendar away) */}
+      <ReadSaid flights={lowerFlights} />
       {data !== null && model !== null ? (
         <div id={CALENDAR_ID} className="search-calendar">
           <Overview
@@ -207,7 +223,7 @@ function refusalOf(v: string | null): StartRefusalCode | null {
 
 /**
  * What "Cheapest trips" says with no trip (Review Focus 3, Ruling 8), the first that applies: calendar prices below, so
- * "No flights read yet for these dates…"; the filters leave no price; the search is still going; else the card's
+ * "No flights read yet for these dates…" (its first sentence alone where flight lists can't be read here); the filters leave no price; the search is still going; else the card's
  * reason the search found nothing ("No prices were found. That isn't the same as no flights." when it names none).
  */
 function noTripOf(
@@ -215,9 +231,10 @@ function noTripOf(
   state: DatesUiState,
   runActive: boolean,
   card: SearchCard | null,
+  canRead: boolean,
 ): NoTrip | null {
   if (model.trips.length > 0) return null;
-  if (model.lower.length > 0) return { text: P.noTrip, clear: false };
+  if (model.lower.length > 0) return { text: canRead ? P.noTrip : P.noTripLead, clear: false };
   if (filtersActive(state)) return { text: P.noPriceInFilters, clear: true };
   if (runActive) return { text: P.stillSearching, clear: false };
   const found = card === null ? null : nothingFound(card);

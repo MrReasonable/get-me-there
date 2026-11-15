@@ -1,7 +1,7 @@
 import type { ListedFlight } from '@gmt/core';
-import type { FlightListsResponse } from '../../api/types.js';
-import type { COPY } from '../../copy.js';
-import { formatIsoDateShort, formatMinutes } from '../../format.js';
+import type { FlightListsResponse } from '../api/types.js';
+import type { COPY } from '../copy.js';
+import { formatIsoDateShort, formatMinutes } from '../format.js';
 
 // Spec rev 55 §11 "Flights" (WP20 Task 20.10): the words a flight read is said in, kept beside their users once the
 // search page's flights block went (design 2026-11-08 Ruling 21): the key a date pair's list is asked by, the dates of

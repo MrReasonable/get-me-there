@@ -24,9 +24,9 @@ import { COPY } from '../../copy.js';
 import { formatIsoDateShort, formatWeekday, londonParts } from '../../format.js';
 import { rowBookingTarget, syntheticProvenance } from '../../lib/bookingTarget.js';
 import { figureLabelKind, labelDetail } from '../../lib/figureLabel.js';
+import { carriersText, hoursText } from '../../lib/flightLines.js';
+import { type PairingView, pairingOf } from '../../lib/pairing.js';
 import { instantMs } from '../../lib/time.js';
-import { carriersText, hoursText } from '../Dates/flightLines.js';
-import { type PairingView, pairingOf } from '../Dates/pairing.js';
 import type { CardState } from './cardState.js';
 
 // Design 2026-11-08 §6.1 (trip-page plan Task 7): the pure side of the Trip page. Which trip the card shows, with its

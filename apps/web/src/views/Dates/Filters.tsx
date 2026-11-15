@@ -2,12 +2,12 @@ import type { Iata } from '@gmt/core';
 import { useId, useState } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
+import { hoursText } from '../../lib/flightLines.js';
 import { type DatesUiState, datesPatch } from '../../state/datesState.js';
 import { nightsRange } from '../../state/parse.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { type AirportDetails, useAirportDetails } from '../Definitions/airports.js';
 import { airportLabel } from '../Searches/cardWords.js';
-import { hoursText } from './flightLines.js';
 
 const P = COPY.searchPage;
 
@@ -25,25 +25,32 @@ const apply = (s: Partial<DatesUiState>) => updateSearchParams(datesPatch(s), 'r
 export function Filters({ definition, state }: { definition: DefinitionResponse; state: DatesUiState }) {
   const id = useId();
   const airports = useAirportDetails([...definition.origins, ...definition.destinations]);
+  // why: fix round 1 (A): with no stay filter the fields show the search's own range, as mockup 02's "10 – 21"; a range
+  // equal to it is no filter, so nothing goes in the URL
+  const own = { min: definition.minNights, max: definition.maxNights };
+  const shown = state.nights ?? own;
   // why: typed text is held here until it is a value the URL can carry; a half-typed "1" of "14" never filters
-  const [stay, setStay] = useState({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
+  const [stay, setStay] = useState({ min: textOf(shown.min), max: textOf(shown.max) });
   // why: the row stays mounted for the page's life, so a URL change made outside it (back and forward, a link, the empty
   // state's Clear filters) must reach the typed text, or the fields disagree with the filter applied. The text is
   // replaced only when it doesn't already say the URL's value, so the operator's own edit (which wrote the URL) is never
   // rewritten mid-typing. React's "adjust state while rendering" pattern: no effect, so no frame shows the stale text.
-  const urlStay = stayKey(state.nights?.min, state.nights?.max);
+  const urlStay = stayKey(shown.min, shown.max);
   const [seenStay, setSeenStay] = useState(urlStay);
   if (seenStay !== urlStay) {
     setSeenStay(urlStay);
-    if (typedStayKey(stay.min, stay.max) !== urlStay)
-      setStay({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
+    if (typedStayKey(stay.min, stay.max, own) !== urlStay)
+      setStay({ min: textOf(shown.min), max: textOf(shown.max) });
   }
   const stayError = stayProblem(stay.min, stay.max);
   const editStay = (next: { min: string; max: string }) => {
     setStay(next);
-    if (next.min.trim() === '' && next.max.trim() === '') apply({ nights: null });
-    else if (stayProblem(next.min, next.max) === false)
-      apply({ nights: nightsRange(`${next.min.trim()}-${next.max.trim()}`) });
+    if (stayProblem(next.min, next.max)) return;
+    const range =
+      next.min.trim() === '' && next.max.trim() === ''
+        ? null
+        : nightsRange(`${next.min.trim()}-${next.max.trim()}`);
+    apply({ nights: range === null || isOwnStay(range, own) ? null : range });
   };
   const journey = state.journey === null ? null : hoursText(state.journey);
   return (
@@ -122,7 +129,7 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
 /**
  * From or To as one select (Ruling 16): every airport of the search (no parameter), or one of them. A narrower set than
  * every airport that is more than one (an old link's) is an option of its own while it is the URL's, so the select
- * always says what is applied.
+ * always says what is applied; every airport named one by one reads as every airport.
  */
 function AirportSelect({
   label,
@@ -138,7 +145,8 @@ function AirportSelect({
   onChange: (codes: Iata[]) => void;
 }) {
   const name = (codes: readonly Iata[]) => codes.map((c) => airportLabel(c, airports.get(c))).join(', ');
-  const several = chosen.length > 1 ? chosen.join(',') : null;
+  // why: every airport named one by one (an old link) is every airport, the first option, never a second copy of it
+  const several = chosen.length > 1 && chosen.length < all.length ? chosen.join(',') : null;
   const value = chosen.length === 1 ? (chosen[0] ?? '') : (several ?? '');
   return (
     <label className="search-filter">
@@ -162,14 +170,22 @@ function AirportSelect({
   );
 }
 
-const textOf = (n: number | undefined): string => (n === undefined ? '' : String(n));
+const textOf = (n: number): string => String(n);
 
-/** A stay range as one comparable string: `-` for no range. */
-const stayKey = (min: number | undefined, max: number | undefined): string => `${min ?? ''}-${max ?? ''}`;
+/** A stay range as one comparable string. */
+const stayKey = (min: number, max: number): string => `${min}-${max}`;
 
-/** The typed stay range's key when the filter can apply it, else null (it then matches no URL value). */
-function typedStayKey(min: string, max: string): string | null {
-  if (min.trim() === '' && max.trim() === '') return stayKey(undefined, undefined);
+/** A range that is the search's own: no filter (fix round 1, A). */
+export function isOwnStay(r: { min: number; max: number }, own: { min: number; max: number }): boolean {
+  return r.min === own.min && r.max === own.max;
+}
+
+/**
+ * The typed stay range's key when the filter can apply it (blank on both sides is the search's own range), else null
+ * (it then matches no URL value).
+ */
+function typedStayKey(min: string, max: string, own: { min: number; max: number }): string | null {
+  if (min.trim() === '' && max.trim() === '') return stayKey(own.min, own.max);
   const r = nightsRange(`${min.trim()}-${max.trim()}`);
   return r === null ? null : stayKey(r.min, r.max);
 }

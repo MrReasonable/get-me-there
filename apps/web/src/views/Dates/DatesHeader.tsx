@@ -8,11 +8,11 @@ import type { DefinitionResponse, ExecutionResponse, SearchCard } from '../../ap
 import { Crumbs, tripsCrumb } from '../../components/Crumbs.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatIsoDateShort } from '../../format.js';
+import { hoursText } from '../../lib/flightLines.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { useAirportDetails } from '../Definitions/airports.js';
 import { airportLabel } from '../Searches/cardWords.js';
 import type { BoardModel } from './board.js';
-import { hoursText } from './flightLines.js';
 import { PageState } from './PageState.js';
 import { RepeatWeekly } from './RepeatWeekly.js';
 import { SearchAgainButton } from './SearchAgainButton.js';

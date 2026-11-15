@@ -1,7 +1,7 @@
 import { asIsoDateTime } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../../src/copy.js';
-import { carriersText, datesShort, hoursText, pairKey } from '../../../../src/views/Dates/flightLines.js';
+import { carriersText, datesShort, hoursText, pairKey } from '../../../../src/lib/flightLines.js';
 import { londonDaysAgo } from '../../../../src/views/Dates/stateLines.js';
 import { NOW } from '../../../render.js';
 

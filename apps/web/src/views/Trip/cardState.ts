@@ -1,6 +1,6 @@
 import { type LegTimes, type PairingRead, RETURN_FINISHED, withinLimits } from '@gmt/core';
 import type { TripResponse } from '../../api/types.js';
-import { pairingOf } from '../Dates/pairing.js';
+import { pairingOf } from '../../lib/pairing.js';
 
 /**
  * Design 2026-11-08 §6.1 (plan Task 6): every state of the Trip page's card, decided once from the trip read so the

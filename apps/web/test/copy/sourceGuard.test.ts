@@ -109,10 +109,8 @@ const NON_COPY_PROPS = new Set([
   'htmlFor',
   'inputMode',
   'value',
-  // the departure board's flap groups: an alignment and a board slot's name, never copy
+  // the departure board's flap groups: an alignment, never copy
   'align',
-  'slot',
-  'flapSlot',
   // WP10: Recharts' identifier props (a data field, an axis scale, a legend position), never copy
   'dataKey',
   'scale',
@@ -231,12 +229,19 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
   // why: spec rev 55 §11 (ruling C3): the flight words that outlived the flights block format no money; every flight
   // amount is a PriceCell
   it('the flight words and the flight reads format no money', () => {
-    for (const f of ['src/views/Dates/flightLines.ts', 'src/lib/flightReads.ts']) {
+    for (const f of ['src/lib/flightLines.ts', 'src/lib/flightReads.ts']) {
       const file = src.find((s) => s.file === f);
       expect(file, f).toBeDefined();
       expect(moneyOffenders('src/views/Elsewhere.tsx', file?.text ?? '')).toEqual([]);
       expect(file?.text).not.toMatch(/estimateMoney/);
     }
+  });
+
+  // why: Task 8 fix round 1 (C): the web's lib sits under its views; a lib file never reaches into views/
+  it('no file under src/lib imports from src/views', () => {
+    const libs = src.filter((x) => x.file.startsWith('src/lib/'));
+    expect(libs.length).toBeGreaterThan(0);
+    expect(libs.filter((x) => /from '(\.\.\/)+views\//.test(x.text)).map((x) => x.file)).toEqual([]);
   });
 
   it('the guards catch planted offenders, multi-line and conditional ones included', () => {
