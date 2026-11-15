@@ -154,7 +154,7 @@ export function SearchFields({
               >
                 {apiContract.cabinSchema.options.map((c) => (
                   <option key={c} value={c}>
-                    {COPY.cabinName[c]}
+                    {COPY.cabinOption[c]}
                   </option>
                 ))}
               </select>

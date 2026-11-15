@@ -419,6 +419,13 @@ export const COPY = {
     business: 'business',
     first: 'first',
   } satisfies Record<Cabin, string>,
+  /** The cabin field's options, in sentence case (Task 7 minor; mockup 01); `cabinName` is for words inside a line. */
+  cabinOption: {
+    economy: 'Economy',
+    premium_economy: 'Premium economy',
+    business: 'Business',
+    first: 'First',
+  } satisfies Record<Cabin, string>,
   constraintsHeading: 'Constraints',
   inPounds: (label: string) => `${label} (£)`,
   minutesAsHours: (text: string) => `= ${text}`,

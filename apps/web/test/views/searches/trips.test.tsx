@@ -20,6 +20,7 @@ import {
 } from '../../fixtures.searches.js';
 import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
+import { setViewportWidth } from '../../viewport.js';
 import { airportRows, renderInShell } from './support.js';
 
 // Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 4, 5, 7, 8, 11, 15, 20 and Review Focus 1 to 3: the Trips page's
@@ -87,35 +88,42 @@ describe('a finished search with trips', () => {
     expect(card.querySelector('.tcard-repeat')).toHaveTextContent('repeats Mondays 05:00');
   });
 
-  it('names the airports as the airports table does, without the city in front, and the code where it is unknown', async () => {
-    const rows = apiContract.airportsResponseSchema.parse([
-      {
-        iata: 'LHR',
-        name: 'London Heathrow Airport',
-        city: 'London',
-        country: 'GB',
-        tz: 'Europe/London',
-        metro: 'LON',
-      },
-      {
-        iata: 'JFK',
-        name: 'John F Kennedy International Airport',
-        city: 'New York',
-        country: 'US',
-        tz: 'America/New_York',
-        metro: 'NYC',
-      },
-    ]);
-    server.use(
-      serveCards([searchCard({ name: 'Named', origins: ['LHR', 'LGW'], destinations: ['JFK'] })]),
-      airportRows(rows),
-    );
-    renderInShell(<SearchesView />);
-    const card = await cardOf('Named');
-    await waitFor(() =>
-      expect(card.querySelector('.tcard-meta')).toHaveTextContent(/^Heathrow, LGW → John F Kennedy · leave/),
-    );
-  });
+  // Task 6 minor: the phone's meta line names the airports as the desktop's does (mockup 01 at 375 px)
+  it.each([375, 1280])(
+    'names the airports as the airports table does, without the city in front, and the code where it is unknown, at %i px',
+    async (width) => {
+      setViewportWidth(width);
+      const rows = apiContract.airportsResponseSchema.parse([
+        {
+          iata: 'LHR',
+          name: 'London Heathrow Airport',
+          city: 'London',
+          country: 'GB',
+          tz: 'Europe/London',
+          metro: 'LON',
+        },
+        {
+          iata: 'JFK',
+          name: 'John F Kennedy International Airport',
+          city: 'New York',
+          country: 'US',
+          tz: 'America/New_York',
+          metro: 'NYC',
+        },
+      ]);
+      server.use(
+        serveCards([searchCard({ name: 'Named', origins: ['LHR', 'LGW'], destinations: ['JFK'] })]),
+        airportRows(rows),
+      );
+      renderInShell(<SearchesView />);
+      const card = await cardOf('Named');
+      await waitFor(() =>
+        expect(card.querySelector('.tcard-meta')).toHaveTextContent(
+          /^Heathrow, LGW → John F Kennedy · leave/,
+        ),
+      );
+    },
+  );
 
   it('Search again is a normal secondary button once the search is loaded, not a disabled one; Search now is primary', async () => {
     server.use(

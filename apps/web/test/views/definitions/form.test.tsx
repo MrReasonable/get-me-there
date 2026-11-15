@@ -125,6 +125,12 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
     expect(fieldValue('Longest stay')).toBe('21');
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     expect(fieldValue('Cabin')).toBe('economy');
+    // Task 7 minor: the options read in sentence case, as mockup 01's do
+    expect(
+      within(screen.getByLabelText('Cabin'))
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Economy', 'Premium economy', 'Business', 'First']);
     // 1500 minutes, entered and shown as 25 hours 0 minutes
     const D = SETUP_COPY.definitions;
     expect(fieldValue(D.journeyPart(PLAN_COPY.journey, D.journeyHours))).toBe('25');

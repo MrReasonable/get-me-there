@@ -26,19 +26,23 @@ const N = COPY.newSearch;
 
 /**
  * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the plan preset's sources, policy and
- * budget without SearchApi (design §8 question 2: it is ticked per search), no schedule (Repeat: Never), no arrival
- * window, and fixed dates the operator enters in Leave from and Leave by (rolling dates are a switch under More options,
- * filled in with the 7-day start and 182-day length).
+ * budget without SearchApi (design §8 question 2: it is ticked per search) and without the test source when a real one
+ * is left, no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave from and Leave
+ * by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
  */
 export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
   const d = defaultDraft(presets);
   const off = (ids: readonly Draft['providers']['discovery'][number][]) =>
     ids.filter((id) => id !== 'searchapi');
+  const discovery = off(d.providers.discovery);
+  // why: Task 7 minor: in fixture mode beside a real source a new search starts on the real ones; the test source is
+  // ticked only when it is the only source left, so a search is never started with none
+  const real = discovery.filter((id) => id !== 'fixture');
   return {
     ...d,
     providers: {
       ...d.providers,
-      discovery: off(d.providers.discovery),
+      discovery: real.length > 0 ? real : discovery,
       verification: off(d.providers.verification),
     },
     window: EMPTY_ABSOLUTE,
@@ -87,17 +91,18 @@ export function NewSearchForm({
   );
 
   // why: fix round 2 — a refusal (and the monthly figure an over-limit one shows) belongs to the form it was said of:
-  // it is kept with that form's body and shown only while the form is unchanged
+  // it is kept with that form's body and shown only while the form is unchanged; one the api answers later keys to the
+  // body as it was pressed (Task 7 minor), never the form as it stands when the answer lands
   const bodyKey = JSON.stringify(form.body);
   const [said, setSaid] = useState<{ key: string; words: string; fit: BudgetFit | null } | null>(null);
   const failure = said !== null && said.key === bodyKey ? said : null;
-  const setFailure = (words: string | null, fit: BudgetFit | null = null) =>
-    setSaid(words === null ? null : { key: bodyKey, words, fit });
+  const setFailure = (words: string | null, fit: BudgetFit | null = null, key: string = bodyKey) =>
+    setSaid(words === null ? null : { key, words, fit });
   // why: fix round 1, finding 5 — a second press in the same tick lands before the re-render that disables the button,
   // so the request in flight is held here, synchronously, and released when it settles
   const sending = useRef(false);
   const create = useMutation({
-    mutationFn: (b: CreateAndStartBody) => api.createAndStart(b),
+    mutationFn: ({ body }: { body: CreateAndStartBody; key: string }) => api.createAndStart(body),
     onSuccess: (r: CreateAndStartResponse) => {
       const id = r.definition.id;
       form.setSaveErrors([]);
@@ -114,14 +119,14 @@ export function NewSearchForm({
     onSettled: () => {
       sending.current = false;
     },
-    onError: (e: Error) => {
+    onError: (e: Error, { key }) => {
       // why: Ruling 14 — the api's monthly-fit refusal in Repeat weekly's words, never the server's
       if (e instanceof ApiError && e.code === 'schedule_over_budget')
-        setFailure(COPY.repeatWeekly.overBudget);
+        setFailure(COPY.repeatWeekly.overBudget, null, key);
       else if (e instanceof ApiError && e.status === 422) {
         form.setSaveErrors(e.fieldErrors());
         setFailure(null);
-      } else setFailure(N.saveFailed(e.message));
+      } else setFailure(N.saveFailed(e.message), null, key);
     },
   });
 
@@ -155,11 +160,14 @@ export function NewSearchForm({
           sending.current = true;
           setFailure(null);
           create.mutate({
-            ...form.body,
-            confirmCostPence: covers.pence,
-            confirmCalls: covers.calls,
-            // why: a fresh key a press, so a retry of this very request (a double send) creates nothing more
-            requestKey: newRequestKey(),
+            body: {
+              ...form.body,
+              confirmCostPence: covers.pence,
+              confirmCalls: covers.calls,
+              // why: a fresh key a press, so a retry of this very request (a double send) creates nothing more
+              requestKey: newRequestKey(),
+            },
+            key: bodyKey,
           });
         }}
       />

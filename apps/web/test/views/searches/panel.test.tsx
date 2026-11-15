@@ -344,6 +344,42 @@ describe('Repeat (Ruling 14)', () => {
     expect(screen.queryByText(/server text that must not show/)).toBeNull();
   });
 
+  // Task 7 minor: a refusal that lands after the form changed belongs to the form as it was pressed, not as it settled
+  it('a late refusal keys to the form at the press: hidden after an edit, shown again when the form is back', async () => {
+    serve();
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const asked: string[] = [];
+    server.use(
+      http.post(`${API}/definitions/create-and-start`, async () => {
+        asked.push('create');
+        await answered;
+        return HttpResponse.json(
+          { error: { code: 'schedule_over_budget', message: 'server text', details: {} } },
+          { status: 422 },
+        );
+      }),
+    );
+    const { user } = renderPanel();
+    await fill(user);
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.selectOptions(screen.getByLabelText(N.repeat), 'weekly');
+    await ready();
+    await user.click(press());
+    await waitFor(() => expect(asked).toHaveLength(1));
+    // the form changes while the request is out, then the refusal lands
+    await user.selectOptions(screen.getByLabelText(N.repeat), 'never');
+    answer();
+    await waitFor(() => expect(screen.getByLabelText(N.repeat)).not.toBeDisabled());
+    await waitFor(() => expect(press()).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(screen.queryByText(W.overBudget)).toBeNull();
+    // the form it was said of, again: the refusal is its own
+    await user.selectOptions(screen.getByLabelText(N.repeat), 'weekly');
+    expect(await screen.findByText(W.overBudget)).toBeInTheDocument();
+  });
+
   it('Other from Never opens the picker on its weekly default, so the search repeats as the select says (fix round 2)', async () => {
     const { estimates } = serve();
     const { user } = renderPanel();
@@ -488,6 +524,50 @@ describe('a source the search uses with no checkbox of its own (fix round 2)', (
       expect(estimates.at(-1)).toMatchObject({ providers: { discovery: ['fixture'], verification: [] } }),
     );
     expect(screen.queryByRole('checkbox', { name: /^SearchApi · / })).toBeNull();
+  });
+});
+
+// Task 7 minor: an install in fixture mode beside real sources starts a new search on the real ones; the test source is
+// ticked on a new panel only when it is the only source the presets leave
+describe('the test source on a new panel', () => {
+  const withFixture = (discovery: Array<'fixture' | 'travelpayouts' | 'searchapi'>): ProvidersResponse => {
+    const free = freeProviders();
+    const first = free.providers[0];
+    if (first === undefined) throw new Error('freeProviders names a source');
+    return providersResponse({
+      ...free,
+      providers: [...free.providers, { ...first, providerId: 'fixture', displayName: 'Fixture' }],
+      presets: {
+        ...free.presets,
+        providers: {
+          discovery,
+          verification: [],
+          discoveryRefreshHours: Object.fromEntries(discovery.map((d) => [d, 168])),
+        },
+      },
+    });
+  };
+  const testSource = () => screen.queryByRole('checkbox', { name: `The test source · ${N.sourceInSearch}` });
+
+  it('is left out beside a real source', async () => {
+    const { estimates, creates } = serve();
+    const { user } = renderPanel(withFixture(['fixture', 'travelpayouts']));
+    expect(testSource()).toBeNull();
+    expect(source(CACHE)).toBeChecked();
+    await fill(user);
+    await waitFor(() =>
+      expect(estimates.at(-1)).toMatchObject({ providers: { discovery: ['travelpayouts'] } }),
+    );
+    expect(creates).toEqual([]);
+  });
+
+  it('is ticked when it is the only source the presets leave (SearchApi starts unticked)', () => {
+    serve();
+    const first = renderPanel(withFixture(['fixture', 'searchapi']));
+    expect(testSource()).toBeChecked();
+    first.unmount();
+    renderPanel(withFixture(['fixture']));
+    expect(testSource()).toBeChecked();
   });
 });
 
