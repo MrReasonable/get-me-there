@@ -119,6 +119,8 @@ export function assembleTrip(
     verificationConfigured: verificationConfigured(def),
     refreshHours,
     limits,
+    // why: fix round 1 (Ruling 2): the card's figure falls back to the board row's own search, in this market
+    pointOfSale: ports.config.pointOfSale,
   };
   // why: Ruling 4: the board's window test (the current space always starts tomorrow, so a departed pair is outside
   // it), before the scope is parsed, so an old link to departed dates, or to dates the search no longer covers, is a 200
@@ -135,7 +137,6 @@ export function assembleTrip(
       flightList: null,
       bookingUrl: null,
       searchLink: null,
-      figureSearchLink: null,
       booking: null,
       calendar: null,
       cached: null,
@@ -230,18 +231,6 @@ export function assembleTrip(
     flightList: list === undefined ? null : toFlightList(list, loaded.rc.now, refreshHours),
     bookingUrl: list === undefined || chosenPairing === null ? null : pairingBookingUrl(list, chosenPairing),
     searchLink: cell === null ? null : safeSearchLink(FLIGHT_LIST_PROVIDER, cell, def, null, pointOfSale),
-    // why: final review I2: a verified price's own search is its own cell's, never the calendar cell it is weighed
-    // against
-    figureSearchLink:
-      figure === null
-        ? null
-        : safeSearchLink(
-            FLIGHT_LIST_PROVIDER,
-            { origin: figure.origin, destination: figure.destination, ...pair },
-            def,
-            null,
-            pointOfSale,
-          ),
     // why: a verified figure's own booking, re-validated when its row was read (`verifiedRow` through `safeBooking`)
     booking: figure?.basis === 'verified' && chosen !== null ? chosen.booking : null,
     calendar: newestOf(aboutRows.filter((r) => !isCached(r))),

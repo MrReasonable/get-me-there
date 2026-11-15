@@ -72,7 +72,7 @@ function body(): Record<string, unknown> {
     flightList: null,
     bookingUrl: null,
     searchLink: null,
-    figureSearchLink: null,
+    pointOfSale: 'GB',
     booking: null,
     calendar: {
       ...price(38_800, calendarProvenance),
@@ -139,13 +139,14 @@ describe('the trip contract (design 2026-11-08 §6.1)', () => {
     expect(tripResponseSchema.safeParse({ ...body(), cached: named }).success).toBe(true);
   });
 
-  it("final review I2: the figure's own search link is a re-validated search link, or null", () => {
-    const link = { url: 'https://www.google.com/travel/flights?q=x', host: 'www.google.com', label: 'x' };
-    expect(tripResponseSchema.safeParse({ ...body(), figureSearchLink: link }).success).toBe(true);
-    const evil = { ...link, url: 'https://evil.example/' };
-    expect(tripResponseSchema.safeParse({ ...body(), figureSearchLink: evil }).success).toBe(false);
-    const { figureSearchLink: _f, ...without } = body();
+  it("fix round 1: carries the install's point of sale (two capitals, or unknown) in place of a figure search link", () => {
+    expect(tripResponseSchema.safeParse({ ...body(), pointOfSale: 'US' }).success).toBe(true);
+    expect(tripResponseSchema.safeParse({ ...body(), pointOfSale: 'unknown' }).success).toBe(true);
+    expect(tripResponseSchema.safeParse({ ...body(), pointOfSale: 'us' }).success).toBe(false);
+    const { pointOfSale: _p, ...without } = body();
     expect(tripResponseSchema.safeParse(without).success).toBe(false);
+    const link = { url: 'https://www.google.com/travel/flights?q=x', host: 'www.google.com', label: 'x' };
+    expect(tripResponseSchema.safeParse({ ...body(), figureSearchLink: link }).success).toBe(false);
   });
 
   it('refuses a list failure without a STOP_DETAILS cause and an unknown skip reason', () => {

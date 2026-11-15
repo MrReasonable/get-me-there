@@ -51,14 +51,14 @@ const SELLER_BOOKING = {
  * A trip read of these dates whose figure is `figure`, everything else as the trip fixture's; a verified figure with
  * booking options carries its seller's booking, as the api sends both from the figure's own row.
  */
-function tripOf(figure: TripResponse['figure']): TripResponse {
+function tripOf(figure: TripResponse['figure'], pointOfSale = 'GB'): TripResponse {
   return trip({
+    pointOfSale,
     departureDate: asIsoDate(DEPART),
     returnDate: asIsoDate(RETURN),
     nights: NIGHTS,
     figure,
     searchLink: null,
-    figureSearchLink: null,
     booking:
       figure?.basis === 'verified' ? (figure.hasBookingOptions ? SELLER_BOOKING : { kind: 'none' }) : null,
   });
@@ -139,5 +139,45 @@ describe('the board row and the Trip card agree, figure by figure (design §6.5)
       expect(boardLabel?.startsWith(figure.hasBookingOptions ? COPY.trip.label.seller : 'Google price')).toBe(
         true,
       );
+  });
+});
+
+// Fix round 1 (Ruling 2): a trip without a booking falls back to the Google Flights search for its own airports and
+// dates in the install's market (POINT_OF_SALE), the same link on the board row and on the Trip card.
+describe("the board row and the Trip card link the same search, in the install's point of sale", () => {
+  it.each([
+    ['a pairing figure with no booking page', pairingFig()],
+    // why: fix round 1: a read trip whose calendar candidate was superseded is still a trip, linked out on both
+    ['a pairing figure whose calendar price was superseded', pairingFig({ superseded: true })],
+    [
+      'a verified figure with no seller',
+      verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched() } }),
+    ],
+  ])('%s', async (_name, figure) => {
+    const body: DatesOptions = {
+      discoveryProviders: ['camoufox'],
+      pointOfSale: 'US',
+      pairs: { [at(DEPART, NIGHTS)]: pricedPair(figure) },
+    };
+    const board = renderDates({ body });
+    const [row] = boardRows(await findBoard());
+    if (row === undefined) throw new Error('no board row');
+    const boardHref = row.querySelector('a[target="_blank"]')?.getAttribute('href') ?? null;
+    expect(boardHref).toContain('gl=US');
+    board.unmount();
+
+    const decoded = decodeDatePairs(datesResponse(body)).pairs.find(
+      (p) => p.departureDate === DEPART && p.nights === NIGHTS,
+    )?.figure;
+    if (decoded == null) throw new Error('no decoded figure');
+    const { airportPair: _index, ...wire } = decoded;
+    server.use(
+      http.get(`${API}/definitions/:id/trip`, () => HttpResponse.json(tripBody(tripOf(wire, 'US')))),
+    );
+    renderWithProviders(<TripView definition={definition()} state={STATE} />, {
+      search: `?view=trip&def=def-0001&depart=${DEPART}&return=${RETURN}`,
+    });
+    const card = await screen.findByRole('region', { name: COPY.trip.cardLabel });
+    expect(within(card).getByRole('link').getAttribute('href')).toBe(boardHref);
   });
 });

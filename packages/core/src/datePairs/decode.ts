@@ -183,6 +183,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     discoveryProviders: r.discoveryProviders,
     verificationProviderConfigured: r.verificationProviderConfigured,
     staleAfterHours: r.staleAfterHours,
+    pointOfSale: r.pointOfSale,
     space: {
       departureFrom: space.departureFrom,
       departureTo: space.departureTo,

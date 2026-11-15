@@ -193,7 +193,6 @@ describe('a read trip: the answer card (design §6.1)', () => {
 
   // final review I2: a stale verified price on LGW → JFK whose flights were read on LHR → JFK, the board's calendar cell
   it("a verified price links to its own airports' search and checks its own airports; a read names the list's", async () => {
-    const own = { ...SEARCH_LINK, url: SEARCH_LINK.url.replace('LHR', 'LGW') };
     const { user } = renderTrip(
       trip({
         figure: datePairFigure({
@@ -202,7 +201,6 @@ describe('a read trip: the answer card (design §6.1)', () => {
         }),
         booking: { kind: 'none' },
         searchLink: SEARCH_LINK,
-        figureSearchLink: own,
       }),
     );
     const verifies: unknown[] = [];

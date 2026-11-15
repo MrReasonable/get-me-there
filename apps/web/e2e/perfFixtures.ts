@@ -182,6 +182,7 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
     discoveryProviders: ['fixture'],
     verificationProviderConfigured: false,
     staleAfterHours: 192,
+    pointOfSale: 'GB',
     space,
     scope: {
       origins,

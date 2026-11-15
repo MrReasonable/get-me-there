@@ -52,7 +52,7 @@ export function trip(over: Partial<TripResponse> = {}): TripResponse {
     flightList: null,
     bookingUrl: null,
     searchLink: SEARCH_LINK,
-    figureSearchLink: SEARCH_LINK,
+    pointOfSale: 'GB',
     booking: null,
     calendar: null,
     cached: null,

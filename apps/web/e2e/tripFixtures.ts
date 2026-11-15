@@ -189,7 +189,7 @@ function base(over: Record<string, unknown>) {
       host: 'www.google.com',
       label: 'search link, not a fare link',
     },
-    figureSearchLink: null,
+    pointOfSale: 'GB',
     booking: null,
     calendar: {
       pricePence: 38_800,

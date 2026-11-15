@@ -39,12 +39,14 @@ const READ: ReadonlySet<PairingRead> = new Set<PairingRead>([
 const UNREAD: ReadonlySet<PairingRead> = new Set<PairingRead>(['not-read', 'outbound-only', 'list-failed']);
 
 /**
- * Whether a figure is a trip with flights read (Ruling 3): a pairing or verified figure that is current (not superseded,
- * seen in the latest search). A verified price the latest search did not see again is not a trip; an older read trip
- * is, and shows its age.
+ * Whether a figure is a trip with flights read (Ruling 3, fix round 1): every pairing figure, and a verified figure that
+ * is current (not superseded, seen in the latest search). A read trip shows its age and is never "not seen again": the
+ * calendar candidate it replaced being superseded does not age it. A verified price the latest search did not see again
+ * is not a trip.
  */
 export function isTrip(fig: TripFacts): boolean {
-  return fig.basis !== 'calendar' && !fig.superseded && fig.notSeenInLatest === null;
+  if (fig.basis === 'pairing') return true;
+  return fig.basis === 'verified' && !fig.superseded && fig.notSeenInLatest === null;
 }
 
 /** Whether a date pair's flights count as read (Ruling 3): a trip, or a calendar figure whose list's returns were read. */

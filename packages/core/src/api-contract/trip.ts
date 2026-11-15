@@ -11,6 +11,7 @@ import { flightTextSchema } from '../flights/types.js';
 import { MAX_URL_LENGTH } from '../normalise/vendorUrl.js';
 import type { CellOutcomeStatus, SkipReason } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
+import { pointOfSaleSchema } from '../types/provenance.js';
 import { bookingSchema, countSchema, priceCellSchema, vendorLinkSchema } from './common.js';
 import { datePairFigureSchema } from './datePairs.js';
 import { flightListSchema } from './flights.js';
@@ -117,11 +118,11 @@ export const tripResponseSchema = z.strictObject({
   bookingUrl: z.string().max(MAX_URL_LENGTH).nullable(),
   searchLink: searchLinkSchema.nullable(),
   /**
-   * Final review I2: the Google Flights search for the figure's own airport pair and dates, which a verified price
-   * links to without a seller's booking (`searchLink` is the flight list's cell's, maybe another pair); null with no
-   * figure
+   * Fix round 1 (Ruling 2): the install's POINT_OF_SALE, so the card's figure falls back to the same Google Flights
+   * search for its own airport pair and dates as its board row (`rowBookingTarget`); `searchLink` is the flight list's
+   * cell's, maybe another pair
    */
-  figureSearchLink: searchLinkSchema.nullable(),
+  pointOfSale: pointOfSaleSchema,
   /** a verified figure's own booking, re-validated (decision 54); null on every other basis */
   booking: bookingSchema.nullable(),
   /**

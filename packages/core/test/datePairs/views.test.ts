@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DatePairFigure } from '../../src/datePairs/encode.js';
 import type { PairingRead } from '../../src/datePairs/pairing.js';
+import { rankDatePairs } from '../../src/datePairs/rank.js';
 import {
   cheapestTrips,
   flightsRead,
@@ -8,7 +9,9 @@ import {
   lowerOnCalendar,
   overLimitCount,
 } from '../../src/datePairs/views.js';
-import { calendarFigure, pairingFigure, verifiedFigure } from '../helpers/datePairs.js';
+import { asIsoDate } from '../../src/types/ids.js';
+import { calendarFigure, datePair, pairingFigure, verifiedFigure } from '../helpers/datePairs.js';
+import { NOW } from '../helpers/rows.js';
 
 // Ruling 3 (Trips and Search plan): the shared rules the api's cards and the web's sections, run line and folds call,
 // over a hand-written ranked list. Each entry is a figure-only stand-in for a ranked date pair; `name` keeps a failure
@@ -50,8 +53,13 @@ describe('isTrip (Ruling 3)', () => {
   it('is not a verified figure the latest search did not see again', () => {
     expect(isTrip(verifiedFigure({ notSeenInLatest: { ageHours: 30 } }))).toBe(false);
   });
-  it('is not a pairing figure whose calendar price was superseded', () => {
-    expect(isTrip(pairingFigure({ superseded: true }))).toBe(false);
+  // why: fix round 1: the calendar candidate a read trip replaced being superseded does not age the trip
+  it('is a pairing figure whose calendar price was superseded', () => {
+    expect(isTrip(pairingFigure({ superseded: true }))).toBe(true);
+    expect(isTrip(pairingFigure({ superseded: true, notSeenInLatest: { ageHours: 30 } }))).toBe(true);
+  });
+  it('is not a verified figure marked superseded', () => {
+    expect(isTrip(verifiedFigure({ superseded: true }))).toBe(false);
   });
   it('is an older read trip, with its age', () => {
     const older = pairingFigure({
@@ -98,6 +106,23 @@ describe('cheapestTrips (Ruling 3)', () => {
   it('keeps the rank order, not the price order', () => {
     const [a, b] = RANKED;
     expect(names(cheapestTrips([b, a]))).toEqual(['trip verified £600', 'trip pairing £450']);
+  });
+  it('takes a pairing figure whose calendar price was superseded, after the current trips as the rank orders it', () => {
+    const space = {
+      departureFrom: asIsoDate('2027-03-14'),
+      departureTo: asIsoDate('2027-03-20'),
+      minNights: 10,
+      maxNights: 10,
+    };
+    const pairs = [
+      datePair(space, 0, 1, { figure: price(pairingFigure({ superseded: true }), 30_000) }),
+      datePair(space, 1, 1, { figure: price(pairingFigure(), 45_000) }),
+      datePair(space, 2, 1, { figure: price(verifiedFigure(), 60_000) }),
+      datePair(space, 3, 1, { figure: calendar(20_000) }),
+    ];
+    expect(cheapestTrips(rankDatePairs(pairs, NOW)).map((p) => p.figure.price.pricePence)).toEqual([
+      45_000, 60_000, 30_000,
+    ]);
   });
   it('is empty with no trip', () => {
     expect(cheapestTrips(RANKED.slice(2))).toEqual([]);

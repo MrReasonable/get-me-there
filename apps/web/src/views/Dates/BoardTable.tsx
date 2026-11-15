@@ -375,6 +375,7 @@ export function BoardTable(props: BoardProps) {
                 p.figure,
                 definition.cabin,
                 verifiedBookingOf(data.verifiedDetails, p, p.figure),
+                data.pointOfSale,
               ),
               journeyFiltered: filtered,
               lit: lit === p.index,

@@ -416,6 +416,21 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
   });
 });
 
+describe("datePairsResponseSchema: the install's point of sale (fix round 1)", () => {
+  it('is required: two capitals, or unknown', () => {
+    expect(issuePaths({ ...body(), pointOfSale: 'US' })).toEqual([]);
+    expect(issuePaths({ ...body(), pointOfSale: 'unknown' })).toEqual([]);
+    for (const bad of ['us', 'xUS', 'USx', 'U'])
+      expect(issuePaths({ ...body(), pointOfSale: bad }), bad).toEqual(['pointOfSale']);
+    const { pointOfSale: _p, ...without } = body();
+    expect(issuePaths(without)).toEqual(['pointOfSale']);
+  });
+  it('round-trips through the codec', () => {
+    const x = { ...decoded(), pointOfSale: 'US' };
+    expect(decodeDatePairs(encodeDatePairs(x)).pointOfSale).toBe('US');
+  });
+});
+
 describe("datePairsResponseSchema: a verified figure's details (Ruling 2)", () => {
   /** The worked example's details: verified figures 0 and 4 are current, figure 2 was not seen again. */
   const details = () => body().verifiedDetails;

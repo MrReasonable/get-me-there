@@ -214,6 +214,7 @@ export function shownTripOf(
           figure,
           cabin,
           booking,
+          r.pointOfSale,
         );
   // why: a trip that is not the figure's (the pairing beneath a calendar figure, a list read by hand) links its own
   // booking page, else the search for the list's cell

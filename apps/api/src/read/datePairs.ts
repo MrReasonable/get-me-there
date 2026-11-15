@@ -362,6 +362,7 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
     discoveryProviders: def.providers.discovery,
     verificationProviderConfigured: def.providers.verification.length > 0,
     staleAfterHours: ports.config.staleAfterHours,
+    pointOfSale: ports.config.pointOfSale,
     space: scope.space,
     scope: {
       origins: scope.space.origins,

@@ -267,6 +267,7 @@ export function decoded(o: DecodedOptions = {}): DecodedDatePairs {
     discoveryProviders: ['travelpayouts'],
     verificationProviderConfigured: true,
     staleAfterHours: 192,
+    pointOfSale: 'GB',
     space,
     scope: {
       origins,

@@ -44,40 +44,40 @@ function staleVerifiedWithOlderTrip() {
   });
 }
 
+type Args = Parameters<typeof rowBookingTarget>;
+/** `rowBookingTarget` in the fixtures' market, GB. */
+const inGb = (p: Args[0], f: Args[1], cabin: Args[2], booking: Args[3]) =>
+  rowBookingTarget(p, f, cabin, booking, 'GB');
+
 describe("rowBookingTarget (core's one rule over a date pair's figure)", () => {
   it("is the booking page when the group has one, else the Google Flights search for the row's airports", () => {
     expect(
-      rowBookingTarget(
+      inGb(
         pair,
         pairingFig({ pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) }),
         'economy',
         null,
       ),
     ).toMatchObject({ kind: 'booking-page', url: SYNTHETIC_BOOKING_URL });
-    const search = rowBookingTarget(pair, pairingFig(), 'economy', null);
+    const search = inGb(pair, pairingFig(), 'economy', null);
     expect(search).toMatchObject({ kind: 'search', host: 'www.google.com' });
     expect(search.kind === 'search' ? search.url : '').toContain('LHR');
   });
   it('is none for a synthetic price and a calendar price', () => {
     const f = pairingFig({ pairing: figurePairing({ bookingUrl: SYNTHETIC_BOOKING_URL }) });
-    expect(
-      rowBookingTarget(pair, { ...f, price: { ...f.price, provenance: provSynthetic() } }, 'economy', null),
-    ).toEqual({ kind: 'none' });
+    expect(inGb(pair, { ...f, price: { ...f.price, provenance: provSynthetic() } }, 'economy', null)).toEqual(
+      { kind: 'none' },
+    );
     // why: the contract only lets a flight list's provenance on a pairing; the rule is defensive, so build one by hand
     expect(
-      rowBookingTarget(
-        pair,
-        { ...f, pairing: { ...figurePairing(), provenance: provSynthetic() } },
-        'economy',
-        null,
-      ),
+      inGb(pair, { ...f, pairing: { ...figurePairing(), provenance: provSynthetic() } }, 'economy', null),
     ).toEqual({ kind: 'none' });
-    expect(rowBookingTarget(pair, calendarFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
+    expect(inGb(pair, calendarFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
       kind: 'none',
     });
   });
   it("gives a current verified trip's seller booking: Book on <host>", () => {
-    const target = rowBookingTarget(pair, verifiedFig({ price: real }), 'economy', SYNTHETIC_SELLER_BOOKING);
+    const target = inGb(pair, verifiedFig({ price: real }), 'economy', SYNTHETIC_SELLER_BOOKING);
     expect(target).toEqual({ kind: 'seller', booking: SYNTHETIC_SELLER_BOOKING });
     // why: the words are BookLink's, the one place a target is worded
     render(createElement(BookLink, { target }));
@@ -85,34 +85,45 @@ describe("rowBookingTarget (core's one rule over a date pair's figure)", () => {
   });
   it("links a verified row without a seller to its own cell's search, never to the booking page beneath it", () => {
     const v = verifiedFig({ price: real });
-    expect(rowBookingTarget(pair, v, 'economy', null)).toMatchObject({
+    expect(inGb(pair, v, 'economy', null)).toMatchObject({
       kind: 'search',
       host: 'www.google.com',
     });
-    expect(rowBookingTarget(pair, v, 'economy', { kind: 'none' })).toMatchObject({ kind: 'search' });
+    expect(inGb(pair, v, 'economy', { kind: 'none' })).toMatchObject({ kind: 'search' });
     // why: final review C1: a stale verified figure carries the pairing read in its date pair's best calendar cell,
     // another trip (maybe another airport pair), so that pairing's booking page is never the verified price's
-    const target = rowBookingTarget(pair, staleVerifiedWithOlderTrip(), 'economy', null);
+    const target = inGb(pair, staleVerifiedWithOlderTrip(), 'economy', null);
     expect(target).toMatchObject({ kind: 'search', host: 'www.google.com' });
     expect(target.kind === 'search' ? target.url : '').toContain('LGW');
   });
+  // why: fix round 1: the calendar candidate a read trip replaced being superseded does not age the trip
+  it('links a pairing figure whose calendar price was superseded', () => {
+    expect(inGb(pair, pairingFig({ superseded: true }), 'economy', null)).toMatchObject({ kind: 'search' });
+  });
   it('is none for a verified figure the latest search did not see again, whatever its booking', () => {
     const gone = verifiedFig({ price: real, notSeenInLatest: { ageHours: 30 } });
-    expect(rowBookingTarget(pair, gone, 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({ kind: 'none' });
-    expect(rowBookingTarget(pair, gone, 'economy', null)).toEqual({ kind: 'none' });
+    expect(inGb(pair, gone, 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({ kind: 'none' });
+    expect(inGb(pair, gone, 'economy', null)).toEqual({ kind: 'none' });
   });
   it('is none for a synthetic verified price, whatever its booking', () => {
-    expect(rowBookingTarget(pair, verifiedFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
+    expect(inGb(pair, verifiedFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
       kind: 'none',
     });
   });
   it('never gives a pairing figure a seller booking handed to it', () => {
-    expect(rowBookingTarget(pair, pairingFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toMatchObject({
+    expect(inGb(pair, pairingFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toMatchObject({
       kind: 'search',
     });
   });
+  // why: fix round 1: the search a trip falls back to is in the install's market, never a default
+  it("builds the search in the install's point of sale", () => {
+    const us = rowBookingTarget(pair, pairingFig(), 'economy', null, 'US');
+    expect(us.kind === 'search' ? us.url : '').toContain('gl=US');
+    const gb = inGb(pair, pairingFig(), 'economy', null);
+    expect(gb.kind === 'search' ? gb.url : '').toContain('gl=GB');
+  });
   it('is none when the search link is not for a cabin the browser reads', () => {
-    expect(rowBookingTarget(pair, pairingFig(), 'business', null)).toEqual({ kind: 'none' });
+    expect(inGb(pair, pairingFig(), 'business', null)).toEqual({ kind: 'none' });
   });
 });
 

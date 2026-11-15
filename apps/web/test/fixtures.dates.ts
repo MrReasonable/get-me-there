@@ -280,6 +280,8 @@ export interface DatesOptions {
     | ((i: number, at: ReturnType<typeof datePairAt>, airportPairs: number) => PairOver);
   /** Every date pair not named: its buckets (default: every airport pair not searched). */
   rest?: Partial<Buckets>;
+  /** The install's POINT_OF_SALE (default GB). */
+  pointOfSale?: string;
   /** Ruling 2's details (default: `verifiedDetailsOf` the date pairs). */
   verifiedDetails?: DecodedDatePairs['verifiedDetails'];
 }
@@ -349,6 +351,7 @@ export function decodedDates(o: DatesOptions = {}): DecodedDatePairs {
     discoveryProviders: o.discoveryProviders ?? ['fixture'],
     verificationProviderConfigured: o.verificationProviderConfigured ?? true,
     staleAfterHours: 192,
+    pointOfSale: o.pointOfSale ?? 'GB',
     space,
     scope: {
       origins,

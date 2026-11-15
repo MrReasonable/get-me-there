@@ -768,6 +768,14 @@ describe('ported: one set of executions per read (review prov-012)', () => {
   });
 });
 
+describe("the install's point of sale (fix round 1)", () => {
+  it('carries POINT_OF_SALE, the market of the search a trip falls back to', async () => {
+    const x = await harness({ POINT_OF_SALE: 'US' });
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput(FOUR));
+    expect((await datesOf(x, def.id)).pointOfSale).toBe('US');
+  });
+});
+
 describe("a verified figure's details (Ruling 2)", () => {
   /** A seller's booking SearchApi's booking options gave, as stored; the api re-validates it on the way out. */
   const SELLER = {

@@ -7,6 +7,7 @@ import {
   type DecodedDatePairs,
   type IsoDate,
   isTrip,
+  type PointOfSale,
   type Provenance,
   searchLinkFor,
 } from '@gmt/core';
@@ -34,13 +35,15 @@ type TargetFacts = Pick<
  * its own booking page where its read recorded one ("Book on Google Flights"), else that search; a booking handed to it is
  * not its own and is ignored. A calendar price is not a trip to book, a verified price the latest search did not see
  * again is not a trip any more, and a synthetic price is never linked out: all three give `none`. `cabin` is the
- * search's, for the search link.
+ * search's and `pointOfSale` the install's
+ * (POINT_OF_SALE, never a default), for the search link.
  */
 export function rowBookingTarget(
   pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
   figure: TargetFacts,
   cabin: DefinitionResponse['cabin'],
   booking: Booking | null,
+  pointOfSale: PointOfSale,
 ): BookingTarget {
   // why: Ruling 3: only a trip is linked out; a calendar price waits for its flights to be read (design §5.3)
   if (!isTrip(figure)) return { kind: 'none' };
@@ -54,6 +57,7 @@ export function rowBookingTarget(
       returnDate: pair.returnDate,
     },
     cabin,
+    pointOfSale,
   );
   const verified = figure.basis === 'verified';
   return bookingTargetOf({

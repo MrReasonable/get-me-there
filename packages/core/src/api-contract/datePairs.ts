@@ -352,6 +352,14 @@ const datePairsBodySchema = z.strictObject({
   discoveryProviders: z.array(providerIdSchema),
   verificationProviderConfigured: z.boolean(),
   staleAfterHours: count,
+  /** fix round 1 (Ruling 2): the install's POINT_OF_SALE, the market of the Google Flights search a trip falls back to */
+  pointOfSale: z
+    .string()
+    // why: provenance's `pointOfSaleSchema` rule, as one refinement so its refusal says what is wrong
+    .refine(
+      (v) => v === 'unknown' || /^[A-Z]{2}$/.test(v),
+      'pointOfSale is a two-letter country code or unknown',
+    ),
   /** the current resolved space's dates and stays */
   space: z.strictObject({
     departureFrom: isoDateSchema,

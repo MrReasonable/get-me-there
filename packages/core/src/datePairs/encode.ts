@@ -5,7 +5,7 @@ import type { StopDetail } from '../api-contract/stopCause.js';
 import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
-import type { Provenance, ProviderId } from '../types/provenance.js';
+import type { PointOfSale, Provenance, ProviderId } from '../types/provenance.js';
 import type { GridPrice } from './figure.js';
 import { type FigureBasis, type LegFacts, PAIRING_READ, type PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
@@ -121,6 +121,8 @@ export interface DecodedDatePairs {
   discoveryProviders: ProviderId[];
   verificationProviderConfigured: boolean;
   staleAfterHours: number;
+  /** the install's POINT_OF_SALE: the market of the search link a trip without a booking falls back to */
+  pointOfSale: PointOfSale;
   space: DatePairSpace;
   scope: DatePairsResponse['scope'];
   summary: CoverageSummary;
@@ -361,6 +363,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     discoveryProviders: d.discoveryProviders,
     verificationProviderConfigured: d.verificationProviderConfigured,
     staleAfterHours: d.staleAfterHours,
+    pointOfSale: d.pointOfSale,
     // why: copied field by field, so a caller passing a whole ResolvedSpace never puts its airports on the wire
     space: {
       departureFrom: space.departureFrom,
