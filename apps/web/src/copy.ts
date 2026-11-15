@@ -1042,10 +1042,6 @@ export const COPY = {
     calendarFailed: (words: string) => `${words}. There's nothing to book here.`,
     calendarWithTrip: (ago: string) =>
       `The trip below was read ${ago}, longer ago than this search's refresh, and doesn't lead.`,
-    // why: a current read beneath the calendar price that isn't older says its own reason (CodeRabbit round, concern 2)
-    calendarWithTripSellers: (ago: string) => `The trip below was read ${ago}, but its sellers weren't read.`,
-    calendarWithTripOffers: (ago: string) =>
-      `The trip below was read ${ago}, but its booking options were only partly read.`,
     readWithoutCalendar: (ago: string) =>
       `No calendar price for these dates; their flights were read by hand ${ago}.`,
     gone: "The latest search didn't find this price again. Probably gone.",

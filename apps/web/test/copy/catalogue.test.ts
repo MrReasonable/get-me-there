@@ -249,8 +249,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'trip.outboundOnly': ['3h ago'],
   'trip.noReturn': ['3h ago'],
   'trip.calendarWithTrip': ['9d ago'],
-  'trip.calendarWithTripSellers': ['3h ago'],
-  'trip.calendarWithTripOffers': ['3h ago'],
   'trip.readWithoutCalendar': ['2h ago'],
   'trip.listFailed': ['16:42', 'the connection to it failed'],
   'trip.limitJourney': ['25h'],

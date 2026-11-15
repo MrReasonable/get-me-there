@@ -241,12 +241,8 @@ function stateSentence(r: TripResponse, state: CardState, listAgo: string): Reac
         : T.calendarOnly;
     case 'gone':
       return T.gone;
-    case 'calendar-with-trip': {
-      const ago = agoText(r.figure?.pairing?.ageHours ?? 'unknown');
-      if (state.why === 'sellers-not-read') return T.calendarWithTripSellers(ago);
-      if (state.why === 'offers-incomplete') return T.calendarWithTripOffers(ago);
-      return T.calendarWithTrip(ago);
-    }
+    case 'calendar-with-trip':
+      return T.calendarWithTrip(agoText(r.figure?.pairing?.ageHours ?? 'unknown'));
     case 'read-without-calendar':
       return T.readWithoutCalendar(agoText(r.flightList?.ageHours ?? 'unknown'));
     case 'over-journey-limit':
