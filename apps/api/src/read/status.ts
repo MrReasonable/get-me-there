@@ -272,15 +272,15 @@ function scheduleCheck(f: StatusFacts): StatusCheck {
 const SKIPPED: Readonly<Record<string, { reason: string; fix: string }>> = {
   skipped_budget: {
     reason: 'it would exceed a budget cap',
-    fix: 'a budget cap was reached: the Providers view shows when its window reopens; raise the cap or search less, or the next firing skips again',
+    fix: 'a budget cap was reached: Settings → Price sources shows when its window reopens; raise the cap or search less, or the next firing skips again',
   },
   skipped_confirm: {
     reason: 'its cost estimate needs your confirmation',
-    fix: 'open the definition and confirm the new estimate; until then every scheduled firing is skipped',
+    fix: "open the search's Edit page and confirm the new estimate; until then every scheduled firing is skipped",
   },
   skipped_window: {
     reason: 'its window has no departure dates left',
-    fix: 'the schedule is now off: edit the window, then enable the definition again',
+    fix: "the schedule is now off: change the dates in the search's Edit page, then set it to repeat again",
   },
   skipped_missed: {
     reason: 'it was missed and not caught up',
@@ -339,7 +339,7 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
       summary: parts.join('; '),
       note,
       fix: fix(
-        running === null ? 'start a run from the Definitions view' : 'wait for the first run to finish',
+        running === null ? "start a run from the search's card on Trips" : 'wait for the first run to finish',
       ),
     });
   }
@@ -353,7 +353,9 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
   else if (browserOnlyCatchUp) problem = fix(STATUS_TEXT.browserOnlyFix);
   else if (unfinished) problem = fix('start a run to finish the cells it left');
   else if (gap)
-    problem = fix('the Coverage view shows which cells were left; run again or widen the sources');
+    problem = fix(
+      "the search's full search log (What was searched) shows which cells were left; run again or widen the sources",
+    );
   else if (d.ages?.stale === true) problem = fix('start a run for newer prices');
   else if (d.ages === null) problem = fix('start a run, or check that a price source is set up');
   else if (d.behindSchedule) problem = fix(BEHIND_FIX);
@@ -374,7 +376,7 @@ function dataChecks(f: StatusFacts): StatusCheck[] {
         area: 'data',
         state: 'off',
         offReason: 'not-set-up',
-        summary: 'no search definition yet',
+        summary: 'no search yet',
       }),
     ];
   return f.data.map((d) => dataCheck(f, d));
@@ -460,8 +462,8 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       summary: `${name}: ${why}${usage}`,
       fix: fix(
         failedOther
-          ? 'check the Providers view and the app log'
-          : 'watch the Providers view; raise the plan or wait for the window to reopen',
+          ? 'check Settings → Price sources and the app log'
+          : 'watch Settings → Price sources; raise the plan or wait for the window to reopen',
       ),
     });
   }

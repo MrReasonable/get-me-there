@@ -161,7 +161,6 @@ export const COPY = {
   // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
   // under COPY so the catalogue test sweeps it for banned words like every other string.
   constraint: CONSTRAINT_LABELS satisfies Record<ConstraintName, string>,
-  noRowsFromRun: 'This run has no rows on this basis. Coverage shows what was searched and what was not.',
   dateRange: (dep: string, ret: string, nights: number) => `${dep}–${ret} (${nights}n)`,
 
   // view header (spec §11)
@@ -384,8 +383,6 @@ export const COPY = {
   excludedFromSchedule: 'excluded from scheduled runs',
 
   // definitions form (spec §11)
-  definitionsHeading: 'Definitions',
-  definitionsList: 'Definitions to edit',
   newDefinition: 'New definition',
   editDefinition: (name: string) => `Edit ${name}`,
   name: 'Name',
@@ -1020,7 +1017,7 @@ export const COPY = {
     tryAgain: (minutes: number) => `Try again · free, ~${minutes} min`,
     readStarted: 'Reading flights for these dates; this page follows the read.',
     checkWithSearchApi: 'Check with SearchApi · 1 credit',
-    checkStarted: 'Checking these dates with SearchApi; the status bar follows it.',
+    checkStarted: 'Checking these dates with SearchApi; this page updates when the check is done.',
     // what the card says in each state (design §6.1's table, Rulings 3 and 4)
     unreachable: "Can't reach the app's server; showing nothing rather than old prices.",
     retry: 'Retry',
@@ -1186,8 +1183,7 @@ export const COPY = {
     cellChanged: 'a different cell from the previous point',
     routePicker: 'Route',
     // why: UI-010: the route view plots calendar series only, so it says where an itinerary offer's history is.
-    offersPerItinerary:
-      "Itinerary offers are shown per itinerary: open a row's price history in Results to see one.",
+    offersPerItinerary: "These are calendar prices; a trip's own price over time is not shown here.",
     pairOption: (origin: string, destination: string) => `${origin}→${destination}`,
     allPairs: (shown: number, total: number) =>
       shown === total ? 'All pairs' : `All pairs (first ${shown} of ${total})`,

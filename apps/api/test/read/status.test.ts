@@ -581,10 +581,10 @@ describe('the data check: honest and complete (review V6)', () => {
     const fixOf = (status: ExecutionStatus, code: 'half-cadence' | 'browser-only-definition' | null = null) =>
       dataOf({ latest: row(status, { skipCode: code }) }).fix?.text;
     expect(fixOf('skipped_window')).toBe(
-      'the schedule is now off: edit the window, then enable the definition again',
+      "the schedule is now off: change the dates in the search's Edit page, then set it to repeat again",
     );
     expect(fixOf('skipped_confirm')).toContain('confirm the new estimate');
-    expect(fixOf('skipped_budget')).toContain('the Providers view shows when its window reopens');
+    expect(fixOf('skipped_budget')).toContain('Settings → Price sources shows when its window reopens');
     expect(fixOf('skipped_missed', 'half-cadence')).toContain('the next scheduled run goes ahead as normal');
     expect(fixOf('skipped_missed', 'browser-only-definition')).toBe(STATUS_TEXT.browserOnlyFix);
   });
@@ -943,7 +943,7 @@ describe('providers', () => {
     expect(tpCheck({ lastCall: null }).summary).toContain('configured; not used yet');
     expect(tpCheck({ lastCall: { at: ago(HOUR), result: 'other' } }).state).toBe('warn');
   });
-  it('the trial warns at 10 credits left and words its lifetime usage as the Providers view does', () => {
+  it('the trial warns at 10 credits left and words its lifetime usage as Settings → Price sources does', () => {
     const usage = { used: 90, cap: 100, window: 'lifetime' as const };
     expect(saCheck({ usage, trialLeft: 10 }).state).toBe('warn');
     expect(saCheck({ usage, trialLeft: 10 }).summary).toContain('10 trial credits left');

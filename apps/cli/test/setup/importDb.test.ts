@@ -140,7 +140,7 @@ describe('importDb: the first-start note', () => {
       'Starting the app resumes 1 unfinished run from this database (set AUTO_RESUME=false in app.env first to leave them for you to resume or cancel).\n',
     );
     expect(startNote({ resumable: 2, scheduled: 1 }, 'now')).toBe(
-      "The app now starts on this database and resumes 2 unfinished runs it holds (cancel them from the app's status bar if you did not want them). 1 scheduled search may catch up its latest missed firing once when the app starts; that run spends calls like any other.\n",
+      "The app now starts on this database and resumes 2 unfinished runs it holds (cancel them from their cards on the app's Trips page if you did not want them). 1 scheduled search may catch up its latest missed firing once when the app starts; that run spends calls like any other.\n",
     );
   });
 });

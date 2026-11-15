@@ -7,11 +7,11 @@ export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';
 export const NO_SCHEDULE_TEXT =
-  'Nothing runs on a schedule until you give a search one; a scheduled search spends within the caps the Providers page shows.';
+  'Nothing runs on a schedule until you give a search one; a scheduled search spends within the caps Settings → Price sources shows.';
 
 /** The line naming where to go next (U3: always printed, with or without a price source). */
 export const nextStep = (port: number): string =>
-  `Next: open http://127.0.0.1:${port} and use the new-search form on Searches: enter From, To and the dates, review what the search will use, then press Search now.`;
+  `Next: open http://127.0.0.1:${port} and use the new-search panel on Trips: enter From, To and the dates, review what the search will use, then press Search.`;
 
 /**
  * The closing screen (brief §6; U3, U6): never the password itself, only where it lives and how to show or replace it;

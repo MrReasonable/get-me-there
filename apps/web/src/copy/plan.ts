@@ -1,5 +1,5 @@
 /**
- * The words of the Searches view's "Plan a search" form: where from, where to, when and how long, in plain words,
+ * The words of the new-search panel on the Trips page: where from, where to, when and how long, in plain words,
  * with everything else behind "More options". They live apart from `src/copy.ts` so the two can change
  * independently; `test/copy/planCatalogue.test.ts` sweeps every string here for the spec §11 banned words.
  * No place is named here: the airports come from the airports table, never from code (spec §1).
@@ -9,7 +9,7 @@ const noun = (n: number, one: string, many: string): string => (n === 1 ? one : 
 
 export const PLAN_COPY = {
   // --- The view ---
-  viewHeading: 'Searches',
+  viewHeading: 'Trips',
   notFound: 'The search in this link no longer exists. See your searches:',
 
   // --- The short form ---

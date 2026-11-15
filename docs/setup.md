@@ -339,7 +339,7 @@ you rely on the app.
 
 What £0 gives: calendar prices from the Aviasales cache only, every row labelled "constraints
 not checked", and coverage that depends on what Aviasales users searched recently. Before you
-search, open More options on a saved search's Edit page and press **Coverage check**: it shows
+search, open a saved search's Edit page and press **Coverage check** at its foot: it shows
 cached rows per airport pair and month, at no cost.
 
 To add SearchApi later (the $40 plan, scraping-derived; see `docs/api-limits.md`):
@@ -747,7 +747,7 @@ section 0.*
 
 ### Status first
 
-The app reports on itself. Open **Settings › System** (the Status view), or run `pnpm gmt status` (add
+The app reports on itself. Open **Settings › System**, or run `pnpm gmt status` (add
 `--only <area>` for one area, `--json` for the report as the app sent it). Both show the same checks, worst first,
 each with a plain summary and what to do about it; in a native install the fix is a `pnpm gmt` command with a
 copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The health line at the
@@ -774,8 +774,8 @@ failing check.
   A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
   at the scheduled time (once a run starts, the app keeps it from idle sleep, but it cannot wake a sleeping machine), or
   move the schedule.
-- **Providers.** One card per price source with its last successful call and its use against its cap (the Providers
-  view's wording, linked), and **price sources**, which warns when no usable source is set up.
+- **Provider.** One card per price source with its last successful call and its use against its cap (in Settings ›
+  Price sources' wording, linked to it), and **price sources**, which warns when no usable source is set up.
 - **Browser worker and consent.** Whether the worker answers, any cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
   window: "browser pages: only inside a run's window" or "also when a run resumes"; while a search runs, its note also
   says "keeping the machine awake until <time>". The consent card gives the
@@ -1075,7 +1075,7 @@ months; `pnpm gmt status` warns from 30 days before. The value comes from a sign
 account cookie; only its first field is understood, so treat it as private: no command prints it except inside
 `pnpm gmt consent export`'s one line (below), which exists to carry it. The
 worker refuses to start, and never sets the cookie, when the stored value is not a rejection (`consent-not-rejection`),
-and the Status view says "consent rejected" only when the stored mark is `reject`. Every refusal that needs a new capture names
+and Settings › System says "consent rejected" only when the stored mark is `reject`. Every refusal that needs a new capture names
 `pnpm gmt consent`. A record left by an earlier version saying no consent page was shown, or voided, is not used: the
 worker refuses it by name until you capture a rejection.
 
@@ -1181,7 +1181,7 @@ loopback, so the Docker path on Linux leaves the provider off; the native app re
 
 Every app and recorder that calls the worker waits on its one page spacing and stops at its one cool-down. There is no
 page or scroll cap, a run's or a month's: every page waits for the spacing, a run's flight lists have their own
-allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. The Providers page
+allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. Settings › Price sources
 shows the browser's pages this calendar month, with no cap on them. A second app calling the same worker in one
 calendar month is reported in the status, not refused.
 
@@ -1273,7 +1273,7 @@ verified on the worker").
 
 ### Choose it
 
-Once the worker is set up and `CAMOUFOX_ENABLED=true`, a new search names "Google Flights prices via Camoufox" by itself. A search saved before then keeps the sources it names until it is edited: add it to that search's discovery providers (More options).
+Once the worker is set up and `CAMOUFOX_ENABLED=true`, a new search names "Google Flights prices via Camoufox" by itself. A search saved before then keeps the sources it names until it is edited: tick it under Where to look on that search's Edit page.
 
 ### Check it
 
