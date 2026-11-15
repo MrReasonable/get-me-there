@@ -310,3 +310,21 @@ a.limit-item {
   margin: 0;
   color: var(--t-muted);
 }
+
+/* The run's progress bar (RunProgress): the accent on the sunk track, in every browser's own pseudo-elements */
+.run-bar {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: var(--t-sunk);
+  color: var(--t-accent);
+}
+.run-bar::-webkit-progress-bar {
+  background: var(--t-sunk);
+}
+.run-bar::-webkit-progress-value {
+  background: var(--t-accent);
+}
+.run-bar::-moz-progress-bar {
+  background: var(--t-accent);
+}

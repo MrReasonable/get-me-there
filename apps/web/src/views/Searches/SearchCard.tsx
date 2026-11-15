@@ -22,7 +22,7 @@ import {
   tripsLabel,
 } from './cardWords.js';
 import { RemoveSearch } from './RemoveSearch.js';
-import { TurnOnBrowser } from './TurnOnBrowser.js';
+import { useTurnOnBrowser } from './TurnOnBrowser.js';
 
 const S = COPY.searchesView;
 
@@ -64,6 +64,7 @@ export function SearchCard({
 }) {
   const now = useNow();
   const { cancel, resume } = useExecutionActions();
+  const turnOn = useTurnOnBrowser();
   const airports = useAirportDetails([...card.origins, ...card.destinations]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -84,10 +85,10 @@ export function SearchCard({
     pointOfSale,
     showCarriers: false,
   } as const;
-  // why: a card's trips are the search's current trips: while another search runs they are the previous search's, and a
-  // trip a search before the latest read says so in its label's detail (Review Focus 2)
+  // why: `fromEarlierSearch` is each trip's own (read before the latest run started): only such a trip says it was read
+  // by the previous search, and "will replace it" only while a run goes; a trip the running search read keeps its detail
   const earlierNote = (fromEarlier: boolean): string | null =>
-    fromEarlier || active ? (active ? S.previousSearchReplaced : S.previousSearchDetail) : null;
+    fromEarlier ? (active ? S.previousSearchReplaced : S.previousSearchDetail) : null;
   const fix = found?.kind === 'browser-off';
   return (
     <li className="tcard" data-card={card.id}>
@@ -126,7 +127,16 @@ export function SearchCard({
           </span>
           <p>
             {nothingFoundText(found)}
-            {found.kind === 'browser-off' && !browserConfigured ? ` ${S.browserNotSetUp}` : null}
+            {found.kind === 'browser-off' && !browserConfigured ? (
+              <>
+                {' '}
+                {S.browserNotSetUp}{' '}
+                <a href={hrefWith(navPatch('settings'))} onClick={navigateTo(navPatch('settings'))}>
+                  {S.browserNotSetUpLink}
+                </a>
+                .
+              </>
+            ) : null}
           </p>
         </div>
       )}
@@ -158,21 +168,24 @@ export function SearchCard({
         >
           {S.allTripsAndDates}
         </a>
-        {active ? null : fix && browserConfigured ? (
-          <TurnOnBrowser definitionId={card.id} name={card.name} />
-        ) : (
+        {active ? null : (
           <SearchAgainButton
             definitionId={card.id}
-            label={run === null ? COPY.searchAgain.searchNow : COPY.searchAgain.label}
-            accessibleName={S.searchAgainOf(card.name)}
+            label={
+              fix && browserConfigured
+                ? S.turnOnBrowser
+                : run === null
+                  ? COPY.searchAgain.searchNow
+                  : COPY.searchAgain.label
+            }
+            accessibleName={
+              fix && browserConfigured ? S.turnOnBrowserOf(card.name) : S.searchAgainOf(card.name)
+            }
+            prepare={fix && browserConfigured ? turnOn : undefined}
+            primary={run === null || (fix && browserConfigured)}
           />
         )}
         <span className="tcard-foot-end">
-          {fix && !browserConfigured ? (
-            <a href={hrefWith(navPatch('settings'))} onClick={navigateTo(navPatch('settings'))}>
-              {S.browserNotSetUpLink}
-            </a>
-          ) : null}
           <a
             href={hrefWith(editPatch(card.id))}
             onClick={navigateTo(editPatch(card.id))}

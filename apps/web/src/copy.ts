@@ -501,9 +501,9 @@ export const COPY = {
     nothingFound: {
       stoppedBefore: (n: number) => `The search stopped before ${thousands(n)} ${noun(n, 'date', 'dates')}.`,
       browserUnavailable: (n: number) =>
-        `The browser was unavailable for ${n} ${noun(n, 'date', 'dates')}; the next search tries them again.`,
+        `The browser was unavailable for ${thousands(n)} ${noun(n, 'date', 'dates')}; the next search tries them again.`,
       couldntRead: (n: number) =>
-        `${n} ${noun(n, 'date', 'dates')} couldn't be read; the next search tries them again.`,
+        `${thousands(n)} ${noun(n, 'date', 'dates')} couldn't be read; the next search tries them again.`,
       browserOff:
         "The other sources found nothing, and the browser is off for this search. That isn't the same as no flights.",
       noPriceShown: "Every date showed no price. That isn't the same as no flights.",
@@ -513,7 +513,7 @@ export const COPY = {
     turnOnBrowser: 'Turn on the browser for this search and search again',
     turnOnBrowserOf: (name: string) => `Turn on the browser for ${name} and search again`,
     turnOnBrowserFailed: (message: string) => `Couldn't turn the browser on: ${message}`,
-    browserNotSetUp: 'The browser is not set up yet. Set it up in Settings.',
+    browserNotSetUp: 'The browser is not set up yet. Set it up in',
     browserNotSetUpLink: 'Settings',
     previousSearchDetail: 'Read by the previous search.',
     previousSearchReplaced: 'Read by the previous search; the search running now will replace it.',

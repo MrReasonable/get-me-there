@@ -89,7 +89,9 @@ export function metaParts(
 
 /** What the card's trips list is called: "Cheapest trips, <name>", or the previous search's while one runs. */
 export function tripsLabel(card: SearchCard): string {
-  return isActive(card) ? S.previousRun : S.tripsLabel(card.name);
+  return isActive(card) && card.trips.length > 0 && card.trips.every((t) => t.figure.fromEarlierSearch)
+    ? S.previousRun
+    : S.tripsLabel(card.name);
 }
 
 /** The reasons of Ruling 8, in the order the first that applies is chosen. */

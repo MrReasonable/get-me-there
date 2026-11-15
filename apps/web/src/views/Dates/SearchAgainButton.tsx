@@ -37,6 +37,7 @@ export function SearchAgainButton({
   accessibleName,
   confirmFirst = false,
   prepare,
+  primary = true,
 }: {
   definitionId: string;
   /** The visible words: "Search again" by default, "Search now" in the never-searched state. */
@@ -49,7 +50,9 @@ export function SearchAgainButton({
    * Something that must succeed before the run is started (the Trips card's "Turn on the browser": it saves the search
    * with the browser added). A failure is said beside the button and nothing is started.
    */
-  prepare?: (definition: DefinitionResponse) => Promise<void>;
+  prepare?: ((definition: DefinitionResponse) => Promise<void>) | undefined;
+  /** The idle button is the page's primary action (the default); a card's repeat search is a secondary one. */
+  primary?: boolean;
 }) {
   const definitions = useDefinitions();
   const { start } = useExecutionActions();
@@ -178,7 +181,7 @@ export function SearchAgainButton({
     <>
       <button
         type="button"
-        className="btn btn-primary btn-sm min-h-11"
+        className={primary ? 'btn btn-primary btn-sm min-h-11' : 'btn btn-sm min-h-11'}
         disabled={definition === undefined || start.isPending || preparing}
         aria-busy={start.isPending || preparing ? true : undefined}
         // why: while pending the visible "Searching…" is the name, so the busy state is what a screen reader hears

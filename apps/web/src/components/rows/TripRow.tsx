@@ -145,7 +145,7 @@ export function TripRow({ figure, details, search, pair, earlierNote = null }: T
         <div key={l.name} className={i === 0 ? 'row-leg row-out' : 'row-leg row-back'}>
           {l.words === '' ? null : (
             <>
-              <span className="row-leg-tag">{l.name}</span> {l.words}
+              <span className="row-leg-tag">{l.name}</span> {l.words.replace(/(\d+h) (\d+m)/g, '$1\u00a0$2')}
             </>
           )}
         </div>

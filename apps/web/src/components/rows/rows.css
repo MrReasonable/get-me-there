@@ -173,13 +173,14 @@
     font-weight: 600;
     text-transform: uppercase;
   }
-  /* A trip an earlier search read (shown while another search runs): quieter ink and a dashed edge, never the price's */
-  .trip-row-earlier {
-    border-left: 2px dashed var(--t-old-line);
-  }
-  .trip-row-earlier .row-dates,
-  .trip-row-earlier .row-nights,
-  .trip-row-earlier .row-leg {
-    color: var(--t-muted);
-  }
+}
+
+/* A trip an earlier search read (shown while another search runs): quieter ink and a dashed edge, never the price's */
+.trip-row-earlier {
+  border-left: 2px dashed var(--t-old-line);
+}
+.trip-row-earlier .row-dates,
+.trip-row-earlier .row-nights,
+.trip-row-earlier .row-leg {
+  color: var(--t-muted);
 }

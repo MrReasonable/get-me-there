@@ -68,6 +68,8 @@ export interface TripOver {
   hasBookingOptions?: boolean;
   /** an earlier search read this trip (the card shows it while another search runs) */
   fromEarlierSearch?: boolean;
+  /** the price is the cheapest of the rows a truncated tile read (decision 36) */
+  truncated?: boolean;
 }
 
 /** A read trip's pairing at `pence`, of the kind asked: 07:15 out, 14:20 back, QQ Travel's offer when a seller's. */
@@ -111,7 +113,7 @@ export function cardTrip(o: TripOver = {}, provenance: ProvenanceInput = provSea
     provenance,
     stale: o.stale ?? false,
     ageHours: o.ageHours ?? 2,
-    truncated: false,
+    truncated: o.truncated ?? false,
   };
   const airports = { origin: o.origin ?? 'BHX', destination: o.destination ?? 'FRA' };
   const nights = (Date.parse(returnDate) - Date.parse(departureDate)) / 86_400_000;

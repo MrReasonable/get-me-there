@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { apiContract } from '@gmt/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
@@ -100,7 +103,7 @@ describe('a finished search with trips', () => {
     );
   });
 
-  it('Search again is the normal primary button once the search is loaded, not a disabled one', async () => {
+  it('Search again is a normal secondary button once the search is loaded, not a disabled one; Search now is primary', async () => {
     server.use(
       serveCards([searchCard({ id: 'def-0001', trips })]),
       http.get(`${API}/definitions`, () => HttpResponse.json([definition({ id: 'def-0001' })])),
@@ -110,7 +113,7 @@ describe('a finished search with trips', () => {
       name: /^Search again/,
     });
     await waitFor(() => expect(again).toBeEnabled());
-    expect(again).toHaveClass('btn-primary');
+    expect(again).not.toHaveClass('btn-primary');
     expect(again).not.toHaveAttribute('aria-busy');
   });
 
@@ -326,6 +329,111 @@ describe('a search that is running (Review Focus 2, Ruling 11)', () => {
   });
 });
 
+describe('earlier trips on a running card (Review Focus 2)', () => {
+  const running = latestRun({ status: 'running', finishedAt: null, stop: null });
+
+  it('only a trip the previous search read says so; a trip the running search read keeps its own detail', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          latestRun: running,
+          trips: [
+            readTrip({ pricePence: 38_900, fromEarlierSearch: false, departureDate: '2027-01-12' }),
+            readTrip({ pricePence: 40_200, fromEarlierSearch: true, departureDate: '2027-01-13' }),
+          ],
+        }),
+      ]),
+    );
+    const { user } = renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    const rows = within(card).getAllByTestId('trip-row');
+    const current = at(rows, 0);
+    const earlier = at(rows, 1);
+    expect(current).not.toHaveAttribute('data-earlier');
+    expect(earlier).toHaveAttribute('data-earlier', 'true');
+    for (const row of [current, earlier]) {
+      const label = within(row).getByTestId('price-label');
+      await user.click(within(label).getByText(/Seller/));
+    }
+    expect(current).not.toHaveTextContent('previous search');
+    expect(earlier).toHaveTextContent('Read by the previous search; the search running now will replace it.');
+    // the list is the previous search's only when every trip is
+    expect(within(card).queryByRole('list', { name: 'Trips from the previous search' })).toBeNull();
+  });
+
+  it('a settled card’s trip from an earlier search says so without "will replace it"', async () => {
+    server.use(serveCards([searchCard({ trips: [readTrip({ fromEarlierSearch: true })] })]));
+    const { user } = renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    await user.click(within(card).getByText(/Seller/));
+    expect(card).toHaveTextContent('Read by the previous search.');
+    expect(card).not.toHaveTextContent('will replace it');
+  });
+
+  it('the earlier-result styling is in no media query, so it applies at every width', () => {
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../src/components/rows/rows.css'),
+      'utf8',
+    );
+    const at = css.indexOf('.trip-row-earlier {');
+    expect(at).toBeGreaterThan(0);
+    let depth = 0;
+    for (const ch of css.slice(0, at)) {
+      if (ch === '{') depth += 1;
+      if (ch === '}') depth -= 1;
+    }
+    expect(depth).toBe(0);
+  });
+});
+
+describe('a truncated or stale price keeps its mark (decision 36, Ruling 19)', () => {
+  it('a truncated lower-on-calendar price and a truncated trip carry the truncated note', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          trips: [readTrip({ truncated: true })],
+          readDates: 3,
+          lowerOnCalendar: lowerOnCalendar({ truncated: true, count: 4 }),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    expect(within(within(card).getByTestId('card-counts')).getByTestId('price-cell')).toHaveTextContent(
+      COPY.truncatedNote,
+    );
+    expect(within(within(card).getByTestId('trip-row')).getByTestId('price-cell')).toHaveTextContent(
+      COPY.truncatedNote,
+    );
+  });
+
+  it('a complete price carries none', async () => {
+    server.use(serveCards([searchCard({ trips: [readTrip()], lowerOnCalendar: lowerOnCalendar() })]));
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    for (const cell of within(card).getAllByTestId('price-cell')) expect(cell).not.toHaveTextContent('…');
+  });
+
+  it('a stale lower price and a stale trip say so in their labels', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          trips: [readTrip({ stale: 'refresh', ageHours: 200 })],
+          lowerOnCalendar: lowerOnCalendar({ stale: 'setting', ageHours: 100 }),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    const labels = within(card).getAllByTestId('price-label');
+    expect(labels).toHaveLength(2);
+    for (const label of labels) {
+      const summary = label.querySelector('summary');
+      expect(summary?.getAttribute('aria-label') ?? '').toMatch(/older|stale/i);
+    }
+  });
+});
+
 describe('the other states', () => {
   it('never searched: "Not searched yet" and Search now, no counts and no reason', async () => {
     server.use(serveCards([searchCard({ latestRun: null, ...noPrices })]));
@@ -456,6 +564,19 @@ describe('a finished search that found nothing says why (Ruling 8)', () => {
         }),
       },
       "12 dates couldn't be read; the next search tries them again.",
+    ],
+    [
+      'a large count is written with its thousands comma',
+      {
+        discovery: [...browser],
+        latestRun: latestRun({
+          datePairs: 2000,
+          datePairsSearched: 797,
+          datePairsNeverSearched: 0,
+          marks: marks({ 'no-price-shown': 797, 'couldnt-read': 1203 }),
+        }),
+      },
+      "1,203 dates couldn't be read; the next search tries them again.",
     ],
     [
       'the browser is off for this search',
@@ -622,6 +743,45 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
     ]);
   });
 
+  it('keeps the start’s refusal visible after the save re-reads the cards', async () => {
+    const order: string[] = [];
+    let saved = false;
+    server.use(
+      http.get(`${API}/definitions/cards`, () =>
+        HttpResponse.json(
+          apiContract.searchCardsResponseSchema.parse({
+            cards: [
+              { ...offAndEmpty(), discovery: saved ? ['travelpayouts', 'camoufox'] : ['travelpayouts'] },
+            ],
+            pointOfSale: 'GB',
+          }),
+        ),
+      ),
+      http.get(`${API}/providers`, () => HttpResponse.json(withBrowser())),
+      http.get(`${API}/definitions`, () => HttpResponse.json([definition({ id: 'def-0001' })])),
+      http.put(`${API}/definitions/:id`, () => {
+        order.push('PUT');
+        saved = true;
+        return HttpResponse.json(definition({ id: 'def-0001' }));
+      }),
+      http.post(`${API}/definitions/:id/executions`, () => {
+        order.push('START');
+        return HttpResponse.json({ error: { code: 'active', message: 'already' } }, { status: 409 });
+      }),
+    );
+    const { user } = renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    const fix = await within(card).findByRole('button', { name: /^Turn on the browser for/ });
+    await waitFor(() => expect(fix).toBeEnabled());
+    await user.click(fix);
+    await waitFor(() => expect(order).toEqual(['PUT', 'START']));
+    // the re-read now says the browser is on, so the reason and the fix label are gone; the refusal stays
+    await waitFor(() => expect(card.querySelector('.tcard-nothing')).not.toHaveTextContent('browser is off'));
+    expect(await within(card).findByText(COPY.searchAgain.refused.active)).toBeInTheDocument();
+    await act(async () => undefined);
+    expect(within(card).getByText(COPY.searchAgain.refused.active)).toBeInTheDocument();
+  });
+
   it('starts nothing when the save fails, and says so beside the button', async () => {
     const order: string[] = [];
     server.use(serveCards([offAndEmpty()]), ...serveOrder(order, [], 500));
@@ -642,7 +802,13 @@ describe('"Turn on the browser for this search and search again" (Ruling 8)', ()
     const card = await cardOf('Birmingham → Frankfurt');
     expect(card.querySelector('.tcard-nothing')).toHaveTextContent(S.browserNotSetUp);
     expect(within(card).queryByRole('button', { name: /^Turn on the browser/ })).toBeNull();
-    expect(within(card).getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/?view=settings');
+    const link = within(card).getByRole('link', { name: 'Settings' });
+    expect(link).toHaveAttribute('href', '/?view=settings');
+    // the link is the sentence's own word, not a separate one in the foot
+    expect(link.closest('.tcard-nothing')).toHaveTextContent(
+      'The browser is not set up yet. Set it up in Settings.',
+    );
+    expect(within(card).getAllByRole('link', { name: 'Settings' })).toHaveLength(1);
     expect(within(card).getByRole('button', { name: /^Search again/ })).toBeInTheDocument();
   });
 

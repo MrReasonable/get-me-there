@@ -6,10 +6,9 @@
   .trips-page {
     color-scheme: light;
     color: var(--t-ink);
-    background: var(--t-bg);
-    border-radius: 10px;
-    padding: 20px var(--t-gutter) 32px;
-    margin-top: 20px;
+    /* the ground is the body's (the tokens' page colour); the column is centred, the view's own gutter is the page's */
+    padding: 4px 0 64px;
+    margin: 0 auto;
     /* the mockup's UI face with tabular figures: the board's faces (flap lettering, the slashed zero) stay off the cards */
     font:
       400 15px / 1.45 ui-sans-serif,
@@ -339,4 +338,20 @@
 .tcard .trip-row .row-price .book-link .book-amount::after {
   content: " ↗" / "";
   font-size: 13px;
+}
+
+/* A card's price and its label, left-aligned (the board's rule puts the label on the amount's right) */
+.tcard .row-price > .price-label:not([open]) {
+  margin-inline-start: 0;
+}
+.tcard .row-price .book-link {
+  text-align: left;
+}
+@media (max-width: 720px) {
+  .tcard .row-price {
+    align-items: flex-end;
+  }
+  .tcard .row-price .book-link {
+    text-align: right;
+  }
 }
