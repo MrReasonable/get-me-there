@@ -105,6 +105,17 @@ describe("rowBookingTarget (core's one rule over a date pair's figure)", () => {
     expect(inGb(pair, gone, 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({ kind: 'none' });
     expect(inGb(pair, gone, 'economy', null)).toEqual({ kind: 'none' });
   });
+  // why: CodeRabbit CR4: a verified figure's pairing is another trip (maybe another airport pair's), so its
+  // provenance never suppresses the verified price's own link; the verified price's own provenance still does
+  it("keeps a real verified trip's seller booking when the pairing beneath it is synthetic", () => {
+    const v = staleVerifiedWithOlderTrip();
+    const beneath = v.pairing === null ? figurePairing() : v.pairing;
+    const withSynthetic = { ...v, pairing: { ...beneath, provenance: provSynthetic() } };
+    expect(inGb(pair, withSynthetic, 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
+      kind: 'seller',
+      booking: SYNTHETIC_SELLER_BOOKING,
+    });
+  });
   it('is none for a synthetic verified price, whatever its booking', () => {
     expect(inGb(pair, verifiedFig(), 'economy', SYNTHETIC_SELLER_BOOKING)).toEqual({
       kind: 'none',

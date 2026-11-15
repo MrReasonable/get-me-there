@@ -61,8 +61,11 @@ export function rowBookingTarget(
   );
   const verified = figure.basis === 'verified';
   return bookingTargetOf({
+    // why: a pairing figure's pairing is its own trip, so its provenance counts; a verified figure's is another trip's
+    // (CodeRabbit CR4), so only the verified price's own provenance suppresses its link
     synthetic:
-      syntheticProvenance(figure.price.provenance) || (q !== null && syntheticProvenance(q.provenance)),
+      syntheticProvenance(figure.price.provenance) ||
+      (!verified && q !== null && syntheticProvenance(q.provenance)),
     booking: verified ? booking : null,
     // why: final review C1: only a pairing figure's pairing is its own trip; a verified figure's is another's
     bookingUrl: verified ? null : (q?.bookingUrl ?? null),
