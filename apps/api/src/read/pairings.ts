@@ -122,8 +122,18 @@ export function candidateOf(
       arriveBack: ret.arrivesLocal,
     },
     legs: {
-      out: { durationMinutes: outbound.durationMinutes, stops: outbound.stops, carriers: outbound.carriers },
-      back: { durationMinutes: ret.durationMinutes, stops: ret.stops, carriers: ret.carriers },
+      out: {
+        durationMinutes: outbound.durationMinutes,
+        stops: outbound.stops,
+        carriers: outbound.carriers,
+        arrivesDayOffset: outbound.arrivesDayOffset,
+      },
+      back: {
+        durationMinutes: ret.durationMinutes,
+        stops: ret.stops,
+        carriers: ret.carriers,
+        arrivesDayOffset: ret.arrivesDayOffset,
+      },
     },
     // why: final whole-branch review I2: the trip's own journey time, as a verified figure's is its two legs' sum, so
     // the board's Journey column shows it rather than "not known" (the calendar row beneath states none)

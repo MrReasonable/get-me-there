@@ -1,6 +1,6 @@
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { clockOf, legWords, rowDay } from '../../src/lib/legWords.js';
+import { clockOf, dayOffsetOf, legWords, rowDay } from '../../src/lib/legWords.js';
 
 // Ruling 20 (Trips and Search plan): one way of a trip in words.
 
@@ -33,6 +33,28 @@ describe('legWords', () => {
     ).toBe('07:15 → 17:55');
     expect(legWords({ durationMinutes: 640, stops: null }, { depart: null, arrive: null })).toBe('10h 40m');
     expect(legWords({ durationMinutes: null, stops: null }, { depart: null, arrive: null })).toBe('');
+  });
+  it('marks an arrival on another day: "+1" the next day, "−1" the day before, nothing on the same day', () => {
+    const times = { depart: '18:30', arrive: '06:40' };
+    expect(legWords({ durationMinutes: 850, stops: 1, arrivesDayOffset: 1 }, times)).toBe(
+      '18:30 → 06:40 +1 · 14h 10m · 1 change',
+    );
+    expect(legWords({ durationMinutes: 850, stops: 1, arrivesDayOffset: -1 }, times)).toContain('06:40 −1 ·');
+    expect(legWords({ durationMinutes: 850, stops: 1, arrivesDayOffset: 0 }, times)).toContain('06:40 ·');
+    expect(legWords({ durationMinutes: 850, stops: 1 }, times)).not.toMatch(/[+−]\d/);
+    // no mark without times to put it on
+    expect(
+      legWords({ durationMinutes: 850, stops: 1, arrivesDayOffset: 1 }, { depart: null, arrive: null }),
+    ).not.toMatch(/\+1/);
+  });
+  it("takes a verified leg's day mark from its local date-times, none where they carry no date", () => {
+    expect(dayOffsetOf('2027-03-14T18:30', '2027-03-15T06:40')).toBe(1);
+    expect(dayOffsetOf('2027-03-14T18:30', '2027-03-14T21:05')).toBe(0);
+    expect(dayOffsetOf('2027-03-14T18:30', '2027-03-13T21:05')).toBe(-1);
+    expect(dayOffsetOf('2027-02-28T23:00', '2027-03-01T06:00')).toBe(1);
+    expect(dayOffsetOf('18:30', '06:40')).toBeUndefined();
+    expect(dayOffsetOf('2027-03-14T18:30', null)).toBeUndefined();
+    expect(dayOffsetOf(null, '2027-03-14T18:30')).toBeUndefined();
   });
   it("takes the clock from a verified result's local date-time", () => {
     expect(clockOf('2027-03-14T18:30')).toBe('18:30');

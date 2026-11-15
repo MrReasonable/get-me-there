@@ -753,6 +753,12 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
       ['outCarriers', []],
       ['outCarriers', seven],
       ['backCarriers', ['Aer\nLingus']],
+      ['outArrivesDayOffset', -1],
+      ['outArrivesDayOffset', 4],
+      ['outArrivesDayOffset', 0.5],
+      ['backArrivesDayOffset', -2],
+      ['backArrivesDayOffset', 4],
+      ['backArrivesDayOffset', 1.5],
     ] as const;
     for (const [column, value] of bad) {
       const r = withPairing();
@@ -769,6 +775,9 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     g.backStops[0] = 0;
     g.outMinutes[0] = 1;
     g.outCarriers[0] = Array.from({ length: 6 }, () => 'Aer Lingus');
+    // the return's offset runs from −1 (a date-line return), the outbound's from 0; both to 3
+    g.outArrivesDayOffset[0] = 3;
+    g.backArrivesDayOffset[0] = -1;
     expect(issuePaths(edge)).toEqual([]);
   });
   it('pairing: the pairing figure has an entry (an offer\'s or a "from" price); none on a verified figure', () => {

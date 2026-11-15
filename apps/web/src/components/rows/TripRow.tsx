@@ -2,7 +2,7 @@ import type { DatePairFigure, PointOfSale } from '@gmt/core';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { rowBookingTarget, type VerifiedDetails } from '../../lib/bookingTarget.js';
-import { type LegWordsFacts, legWords } from '../../lib/legWords.js';
+import { dayOffsetOf, type LegWordsFacts, legWords } from '../../lib/legWords.js';
 import { tripHref } from '../../state/tripState.js';
 import { BookLink } from '../BookLink.js';
 import { DatesCell, NightsCell, RowAmount, RowLabel, type RowPair, stayDates } from './RowParts.js';
@@ -56,15 +56,18 @@ function legsOf(
   }
   if (figure.basis === 'verified') {
     const none = { durationMinutes: null, stops: null };
+    // why: a verified leg's own local date-times give its day mark
+    const out = {
+      ...(details?.legs.out ?? none),
+      arrivesDayOffset: dayOffsetOf(figure.departOut, figure.arriveOut),
+    };
+    const back = {
+      ...(details?.legs.back ?? none),
+      arrivesDayOffset: dayOffsetOf(figure.departBack, figure.arriveBack),
+    };
     return [
-      {
-        name: R.out,
-        words: legWords(details?.legs.out ?? none, { depart: figure.departOut, arrive: figure.arriveOut }),
-      },
-      {
-        name: R.back,
-        words: legWords(details?.legs.back ?? none, { depart: figure.departBack, arrive: figure.arriveBack }),
-      },
+      { name: R.out, words: legWords(out, { depart: figure.departOut, arrive: figure.arriveOut }) },
+      { name: R.back, words: legWords(back, { depart: figure.departBack, arrive: figure.arriveBack }) },
     ];
   }
   // why: the grid keeps its columns whatever a row knows of its flights

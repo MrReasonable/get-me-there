@@ -55,9 +55,15 @@ for (const width of [375, 1280] as const)
       await expect(page.getByTestId('trip-row').first()).toBeVisible();
       // the head row is aria-hidden; the two trips and the calendar row are the list's items
       await expect(trips).toHaveCount(2);
+      // three long airline names each way, and a booking link on a long host: named in full, wrapped, never sideways
       await expect(page.getByTestId('trips')).toContainText(
-        'Virgin Atlantic, Aer Lingus, British Airways Cityflyer',
+        'Virgin Atlantic Airways Limited, Aer Lingus Regional, British Airways Cityflyer',
       );
+      const host = 'flights-booking.partner-redirects.seller-checkout.google.com';
+      const book = page.getByRole('link', { name: new RegExp(`Book on ${host.replaceAll('.', '\\.')}`) });
+      await expect(book).toBeAttached();
+      // the words are drawn at a desktop; a phone shows "£412 ↗" and keeps them in the link's name
+      if (width >= 720) await expect(book).toContainText(host);
       await expect(page.getByTestId('row-airports').first()).toHaveText('LGW → JFK');
       await expect(page.getByTestId('calendar-row')).toContainText("Flights couldn't be read:");
       await expectNoSidewaysScroll(page);

@@ -205,10 +205,11 @@ export function pairingPrice(c: {
 }
 
 /**
- * What one way of a read trip says about itself, as the list page states it: its journey time, how many changes and the
- * airlines' names (not codes). `operatedBy` is not carried; the Trip page shows it.
+ * What one way of a read trip says about itself, as the list page states it: its journey time, how many changes, the
+ * airlines' names (not codes) and the days from the leg's own date to its arrival (`arrivesDayOffset`: 0 to 3 out; the
+ * return's runs from −1, a date-line return). `operatedBy` is not carried; the Trip page shows it.
  */
-export type LegFacts = Pick<ListedFlight, 'durationMinutes' | 'stops' | 'carriers'>;
+export type LegFacts = Pick<ListedFlight, 'durationMinutes' | 'stops' | 'carriers' | 'arrivesDayOffset'>;
 
 /**
  * What the api attaches per cell for the pairing figure (spec rev 56 §6.9, §10): the return's "from" price, the

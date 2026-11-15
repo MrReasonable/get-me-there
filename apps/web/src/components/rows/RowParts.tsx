@@ -43,12 +43,22 @@ export function RowAmount({
   );
 }
 
-/** The one label of the figure's price (`figureLabelKind`), its tap detail naming the seller where one was read. */
+/**
+ * The one label of the figure's price (`figureLabelKind`), its tap detail naming the seller where one was read. A
+ * provenance that is not one withholds this row's label (and its price: `RowAmount` has its own boundary), never the page.
+ */
 export function RowLabel({ figure }: { figure: DatePairFigure }) {
+  return (
+    <PriceBoundary>
+      <ValidLabel figure={figure} />
+    </PriceBoundary>
+  );
+}
+
+function ValidLabel({ figure }: { figure: DatePairFigure }) {
   const q = figure.pairing;
   const kind = figureLabelKind(figure);
   const p = figure.price;
-  // why: a price on screen is withheld, with its label, when its provenance is not one (the label's own boundary)
   assertProvenance(p.provenance);
   return (
     <PriceLabel

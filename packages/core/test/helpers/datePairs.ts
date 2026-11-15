@@ -100,8 +100,8 @@ export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPair
     departBack: '14:20',
     arriveBack: '06:25',
     legs: {
-      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'] },
-      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'] },
+      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 0 },
+      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: 0 },
     },
     mismatch: false,
     provenance: flightListProvenance(),

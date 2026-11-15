@@ -567,8 +567,13 @@ function withPairings(): DecodedDatePairs {
                 departBack: '19:10',
                 arriveBack: '07:15',
                 legs: {
-                  out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'] },
-                  back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'] },
+                  out: {
+                    durationMinutes: 345,
+                    stops: 0,
+                    carriers: ['Virgin Atlantic', 'Delta'],
+                    arrivesDayOffset: 1,
+                  },
+                  back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'], arrivesDayOffset: -1 },
                 },
                 mismatch: false,
                 provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
@@ -634,11 +639,13 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
       backMinutes: [415, 480],
       backStops: [0, 2],
       backCarriers: [['Virgin Atlantic'], ['Aer Lingus']],
+      outArrivesDayOffset: [0, 1],
+      backArrivesDayOffset: [0, -1],
     });
     const parsed = datePairsResponseSchema.parse(JSON.parse(JSON.stringify(wire)));
     expect(decodeDatePairs(parsed).pairs[3]?.figure?.pairing?.legs).toEqual({
-      out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'] },
-      back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'] },
+      out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'], arrivesDayOffset: 1 },
+      back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'], arrivesDayOffset: -1 },
     });
   });
 

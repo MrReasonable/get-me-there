@@ -283,6 +283,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'rows.readFlightsFor': ['Wed 11 Nov → Sat 28 Nov', null],
   'rows.legTimes': ['07:15', '17:55'],
   'rows.changes': [2],
+  'trip.calendarFailed': ["Flights couldn't be read: the connection to it failed"],
   'readState.failed': ['the connection to it failed'],
   // trip-page plan Task 7: the Trip page (design 2026-11-08 §5, §6.1)
   'trip.heading': ['Wed 11 Nov', 'Sat 28 Nov'],

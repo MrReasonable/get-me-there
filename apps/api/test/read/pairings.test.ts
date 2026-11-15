@@ -90,17 +90,19 @@ describe("candidateOf's legs (Ruling 1)", () => {
     out.durationMinutes = 640;
     out.stops = 1;
     out.carriers = ['Aer Lingus'];
+    out.arrivesDayOffset = 1;
     ret.durationMinutes = 415;
     ret.stops = 0;
     ret.carriers = ['Virgin Atlantic'];
+    ret.arrivesDayOffset = -1;
     return { ...list, returns: returnReadSchema.parse(returns) };
   };
 
   it('takes the legs of the outbound and the return it chose, and the group carries them', () => {
     const c = candidateOf(chosenLegs(), PAIRING_LIMITS, at(0), 168);
     const expected = {
-      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'] },
-      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'] },
+      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 1 },
+      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: -1 },
     };
     expect(c?.legs).toEqual(expected);
     if (c === null) throw new Error('a candidate');

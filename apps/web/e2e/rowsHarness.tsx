@@ -1,5 +1,4 @@
 import { asIata, asIsoDate, asIsoDateTime } from '@gmt/core';
-import { SYNTHETIC_SELLER_BOOKING } from '@gmt/core/testing';
 import { createRoot } from 'react-dom/client';
 import { CalendarRow } from '../src/components/rows/CalendarRow.js';
 import { TripRow, TripRowHead } from '../src/components/rows/TripRow.js';
@@ -28,7 +27,13 @@ const search = {
 } as const;
 
 /** Three airlines each way, a long seller and a failed read with its reason: the longest each row can say. */
-const THREE_AIRLINES = ['Virgin Atlantic', 'Aer Lingus', 'British Airways Cityflyer'];
+const THREE_AIRLINES = [
+  'Virgin Atlantic Airways Limited',
+  'Aer Lingus Regional',
+  'British Airways Cityflyer',
+];
+/** A seller's booking on a long subdomain of the one allowed host: the longest "Book on <host>" a link can say. */
+const LONG_HOST = 'flights-booking.partner-redirects.seller-checkout.google.com';
 const LONG_SELLER = 'Trip.com Travel Singapore Pte Ltd';
 const trip = pairingFig({
   origin: asIata('LGW'),
@@ -36,8 +41,8 @@ const trip = pairingFig({
   pairing: figurePairing({
     seller: LONG_SELLER,
     legs: {
-      out: { durationMinutes: 640, stops: 2, carriers: THREE_AIRLINES },
-      back: { durationMinutes: 415, stops: 1, carriers: THREE_AIRLINES },
+      out: { durationMinutes: 640, stops: 2, carriers: THREE_AIRLINES, arrivesDayOffset: 0 },
+      back: { durationMinutes: 415, stops: 1, carriers: THREE_AIRLINES, arrivesDayOffset: 0 },
     },
   }),
 });
@@ -60,7 +65,7 @@ createRoot(document.getElementById('root') ?? document.body).render(
           origin: verified.origin,
           destination: verified.destination,
           legs: { out: { durationMinutes: 850, stops: 1 }, back: { durationMinutes: 725, stops: 0 } },
-          booking: SYNTHETIC_SELLER_BOOKING,
+          booking: { kind: 'get', url: `https://${LONG_HOST}/travel/clk/f?id=1`, host: LONG_HOST },
         }}
         search={search}
         pair={pair}

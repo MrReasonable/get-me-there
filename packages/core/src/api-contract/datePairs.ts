@@ -202,11 +202,15 @@ const bookingOptionsSchema = z.strictObject({ figure: counts });
 const legMinutes = z.number().int().min(1);
 const legStops = z.number().int().min(0).max(5);
 const legCarriers = z.array(pageText).min(1).max(6);
-const legFactsSchema = z.strictObject({
-  durationMinutes: legMinutes,
-  stops: legStops,
-  carriers: legCarriers,
-});
+const outOffset = z.number().int().min(0).max(3);
+const backOffset = z.number().int().min(-1).max(3);
+const legFactsSchema = (arrivesDayOffset: typeof outOffset) =>
+  z.strictObject({
+    durationMinutes: legMinutes,
+    stops: legStops,
+    carriers: legCarriers,
+    arrivesDayOffset,
+  });
 
 /**
  * Spec rev 56 §10: one entry per pairing figure, the calendar price it replaced (shown beneath it with its own source,
@@ -253,9 +257,12 @@ const pairingGroupSchema = z.strictObject({
   outMinutes: z.array(legMinutes),
   outStops: z.array(legStops),
   outCarriers: z.array(legCarriers),
+  /** the days from the outbound's date to its arrival (0 to 3) and from the return's (−1, a date-line return, to 3) */
+  outArrivesDayOffset: z.array(outOffset),
   backMinutes: z.array(legMinutes),
   backStops: z.array(legStops),
   backCarriers: z.array(legCarriers),
+  backArrivesDayOffset: z.array(backOffset),
   mismatch: z.array(z.boolean()),
   provenance: counts,
   stale: z.array(staleMarkSchema),
@@ -280,9 +287,11 @@ const PAIRING_COLUMNS = [
   'outMinutes',
   'outStops',
   'outCarriers',
+  'outArrivesDayOffset',
   'backMinutes',
   'backStops',
   'backCarriers',
+  'backArrivesDayOffset',
   'mismatch',
   'provenance',
   'stale',
@@ -974,7 +983,7 @@ const pairingCellSchema = z.strictObject({
   arriveOut: hhmm,
   departBack: hhmm,
   arriveBack: hhmm,
-  legs: z.strictObject({ out: legFactsSchema, back: legFactsSchema }),
+  legs: z.strictObject({ out: legFactsSchema(outOffset), back: legFactsSchema(backOffset) }),
   mismatch: z.boolean(),
   provenance: provenanceSchema,
   stale: staleMarkSchema,

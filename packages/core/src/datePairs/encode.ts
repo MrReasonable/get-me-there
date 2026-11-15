@@ -234,9 +234,11 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     outMinutes: [],
     outStops: [],
     outCarriers: [],
+    outArrivesDayOffset: [],
     backMinutes: [],
     backStops: [],
     backCarriers: [],
+    backArrivesDayOffset: [],
     mismatch: [],
     provenance: [],
     stale: [],
@@ -346,9 +348,11 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairing.outMinutes.push(q.legs.out.durationMinutes);
       pairing.outStops.push(q.legs.out.stops);
       pairing.outCarriers.push(q.legs.out.carriers);
+      pairing.outArrivesDayOffset.push(q.legs.out.arrivesDayOffset);
       pairing.backMinutes.push(q.legs.back.durationMinutes);
       pairing.backStops.push(q.legs.back.stops);
       pairing.backCarriers.push(q.legs.back.carriers);
+      pairing.backArrivesDayOffset.push(q.legs.back.arrivesDayOffset);
       pairing.mismatch.push(q.mismatch);
       pairing.provenance.push(entry(q.provenance));
       pairing.stale.push(q.stale);

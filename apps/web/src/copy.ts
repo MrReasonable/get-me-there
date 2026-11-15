@@ -1239,6 +1239,8 @@ export const COPY = {
     noReturn: (ago: string) =>
       `Flights were read ${ago}, but Google listed no return for the outbounds tried.`,
     calendarOnly: `${READ_STATE_WORDS['not-read']} yet, so there's nothing to book here.`,
+    // a failed read of the dates' flights, in the row's own words (`readStateWords`): "Flights couldn't be read: <why>."
+    calendarFailed: (words: string) => `${words}. There's nothing to book here.`,
     calendarWithTrip: (ago: string) =>
       `The trip below was read ${ago}, longer ago than this search's refresh, and doesn't lead.`,
     readWithoutCalendar: (ago: string) =>

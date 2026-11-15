@@ -85,8 +85,8 @@ function pairingOf(pence: number, kind: PairingKind, provenance: ProvenanceInput
     departBack: '14:20',
     arriveBack: '06:25',
     legs: {
-      out: { durationMinutes: 890, stops: 1, carriers: ['QQ Atlantic'] },
-      back: { durationMinutes: 725, stops: 1, carriers: ['QQ Atlantic'] },
+      out: { durationMinutes: 890, stops: 1, carriers: ['QQ Atlantic'], arrivesDayOffset: 0 },
+      back: { durationMinutes: 725, stops: 1, carriers: ['QQ Atlantic'], arrivesDayOffset: 0 },
     },
     mismatch: false,
     provenance,

@@ -1,7 +1,7 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL, SYNTHETIC_SELLER_BOOKING } from '@gmt/core/testing';
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TripRow, TripRowHead, type TripRowProps } from '../../src/components/rows/TripRow.js';
 import { COPY } from '../../src/copy.js';
 import type { VerifiedDetails } from '../../src/lib/bookingTarget.js';
@@ -64,6 +64,44 @@ describe('TripRow', () => {
     );
   });
 
+  it("marks a pairing leg's next-day arrival and a date-line return from the list's own day offsets", () => {
+    renderRow({
+      figure: pairingFig({
+        pairing: figurePairing({
+          legs: {
+            out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 1 },
+            back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: -1 },
+          },
+        }),
+      }),
+    });
+    const row = screen.getByRole('listitem');
+    expect(row).toHaveTextContent('Out 07:15 → 18:05 +1 · 10h 40m');
+    expect(row).toHaveTextContent('Back 14:20 → 06:25 −1 · 6h 55m');
+  });
+
+  it("withholds one row's price when its provenance is not one, and keeps the rows and the page", () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const good = pairingFig();
+    renderWithProviders(
+      <ul>
+        <TripRow
+          // why: a figure whose provenance is not one (no cast: an intersection with a bad value is still a figure)
+          figure={Object.assign({}, good, { price: { ...good.price, provenance: 'not a provenance' } })}
+          details={null}
+          search={search}
+          pair={pair}
+        />
+        <TripRow figure={good} details={null} search={search} pair={pair} />
+      </ul>,
+    );
+    spy.mockRestore();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getAllByText(COPY.priceWithheld).length).toBeGreaterThan(0);
+    // only the second row keeps its label
+    expect(screen.getAllByTestId('price-label')).toHaveLength(1);
+  });
+
   it('leaves the airlines off a card (showCarriers false or absent)', () => {
     renderRow({ figure: pairingFig(), search: { ...search, showCarriers: false } });
     expect(screen.getByRole('listitem')).not.toHaveTextContent('Aer Lingus');
@@ -111,7 +149,8 @@ describe('TripRow', () => {
     it('shows its own times, minutes and stops from its details, no airlines, and its seller link', () => {
       renderRow({ figure: verified, details: DETAILS });
       const row = screen.getByRole('listitem');
-      expect(row).toHaveTextContent('Out 18:30 → 06:40 · 14h 10m · 1 change');
+      // the overnight outbound's day mark comes from its local date-times
+      expect(row).toHaveTextContent('Out 18:30 → 06:40 +1 · 14h 10m · 1 change');
       // the return states no stops: only its times and minutes
       expect(row).toHaveTextContent('Back 09:00 → 21:05 · 12h 05m');
       expect(row).not.toHaveTextContent(/Aer Lingus|Virgin Atlantic/);

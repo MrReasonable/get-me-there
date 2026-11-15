@@ -385,8 +385,8 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; des
     times: { departOut: '07:15', arriveOut: '18:05', departBack: '14:20', arriveBack: '06:25' },
     journeyMinutes: 1_615,
     legs: {
-      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'] },
-      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'] },
+      out: { durationMinutes: 640, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 0 },
+      back: { durationMinutes: 415, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: 0 },
     },
     mismatch: false,
     provenance: {

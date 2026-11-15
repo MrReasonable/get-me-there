@@ -1,10 +1,18 @@
-import { asIata, asIsoDate, BANNED_WORD_ALLOWLIST, findBannedWords, searchLinkFor } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  BANNED_WORD_ALLOWLIST,
+  findBannedWords,
+  PAIRING_READ,
+  searchLinkFor,
+} from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { TripResponse } from '../../../src/api/types.js';
 import { COPY } from '../../../src/copy.js';
+import { readStateWords } from '../../../src/lib/readStateWords.js';
 import type { TripUiState } from '../../../src/state/tripState.js';
 import { type CardState, cardOf } from '../../../src/views/Trip/cardState.js';
 import { TripView } from '../../../src/views/Trip/TripView.js';
@@ -286,6 +294,53 @@ const EXPECT: Record<CardState['kind'], { says: string | RegExp; actions: string
 const isKind = (k: string): k is CardState['kind'] => Object.hasOwn(EXPECT, k);
 /** Every state of the card, from the table above (a `Record` over the union, so none is left out). */
 const KINDS = Object.keys(EXPECT).filter(isKind);
+
+/** Ruling 5: where the card and a calendar row describe the same read, they use the same words (`readStateWords`). */
+describe('the card and the calendar row agree on every flight read', () => {
+  it.each(PAIRING_READ)('%s', async (read) => {
+    const withPairing =
+      read !== 'not-read' && read !== 'list-failed' && read !== 'outbound-only' && read !== 'no-pairing-read';
+    // why: the contract gives a read beneath a figure its pairing (`within` is a pairing figure's own)
+    const fig =
+      read === 'within'
+        ? pairingFigure()
+        : calendarFigure({
+            pairingRead: read,
+            listReason: read === 'list-failed' ? 'network' : null,
+            ...(withPairing
+              ? {
+                  pairing:
+                    read === 'over-limit'
+                      ? overPairing()
+                      : readPairing(read === 'within-older' ? { stale: 'refresh', ageHours: 50 } : {}),
+                }
+              : {}),
+          });
+    renderTrip(trip({ figure: fig }));
+    const text = shownText(await card());
+    const row = readStateWords(fig);
+    switch (read) {
+      case 'not-read':
+      case 'list-failed':
+        // the two states with no flights to show say the row's own words
+        expect(text).toContain(row);
+        break;
+      case 'outbound-only':
+        expect(text).toMatch(/return/i);
+        expect(row).toMatch(/return/i);
+        break;
+      case 'no-pairing-read':
+        expect(text).toMatch(/no return/i);
+        expect(row).toMatch(/no return/i);
+        break;
+      default:
+        // a read with flights: neither says the flights were not read
+        expect(text).not.toMatch(/flights not read/i);
+        expect(row).toMatch(/^Flights read/);
+    }
+    if (read === 'list-failed') expect(text).not.toContain('not read yet');
+  });
+});
 
 describe('every state of the card says its sentence, with exactly its own actions (design §6.1)', () => {
   it.each(KINDS)('%s', async (kind) => {

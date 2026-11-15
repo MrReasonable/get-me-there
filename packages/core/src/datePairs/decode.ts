@@ -164,11 +164,13 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
             durationMinutes: columnAt(q.outMinutes, k),
             stops: columnAt(q.outStops, k),
             carriers: columnAt(q.outCarriers, k),
+            arrivesDayOffset: columnAt(q.outArrivesDayOffset, k),
           },
           back: {
             durationMinutes: columnAt(q.backMinutes, k),
             stops: columnAt(q.backStops, k),
             carriers: columnAt(q.backCarriers, k),
+            arrivesDayOffset: columnAt(q.backArrivesDayOffset, k),
           },
         },
         mismatch: columnAt(q.mismatch, k),

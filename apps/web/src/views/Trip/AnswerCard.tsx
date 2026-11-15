@@ -9,6 +9,7 @@ import { listText } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
+import { readStateWords } from '../../lib/readStateWords.js';
 import { useNow } from '../../now.js';
 import { FlightRead } from '../Dates/BoardCard.js';
 import type { ListsState } from '../Dates/board.js';
@@ -247,7 +248,10 @@ function stateSentence(r: TripResponse, state: CardState, listAgo: string): Reac
     case 'no-return':
       return T.noReturn(listAgo);
     case 'calendar-only':
-      return T.calendarOnly;
+      // why: Ruling 5: the card and the Search page's row say the same of one read (`readStateWords`)
+      return r.figure?.pairingRead === 'list-failed'
+        ? T.calendarFailed(readStateWords(r.figure))
+        : T.calendarOnly;
     case 'gone':
       return T.gone;
     case 'calendar-with-trip':
