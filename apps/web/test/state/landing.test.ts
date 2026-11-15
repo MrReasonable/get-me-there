@@ -26,7 +26,16 @@ const view = (v: ViewId, patch: Record<string, string | null> = {}): Landing => 
 });
 
 /** The detail's own parameters, removed when a Results URL lands on Dates (spec §11 "Back to dates"). */
-const DETAIL_GONE = { view: 'dates', depart: null, return: null, basis: null, row: null };
+// final review M3: the trip's own airport pair (t.from, t.to) goes with its dates
+const DETAIL_GONE = {
+  view: 'dates',
+  depart: null,
+  return: null,
+  basis: null,
+  row: null,
+  't.from': null,
+  't.to': null,
+};
 
 const TO_SEARCHES = view('searches', { view: 'searches' });
 
@@ -235,7 +244,14 @@ describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () =
     for (const v of VIEWS) expect(NAV_ITEMS).toContain(navItemOf(v));
   });
 
-  it("a nav link names its view and drops the detail's date pair and row, keeping every filter", () => {
-    expect(navPatch('history')).toEqual({ view: 'history', depart: null, return: null, row: null });
+  it("a nav link names its view and drops the detail's date pair, its airport pair and row, keeping every filter", () => {
+    expect(navPatch('history')).toEqual({
+      view: 'history',
+      depart: null,
+      return: null,
+      row: null,
+      't.from': null,
+      't.to': null,
+    });
   });
 });

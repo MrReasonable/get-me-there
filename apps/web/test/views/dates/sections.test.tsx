@@ -285,8 +285,8 @@ describe('Cheapest trips (Rulings 4, 20 and 22; mockup 02)', () => {
           .getAttribute('href') ?? '',
         'http://x',
       ).searchParams;
-    expect([details(lhr).get('d.from'), details(lhr).get('d.to')]).toEqual(['LHR', 'JFK']);
-    expect([details(lgw).get('d.from'), details(lgw).get('d.to')]).toEqual(['LGW', 'EWR']);
+    expect([details(lhr).get('t.from'), details(lhr).get('t.to')]).toEqual(['LHR', 'JFK']);
+    expect([details(lgw).get('t.from'), details(lgw).get('t.to')]).toEqual(['LGW', 'EWR']);
     expect(within(lgw).getByRole('link', { name: /^Details for/ })).toHaveAccessibleName(
       'Details for LGW → EWR, Mon 15 Mar → Thu 25 Mar',
     );

@@ -174,7 +174,15 @@ describe('an old detail link and the way back to a search (trip-page plan Task 7
   });
 
   it("back to a search's page drops the Trip page's own parameters; the coverage link opens its section", () => {
-    expect(BACK_TO_DATES).toEqual({ view: 'dates', depart: null, return: null, basis: null, row: null });
+    expect(BACK_TO_DATES).toEqual({
+      view: 'dates',
+      depart: null,
+      return: null,
+      basis: null,
+      row: null,
+      't.from': null,
+      't.to': null,
+    });
     expect(DATES_COVERAGE).toEqual({ ...BACK_TO_DATES, 'd.coverage': 'open' });
   });
 });

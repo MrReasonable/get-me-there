@@ -1,5 +1,6 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { BACK_TO_DATES, TRIP_PAIR_PARAMS } from '../../src/state/resultsState.js';
 import {
   parseTripState,
   searchPageTripHref,
@@ -8,6 +9,7 @@ import {
   tripQueryOf,
 } from '../../src/state/tripState.js';
 import { hrefWith } from '../../src/state/urlState.js';
+import { navPatch } from '../../src/state/view.js';
 
 // Design 2026-11-08 §6.1 (plan Task 6): the Trip page's URL (`def`, `depart`, `return`, `d.from`, `d.to`,
 // `d.journey`) and the trip read's query built from it. Synthetic codes only.
@@ -112,19 +114,18 @@ describe("tripPatch and tripHref (one builder: Ruling 9's parameters)", () => {
       return: '2027-03-24',
     });
   });
-  it('tripHref builds the address from scratch, carrying only the filters given', () => {
+  // final review M3: a multi-airport trip's own pair is the trip's (`t.from`/`t.to`), never the page's airport filter
+  it('tripHref builds the address from scratch, naming the trip’s own airport pair when given', () => {
     expect(tripHref('def-1', '2027-03-14', '2027-03-24', {})).toBe(
       '?view=trip&def=def-1&depart=2027-03-14&return=2027-03-24',
     );
-    expect(
-      tripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', to: 'JFK,EWR', journey: '1500' }),
-    ).toBe(
-      '?view=trip&def=def-1&depart=2027-03-14&return=2027-03-24&d.from=LGW&d.to=JFK%2CEWR&d.journey=1500',
+    expect(tripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', to: 'JFK' })).toBe(
+      '?view=trip&def=def-1&depart=2027-03-14&return=2027-03-24&t.from=LGW&t.to=JFK',
     );
   });
   // Task 9 fix round 1 (ruling): a trip linked from a search's page carries the page's filters, so the Trip page's crumb
-  // back returns to the same filtered view
-  it('searchPageTripHref carries every d.* of the page, the trip’s own airports over the page’s, nothing else', () => {
+  // back returns to the same filtered view; final review M3: the page's own airport filter (or none) is kept as it was
+  it('searchPageTripHref carries every d.* of the page as it was, and the trip’s own pair beside them', () => {
     const page = new URLSearchParams(
       'view=dates&def=def-1&d.nights=10-11&d.week=best&d.journey=1500&d.from=LGW&d.coverage=open&row=old',
     );
@@ -140,23 +141,42 @@ describe("tripPatch and tripHref (one builder: Ruling 9's parameters)", () => {
       'd.from': 'LGW',
       'd.coverage': 'open',
     });
-    // a multi-airport trip's own pair replaces the page's airport filter
-    const own = searchPageTripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LHR', to: 'JFK' }, page);
-    expect(new URLSearchParams(own).get('d.from')).toBe('LHR');
-    expect(new URLSearchParams(own).get('d.to')).toBe('JFK');
-    expect(new URLSearchParams(own).get('d.nights')).toBe('10-11');
+    // a multi-airport trip's own pair sits beside the page's airport filter, which is left as it was
+    const own = new URLSearchParams(
+      searchPageTripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', to: 'JFK' }, page),
+    );
+    expect([own.get('t.from'), own.get('t.to')]).toEqual(['LGW', 'JFK']);
+    expect([own.get('d.from'), own.get('d.to')]).toEqual(['LGW', null]);
+    expect(own.get('d.nights')).toBe('10-11');
     // a page without filters gives tripHref's own address
     expect(
       searchPageTripHref('def-1', '2027-03-14', '2027-03-24', {}, new URLSearchParams('view=dates')),
     ).toBe(tripHref('def-1', '2027-03-14', '2027-03-24', {}));
   });
+  it('the trip’s own pair scopes the Trip page over the page’s filter; the way back and the nav drop it', () => {
+    expect(
+      parse(
+        'view=trip&def=d1&depart=2027-03-14&return=2027-03-24&d.from=LGW&d.journey=900&t.from=LGW&t.to=EWR',
+      ),
+    ).toEqual({ ...DATES, from: ['LGW'], to: ['EWR'], journey: 900 });
+    // an airport outside the search is dropped, as the page's filter's is
+    expect(parse('depart=2027-03-14&return=2027-03-24&t.from=QQA&t.to=JFK')).toEqual({
+      ...DATES,
+      from: [],
+      to: ['JFK'],
+      journey: null,
+    });
+    expect(TRIP_PAIR_PARAMS).toEqual({ from: 't.from', to: 't.to' });
+    for (const patch of [BACK_TO_DATES, navPatch('searches')])
+      expect([patch['t.from'], patch['t.to']]).toEqual([null, null]);
+  });
   it('an address from tripHref parses back to the same trip', () => {
-    const href = tripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', journey: '900' });
+    const href = tripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', to: 'JFK' });
     expect(parseTripState(new URL(href, 'http://localhost').searchParams, DEF)).toEqual({
       ...DATES,
       from: ['LGW'],
-      to: [],
-      journey: 900,
+      to: ['JFK'],
+      journey: null,
     });
   });
 });

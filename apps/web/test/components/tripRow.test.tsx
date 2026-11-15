@@ -222,8 +222,8 @@ describe('TripRow', () => {
       renderRow({ figure: pairingFig(), search: multi });
       expect(screen.getByTestId('row-airports')).toHaveTextContent('LHR → JFK');
       const link = screen.getByRole('link', { name: 'Details for LHR → JFK, Wed 11 Nov → Sat 28 Nov' });
-      expect(link.getAttribute('href')).toContain('d.from=LHR');
-      expect(link.getAttribute('href')).toContain('d.to=JFK');
+      expect(link.getAttribute('href')).toContain('t.from=LHR');
+      expect(link.getAttribute('href')).toContain('t.to=JFK');
     });
     it('two trips on one date with different pairs have different details and book links', () => {
       const lgw = pairingFig({ origin: asIata('LGW'), airportPair: airportPairIndex('LGW', 'JFK') });

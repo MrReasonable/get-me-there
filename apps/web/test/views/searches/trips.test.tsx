@@ -282,10 +282,10 @@ describe('a search with several airports (Review Focus 1)', () => {
     expect(within(at(rows, 0)).getByTestId('row-airports')).toHaveTextContent('LHR → JFK');
     expect(within(at(rows, 1)).getByTestId('row-airports')).toHaveTextContent('LGW → EWR');
     const detail = (r: HTMLElement) => within(r).getByRole('link', { name: /^Details for/ });
-    expect(detail(at(rows, 0)).getAttribute('href')).toContain('d.from=LHR');
-    expect(detail(at(rows, 0)).getAttribute('href')).toContain('d.to=JFK');
-    expect(detail(at(rows, 1)).getAttribute('href')).toContain('d.from=LGW');
-    expect(detail(at(rows, 1)).getAttribute('href')).toContain('d.to=EWR');
+    expect(detail(at(rows, 0)).getAttribute('href')).toContain('t.from=LHR');
+    expect(detail(at(rows, 0)).getAttribute('href')).toContain('t.to=JFK');
+    expect(detail(at(rows, 1)).getAttribute('href')).toContain('t.from=LGW');
+    expect(detail(at(rows, 1)).getAttribute('href')).toContain('t.to=EWR');
     const book = (r: HTMLElement) => r.querySelector('.row-price a')?.getAttribute('href');
     expect(book(at(rows, 0))).toContain('LHR');
     expect(book(at(rows, 1))).toContain('LGW');

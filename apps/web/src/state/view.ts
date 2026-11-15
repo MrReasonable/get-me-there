@@ -1,5 +1,6 @@
 import { DETAIL_LINK_PARAMS } from '@gmt/core';
 import { oneOf } from './oneOf.js';
+import { TRIP_PAIR_PARAMS } from './resultsState.js';
 
 /**
  * Every view of spec rev 55 §11 (WP20 Task 20.3; design 2026-11-08 Ruling 9): Searches is the first screen (the nav says
@@ -61,7 +62,7 @@ export function parseView(v: string | null): ViewId {
 }
 
 /**
- * A nav link's patch: the view, with the detail's date pair and row dropped (they name one date pair's results and
+ * A nav link's patch: the view, with the detail's date pair, its airport pair and row dropped (they name one trip and
  * mean nothing to another view); every filter (`d.*`, `f.*`, the sort, `def=`) is kept, so the filters travel with
  * every nav link (spec §11; WP19 Task 19.7).
  */
@@ -71,5 +72,7 @@ export function navPatch(view: ViewId): Record<string, string | null> {
     [DETAIL_LINK_PARAMS.depart]: null,
     [DETAIL_LINK_PARAMS.return]: null,
     [DETAIL_LINK_PARAMS.row]: null,
+    [TRIP_PAIR_PARAMS.from]: null,
+    [TRIP_PAIR_PARAMS.to]: null,
   };
 }

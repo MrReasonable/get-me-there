@@ -33,8 +33,15 @@ export function parseDetailPair(p: URLSearchParams): DetailPair | null {
 }
 
 /**
+ * A multi-airport trip's own airport pair on the Trip page's URL (final review M3): the trip's, kept apart from the
+ * search page's airport filter (`d.from`/`d.to`), so the way back finds that filter as it was, or none.
+ */
+export const TRIP_PAIR_PARAMS = { from: 't.from', to: 't.to' } as const;
+
+/**
  * Back to a search's page (spec §11): the Dates view with every `d.*` parameter kept (hrefWith keeps every parameter
- * the patch does not name) and the Trip page's own parameters removed, names from core's one constant.
+ * the patch does not name) and the Trip page's own parameters removed (its dates, its pair), names from core's one
+ * constant and `TRIP_PAIR_PARAMS`.
  */
 export const BACK_TO_DATES: Readonly<Record<string, string | null>> = {
   [DETAIL_LINK_PARAMS.view]: 'dates',
@@ -42,6 +49,8 @@ export const BACK_TO_DATES: Readonly<Record<string, string | null>> = {
   [DETAIL_LINK_PARAMS.return]: null,
   [DETAIL_LINK_PARAMS.basis]: null,
   [DETAIL_LINK_PARAMS.row]: null,
+  [TRIP_PAIR_PARAMS.from]: null,
+  [TRIP_PAIR_PARAMS.to]: null,
 };
 
 /** A search's page with its coverage section open (the status bar and the status card link to it). */

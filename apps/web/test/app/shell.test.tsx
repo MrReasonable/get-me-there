@@ -5,7 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
 import { COPY } from '../../src/copy.js';
-import { workedDates } from '../fixtures.dates.js';
+import {
+  airportPairIndex,
+  at,
+  figurePairing,
+  pairingFig,
+  pricedPair,
+  workedDates,
+} from '../fixtures.dates.js';
 import { API, definition, providersResponse, resultsResponse } from '../fixtures.js';
 import { latestRun, lowerOnCalendar, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
@@ -637,5 +644,44 @@ describe('what a URL lands at is used once (final review C2, I1, I2)', () => {
     for (const d of folds.querySelectorAll('details')) expect(d).not.toHaveAttribute('open');
     expect(screen.queryByRole('table', { name: COPY.coverageHeading })).toBeNull();
     expect(folds.contains(document.activeElement)).toBe(false);
+  });
+});
+
+// final review M3: the Trip page's crumb back restores the Search page's own airport filter (or none), never the trip's pair
+describe('the Trip page’s crumb back (final review M3)', () => {
+  const lgw = pairingFig({
+    origin: asIata('LGW'),
+    destination: asIata('EWR'),
+    airportPair: airportPairIndex('LGW', 'EWR'),
+    pairing: figurePairing({ pricePence: 41_300, fromPence: 41_300 }),
+    price: { ...pairingFig().price, pricePence: 41_300 },
+  });
+  const there = async (user: ReturnType<typeof renderWithProviders>['user']) => {
+    const trips = await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
+    await user.click(within(trips).getByRole('link', { name: /^Details for LGW → EWR/ }));
+    await screen.findByTestId('trip-page');
+    const q = new URLSearchParams(window.location.search);
+    expect([q.get('t.from'), q.get('t.to')]).toEqual(['LGW', 'EWR']);
+  };
+  const back = async (user: ReturnType<typeof renderWithProviders>['user']) => {
+    await user.click(screen.getByTestId('trip-back'));
+    await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
+    return new URLSearchParams(window.location.search);
+  };
+
+  it('a multi-airport search with no airport filter comes back with none', async () => {
+    server.use(serveDates({ pairs: { [at('2027-03-15', 10)]: pricedPair(lgw) } }));
+    const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001&d.nights=10-11' });
+    await there(user);
+    const p = await back(user);
+    expect(Object.fromEntries(p)).toEqual({ view: 'dates', def: 'def-0001', 'd.nights': '10-11' });
+  });
+
+  it('a page filtered to one origin comes back filtered to it alone', async () => {
+    server.use(serveDates({ pairs: { [at('2027-03-15', 10)]: pricedPair(lgw) } }));
+    const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001&d.from=LGW' });
+    await there(user);
+    const p = await back(user);
+    expect(Object.fromEntries(p)).toEqual({ view: 'dates', def: 'def-0001', 'd.from': 'LGW' });
   });
 });
