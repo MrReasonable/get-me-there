@@ -198,6 +198,78 @@
       0 10px 24px rgb(0 0 0 / 0.35);
   }
 
+  /* The search's fields (SearchFields): the places, the dates, the stay and Where to look, then the folds. On the Edit
+     plate From and To sit side by side from 768 px; the Trips page's narrow panel stacks them (searches.css) */
+  .search-fields {
+    display: grid;
+    gap: 20px;
+  }
+  .search-places {
+    display: grid;
+    gap: 20px;
+  }
+  @media (min-width: 768px) {
+    .search-places {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+  }
+  .search-more {
+    display: grid;
+    gap: 20px;
+    padding: 8px 0 24px;
+  }
+  /* Cabin beside Repeat (mockup 01's row), stacking when there is no room */
+  .search-pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px 20px;
+    align-items: start;
+  }
+  .search-pair .input {
+    width: 100%;
+  }
+  /* Leave from and Leave by, side by side while they fit */
+  .leave-dates {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  /* Where to look (Ruling 13): one checkbox per source set up, each with its cost; a sentence for the rest. The legend
+     floats, so a rule drawn above the group is never broken by it */
+  .where-to-look {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .where-to-look-title {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+    font: 700 15px / 1.25 var(--font-ui);
+    color: var(--fg);
+  }
+  .where-to-look > :not(legend) {
+    clear: both;
+  }
+  .where-to-look > :not(legend) + :not(legend) {
+    margin-top: 8px;
+  }
+  .source-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+  }
+  .source-check input {
+    flex: none;
+    margin-top: 2px;
+  }
+  .source-note {
+    color: var(--fg-2);
+  }
+
   /* More options: a fold between two rules on the plate */
   .def-more {
     border-top: 1px solid var(--line);

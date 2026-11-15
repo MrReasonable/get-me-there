@@ -97,6 +97,10 @@ const SAMPLES: Record<string, unknown[]> = {
   // WP20 Task 20.5: the new-search form, the estimate sentence, a refused Search now, Edit and Repeat weekly
   'newSearch.estimateFailed': ['database is locked'],
   'newSearch.saveFailed': ['database is locked'],
+  // Trips and Search Task 7 (Rulings 13–14): Where to look and Repeat
+  'newSearch.searchapiNote': [2000, 9385],
+  'newSearch.notSetUp': [['the browser', 'SearchApi']],
+  'newSearch.repeatOther': ['Every day at 06:30 (Europe/London)'],
   'editSearch.heading': ['Birmingham → Frankfurt'],
   'editSearch.startFailed': ['database is locked'],
   'repeatWeekly.repeats': ['Mondays', '05:00'],

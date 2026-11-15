@@ -50,10 +50,12 @@ export const SMOKE = {
   priceLabel: '[data-testid="price-label"] > summary',
   aboutPrice: '[data-testid="about-price"] > summary',
   searchLog: '[data-testid="search-log"] > summary',
-  /** The new-search form (WP20): the form that holds the From picker; at 900 px and narrower it is first in the DOM. */
+  /** The new-search form (WP20): the form that holds the From picker, inside the panel after the cards (Ruling 13). */
   newSearchForm: 'form:has(#origins-input)',
-  /** The press that starts a search: the new-search form's, a card's and the page's (Search again) share the verb. */
-  searchNow: /^Search now/,
+  /** The new-search panel: the region named by its "New search" heading, holding the form. */
+  newSearchPanel: '[aria-labelledby="new-search-heading"]',
+  /** The panel's press: "Search", or "Search · <cost>" on a run that costs (Ruling 13). */
+  searchNow: /^Search( · .+)?$/,
   /** The search page's state line, read by a screen reader as a status named "Search state". */
   stateLine: COPY.searchPage.stateLabel,
   /** One search's card on the Searches view. */

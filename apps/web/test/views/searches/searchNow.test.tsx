@@ -99,7 +99,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     const bodies = serveCreate();
     const { user } = await ready();
     const pushes = vi.spyOn(window.history, 'pushState');
-    await user.click(screen.getByRole('button', { name: 'Search now · about £1.20' }));
+    await user.click(screen.getByRole('button', { name: 'Search · about £1.20' }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toMatchObject({
       origins: ['BHX'],
@@ -131,7 +131,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
       return HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 });
     });
     const { user } = await ready();
-    await user.click(screen.getByRole('button', { name: /^Search now/ }));
+    await user.click(searchNow());
     await waitFor(() => expect(bodies).toHaveLength(1));
     const pending = screen.getByRole('button', { name: COPY.working });
     expect(pending).toBeDisabled();
@@ -139,7 +139,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     release();
     expect(await screen.findByText(/Couldn't save the search/)).toBeInTheDocument();
     expect(bodies).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: /^Search now/ }));
+    await user.click(searchNow());
     await waitFor(() => expect(bodies).toHaveLength(2));
     const keys = bodies.map(keyOf);
     expect(keys[0]).not.toBe(keys[1]);
@@ -155,7 +155,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
       return HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 });
     });
     await ready();
-    const press = screen.getByRole('button', { name: /^Search now/ });
+    const press = searchNow();
     // why: both clicks are dispatched inside one act, so React has not re-rendered (nor disabled the button) between them
     act(() => {
       press.click();
@@ -172,7 +172,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     async (code) => {
       serveCreate(() => refused(code));
       const { user } = await ready();
-      await user.click(screen.getByRole('button', { name: /^Search now/ }));
+      await user.click(searchNow());
       await waitFor(() => expect(new URLSearchParams(window.location.search).get('refused')).toBe(code));
       const params = new URLSearchParams(window.location.search);
       expect(params.get('view')).toBe('dates');
@@ -194,7 +194,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
       ),
     );
     const { user } = await ready();
-    await user.click(screen.getByRole('button', { name: /^Search now/ }));
+    await user.click(searchNow());
     expect(await screen.findByText('maxNights: maxNights must be at least minNights')).toBeInTheDocument();
     expect(screen.getByLabelText(PLAN_COPY.longest)).toHaveAttribute('aria-invalid', 'true');
     expect(new URLSearchParams(window.location.search).get('view')).toBeNull();
@@ -205,7 +205,7 @@ describe('Search now: the press (spec rev 55 §11)', () => {
       HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 }),
     );
     const { user } = await ready();
-    await user.click(screen.getByRole('button', { name: /^Search now/ }));
+    await user.click(searchNow());
     expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the search: db is down");
   });
 });
@@ -254,7 +254,7 @@ describe('the page’s words for a refused Search now (spec rev 55 §11; Review 
     expect(asked).toEqual(['def-0002']);
     expect(
       screen.getByText(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest when you search again.',
       ),
     ).toBeInTheDocument();
     await user.click(again);

@@ -1,6 +1,6 @@
 import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { PAIRING_FIXTURE } from '@gmt/core/testing';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { App } from '../../src/App.js';
@@ -24,6 +24,8 @@ import {
   budgetResponse,
   calendarGap,
   calendarRow,
+  estimate,
+  estimateResponse,
   execution,
   failedRow,
   partialRow,
@@ -52,6 +54,7 @@ import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
 import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
 import { autoOpenFlights } from '../views/dates/render.js';
+import { airportRows } from '../views/searches/support.js';
 
 /**
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
@@ -400,6 +403,81 @@ describe('the Trips cards say no banned word, no set-up term and no "£" outside
     await screen.findByText(/Calendar prices for 2,146 dates/);
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(jargonIn(mainPathWords())).toEqual([]);
+    expect(poundsOutsidePrices()).toEqual([]);
+  });
+});
+
+describe('the new-search panel says no banned word, no main-path term and no "£" outside a cost (Task 7)', () => {
+  // why: the Trips plan's main-path words, beyond the jargon list: the panel and its sentence say "dates", never these
+  const PANEL_WORDS: ReadonlyArray<readonly [string, RegExp]> = [
+    ['date pair', /\bdate pairs?\b/i],
+    ['reused', /\breused\b/i],
+    ['superseded', /\bsuperseded\b/i],
+    ['billed calls', /\bbilled calls?\b/i],
+    ['verdict', /\bverdicts?\b/i],
+    ['basis', /\bbasis\b/i],
+    ['itinerary search', /\bitinerary search\b/i],
+    ['on-demand', /\bon-demand\b/i],
+    ['trips you can book', /\btrips you can book\b/i],
+  ];
+
+  it('Where to look with two sources and the Settings sentence, More options with Repeat’s picker, the sentence, its notes and the over-limit refusal', async () => {
+    const tp = providersResponse().providers[0];
+    if (tp === undefined) throw new Error('the fixture names the Aviasales cache first');
+    // the browser set up and SearchApi not, so both a checkbox and the Settings sentence are swept
+    const providers = providersResponse({
+      providers: [tp, { ...tp, providerId: 'camoufox', displayName: 'Camoufox', usage: [] }],
+    });
+    const fitOver = {
+      fits: false,
+      runsPerMonth: 4.3,
+      perScope: [{ scope: 'provider-month:travelpayouts', estimated: 60_000, cap: 50_000, fits: false }],
+    };
+    server.use(
+      airportRows(),
+      http.get(`${API}/providers`, () => HttpResponse.json(providers)),
+      http.post(`${API}/definitions/estimate`, () =>
+        HttpResponse.json(
+          estimateResponse({
+            estimate: estimate({
+              seconds: 1500,
+              flightLists: {
+                pages: 23,
+                seconds: 100,
+                pairs: 15,
+                returns: true,
+                pagesMax: 580,
+                secondsMax: 1825,
+              },
+            }),
+            datePairs: 405,
+            datePairsCovered: 300,
+            datePairsReused: 50,
+            budgetFit: fitOver,
+          }),
+        ),
+      ),
+      serveCards([searchCard({ name: 'Worked example' })]),
+    );
+    const { user } = renderWithProviders(<App />, { search: '?view=searches' });
+    const from = await screen.findByRole('combobox', { name: PLAN_COPY.from });
+    await user.type(from, 'BHX{Enter}');
+    await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'FRA{Enter}');
+    await screen.findByRole('button', { name: 'Remove FRA' });
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.earliest), { target: { value: '2027-01-10' } });
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.latest), { target: { value: '2027-03-31' } });
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'weekly');
+    const region = screen.getByRole('status', { name: COPY.newSearch.estimateRegion });
+    await waitFor(() => expect(region).toHaveTextContent('the rest next Monday'));
+    await user.click(screen.getByRole('button', { name: /^Search( · .+)?$/ }));
+    await screen.findByText(COPY.repeatWeekly.overBudget);
+    await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'other');
+    expect(screen.getByText(/set it up in/)).toBeInTheDocument();
+    const words = mainPathWords();
+    expect(jargonIn(words)).toEqual([]);
+    expect(PANEL_WORDS.filter(([, re]) => re.test(words)).map(([w]) => w)).toEqual([]);
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
   });
 });

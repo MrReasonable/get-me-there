@@ -84,7 +84,8 @@ export function renderForm(providers = freeProviders()) {
 }
 
 export type User = ReturnType<typeof renderForm>['user'];
-export const searchNow = () => screen.getByRole('button', { name: /^Search now/ });
+/** The panel's press: "Search", or "Search · <cost>" on a run that costs (design 2026-11-08 Ruling 13). */
+export const searchNow = () => screen.getByRole('button', { name: /^Search( · .+)?$/ });
 export const step = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 export const field = (label: string) => {
   const el = screen.getByLabelText(label);

@@ -627,13 +627,15 @@ describe('no main-path jargon on the Edit page and its More options (spec rev 55
   async function opened(existing = definition()) {
     const r = renderEdit(existing);
     await r.user.click(await screen.findByText(PLAN_COPY.moreOptions));
+    // design 2026-11-08 Ruling 13: the rest of the old More options is under Limits and checks
+    await r.user.click(screen.getByText(COPY.newSearch.limitsHeading));
     await screen.findByRole('button', { name: /^Save and search again/ });
     await waitFor(() => expect(screen.queryByText(COPY.newSearch.working)).toBeNull());
     return r;
   }
   const sweep = (state: string) => expect(jargonIn(mainPathWords()), state).toEqual([]);
 
-  it('as it opens, with More options and the budget fit', async () => {
+  it('as it opens, with More options, Limits and checks and the budget fit', async () => {
     await opened();
     sweep('opened');
   });
@@ -705,8 +707,8 @@ describe('no main-path jargon on the Edit page and its More options (spec rev 55
     ];
     for (const [label, words] of explained)
       expect(screen.getByLabelText(label), label).toHaveAccessibleDescription(words);
-    // the sources are named as the main path names them, never by a vendor's product name
-    expect(screen.getByRole('checkbox', { name: 'The Aviasales cache' })).toBeInTheDocument();
+    // the sources are named as Where to look names them (Ruling 13), never by a vendor's own product name
+    expect(screen.getByRole('checkbox', { name: /^Aviasales cache · / })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Camoufox|Travelpayouts/ })).toBeNull();
     // the budget fit names each limit in words, never by its wire label
     expect(document.body.textContent).not.toMatch(/provider-month:|execution-calls|global-month/);

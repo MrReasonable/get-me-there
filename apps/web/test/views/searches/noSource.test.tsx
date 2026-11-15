@@ -84,7 +84,7 @@ describe('Search now with no price source set up (Review Focus 1)', () => {
     pickDate(PLAN_COPY.earliest, '2027-01-10');
     pickDate(PLAN_COPY.latest, '2027-03-31');
     await act(() => vi.advanceTimersByTimeAsync(ESTIMATE_DEBOUNCE_MS));
-    const press = screen.getByRole('button', { name: /^Search now/ });
+    const press = screen.getByRole('button', { name: /^Search( · .+)?$/ });
     await vi.waitFor(() => expect(press).not.toHaveAttribute('aria-disabled'));
     await user.click(press);
     await vi.waitFor(() => expect(creates).toHaveLength(1));

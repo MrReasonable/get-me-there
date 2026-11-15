@@ -76,7 +76,8 @@ export const SETUP_COPY = {
 
   // --- Definitions: schedule picker ---
   schedule: {
-    repeat: 'Repeat',
+    // why: design 2026-11-08 Ruling 14 — the picker opens under Repeat's Other, so its own select is named apart
+    repeat: 'How often',
     mode: {
       none: 'No schedule (it runs when you press Search again)',
       daily: 'Every day',

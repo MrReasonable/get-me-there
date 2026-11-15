@@ -16,8 +16,11 @@ export type DateEnd = 'from' | 'to';
 /** Ids of the number boxes whose "required" mark is the stay's own reason ("Enter the stay"). */
 const STAY_BOXES: readonly string[] = ['n-min', 'n-max'];
 /** Fields that live inside the collapsed More options fold (a 422 naming one opens it, UI-11). */
-const ADVANCED_FIELDS =
-  /^(name|cabin|constraints|verification|budget|providers|schedule|enabled|destinationNotes|onwardCostPence|window\.(startOffsetDays|lengthDays))/;
+const MORE_FIELDS =
+  /^(name|cabin|constraints\.maxJourneyMinutes|schedule|enabled|window\.(startOffsetDays|lengthDays))/;
+/** Fields that live inside Edit's collapsed Limits and checks fold (design 2026-11-08 Ruling 13), opened the same way. */
+const LIMIT_FIELDS =
+  /^(constraints(?!\.maxJourneyMinutes)|verification|budget|providers\.discoveryRefreshHours|destinationNotes|onwardCostPence)/;
 
 /** Field errors whose path is `field` or starts with `field.` (422 `details.fields`). */
 const errorsIn = (errors: readonly FieldError[], field: string) =>
@@ -60,6 +63,9 @@ export interface SearchForm {
   wait: string | null;
   advancedOpen: boolean;
   setAdvancedOpen: (open: boolean) => void;
+  /** Edit's Limits and checks fold. */
+  limitsOpen: boolean;
+  setLimitsOpen: (open: boolean) => void;
   summaryRef: RefObject<HTMLDivElement | null>;
 }
 
@@ -153,13 +159,16 @@ export function useSearchForm(
   const [saveErrors, setSaveErrors] = useState<readonly FieldError[]>([]);
   const fieldErrors = saveErrors.length > 0 ? saveErrors : refusedFields ? failed.fieldErrors() : [];
 
-  // why: the API's field errors move focus to their summary, and open the fold when one names an advanced field (UI-11)
+  // why: the API's field errors move focus to their summary, and open each fold holding a field one names (UI-11)
   const summaryRef = useRef<HTMLDivElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [limitsOpen, setLimitsOpen] = useState(false);
   const errorKey = fieldErrors.map((e) => `${e.field}:${e.message}`).join('|');
   useEffect(() => {
     if (errorKey === '') return;
-    if (errorKey.split('|').some((e) => ADVANCED_FIELDS.test(e))) setAdvancedOpen(true);
+    const fields = errorKey.split('|');
+    if (fields.some((e) => MORE_FIELDS.test(e))) setAdvancedOpen(true);
+    if (fields.some((e) => LIMIT_FIELDS.test(e))) setLimitsOpen(true);
     summaryRef.current?.focus();
   }, [errorKey]);
 
@@ -186,6 +195,8 @@ export function useSearchForm(
     wait,
     advancedOpen,
     setAdvancedOpen,
+    limitsOpen,
+    setLimitsOpen,
     summaryRef,
   };
 }

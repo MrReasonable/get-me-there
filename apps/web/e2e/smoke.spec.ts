@@ -1,4 +1,4 @@
-import { SOURCE_LABELS } from '@gmt/core';
+import { apiContract, SOURCE_LABELS } from '@gmt/core';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { z } from 'zod';
 import { PLAN_COPY } from '../src/copy/plan.js';
@@ -55,10 +55,11 @@ const smokeCard = (page: Page) =>
 const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
 const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
 
-test('fixture mode: a new search, Search now, then Dates, the Trip page and History show synthetic prices with provenance', async ({
+test('fixture mode: a new search, Search, then Dates, the Trip page and History show synthetic prices with provenance', async ({
   page,
 }) => {
-  // (1) the first screen is Searches: fill the new-search form, point both stages at the fixture provider, press Search now
+  // (1) the first screen is Trips: fill the new-search panel and press Search (fixture mode sets up only the fixture
+  // provider, which the presets name for both stages; Where to look offers no checkbox and says so, Ruling 13)
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1, name: COPY.searchesView.heading })).toBeVisible();
   await addAirport(page, PLAN_COPY.from, 'LHR');
@@ -67,17 +68,15 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   await page.locator('#w-to').fill('2027-03-15');
   await page.locator('#n-min').fill('10');
   await page.locator('#n-max').fill('11');
-  // why: the provider checkboxes sit behind More options, below the short form.
+  const panel = page.locator(SMOKE.newSearchPanel);
+  await expect(panel.getByRole('group', { name: COPY.newSearch.whereToLook })).toContainText(
+    COPY.newSearch.notSetUpLink,
+  );
+  await expect(panel.getByRole('checkbox', { name: /^(Google Flights|Aviasales|SearchApi)/ })).toHaveCount(0);
+  // the name is suggested from the airports picked (the airports table's cities for LHR and JFK), under More options
   await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
-  // the name is suggested from the airports picked (the airports table's cities for LHR and JFK)
   const searchName = SMOKE_SEARCH;
   await expect(page.getByRole('textbox', { name: PLAN_COPY.name })).toHaveValue(searchName);
-  // why: the presets name the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
-  for (const prefix of ['p-d-', 'p-v-']) {
-    for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all())
-      await box.uncheck();
-    await page.locator(`#${prefix}fixture`).check();
-  }
   // why: the press is the confirmation (spec rev 55 §11): there is no separate estimate or enable step. The button
   // waits for the estimate of the form as it now is, so a click on it is a click on a ready button.
   const press = page.locator(SMOKE.newSearchForm).getByRole('button', { name: SMOKE.searchNow });
@@ -347,16 +346,16 @@ test('at 375 x 812 the board starts in the first screen (Ian, 2026-10-27) @phone
   expect(box?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(812);
 });
 
-test('at 375px the new-search form sits above the list, and the cards list fits with 44px actions @phone', async ({
+test('at 375px the new-search panel sits below the list, and the cards list fits with 44px actions @phone', async ({
   page,
 }) => {
   await page.goto('/');
   const card = smokeCard(page);
   await expect(card).toBeVisible();
-  // spec rev 55 §11: narrower than 900 px the form is first in the DOM, so it is above the list
+  // Ruling 13: the cards come first in the DOM at every width, so on a phone the panel is below them
   const form = await page.locator(SMOKE.newSearchForm).boundingBox();
-  const first = await card.boundingBox();
-  expect((form?.y ?? Number.POSITIVE_INFINITY) + (form?.height ?? 0)).toBeLessThanOrEqual(first?.y ?? 0);
+  const last = await page.locator(SMOKE.searchCard).last().boundingBox();
+  expect(form?.y ?? 0).toBeGreaterThanOrEqual((last?.y ?? Number.POSITIVE_INFINITY) + (last?.height ?? 0));
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   const actions = await page.locator(SMOKE.cardAction).all();
   expect(actions.length).toBeGreaterThan(0);
@@ -458,4 +457,131 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
   await expect(page.locator(SMOKE.flightsBlock).first()).toBeVisible();
   await expect(page.getByRole('link', { name: OPEN_LINK }).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+/**
+ * Serves `/providers` with the three sources of Where to look set up beside the fixture one, and SearchApi's month, so
+ * the panel shows its three checkboxes with their costs as mockup 01 does. Nothing is pressed: the api never sees them.
+ */
+async function showEverySource(page: Page) {
+  await page.route('**/api/providers', async (route) => {
+    const real = apiContract.providersResponseSchema.parse(await (await route.fetch()).json());
+    const base = real.providers[0];
+    if (base === undefined) throw new Error('fixture mode lists the fixture provider');
+    const source = (providerId: 'camoufox' | 'travelpayouts' | 'searchapi', plan: '40usd' | 'free') => ({
+      ...base,
+      providerId,
+      displayName: providerId,
+      plan,
+      usage: [],
+    });
+    await route.fulfill({
+      json: {
+        ...real,
+        providers: [
+          ...real.providers,
+          source('camoufox', 'free'),
+          source('travelpayouts', 'free'),
+          source('searchapi', '40usd'),
+        ],
+        presets: {
+          ...real.presets,
+          providers: { ...real.presets.providers, discovery: ['camoufox', 'travelpayouts'] },
+        },
+      },
+    });
+  });
+  await page.route('**/api/budget', async (route) => {
+    const real = apiContract.budgetResponseSchema.parse(await (await route.fetch()).json());
+    const month = real.scopes.find((u) => u.scope === 'global-month');
+    await route.fulfill({
+      json: {
+        ...real,
+        scopes: [
+          ...real.scopes,
+          ...(month === undefined
+            ? []
+            : [{ ...month, scope: 'provider-month:searchapi', calls: 588, cap: 1000 }]),
+        ],
+      },
+    });
+  });
+}
+
+// Ruling 13 (Trips and Search Task 7): the new-search panel after the cards in the DOM at every width, sticky beside
+// them from 900 px, its fields readable in light and dark, the page never scrolling sideways. Screenshots go to
+// test-results/panel-shots/ for the report, beside mockup 01.
+for (const width of [375, 900, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const)
+    test(`the Trips page with the new-search panel at ${width}px, ${colorScheme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showEverySource(page);
+      await page.goto('/');
+      const panel = page.locator(SMOKE.newSearchPanel);
+      await expect(
+        panel.getByRole('heading', { level: 2, name: COPY.searchesView.sideHeading }),
+      ).toBeVisible();
+      await expect(page.locator(SMOKE.searchCard).first()).toBeVisible();
+      // the cards come before the panel in the DOM
+      const cardsFirst = await page.evaluate((sel) => {
+        const card = document.querySelector('[data-card]');
+        const side = document.querySelector(sel);
+        return card !== null && side !== null && (card.compareDocumentPosition(side) & 4) !== 0;
+      }, SMOKE.newSearchPanel);
+      expect(cardsFirst).toBe(true);
+      // sticky beside the cards from 900 px; in the single column below
+      const position = await panel.evaluate((el) => getComputedStyle(el).position);
+      const [cardBox, panelBox] = [
+        await page.locator(SMOKE.searchCard).first().boundingBox(),
+        await panel.boundingBox(),
+      ];
+      if (width >= 900) {
+        expect(position).toBe('sticky');
+        expect(panelBox?.x ?? 0).toBeGreaterThanOrEqual((cardBox?.x ?? 0) + (cardBox?.width ?? 0));
+      } else {
+        expect(position).toBe('static');
+        expect(panelBox?.y ?? 0).toBeGreaterThan(cardBox?.y ?? 0);
+      }
+      // the fields read in dark: the date field's ink differs from its ground (Task 6 note: unreadable before)
+      const date = page.locator('#w-from');
+      const [ink, ground] = await date.evaluate((el) => [
+        getComputedStyle(el).color,
+        getComputedStyle(el).backgroundColor,
+      ]);
+      expect(ink).not.toBe(ground);
+      if (colorScheme === 'dark') expect(ground).not.toBe('rgb(255, 255, 255)');
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/panel-shots/trips-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+      await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
+      await expect(page.getByLabel(COPY.newSearch.repeat)).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/panel-shots/trips-${width}-${colorScheme}-more.png`,
+        fullPage: true,
+      });
+    });
+
+test('"+ New search" moves focus to From in the panel', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/');
+  await expect(page.locator(SMOKE.searchCard).first()).toBeVisible();
+  await page.getByRole('button', { name: COPY.searchesView.newSearch }).click();
+  await expect(page.getByRole('combobox', { name: PLAN_COPY.from })).toBeFocused();
+  await expect(page.getByRole('combobox', { name: PLAN_COPY.from })).toBeInViewport();
+});
+
+test('the Edit page shares the form, with Limits and checks, at 1280px', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const id = await searchId(page);
+  await page.goto(`/?view=definitions&edit=${id}`);
+  await expect(page.getByRole('group', { name: COPY.newSearch.whereToLook })).toBeVisible();
+  await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
+  await page.getByText(COPY.newSearch.limitsHeading, { exact: true }).click();
+  await expect(page.getByLabel(COPY.maxCalls)).toBeVisible();
+  await expectNoSidewaysScroll(page);
+  await page.screenshot({ path: 'test-results/panel-shots/edit-1280-light.png', fullPage: true });
 });

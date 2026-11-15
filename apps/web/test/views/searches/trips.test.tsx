@@ -5,6 +5,7 @@ import { apiContract } from '@gmt/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
 import { API, definition, execution, providersResponse } from '../../fixtures.js';
@@ -43,14 +44,27 @@ const readTrip = (over: Parameters<typeof cardTrip>[0] = {}) =>
   cardTrip({ basis: 'pairing', priceKind: 'seller', ...over }, SELLER);
 
 describe('the page', () => {
-  it('is headed Trips, with "+ New search" that moves focus into the new-search panel', async () => {
+  it('is headed Trips, with "+ New search" that moves focus to the panel’s first field, From (Ruling 13)', async () => {
     server.use(serveCards([searchCard()]));
     const { user } = renderInShell(<SearchesView />);
     expect(await screen.findByRole('heading', { level: 1, name: 'Trips' })).toBeInTheDocument();
     const side = await screen.findByRole('region', { name: S.sideHeading });
-    await within(side).findByRole('button', { name: COPY.searchAgain.searchNow });
+    const from = await within(side).findByRole('combobox', { name: PLAN_COPY.from });
     await user.click(screen.getByRole('button', { name: '+ New search' }));
-    expect(side.contains(document.activeElement)).toBe(true);
+    expect(from).toHaveFocus();
+  });
+
+  it('while the sources are still loading there is no field yet, so "+ New search" focuses the panel’s heading', async () => {
+    // why: /providers never answers in this test, so the panel shows its loading state
+    server.use(
+      serveCards([searchCard()]),
+      http.get(`${API}/providers`, () => new Promise<never>(() => undefined)),
+    );
+    const { user } = renderInShell(<SearchesView />);
+    const side = await screen.findByRole('region', { name: S.sideHeading });
+    expect(within(side).queryByRole('combobox', { name: PLAN_COPY.from })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '+ New search' }));
+    expect(within(side).getByRole('heading', { level: 2, name: S.sideHeading })).toHaveFocus();
   });
 });
 

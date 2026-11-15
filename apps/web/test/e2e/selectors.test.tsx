@@ -138,7 +138,7 @@ describe('the Playwright smoke’s nav and Trip page selectors match the rendere
 });
 
 describe('the Playwright smoke’s WP20 selectors match the rendered markup (Task 20.11)', () => {
-  it('Searches: the new-search form holds From and its Search now button, one card per search with its actions', async () => {
+  it('Searches: the new-search panel holds the form with From and its Search button, after the cards with their actions', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
     const form = await waitFor(() => one(SMOKE.newSearchForm));
@@ -147,9 +147,10 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
     await waitFor(() => expect(document.querySelectorAll(SMOKE.searchCard)).toHaveLength(1));
     // a card's All trips and dates, Search again, Edit and Remove
     expect(document.querySelectorAll(SMOKE.cardAction).length).toBeGreaterThanOrEqual(4);
-    // the form is above the list in the DOM, which is what puts it first below 900 px (spec rev 55 §11)
+    // Ruling 13: the cards come first in the DOM and the panel after them, which is what puts it below them on a phone
+    expect(one(SMOKE.newSearchPanel).contains(form)).toBe(true);
     expect(
-      form.compareDocumentPosition(one(SMOKE.searchCard)) & Node.DOCUMENT_POSITION_FOLLOWING,
+      one(SMOKE.searchCard).compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 

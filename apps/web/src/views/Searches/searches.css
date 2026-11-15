@@ -1,6 +1,6 @@
 /* The Trips page (design 2026-11-08 §5.3, mockup 01-searches.html): plain cards on the shared tokens (styles/theme.css),
    light and dark, like the Trip page and Settings. The cards are the main column and the new-search panel sits beside
-   them from 900 px (sticky); narrower it stacks in the DOM's order (the panel first until Task 7 reorders it). Spec
+   them from 900 px (sticky); narrower it stacks in the DOM's order, the cards first (Ruling 13). Spec
    §4's CSP blocks inline styles: nothing here is set from markup. */
 @layer components {
   .trips-page {
@@ -176,14 +176,206 @@
       position: static;
     }
   }
-  /* The existing form is a two-column plate; in the narrow side column it stacks */
-  .searches-side .def-form {
-    grid-template-columns: minmax(0, 1fr);
+
+  /* The new-search panel (Ruling 13, mockup 01 #new): a plain card on the tokens, its fields drawn on them too, so the
+     inputs, chips, list and checkboxes read in light and dark (the Edit plate keeps the board world's fields) */
+  .new-search {
+    padding: 16px 18px 18px;
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 10px;
   }
-  .searches-side .def-side {
-    position: static;
+  .new-search-heading {
+    margin-bottom: 12px;
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+  .new-search-heading:focus-visible {
+    outline: 2px solid var(--t-focus);
+    outline-offset: 2px;
+  }
+  .new-search-form {
+    display: grid;
+    gap: 12px;
+  }
+  .new-search .search-fields,
+  .new-search .search-places {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .new-search .search-more {
+    gap: 12px;
+    padding: 0 0 8px;
+  }
+  .new-search .leave-dates {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .new-search :is(.field-label, .def-group-title, .where-to-look-title, .def-fold-legend) {
+    margin: 0;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--t-ink);
+  }
+  .new-search .def-fold-group {
+    padding-top: 0;
+    border-top: 0;
+  }
+  /* the rolling switch says what it is (mockup 01 has the checkbox alone); its group keeps the name for a screen reader */
+  .new-search .def-fold-group > .def-fold-legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .new-search .hint,
+  .new-search .text-fg-2 {
+    font-size: 12.5px;
+    color: var(--t-muted);
+  }
+  .new-search .where-to-look {
+    margin-top: 2px;
+    padding-top: 12px;
+    border-top: 1px solid var(--t-line);
+  }
+  .new-search .source-check {
+    font-size: 14px;
+  }
+  .new-search .source-note,
+  .new-search .source-unset {
+    font-size: 13px;
+    color: var(--t-muted);
+  }
+  .new-search input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--t-accent);
+  }
+  .new-search .input {
+    padding: 0 10px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--t-ink);
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 8px;
+    box-shadow: none;
+  }
+  .new-search .leave-date .input {
+    width: 100%;
+  }
+  .new-search .input[aria-invalid="true"] {
+    border: 2px solid var(--t-bad);
+  }
+  /* the airport chips and their list, as mockup 01's chips */
+  .new-search .airport-chip {
+    gap: 6px;
+    padding-left: 10px;
+    color: var(--t-ink);
+    background: var(--t-sunk);
+    border: 1px solid var(--t-line);
+    border-radius: 999px;
+    box-shadow: none;
+  }
+  .new-search .airport-chip-code {
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+  .new-search .airport-chip-name {
+    font-size: 13.5px;
+    color: var(--t-ink);
+  }
+  .new-search .airport-chip-remove {
+    color: var(--t-muted);
+    border-left: 0;
+    border-radius: 0 999px 999px 0;
+  }
+  .new-search .airport-chip-remove:hover {
+    color: var(--t-ink);
+    background: transparent;
+  }
+  .new-search :is(.combo-list, .combo-message) {
+    color: var(--t-ink);
+    background: var(--t-surface);
+    border-radius: 8px;
+    box-shadow:
+      0 0 0 1px var(--t-line),
+      0 8px 24px rgb(0 0 0 / 0.12);
+  }
+  .new-search .combo-option[aria-selected="true"] {
+    background: var(--t-sunk);
+    border-left-color: var(--t-accent);
+  }
+  .new-search .combo-option-metro {
+    border-bottom-color: var(--t-line);
+  }
+  .new-search .combo-code {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+  .new-search .combo-meta {
+    color: var(--t-muted);
+  }
+  .new-search .def-errors {
+    background: var(--t-surface);
+    border-color: var(--t-bad);
+    border-radius: 8px;
+  }
+  /* More options: the mockup's accent summary with a small arrow, no rules around it */
+  .new-search .def-more {
+    border: 0;
+  }
+  .new-search .fold > summary {
+    gap: 4px;
+    padding: 0;
+    font-weight: 600;
+    color: var(--t-accent);
+  }
+  .new-search .fold > summary::before {
+    content: "▸";
+    width: 16px;
+    height: auto;
+    font: inherit;
+    color: var(--t-muted);
+    background: none;
+  }
+  .new-search .fold[open] > summary::before {
+    content: "▾";
+  }
+  .new-search .estimate-line {
+    font-size: 13.5px;
+    color: var(--t-muted);
+  }
+  .new-search-form > .btn {
+    width: 100%;
+  }
+  .new-search .repeat-other {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    font-size: 13px;
+    color: var(--t-muted);
+  }
+  .new-search .btn-text {
+    color: var(--t-accent);
   }
   .searches-list {
+    /* the cards' rows lay out by the list's own width, not the window's: beside the panel at 900 px a card is narrower
+       than a phone's window is wide */
+    container: cards / inline-size;
     display: grid;
     gap: 16px;
     margin: 0;
@@ -318,12 +510,67 @@
   }
 }
 
+/* Unlayered, so it wins over the sentence's own bold utility: the panel's estimate reads as mockup 01's quiet line */
+.new-search .estimate-line p {
+  font-weight: 400;
+}
+
 /* Unlayered, like the rows' own grid (rows.css), so these win over it */
 /* Beside the 340 px panel a card is about 724 px wide at 1280 px: these minima (as the mockup's) keep each trip row,
-   its › included, inside its card; phones keep the rows' own two-column layout */
-@media (min-width: 721px) {
+   its › included, inside its card. A narrower list (a phone, or beside the panel from 900 px to about 1140 px) takes
+   the rows' own two-column layout, as rows.css draws it under 720 px, by the list's width (Ruling 13) */
+@container cards (min-width: 720px) {
   .tcard .trip-row {
     grid-template-columns: 130px minmax(150px, 1.3fr) 52px minmax(110px, 1fr) minmax(110px, 1fr) 24px;
+  }
+}
+@container cards (max-width: 719px) {
+  .tcard .trip-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "dates pc" "out out" "back go";
+    padding: 12px 16px;
+  }
+  .tcard .trip-row-head {
+    display: none;
+  }
+  .tcard .trip-row .row-dates {
+    grid-area: dates;
+  }
+  .tcard .trip-row .row-price {
+    grid-area: pc;
+    align-items: flex-end;
+  }
+  .tcard .trip-row .row-nights {
+    display: none;
+  }
+  .tcard .trip-row .row-nights-inline {
+    display: inline;
+  }
+  .tcard .trip-row .row-out {
+    grid-area: out;
+  }
+  .tcard .trip-row .row-back {
+    grid-area: back;
+  }
+  .tcard .trip-row .row-go {
+    grid-area: go;
+    align-self: end;
+  }
+  .tcard .trip-row .row-leg-tag {
+    position: static;
+    display: inline-block;
+    width: 38px;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    color: var(--t-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  /* more specific than the left alignment below, which is a desktop card's */
+  .tcard .trip-row .row-price .book-link {
+    text-align: right;
   }
 }
 /* A card's price reads "£412 ↗" at every width (mockup 01); the booking words stay in the link's accessible name */
@@ -346,12 +593,4 @@
 }
 .tcard .row-price .book-link {
   text-align: left;
-}
-@media (max-width: 720px) {
-  .tcard .row-price {
-    align-items: flex-end;
-  }
-  .tcard .row-price .book-link {
-    text-align: right;
-  }
 }

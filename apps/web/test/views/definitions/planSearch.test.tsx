@@ -1,6 +1,7 @@
 import { asIata } from '@gmt/core';
-// "Plan a search" (spec rev 55 §11, WP20 Task 20.5): the new-search form sets up a whole search from From, To, Leave
-// between and Stay, through the estimate sentence and Search now, without opening More options.
+// "Plan a search" (spec rev 55 §11, WP20 Task 20.5; design 2026-11-08 Ruling 13): the new-search panel sets up a whole
+// search from From, To, Leave from and Leave by, Stay and Where to look, through the estimate sentence and Search,
+// without opening More options.
 import { act, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -96,21 +97,21 @@ const fieldValue = (label: string) => {
 };
 
 describe('Plan a search (the new-search form)', () => {
-  it('leads with From, To, Leave between and Stay; More options stays closed; the press comes after them', () => {
+  it('leads with From, To, Leave from and Leave by, Stay and Where to look; More options stays closed; the press comes after them', () => {
     setUp();
     const plan = screen.getByRole('region', { name: PLAN_COPY.heading });
-    for (const name of ['From', 'To', PLAN_COPY.leaveBetween, PLAN_COPY.stay])
+    for (const name of ['From', 'To', PLAN_COPY.leaveBetween, PLAN_COPY.stay, COPY.newSearch.whereToLook])
       expect(within(plan).getByRole('group', { name })).toBeInTheDocument();
     // the journey limit, cabin and name are filled in under More options
     expect(within(plan).queryByLabelText('Cabin')).toBeNull();
     expect(within(plan).queryByLabelText(PLAN_COPY.name)).toBeNull();
     expect(screen.getByLabelText(PLAN_COPY.name)).toHaveAccessibleDescription(PLAN_COPY.nameHint);
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
-    const press = screen.getByRole('button', { name: /^Search now/ });
+    const press = screen.getByRole('button', { name: /^Search( · .+)?$/ });
     expect(plan.compareDocumentPosition(press) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('sets up a whole search by places, through the estimate sentence and Search now, without opening More options', async () => {
+  it('sets up a whole search by places, through the estimate sentence and Search, without opening More options', async () => {
     const { user, estimates, creates } = setUp();
     await pickPlace(user, 'From', 'lond');
     await vi.waitFor(() => expect(chipCodes('From')).toEqual(['LGW', 'LHR']));
@@ -125,7 +126,7 @@ describe('Plan a search (the new-search form)', () => {
     // the name follows the places, one per metro, until the operator types one
     await vi.waitFor(() => expect(fieldValue(PLAN_COPY.name)).toBe('London → New York'));
     await act(() => vi.advanceTimersByTimeAsync(ESTIMATE_DEBOUNCE_MS));
-    const press = screen.getByRole('button', { name: /^Search now/ });
+    const press = screen.getByRole('button', { name: /^Search( · .+)?$/ });
     await vi.waitFor(() => expect(press).not.toHaveAttribute('aria-disabled'));
     await user.click(press);
     await vi.waitFor(() => expect(creates).toHaveLength(1));
@@ -138,8 +139,8 @@ describe('Plan a search (the new-search form)', () => {
       maxNights: 14,
       cabin: 'economy',
       constraints: { maxJourneyMinutes: 1500 },
-      // the defaults More options would show: the plan preset's sources and budget, no schedule (spec rev 55 §8.2)
-      providers: providersResponse().presets.providers,
+      // the plan preset's free sources (SearchApi is ticked per search, design §8 question 2) and budget; Repeat Never
+      providers: { discovery: ['travelpayouts'], verification: [] },
       budget: providersResponse().presets.budget,
       scheduleCron: null,
       enabled: false,

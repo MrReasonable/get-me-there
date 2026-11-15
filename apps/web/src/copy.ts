@@ -551,6 +551,39 @@ export const COPY = {
   },
   // --- WP20 Task 20.5: the new-search form's press, its reasons and its failures (spec rev 55 §11) ---
   newSearch: {
+    // design 2026-11-08 Ruling 13: the panel's press, its sources with their cost, and Edit's second fold
+    search: 'Search',
+    whereToLook: 'Where to look',
+    source: {
+      camoufox: 'Google Flights, in your browser',
+      travelpayouts: 'Aviasales cache',
+      searchapi: 'SearchApi',
+    },
+    sourceNote: {
+      camoufox: 'free, takes a while',
+      travelpayouts: "free, prices from other people's searches, often days old",
+    },
+    searchapiNote: (perRun: number, left: number | null) =>
+      `up to ${thousands(perRun)} ${noun(perRun, 'call', 'calls')} a run${left === null ? '' : `, ${thousands(left)} left`}`,
+    /** A source not set up on this install, by the name the sentence gives it (lower case: the sentence capitalises). */
+    sourceUnset: {
+      camoufox: 'the browser',
+      travelpayouts: 'the Aviasales cache',
+      searchapi: 'SearchApi',
+    },
+    notSetUp: (names: readonly string[]) => {
+      const list = listText(names);
+      const many = names.length > 1;
+      return `${list.charAt(0).toUpperCase()}${list.slice(1)} ${many ? "aren't" : "isn't"} set up yet; set ${many ? 'them' : 'it'} up in`;
+    },
+    notSetUpLink: 'Settings',
+    // Ruling 14: one Repeat control over the schedule
+    repeat: 'Repeat',
+    repeatMode: { never: 'Never', weekly: 'Weekly', other: 'Other' },
+    repeatOther: (words: string) => `Other: ${words}`,
+    repeatChange: 'Change',
+    repeatChangeName: 'Change how this search repeats',
+    limitsHeading: 'Limits and checks',
     estimateRegion: 'Estimate',
     working: 'Working out the estimate…',
     // why: the first reason the form cannot be estimated, as the button's accessible description (spec rev 55 §11)

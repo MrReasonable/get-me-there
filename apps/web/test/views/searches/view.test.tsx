@@ -150,26 +150,28 @@ describe('the synthetic banner (Ruling 7)', () => {
   });
 });
 
-describe('the side column (ruling A18)', () => {
-  it('mounts the new-search form, with Search now, first in the DOM, as a phone shows it (ruling A18)', async () => {
+describe('the side column (Ruling 13, withdrawing ruling A18)', () => {
+  it('mounts the new-search panel, headed "New search", with its Search, after the cards in the DOM at every width', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
     const side = await screen.findByRole('region', { name: S.sideHeading });
     const main = screen.getByRole('region', { name: S.listLabel });
-    expect(await within(side).findByRole('button', { name: COPY.searchAgain.searchNow })).toBeInTheDocument();
+    expect(within(side).getByRole('heading', { level: 2, name: S.sideHeading })).toBeInTheDocument();
+    expect(await within(side).findByRole('button', { name: COPY.newSearch.search })).toBeInTheDocument();
     expect(within(side).queryByRole('button', { name: 'Show estimate' })).toBeNull();
-    // why: DOM order follows the phone's visual order (WCAG 2.4.3): the form first; CSS grid puts it on the right
-    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // no link out to the Edit page's form: the form is here (ruling A18)
+    // why: Ruling 13 — the cards first, then the panel, as a phone shows them (WCAG 2.4.3); CSS grid puts the panel on
+    // the right from 900 px
+    expect(main.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // no link out to the Edit page's form: the form is here
     expect(within(side).queryByRole('link', { name: /New search/ })).toBeNull();
   });
 
-  it('the stylesheet places the form in the right column from 900 px and in the single column below, with one DOM order', () => {
+  it('the stylesheet places the panel in the right column from 900 px, sticky, and in the single column below, with one DOM order', () => {
     const css = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../../../src/views/Searches/searches.css'),
       'utf8',
     );
-    expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;/);
+    expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;[^}]*position: sticky;/);
     expect(css).toMatch(/\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: 1;/);
     expect(css).toMatch(
       /@media \(max-width: 899px\)[\s\S]*\.searches-side,\s*\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: auto;/,

@@ -6,6 +6,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
 import { syntheticProvenance } from '../../lib/bookingTarget.js';
+import { sourceConfigured } from '../../lib/sources.js';
 import '../Definitions/definitions.css';
 import { NewSearchForm } from './NewSearchForm.js';
 import { RemovedLine } from './RemovedLine.js';
@@ -52,15 +53,23 @@ const hasSyntheticPrice = (cards: readonly Card[]): boolean =>
   );
 
 /**
+ * "+ New search" (Ruling 13): focus moves to the panel's first field, From; while the sources are still loading there is
+ * no field yet, so the panel's heading takes it (focus scrolls it into view).
+ */
+function focusNewSearch(heading: HTMLHeadingElement | null): void {
+  (document.getElementById('origins-input') ?? heading)?.focus();
+}
+
+/**
  * Spec rev 55 §11 "Searches" (`?view=searches`, the first screen and always the landing view): layout B, the operator's
- * searches as the main column and the new-search form beside it on the right; narrower than 900 px the form sits above the
- * list. It reads `GET /definitions/cards` and keeps the served order (while a mutation is pending the order is held and
+ * searches as the main column and the new-search panel beside it on the right, sticky; narrower than 900 px the panel sits
+ * below the list (design 2026-11-08 Ruling 13). It reads `GET /definitions/cards` and keeps the served order (while a mutation is pending the order is held and
  * changes only on the next settled read), re-reading at the status bar's poll interval only while a card is pending or
  * running.
  *
  * Remove asks inline on its card; once it succeeds the card is replaced, in its place, by "Removed <name>. Undo" for
  * `UNDO_MS`, kept through any re-read. Undo restores the search and puts its card back where the api's order puts it,
- * with focus on its heading. The side column holds the new-search form and Search now (Task 20.5, ruling A18).
+ * with focus on its heading. The side column holds the new-search panel and its Search (Task 20.5, Ruling 13).
  */
 export function SearchesView() {
   const cards = useCards();
@@ -141,11 +150,13 @@ export function SearchesView() {
     return v instanceof Error ? v : null;
   };
 
-  const sideRef = useRef<HTMLElement>(null);
-  const browserConfigured =
-    providers.data?.providers.some((p) => p.providerId === 'camoufox' && p.enabled) === true;
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const browserConfigured = providers.data !== undefined && sourceConfigured(providers.data, 'camoufox');
   const side = (
-    <section ref={sideRef} aria-label={S.sideHeading} className="searches-side">
+    <section aria-labelledby="new-search-heading" className="searches-side new-search">
+      <h2 id="new-search-heading" ref={headingRef} tabIndex={-1} className="new-search-heading">
+        {S.sideHeading}
+      </h2>
       {providers.error ? (
         <LoadError error={providers.error} retry={() => void providers.refetch()} />
       ) : providers.data === undefined ? (
@@ -202,16 +213,17 @@ export function SearchesView() {
         <button
           type="button"
           className="trip-btn trip-btn-primary"
-          onClick={() => sideRef.current?.querySelector<HTMLElement>('input, select, button')?.focus()}
+          onClick={() => focusNewSearch(headingRef.current)}
         >
           {S.newSearch}
         </button>
       </div>
-      {/* why: one stable tree with the form first, as a phone shows it (focus order follows what is seen, WCAG 2.4.3);
-      from 900 px CSS grid puts it in the right column (searches.css), so crossing the breakpoint never remounts it */}
+      {/* why: Ruling 13 (withdrawing ruling A18) — the cards first and the panel after them at every width, as a phone
+      shows them (focus order follows what is seen, WCAG 2.4.3); from 900 px CSS grid puts the panel in the right column,
+      sticky (searches.css), so crossing the breakpoint never remounts it */}
       <div className="searches-layout">
-        {side}
         {main}
+        {side}
       </div>
     </div>
   );

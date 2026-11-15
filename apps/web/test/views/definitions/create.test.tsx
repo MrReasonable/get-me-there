@@ -182,13 +182,13 @@ describe('saved definitions (spec §8.1)', () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
     expect(await screen.findByRole('alert')).toHaveTextContent(PLAN_COPY.notFound);
     // why: no form behind a dead link: nothing to estimate, start or save
-    expect(screen.queryByRole('button', { name: /^Search now/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Search( · .+)?$/ })).toBeNull();
     expect(screen.queryByRole('button', { name: COPY.editSearch.save })).toBeNull();
   });
 
   it('edit=new and an existing definition show no not-found alert', async () => {
     const first = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=new' });
-    await screen.findByRole('button', { name: /^Search now/ });
+    await screen.findByRole('button', { name: /^Search( · .+)?$/ });
     expect(screen.queryByText(PLAN_COPY.notFound)).toBeNull();
     first.unmount();
     renderWithProviders(<DefinitionsView />, { search: EDIT });
