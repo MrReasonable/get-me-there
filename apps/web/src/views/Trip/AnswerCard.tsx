@@ -10,8 +10,6 @@ import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
 import { useNow } from '../../now.js';
-import { BACK_TO_DATES } from '../../state/resultsState.js';
-import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { FlightRead } from '../Dates/BoardCard.js';
 import type { ListsState } from '../Dates/board.js';
 import { refusalWords } from '../Dates/Flights.js';
@@ -313,12 +311,7 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
   if (state.kind === 'outside-window')
     return (
       <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
-        <p>
-          {T.outsideWindow}{' '}
-          <a className="trip-link" href={hrefWith(BACK_TO_DATES)} onClick={navigateTo(BACK_TO_DATES)}>
-            {T.backToSearch(definition.name)}
-          </a>
-        </p>
+        <p>{T.outsideWindow}</p>
       </section>
     );
   if (state.kind === 'reading') {

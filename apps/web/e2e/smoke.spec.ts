@@ -3,6 +3,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import { z } from 'zod';
 import { PLAN_COPY } from '../src/copy/plan.js';
 import { COPY } from '../src/copy.js';
+import { expectNoSidewaysScroll } from './layout.js';
 import { SMOKE } from './selectors.js';
 
 // Spec §9 item 6: one Playwright smoke in fixture mode, through the real api and the built SPA (WP19 Task 19.9, the
@@ -157,17 +158,17 @@ test('fixture mode: a new search, Search now, then Dates, the Trip page and Hist
   expect(back.get('d.nights')).toBe(NIGHTS);
   expect(back.get('depart')).toBeNull();
 
-  // (4) a search's page by its id, ?view=definitions landing on Searches (the old Definitions URL), the nav naming the
-  // search last opened; the retired views' URLs land on Dates; ?view=coverage opens the coverage section
+  // (4) a search's page by its id, ?view=definitions landing on Searches (the old Definitions URL), the breadcrumb naming the
+  // search; the retired views' URLs land on Dates; ?view=coverage opens the coverage section
   await page.goto(`/?view=dates&def=${defId}`);
   await expect(board(page)).toBeVisible();
   await page.goto('/?view=definitions');
   await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('searches');
   await expect(smokeCard(page)).toHaveCount(1);
-  await expect(
-    page.getByRole('navigation', { name: SMOKE.nav }).getByRole('link', { name: searchName }),
-  ).toBeVisible();
+  // why: Ruling 9 — the nav names no search; a search's page carries its name in its breadcrumb instead
+  await page.goto(`/?view=dates&def=${defId}`);
+  await expect(page.getByRole('navigation', { name: SMOKE.crumbs }).getByText(searchName)).toBeVisible();
   await page.goto(`/?view=calendar&def=${defId}`);
   await expect(board(page)).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
@@ -263,42 +264,77 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   // why: the fixture run fires no alert, so the loaded Alerts view is the one that says there are no rules yet
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
+  // why: Settings is three links, each a heading
+  settings: (p) => p.getByRole('heading', { name: COPY.crumbs.priceSources }),
   // why: the report's area headings draw only once the report has loaded
   status: (p) => p.getByRole('heading', { level: 3 }),
 };
 
-test('at 375px the nav is one row whose menu opens both tiers of 44px links, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
+test('at 375px the nav is one row of two 44px links, the top bar wraps under it, and no loaded view scrolls the page sideways, light and dark (UI-005, UI-009, UI-011) @phone', async ({
   page,
 }) => {
   const id = await searchId(page);
-  for (const [view, loaded] of Object.entries(LOADED)) {
-    if (view === 'trip') {
-      await page.goto(`/?view=dates&def=${id}`);
-      await page.locator(SMOKE.phoneCard).first().getByRole('link').click();
-    } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
-    const nav = page.getByRole('navigation', { name: SMOKE.nav });
-    await expect(nav).toBeVisible();
-    // why: the departure board (Ian, 2026-10-27): one row (the current tier and view, and the menu), so the view
-    // starts in the first screen
-    const row = await nav.boundingBox();
-    expect(row?.height ?? 0, view).toBeLessThanOrEqual(44 + 8);
-    const menu = nav.getByRole('button', { name: COPY.navMenu });
-    await expect(menu).toHaveAttribute('aria-expanded', 'false');
-    await menu.click();
-    await expect(menu).toHaveAttribute('aria-expanded', 'true');
-    for (const name of SMOKE.navTiers) await expect(nav.getByRole('list', { name })).toBeVisible();
-    for (const link of await nav.getByRole('link').all()) {
-      await expect(link).toBeInViewport({ ratio: 1 });
-      const box = await link.boundingBox();
-      expect(box?.height ?? 0, view).toBeGreaterThanOrEqual(44);
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [view, loaded] of Object.entries(LOADED)) {
+      const label = `${view}, ${colorScheme}`;
+      if (view === 'trip') {
+        await page.goto(`/?view=dates&def=${id}`);
+        await page.locator(SMOKE.phoneCard).first().getByRole('link').click();
+      } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
+      const nav = page.getByRole('navigation', { name: SMOKE.nav });
+      await expect(nav).toBeVisible();
+      // why: Ruling 9 — the same two links in one row at every width, no menu
+      const links = await nav.getByRole('link').all();
+      expect(links, label).toHaveLength(SMOKE.navItems.length);
+      const tops = new Set<number>();
+      for (const link of links) {
+        await expect(link).toBeInViewport({ ratio: 1 });
+        const box = await link.boundingBox();
+        expect(box?.height ?? 0, label).toBeGreaterThanOrEqual(44);
+        tops.add(Math.round(box?.y ?? -1));
+      }
+      expect(tops.size, `${label}: one row`).toBe(1);
+      // why: Ruling 10 — the health line, then the limits, under the nav
+      const health = page
+        .getByRole('status')
+        .filter({ hasText: /All working|needs attention|failing|things need you|Status:/ });
+      await expect(health.first(), label).toBeVisible();
+      const healthBox = await health.first().boundingBox();
+      const navBox = await nav.boundingBox();
+      expect(healthBox?.y ?? 0, label).toBeGreaterThanOrEqual((navBox?.y ?? 0) + (navBox?.height ?? 0) - 1);
+      // why: measured only after the view's own content is on the page, never on its loading state
+      await expect(loaded(page).first(), label).toBeVisible();
+      await expectNoSidewaysScroll(page);
     }
-    await page.keyboard.press('Escape');
-    await expect(menu).toHaveAttribute('aria-expanded', 'false');
-    await expect(menu).toBeFocused();
-    // why: measured only after the view's own content is on the page, never on its loading state
-    await expect(loaded(page).first(), view).toBeVisible();
-    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-    expect(scrollWidth, view).toBeLessThanOrEqual(375);
+  }
+});
+
+test('at 1280px every loaded view fits without scrolling sideways, light and dark, with the limits on the right of the health line', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const id = await searchId(page);
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [view, loaded] of Object.entries(LOADED)) {
+      const label = `${view}, ${colorScheme}`;
+      if (view === 'trip') {
+        await page.goto(`/?view=dates&def=${id}`);
+        await page.locator(SMOKE.boardRow).first().getByRole('link', { name: SMOKE.rowLink }).click();
+      } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
+      // why: at 1280 px the board is the table, not the phone's stacked cards
+      await expect(view === 'dates' ? board(page) : loaded(page).first(), label).toBeVisible();
+      const limits = page.getByRole('region', { name: COPY.topBar.limitsLabel });
+      await expect(limits, label).toBeVisible();
+      const health = page
+        .getByRole('status')
+        .filter({ hasText: /All working|needs attention|failing|things need you|Status:/ });
+      const [h, l] = [await health.first().boundingBox(), await limits.boundingBox()];
+      // why: Ruling 10 — health on the left, the limits on its right on a desktop
+      expect((l?.x ?? 0) - ((h?.x ?? 0) + (h?.width ?? 0)), label).toBeGreaterThanOrEqual(0);
+      await expectNoSidewaysScroll(page);
+    }
   }
 });
 

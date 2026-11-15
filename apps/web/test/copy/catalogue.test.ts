@@ -24,13 +24,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'alertsView.classPartial': ['checked bag'],
   confirmedWas: ['154', '£1'],
   metroExpanded: ['LON', 'LHR, LGW'],
-  progressSelected: [
-    {
-      provider: 'SearchApi',
-      buckets: { priced: 8, empty: 0, no_data: 0, error: 1, skipped: 116, not_run: 2 },
-      selected: 10,
-    },
-  ],
   childExecutionNotStarted: ['pending'],
   executionNotStarted: ['pending'],
   loadFailed: ['network error'],
@@ -46,23 +39,18 @@ const SAMPLES: Record<string, unknown[]> = {
   childExecutionItem: ['14 Oct 2026 13:00 Europe/London', 'running', 'just now'],
   spanExecutions: [3, 1],
   notCompletedBanner: ['running'],
-  // why: the bar passes its main-path stage words (COPY.barStageName) and source name (mainPathSource)
-  progress: [
-    {
-      stage: 'the first pass across your dates',
-      provider: 'the Aviasales cache',
-      buckets: { priced: 60, empty: 10, no_data: 40, error: 6, skipped: 0, not_run: 10 },
-      total: 126,
-    },
-  ],
-  progressBuckets: [{ priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 }],
-  progressLabel: ['the first pass across your dates', 'the Aviasales cache'],
-  spendRunCalls: [42, '2000'],
-  spendRunFreeCalls: [14, '2000'],
-  spendRunCost: ['£0', '£0'],
-  spendMonth: ['£32', '£35'],
-  spendProviderMonth: ['SearchApi', 615, '10000'],
-  spendProviderLifetime: ['SearchApi', 7, '24'],
+  'topBar.needsAttention': ['backups'],
+  'topBar.failing': ['schedule'],
+  'topBar.severalNeedYou': [3],
+  'topBar.callsLeftMonth': [51, 100],
+  'topBar.callsLeftTrial': [15, 24],
+  'topBar.spent': ['£32', '£35'],
+  'topBar.spentNoCap': ['£32'],
+  'topBar.searching': ['Birmingham → Frankfurt'],
+  'runProgress.calendar': [1203, 2184, 'about 14m left'],
+  'runProgress.flights': [9],
+  'runProgress.resumesAt': ['1 Nov 2026 00:00 Europe/London'],
+  'runProgress.childRun': ['stopped'],
   requestRowTiles: [14, '14', 14, 0, '£0'],
   maxAgeAssumed: ['24h'],
   coverageOnDemandRunText: ['completed', '14 Oct 2026 13:41 Europe/London'],
@@ -71,9 +59,6 @@ const SAMPLES: Record<string, unknown[]> = {
   scheduledOnlyHeading: ['left for the next scheduled run'],
   firingNotStarted: ['19 Oct 2026 05:00', 'skipped: missed and not caught up'],
   skippedWhy: ['skipped: missed and not caught up', 'the next scheduled run was less than half the gap away'],
-  resumesAt: ['1 Nov 2026 00:00 Europe/London'],
-  scheduleBlocked: ['14 Oct 2026'],
-  childRun: ['running'],
   carriersIgnored: ['BRITISH'],
   reusedNote: [4],
   cellLabel: ['LHR', 'JFK', '20 Mar 2027', '1 Apr 2027'],
@@ -125,7 +110,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.readingFlightsConfirm': [9, 3],
   'searchesView.left': ['1h 40m'],
   'searchesView.searchedAgo': ['2h ago'],
-  barSearchName: ['Birmingham → Frankfurt'],
   'searchesView.neverSearched': [85, 405],
   'searchesView.trip': ['12', '23 Jan'],
   'searchesView.seeDatesOf': ['Birmingham → Frankfurt'],
@@ -315,7 +299,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'trip.noReturn': ['3h ago'],
   'trip.calendarWithTrip': ['9d ago'],
   'trip.readWithoutCalendar': ['2h ago'],
-  'trip.backToSearch': ['London → New York'],
   'trip.listFailed': ['16:42', 'the connection to it failed'],
   'trip.limitJourney': ['25h'],
   'trip.limitStops': [1],
@@ -417,22 +400,15 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('stage counts name the buckets', () => {
-    // why: ruling 4: the status bar shows the bucket breakdown; no umbrella ("attempted" or "searched") on any view but D.
-    expect(
-      COPY.progress({
-        stage: 'discovery',
-        provider: 'Travelpayouts',
-        buckets: { priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 },
-        total: 108,
-      }),
-    ).toBe(
-      "discovery · Travelpayouts: 9 priced · 99 no price shown · 0 couldn't be read · 0 not reached · 0 not searched of 108 date and airport pairs",
+  it('run progress says dates and flights in the plan’s own words, with a thousands separator and no umbrella', () => {
+    const R = COPY.runProgress;
+    expect(R.calendar(1203, 2184, 'about 14m left')).toBe(
+      'Reading the calendar, 1,203 of 2,184 dates · about 14m left',
     );
-    // why: spec rev 55 §11 — the six buckets under the count, in the coverage section's own terms
-    expect(COPY.progressBuckets({ priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 })).toBe(
-      '9 priced · 0 no fares · 99 no cached data · 0 error · 0 skipped · 0 not searched',
-    );
+    expect(R.calendar(0, 1, null)).toBe('Reading the calendar, 0 of 1 date');
+    expect(R.flights(9)).toBe('Reading flights for the cheapest dates, 9 read so far');
+    // why: ruling 4 (decision 67) still holds: no "attempted" or "searched" umbrella outside the Search log
+    expect([R.calendar(5, 9, null), R.flights(1)].filter((t) => /attempted|searched/.test(t))).toEqual([]);
   });
 
   it('a reconfirmation states the estimated calls with the limit they stop at, and pounds (decisions 36, 44; spec rev 55 §3)', () => {
@@ -466,11 +442,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(hits).toEqual([]);
   });
 
-  it('the status bar names a stage and a stopped run in main-path words, never "paused: error"', () => {
-    expect(COPY.barStageName).toEqual({
-      discovery: 'the first pass across your dates',
-      verification: 'checking fares',
-    });
+  it('run progress names a stopped run in main-path words, never "paused: error"', () => {
     expect(Object.values(COPY.barStatusName).filter((w) => /^paused/.test(w))).toEqual([]);
   });
 
@@ -541,10 +513,12 @@ describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', (
 // --- the main path's reach (minor 8): every COPY path its source files name, directly or through an alias ---
 
 const SRC = join(import.meta.dirname, '..', '..', 'src');
-/** The main path's files (spec rev 55 §11): the first screen, a search's page, the Edit page and More options, the bar. */
-const MAIN_PATH_DIRS = ['views/Searches', 'views/Dates', 'views/Definitions'];
+/** The main path's files (spec rev 55 §11): the first screen, a search's page, the Edit page and More options, the top bar, run progress, breadcrumbs and Settings. */
+const MAIN_PATH_DIRS = ['views/Searches', 'views/Dates', 'views/Definitions', 'views/Settings'];
 const MAIN_PATH_FILES = [
-  'components/StatusBar.tsx',
+  'components/TopBar.tsx',
+  'components/RunProgress.tsx',
+  'components/Crumbs.tsx',
   'components/StopWords.tsx',
   'components/Nav.tsx',
   'lib/leftWords.ts',

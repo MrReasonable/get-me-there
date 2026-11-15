@@ -353,7 +353,7 @@ describe('agreement of the card and the bar', () => {
   it('a degraded app is a fail on schedule and the bar says so; a clean install leaves the bar clean', () => {
     const f = healthyFacts({ schedule: { ...healthyFacts().schedule, degraded: true } });
     expect(checkOf(f, 'schedule').state).toBe('fail');
-    expect(barSummary(buildChecks(f)).text).toBe('Status: schedule failing');
+    expect(barSummary(buildChecks(f))).toEqual({ kind: 'fail', count: 1, name: 'schedule' });
     expect(barSummary(buildChecks(healthyFacts())).kind).toBe('clean');
   });
   it('a fresh install with its first backup present is ok with no due note; a recent catch-up is ok with a note and a clean bar', () => {

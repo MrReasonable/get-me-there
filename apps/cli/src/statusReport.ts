@@ -19,6 +19,13 @@ export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; 
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
 
 /** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
+/** The one line under the report: core's structured summary, worded here ("Status: schedule failing", "Status: 2 to check"). */
+function barLine(checks: readonly apiContract.StatusCheck[]): string {
+  const { kind, count, name } = apiContract.barSummary(checks);
+  if (kind === 'clean') return 'Status: nothing to check';
+  return `Status: ${name ?? String(count)} ${kind === 'fail' ? 'failing' : 'to check'}`;
+}
+
 export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(deps)): Promise<ReportRead> {
   if (a.kind === 'none') return { kind: 'down', reason: a.reason };
   const r = await deps.http({
@@ -118,9 +125,7 @@ export async function finishStatus(
   if (rf.json) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
   else {
     deps.io.out(`\n${describeReport(checks)}`);
-    deps.io.out(
-      `${apiContract.barSummary(checks).text} (app ${read.report.version}, ${read.report.mode} mode)\n`,
-    );
+    deps.io.out(`${barLine(checks)} (app ${read.report.version}, ${read.report.mode} mode)\n`);
   }
   // why: CodeRabbit on PR #14 — the exit code never depends on what was printed: a failing check anywhere, local or in
   // any area of the report, fails the command, whatever `--only` or `--json` filtered out of the output

@@ -154,7 +154,7 @@ describe('a read trip: the answer card (design §6.1)', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Wed 11 Nov → Sat 28 Nov · 17 nights' }),
     ).toBeInTheDocument();
-    const crumbs = screen.getByRole('navigation', { name: T.crumbsLabel });
+    const crumbs = screen.getByRole('navigation', { name: COPY.crumbsLabel });
     expect(crumbs).toHaveTextContent('Trips › London → New York › Wed 11 Nov → Sat 28 Nov');
     const back = within(crumbs).getByRole('link', { name: 'London → New York' });
     // why: the search page's filters (`d.*`) travel back with the breadcrumb
@@ -319,10 +319,17 @@ describe('every state of the card says its sentence, with exactly its own action
     expect(c).not.toHaveTextContent('£412');
   });
 
-  it('outside the window links back to the search', async () => {
+  it('outside the window says so and has no back link of its own: the breadcrumb is the way back', async () => {
     renderTrip(STATE_FIXTURES['outside-window']);
-    const link = within(await card()).getByRole('link', { name: T.backToSearch('London → New York') });
-    expect(link.getAttribute('href')).toContain('view=dates');
+    const c = await card();
+    expect(within(c).queryByRole('link')).toBeNull();
+    expect(
+      within(screen.getByRole('navigation', { name: COPY.crumbsLabel }))
+        .getByRole('link', {
+          name: 'London → New York',
+        })
+        .getAttribute('href'),
+    ).toContain('view=dates');
     expect(screen.queryByRole('heading', { name: T.otherHeading })).toBeNull();
     expect(screen.queryByTestId('about-price')).toBeNull();
   });

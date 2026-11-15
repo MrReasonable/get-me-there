@@ -1,7 +1,15 @@
 import { asIata, asIsoDate, detailLinkQuery, type Iata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { type Landing, land } from '../../src/state/landing.js';
-import { NAV_TIERS, navPatch, parseView, VIEWS, type ViewId } from '../../src/state/view.js';
+import {
+  NAV_ITEMS,
+  NAV_VIEW,
+  navItemOf,
+  navPatch,
+  parseView,
+  VIEWS,
+  type ViewId,
+} from '../../src/state/view.js';
 
 // Spec rev 55 §11 URLs (WP20 Task 20.3): `?view=` names the view; an absent or unknown value, a search's page without
 // `def=` and the Edit page without `edit=` land on Searches; the retired values and a Results URL without a date pair
@@ -180,14 +188,15 @@ describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the e
   );
 });
 
-describe('the view list and the two-tier nav (spec §11 layout)', () => {
-  it('eight views (Results retired; its links land on the Trip page); anything unknown or absent is Searches', () => {
+describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () => {
+  it('nine views (Results retired; its links land on the Trip page; Settings is the interim page); anything unknown or absent is Searches', () => {
     expect(VIEWS).toEqual([
       'searches',
       'dates',
       'trip',
       'history',
       'definitions',
+      'settings',
       'providers',
       'alerts',
       'status',
@@ -195,14 +204,35 @@ describe('the view list and the two-tier nav (spec §11 layout)', () => {
     expect(parseView(null)).toBe('searches');
     expect(parseView('calendar')).toBe('searches');
     expect(parseView('history')).toBe('history');
+    expect(parseView('settings')).toBe('settings');
     expect(parseView('results')).toBe('searches');
   });
 
-  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; the Trip page and Edit are in neither', () => {
-    expect(NAV_TIERS).toEqual([
-      { id: 'decide', views: ['searches', 'dates', 'history'] },
-      { id: 'setup', views: ['providers', 'alerts', 'status'] },
-    ]);
+  it('?view=settings lands on Settings with nothing to rewrite', () => {
+    expect(land(new URLSearchParams('view=settings'), DEF)).toEqual(view('settings'));
+  });
+
+  it('the nav has two items, Trips and Settings, each opening its own view', () => {
+    expect(NAV_ITEMS).toEqual(['trips', 'settings']);
+    expect(NAV_VIEW).toEqual({ trips: 'searches', settings: 'settings' });
+  });
+
+  it.each<[ViewId, 'trips' | 'settings']>([
+    ['searches', 'trips'],
+    ['dates', 'trips'],
+    ['trip', 'trips'],
+    ['definitions', 'trips'],
+    ['history', 'trips'],
+    ['settings', 'settings'],
+    ['providers', 'settings'],
+    ['alerts', 'settings'],
+    ['status', 'settings'],
+  ])('%s sits under %s', (v, item) => {
+    expect(navItemOf(v)).toBe(item);
+  });
+
+  it('every view has a nav item (none is left out)', () => {
+    for (const v of VIEWS) expect(NAV_ITEMS).toContain(navItemOf(v));
   });
 
   it("a nav link names its view and drops the detail's date pair and row, keeping every filter", () => {

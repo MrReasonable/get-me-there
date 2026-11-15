@@ -208,18 +208,18 @@ describe('saved definitions (spec §8.1)', () => {
 });
 
 describe('the App (spec §11 layout)', () => {
-  it('a search’s page survives a view switch, the status bar is on every view, and a board row opens the Trip page', async () => {
+  it('a search’s page survives a view switch, the top bar is on every view, and a board row opens the Trip page', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
     await screen.findByRole('table', { name: /^Best dates/ });
-    const nav = screen.getByRole('navigation', { name: 'Views' });
-    await user.click(within(nav).getByRole('link', { name: 'Providers' }));
-    expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
-    // why: ruling R-bar — the bar always carries the month's spend, whichever view is open
-    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    await user.click(within(nav).getByRole('link', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    // why: Ruling 10 — the top bar always carries the month's spend, whichever view is open
+    expect(await screen.findByRole('region', { name: COPY.topBar.limitsLabel })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
     // why: WP19 Task 19.7: the Trip page is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3),
     // and a board row opens the Trip page
-    await user.click(within(nav).getByRole('link', { name: 'Searches' }));
+    await user.click(within(nav).getByRole('link', { name: 'Trips' }));
     await user.click(await screen.findByRole('link', { name: /^See dates for / }));
     const board = await screen.findByRole('table', { name: /^Best dates/ });
     const [first] = within(board).getAllByRole('row').slice(1);
@@ -262,7 +262,7 @@ describe('the App (spec §11 layout)', () => {
   it('with /providers real only (synthetic: false) there is no banner', async () => {
     // why: the shell's banner follows /providers alone; Providers is the view with no prices of its own to raise one
     renderWithProviders(<App />, { search: '?view=providers' });
-    await screen.findByRole('heading', { name: 'Providers' });
+    await screen.findByRole('heading', { name: 'Price sources' });
     expect(screen.queryByText(/Synthetic data: the fixture provider is enabled/)).toBeNull();
   });
 });

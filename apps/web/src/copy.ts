@@ -21,16 +21,13 @@ import { EXAMPLE_PAIR_CELLS } from './example.js';
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
 
+/** A whole number with a comma between thousands ("2184" → "2,184"), as the plan words its counts. */
+const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+/** A sentence's first letter, for a name that starts one ("backups" → "Backups"). */
+const upperFirst = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
-/** The six buckets a progress line names (spec §3); `reused` sits inside its bucket and is not a seventh. */
-type ProgressBuckets = {
-  priced: number;
-  empty: number;
-  no_data: number;
-  error: number;
-  skipped: number;
-  not_run: number;
-};
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
 /** The six coverage buckets; `reused` is a count beside them, not a bucket (spec §3). */
 export type BucketName = Exclude<keyof Buckets, 'reused'>;
@@ -60,22 +57,21 @@ const NEXT_READ = (readNow: boolean): string =>
 export const COPY = {
   appTitle: 'get-me-there',
   skipToContent: 'Skip to the main content',
-  navLabel: 'Views',
-  // WP19 Task 19.7 (spec §11 layout): the nav's two tiers
-  navTier: { decide: 'Decide', setup: 'Set up' },
-  /** The phone's one nav row opens the full nav (departure board, Ian 2026-10-27). */
-  navMenu: 'All views',
-  nav: {
-    searches: 'Searches',
-    // why: the nav names this entry by the search last opened (spec rev 55 §11); this word is only the Record's key
-    dates: 'Dates',
-    // why: the Trip page and the Edit page are not in the nav (spec §11); the words name the views in the Record every ViewId keys
-    trip: 'Trip',
-    history: 'History',
-    definitions: 'Edit',
+  navLabel: 'Main',
+  /** The nav's two items (design 2026-11-08 Ruling 9); every other view sits under one of them (`navItemOf`). */
+  nav: { trips: 'Trips', settings: 'Settings' },
+  /** The logo links to Trips. */
+  logoLink: 'get-me-there, Trips',
+  /** The breadcrumb's nav name and the steps shared across pages (Ruling 12). */
+  crumbsLabel: 'Breadcrumb',
+  crumbs: {
+    trips: 'Trips',
+    edit: 'Edit',
+    priceOverTime: 'Price over time',
+    settings: 'Settings',
+    priceSources: 'Price sources',
     alerts: 'Alerts',
-    providers: 'Providers',
-    status: 'Status',
+    system: 'System',
   },
   noDefinitions: 'No searches yet. Plan one under Searches.',
   definitionNotFound: 'The search in this link no longer exists. Pick one under Searches.',
@@ -195,51 +191,55 @@ export const COPY = {
     skipped_missed: 'skipped: missed and not caught up',
   } satisfies Record<ExecutionStatus, string>,
   stageName: { discovery: 'discovery', verification: 'itinerary search' } satisfies Record<Stage, string>,
-  // why: spec rev 55 §3 — the status bar speaks in main-path words; the coverage section keeps the set-up terms above
-  barStageName: {
-    discovery: 'the first pass across your dates',
-    verification: 'checking fares',
-  } satisfies Record<Stage, string>,
 
-  // status bar (spec §11)
-  statusBarLabel: 'Run status',
-  // why: ruling 4 (decision 67): the bar names every bucket; an umbrella ("searched", "attempted") is View D's alone.
-  // why: spec rev 55 §3, §11 — the bar shows a source's cells as the five marks (no fares and no cached data are both
-  // "no price shown"), the stage and source in main-path words, and the six buckets under the count (`progressBuckets`).
-  progress: (p: { stage: string; provider: string; buckets: ProgressBuckets; total: number }) =>
-    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty + p.buckets.no_data} no price shown · ${p.buckets.error} couldn't be read · ${p.buckets.skipped} not reached · ${p.buckets.not_run} not searched of ${p.total} date and airport ${noun(p.total, 'pair', 'pairs')}`,
-  progressSelected: (p: { provider: string; buckets: ProgressBuckets; selected: number }) =>
-    `checking fares · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty + p.buckets.no_data} no price shown · ${p.buckets.error} couldn't be read of ${p.selected} chosen · ${p.buckets.skipped} not reached · ${p.buckets.not_run} not searched`,
-  /** The six buckets under a progress count (spec §11: "the six buckets under the count"), the coverage section's terms. */
-  progressBuckets: (b: ProgressBuckets) =>
-    `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched`,
-  progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
-  spendRunCalls: (calls: number, cap: string) =>
-    `this run: ${calls} of ${cap} billed ${noun(cap, 'call', 'calls')}`,
-  spendRunFreeCalls: (calls: number, cap: string) =>
-    `this run: ${calls} of ${cap} free ${noun(cap, 'call', 'calls')}`,
-  spendRunCost: (used: string, cap: string) => `this run: ${used} of ${cap}`,
-  spendMonth: (used: string, cap: string) => `this month: ${used} of ${cap}`,
-  spendProviderMonth: (provider: string, calls: number, cap: string) =>
-    `this month: ${provider} ${calls} of ${cap} ${noun(cap, 'call', 'calls')}`,
-  spendProviderLifetime: (provider: string, calls: number, cap: string) =>
-    `${provider} ${calls} of ${cap} ${noun(cap, 'call', 'calls')} over the plan's lifetime`,
-  nearCap: 'near cap',
+  // --- The interim Settings page (design 2026-11-08 Ruling 9; stage 3 replaces it) ---
+  settingsView: {
+    heading: 'Settings',
+    lede: 'Where prices come from, who gets emails, and whether everything is working.',
+    sectionsLabel: 'Settings sections',
+    priceSources:
+      'Where prices come from: the browser, the Aviasales cache and SearchApi, and what each has left.',
+    alerts: 'The emails sent when a price you are watching drops.',
+    system: 'Whether everything is working, and what to do when something is not.',
+  },
+
+  // --- The top bar and run progress (design 2026-11-08 Rulings 10 and 11); main-path words only ---
+  topBar: {
+    /** The bar's first line: the health of the install, one word each for the worst problem (`barSummary`). */
+    allWorking: 'All working',
+    needsAttention: (name: string) => `${upperFirst(name)} needs attention`,
+    failing: (name: string) => `${upperFirst(name)} failing`,
+    severalNeedYou: (count: number) => `${count} things need you`,
+    /** The link's tail: the Status page says what to do (the System page of Settings). */
+    fix: 'fix',
+    limitsLabel: 'Limits',
+    /** The window in use: a monthly plan's month, or a trial's one-off allowance (`searchApiCallsLeft`). */
+    callsLeftMonth: (left: number, cap: number) =>
+      `SearchApi: ${left} of ${cap} ${noun(cap, 'call', 'calls')} left this month`,
+    callsLeftTrial: (left: number, cap: number) =>
+      `SearchApi: ${left} of ${cap} trial ${noun(cap, 'call', 'calls')} left`,
+    spent: (used: string, cap: string) => `Spent ${used} of ${cap} this month`,
+    spentNoCap: (used: string) => `Spent ${used} this month`,
+    nearCap: 'near cap',
+    searching: (name: string) => `Searching: ${name}`,
+  },
+  runProgress: {
+    label: 'Search progress',
+    /** The bar's own name, read with its value text. */
+    barLabel: 'Dates read',
+    calendar: (done: number, total: number, left: string | null) =>
+      `Reading the calendar, ${thousands(done)} of ${thousands(total)} ${noun(total, 'date', 'dates')}${left === null ? '' : ` · ${left}`}`,
+    flights: (read: number) => `Reading flights for the cheapest dates, ${read} read so far`,
+    resumesAt: (when: string) => `resumes ${when}`,
+    childRun: (status: string) => `Reading flights for one more date: ${status}`,
+    cancel: 'Cancel',
+    confirmCancel: 'Confirm: cancel this run',
+    keepRunning: 'Keep running',
+    resume: 'Resume',
+    working: 'Working…',
+  },
   noCap: 'no cap',
-  resumesAt: (when: string) => `resumes ${when}`,
-  scheduleBlocked: (date: string) => `schedule blocked since ${date}`,
-  childRun: (status: string) => `checking fares for one date pair: ${status}`,
-  /** The bar names the search whose run it shows when the view does not (ruling R-bar). */
-  barSearchName: (name: string) => `${name}:`,
-  monthSpendLabel: 'Spend this month',
-  resume: 'Resume',
-  cancel: 'Cancel',
-  confirmCancel: 'Confirm: cancel this run',
-  keepRunning: 'Keep running',
   working: 'Working…',
-  runDetails: 'Progress and spend',
-  // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
-  progressCoverageLink: 'Coverage of this search',
   carriersIgnored: (entries: string) => `ignored, not two-character carrier codes: ${entries}`,
   clearFilters: 'Clear filters',
 
@@ -333,7 +333,7 @@ export const COPY = {
     unavailable: 'browser worker not reachable',
     note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds, so a run takes hours (${EXAMPLE_PAIR_CELLS} day pairs). Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
-  providersHeading: 'Providers',
+  providersHeading: 'Price sources',
   providerEnabled: 'configured',
   providerDisabled: 'not configured',
   plan: (p: string) => `plan: ${p}`,
@@ -1141,8 +1141,6 @@ export const COPY = {
   // Its main path never says definition, cell, date pair, basis, discovery, itinerary search, verdict, reused,
   // superseded or billed calls; a sentence that shows a price takes the price beside it, never inside its words ---
   trip: {
-    crumbsLabel: 'Where you are',
-    crumbTrips: 'Trips',
     heading: (departure: string, back: string) => `${departure} → ${back}`,
     nights: (n: number) => `· ${n} ${noun(n, 'night', 'nights')}`,
     cardLabel: 'Cheapest trip for these dates',
@@ -1242,7 +1240,6 @@ export const COPY = {
     notSearched:
       "These dates weren't searched: the latest search stopped before reaching them. They'll be searched next time.",
     outsideWindow: "These dates are outside this search's dates now.",
-    backToSearch: (name: string) => `Back to ${name}`,
     listFailed: (time: string, cause: string) =>
       `The flights page didn't load at ${time}: ${cause}. Nothing was saved.`,
     // the limits no flight read met (cardState's `failing`), in the order journey, stops, departure, arrival
@@ -1453,7 +1450,7 @@ export const COPY = {
 
   // Status (spec §10 `GET /status`, §11 Status and the status bar; brief WP18 Task 18.6)
   statusView: {
-    heading: 'Status',
+    heading: 'System',
     /** "checked 40 s ago", "checked 3 min ago": from the report's own generatedAt. */
     checkedAgo: (seconds: number) =>
       seconds < 60 ? `checked ${seconds} s ago` : `checked ${Math.floor(seconds / 60)} min ago`,
@@ -1512,9 +1509,8 @@ export const COPY = {
     testFailed: 'The test email failed to send.',
     testFailedCall: (message: string) => `The test email request failed: ${message}`,
   },
-  /** The link in the status bar (the line itself, "Status: 2 failing", comes from core's barSummary). */
+  /** The health line's words when the report cannot be had or is old (the line itself is `topBar`, from core's barSummary). */
   statusLink: {
-    label: 'Status report',
     stale: (checked: string) => `Status: stale, ${checked}`,
     notAnswering: 'Status: app not answering',
     signInRefused: 'Status: sign-in refused',

@@ -37,9 +37,11 @@ export const SMOKE = {
   previousMonth: D.overview.previousMonth,
   nextMonth: D.overview.nextMonth,
   coverageToggle: D.coverageToggle,
-  /** The nav, labelled "Views", with its two tiers as lists labelled by their names. */
+  /** The nav, labelled "Main", with its two links: Trips and Settings (design 2026-11-08 Ruling 9). */
   nav: COPY.navLabel,
-  navTiers: [COPY.navTier.decide, COPY.navTier.setup],
+  navItems: [COPY.nav.trips, COPY.nav.settings],
+  /** The breadcrumb: a nav named "Breadcrumb" holding an ordered list (Ruling 12). */
+  crumbs: COPY.crumbsLabel,
   navCurrent: '[aria-current="page"]',
   /** The Trip page (design 2026-11-08 §6.1): its answer card, named; its breadcrumb back to the search; its folds. */
   tripPage: '[data-testid="trip-page"]',

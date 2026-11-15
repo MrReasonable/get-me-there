@@ -13,7 +13,7 @@ import { type ReactElement, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS, qk } from '../../../src/api/queries.js';
 import type { ExecutionResponse } from '../../../src/api/types.js';
-import { StatusBar } from '../../../src/components/StatusBar.js';
+import { TopBar } from '../../../src/components/TopBar.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { REFUSED_COPY } from '../../../src/copy/refused.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
@@ -42,9 +42,7 @@ import {
   provCalendar,
   providersResponse,
 } from '../../fixtures.js';
-import { latestRun, searchCard } from '../../fixtures.searches.js';
 import { datesError, serveDates as serveDatesFor } from '../../msw/datesHandlers.js';
-import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
 import { jargonIn, mainPathWords } from './jargon.js';
@@ -558,7 +556,7 @@ describe('the red synthetic banner, judged on the decoded read (revision 50)', (
   });
 });
 
-describe('the latest run’s own poll beside the status bar’s (ruling B7, R-coupling)', () => {
+describe('the latest run’s own poll beside the top bar (ruling B7, R-coupling)', () => {
   // why: only the interval is faked and the clock never advances by itself, so each POLL_MS step is exact; Testing
   // Library's waits run on the DOM's mutation events. The tests check what the page says as reads arrive, never how the
   // query library schedules them.
@@ -566,7 +564,7 @@ describe('the latest run’s own poll beside the status bar’s (ruling B7, R-co
   const fakeClock = () =>
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
 
-  /** The bar beside a page that mounts on a press, so the two start polling at different instants. */
+  /** The bar beside a page that mounts on a press, so the two start reading at different instants. */
   function Shell({ bar }: { bar: ReactElement }) {
     const [page, setPage] = useState(false);
     return (
@@ -599,50 +597,16 @@ describe('the latest run’s own poll beside the status bar’s (ruling B7, R-co
     executions: [runSummary({ status: 'running', finishedAt: null })],
   };
 
-  it('two runs in flight: the bar shows another search’s older run, and the page’s line follows its own newer one', async () => {
-    fakeClock();
-    const reads: string[] = [];
-    serveRuns(reads);
-    server.use(
-      serveDatesFor(runningDates),
-      serveCards([
-        searchCard({
-          id: 'def-0002',
-          name: 'Another search',
-          latestRun: latestRun({
-            id: 'exec-other',
-            status: 'running',
-            startedAt: '2026-10-14T10:00:00.000Z',
-          }),
-        }),
-        searchCard({ id: 'def-0001', latestRun: latestRun({ status: 'running', finishedAt: null }) }),
-      ]),
-    );
-    renderWithProviders(<Shell bar={<StatusBar definition={null} />} />, {
-      search: '?view=dates&def=def-0001',
-    });
-    await waitFor(() => expect(reads).toContain('exec-other'));
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS / 2));
-    fireEvent.click(screen.getByRole('button', { name: 'show page' }));
-    const line = await screen.findByTestId('state-line');
-    await waitFor(() => expect(line).toHaveTextContent('about 1h 40m left'));
-    const own = () => reads.filter((id) => id === 'exec-0001').length;
-    const before = own();
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-    await waitFor(() => expect(own()).toBe(before + 1));
-    await waitFor(() => expect(line).toHaveTextContent('about 1h 20m left'));
-  });
-
-  it('when the bar polls the same run, the page’s line still moves with each read', async () => {
+  it('beside the top bar, the page’s line still moves with each read of its own run', async () => {
     fakeClock();
     const reads: string[] = [];
     serveRuns(reads);
     server.use(serveDatesFor(runningDates));
-    renderWithProviders(<Shell bar={<StatusBar definition={definition()} />} />, {
+    renderWithProviders(<Shell bar={<TopBar />} />, {
       search: '?view=dates&def=def-0001',
     });
-    await waitFor(() => expect(reads).toContain('exec-0001'));
     fireEvent.click(screen.getByRole('button', { name: 'show page' }));
+    await waitFor(() => expect(reads).toContain('exec-0001'));
     const line = await screen.findByTestId('state-line');
     await waitFor(() => expect(line).toHaveTextContent(/about 1h \d+m left/));
     const first = line.textContent;

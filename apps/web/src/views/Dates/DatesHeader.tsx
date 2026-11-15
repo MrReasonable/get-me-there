@@ -9,6 +9,7 @@ import {
 } from '@gmt/core';
 import { useCalendarGap } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
+import { Crumbs, tripsCrumb } from '../../components/Crumbs.js';
 import { LoadError } from '../../components/LoadState.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -171,6 +172,7 @@ export function DatesHeader({
   const edit = { view: 'definitions', edit: definition.id, def: null };
   return (
     <div className="dates-head space-y-2" data-testid="dates-head">
+      <Crumbs items={[tripsCrumb(), { label: definition.name }]} />
       <h2 className="name-board">
         <span className="sr-only">{definition.name}</span>
         {/* why: the search's name in large flaps, a word to a group so a long name wraps between words */}

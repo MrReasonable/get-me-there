@@ -1,4 +1,5 @@
 import { useDefinitions, useProviders } from '../../api/queries.js';
+import { Crumbs, searchCrumb, tripsCrumb } from '../../components/Crumbs.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
@@ -32,6 +33,9 @@ export function DefinitionsView() {
   const existing = definitions.data.find((d) => d.id === editing && d.deletedAt === null) ?? null;
   return (
     <div className="space-y-5 pt-6">
+      {existing === null ? null : (
+        <Crumbs items={[tripsCrumb(), searchCrumb(existing), { label: COPY.crumbs.edit }]} />
+      )}
       <h2 className="h-view">
         {existing === null ? PLAN_COPY.viewHeading : COPY.editSearch.heading(existing.name)}
       </h2>

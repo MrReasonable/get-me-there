@@ -6,7 +6,7 @@ import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
 import { COPY } from '../../src/copy.js';
 import { workedDates } from '../fixtures.dates.js';
-import { API, definition, execution, providersResponse, resultsResponse } from '../fixtures.js';
+import { API, providersResponse, resultsResponse } from '../fixtures.js';
 import { latestRun, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
 import { serveDates } from '../msw/datesHandlers.js';
@@ -16,101 +16,79 @@ import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
 
 describe('shell (spec §11 layout)', () => {
-  it('the nav has two tiers, each a list headed by its name: Decide (Searches, History) and Set up (Providers, Alerts, Status); no search is named until one has been opened', async () => {
+  it('the nav is two links, Trips and Settings, in one row at every width: no tiers, no search named, no menu (Ruling 9)', async () => {
     renderWithProviders(<App />, { search: '?view=searches' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    const decide = within(nav).getByRole('list', { name: 'Decide' });
-    const setup = within(nav).getByRole('list', { name: 'Set up' });
-    expect(
-      within(decide)
-        .getAllByRole('link')
-        .map((l) => l.textContent),
-    ).toEqual(['Searches', 'History']);
-    expect(
-      within(setup)
-        .getAllByRole('link')
-        .map((l) => l.textContent),
-    ).toEqual(['Providers', 'Alerts', 'Status']);
-    // spec rev 55 §11: no "Definitions" or "Edit" entry either; the Edit page opens from a card
-    expect(within(nav).queryByRole('link', { name: /Definitions|Edit/ })).toBeNull();
-    // each tier's name is text, first in its row
-    expect(within(nav).getByText('Decide')).toBeInTheDocument();
-    expect(within(nav).getByText('Set up')).toBeInTheDocument();
-    // Results is the date pair detail, opened from a board row or a link, never from the nav (spec §11)
-    expect(within(nav).queryByRole('link', { name: 'Results' })).toBeNull();
-    for (const link of within(nav).getAllByRole('link')) {
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    const links = within(nav).getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual(['Trips', 'Settings']);
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/?view=searches', '/?view=settings']);
+    for (const link of links) {
       // why: 44 px targets (review UI-15); real links, so they work with the keyboard and new tabs
       expect(link).toHaveClass('min-h-11');
-      expect(link.getAttribute('href')).toMatch(/^\/\?view=/);
     }
+    // the old tiers, their names and the phone's menu are gone; so is every per-view entry
+    expect(within(nav).queryByRole('list', { name: /Decide|Set up/ })).toBeNull();
+    expect(within(nav).queryByText(/Decide|Set up/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /All views/ })).toBeNull();
+    expect(
+      within(nav).queryByRole('link', { name: /Searches|History|Providers|Alerts|Status|Definitions|Edit/ }),
+    ).toBeNull();
   });
 
-  it('the Decide tier names the search last opened, between Searches and History, once its page has been opened', async () => {
-    const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    // why: DatesView writes gmt.lastSearch on mount, and the nav follows the write
-    const decide = within(nav).getByRole('list', { name: 'Decide' });
-    await waitFor(() =>
-      expect(
-        within(decide)
-          .getAllByRole('link')
-          .map((l) => l.textContent),
-      ).toEqual(['Searches', 'Worked example', 'History']),
-    );
-    expect(window.localStorage.getItem('gmt.lastSearch')).toBe('def-0001');
-    // it stays in the nav on the other views, linking to that search's page
-    await user.click(within(nav).getByRole('link', { name: 'Providers' }));
-    const named = within(nav).getByRole('link', { name: 'Worked example' });
-    expect(named).toHaveAttribute('href', expect.stringContaining('view=dates'));
-    expect(named).toHaveAttribute('href', expect.stringContaining('def=def-0001'));
-    expect(named).not.toHaveAttribute('aria-current');
-    await user.click(within(nav).getByRole('link', { name: 'Searches' }));
+  it('the logo links to Trips, dropping the search the page shows', async () => {
+    const { user } = renderWithProviders(<App />, { search: '?view=history&def=def-0001&d.to=JFK' });
+    const logo = await screen.findByRole('link', { name: COPY.logoLink });
+    expect(logo).toHaveAttribute('href', '/?view=searches&d.to=JFK');
+    await user.click(logo);
     expect(await screen.findByRole('list', { name: COPY.searchesView.listLabel })).toBeInTheDocument();
-    await user.click(within(nav).getByRole('link', { name: 'Worked example' }));
-    expect(await screen.findByRole('table', { name: /^Best dates/ })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get('def')).toBe('def-0001');
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('searches');
+    expect(new URLSearchParams(window.location.search).has('def')).toBe(false);
   });
 
   it('a search that no longer exists is not named, and no definition selector is anywhere', async () => {
     window.localStorage.setItem('gmt.lastSearch', 'gone');
     renderWithProviders(<App />, { search: '?view=searches' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
+    await screen.findByRole('navigation', { name: 'Main' });
     await screen.findByRole('list', { name: COPY.searchesView.listLabel });
-    expect(
-      within(within(nav).getByRole('list', { name: 'Decide' }))
-        .getAllByRole('link')
-        .map((l) => l.textContent),
-    ).toEqual(['Searches', 'History']);
     expect(screen.queryByLabelText(/Search definition/)).toBeNull();
     expect(screen.queryByRole('combobox', { name: /search/i })).toBeNull();
   });
 
-  it('the current view carries aria-current and a cue that is not colour alone', async () => {
+  it('the current item carries aria-current and a cue that is not colour alone', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=searches' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    const dates = within(nav).getByRole('link', { name: 'Searches' });
-    expect(dates).toHaveAttribute('aria-current', 'page');
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    const trips = within(nav).getByRole('link', { name: 'Trips' });
+    expect(trips).toHaveAttribute('aria-current', 'page');
     // why: a thick bar under the current entry is drawn in currentColor, so it stays under forced colours too
-    expect(dates).toHaveClass('border-b-4', 'font-bold');
-    expect(within(nav).getByRole('link', { name: 'History' })).not.toHaveAttribute('aria-current');
-    expect(within(nav).getByRole('link', { name: 'History' })).not.toHaveClass('border-b-4');
-    await user.click(within(nav).getByRole('link', { name: 'Providers' }));
-    expect(within(nav).getByRole('link', { name: 'Providers' })).toHaveAttribute('aria-current', 'page');
-    expect(dates).not.toHaveAttribute('aria-current');
+    expect(trips).toHaveClass('border-b-4', 'font-bold');
+    const settings = within(nav).getByRole('link', { name: 'Settings' });
+    expect(settings).not.toHaveAttribute('aria-current');
+    expect(settings).not.toHaveClass('border-b-4');
+    await user.click(settings);
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(settings).toHaveAttribute('aria-current', 'page');
+    expect(trips).not.toHaveAttribute('aria-current');
   });
 
-  it('the Trip page marks no nav entry as current', async () => {
-    renderWithProviders(<App />, {
-      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    expect(nav.querySelector('[aria-current]')).toBeNull();
+  it.each([
+    ['a search’s page', '?view=dates&def=def-0001', 'Trips'],
+    ['the Trip page', '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28', 'Trips'],
+    ['the Edit page', '?view=definitions&edit=def-0001', 'Trips'],
+    ['History', '?view=history&def=def-0001', 'Trips'],
+    ['Price sources', '?view=providers', 'Settings'],
+    ['Alerts', '?view=alerts&def=def-0001', 'Settings'],
+    ['System', '?view=status', 'Settings'],
+  ])('%s sits under %s in the nav', async (_name, search, item) => {
+    renderWithProviders(<App />, { search });
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    const current = [...nav.querySelectorAll('[aria-current="page"]')];
+    expect(current.map((c) => c.textContent)).toEqual([item]);
   });
 
-  it('a skip link comes first and targets the main region; each tier wraps into rows, never a hidden sideways scroll (UI-011)', async () => {
+  it('a skip link comes first and targets the main region; the two links never scroll sideways (UI-011)', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    // why: UI-011: a sideways-scrolling nav hid views at 375 px with no affordance; the phone e2e measures the rows
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    // why: UI-011: a sideways-scrolling nav hid views at 375 px with no affordance; the phone e2e measures the row
     expect(nav).not.toHaveClass('overflow-x-auto');
     await user.tab();
     const skip = screen.getByRole('link', { name: 'Skip to the main content' });
@@ -119,18 +97,16 @@ describe('shell (spec §11 layout)', () => {
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main');
   });
 
-  it('on a phone the current view’s tile names the search, its whole name in the title (the tile cuts it to one line)', async () => {
+  it('on a phone the nav is the same two links, with no menu to open', async () => {
     setViewportWidth(375);
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    const here = await waitFor(() => {
-      const el = nav.querySelector<HTMLElement>('.nav-here');
-      if (el === null || el.textContent === COPY.nav.dates) throw new Error('no search name yet');
-      return el;
-    });
-    const name = definition().name;
-    expect(here).toHaveTextContent(name);
-    expect(here).toHaveAttribute('title', name);
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual(['Trips', 'Settings']);
+    expect(within(nav).queryByRole('button')).toBeNull();
   });
 
   it('alerts renders the Alerts view for the selected definition', async () => {
@@ -149,7 +125,7 @@ describe('shell (spec §11 layout)', () => {
   it('negative: no synthetic banner and no provider alert for real data', async () => {
     // why: the Dates fixtures' prices are synthetic and raise the banner themselves; Providers has no prices of its own
     renderWithProviders(<App />, { search: '?view=providers' });
-    await screen.findByRole('heading', { name: 'Providers' });
+    await screen.findByRole('heading', { name: 'Price sources' });
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
     expect(screen.queryByText(/Provider status unknown/)).toBeNull();
   });
@@ -190,7 +166,7 @@ describe('shell (spec §11 layout)', () => {
         }),
       );
       const { client } = renderWithProviders(<App />, { search: `?view=${view}&def=def-0001` });
-      await screen.findByRole('navigation', { name: 'Views' });
+      await screen.findByRole('navigation', { name: 'Main' });
       // why: wait until only /providers is still in flight, so a view that did render would have its data by now
       await waitFor(() => expect(client.isFetching()).toBe(1));
       const main = screen.getByRole('main');
@@ -365,31 +341,19 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
   });
 });
 
-describe('filters kept across views (spec §11: the filters live in the URL and travel with every nav link)', () => {
-  it("History's nav link keeps every d.*, and the Dates link back restores the same board with no request for the stay filter or the sort", async () => {
+describe('filters kept across views (spec §11: the filters live in the URL and travel with every link)', () => {
+  it("History's crumb back to the search keeps every d.*, and the board is restored with no request for the stay filter or the sort", async () => {
     const requests: URL[] = [];
     server.use(serveDates(workedDates({ destinations: [asIata('JFK')] }), requests));
     const filters = 'd.nights=10-11&d.from=LHR&d.to=JFK&d.journey=900&d.sort=journey.asc&d.week=best';
-    const { user } = renderWithProviders(<App />, { search: `?view=dates&def=def-0001&${filters}` });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    const firstBoard = await screen.findByRole('table', { name: /^Best dates/ });
-    // why: 21.7 prov-004: a row says "loading flights" until the flight-lists answer lands; compare the settled board
-    await screen.findByTestId('flights-unavailable');
-    const rowsBefore = within(firstBoard)
-      .getAllByRole('row')
-      .map((r) => r.textContent);
-    const history = within(nav).getByRole('link', { name: 'History' });
-    expect(history).toHaveAttribute('href', `/?view=history&def=def-0001&${filters}`);
-    await user.click(history);
+    const { user } = renderWithProviders(<App />, { search: `?view=history&def=def-0001&${filters}` });
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle })).toBeInTheDocument();
-    await user.click(within(nav).getByRole('link', { name: 'Worked example' }));
+    const back = within(crumbs).getByRole('link', { name: 'Worked example' });
+    expect(back).toHaveAttribute('href', `/?view=dates&def=def-0001&${filters}`);
+    await user.click(back);
     expect(window.location.search).toBe(`?view=dates&def=def-0001&${filters}`);
-    const again = await screen.findByRole('table', { name: /^Best dates/ });
-    expect(
-      within(again)
-        .getAllByRole('row')
-        .map((r) => r.textContent),
-    ).toEqual(rowsBefore);
+    expect(await screen.findByRole('table', { name: /^Best dates/ })).toBeInTheDocument();
     expect(requests.length).toBeGreaterThan(0);
     for (const r of requests)
       expect([...r.searchParams.keys()].sort()).toEqual(['destinations', 'maxJourneyMinutes', 'origins']);
@@ -399,22 +363,92 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
     renderWithProviders(<App />, {
       search: '?view=trip&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28',
     });
-    const nav = await screen.findByRole('navigation', { name: 'Views' });
-    // why: no search's page has been opened in this session, so the nav names none; History's link drops the detail's
-    // date pair and row and keeps def= and the filters
-    expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute(
-      'href',
-      '/?view=history&def=def-0001&d.to=JFK',
-    );
-    // ruling R-bar: Searches names no search, so its link drops def=
-    expect(within(nav).getByRole('link', { name: 'Searches' })).toHaveAttribute(
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    // ruling R-bar: Trips names no search, so its link drops def=; the filters stay
+    expect(within(nav).getByRole('link', { name: 'Trips' })).toHaveAttribute(
       'href',
       '/?view=searches&d.to=JFK',
+    );
+    expect(within(nav).getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/?view=settings&def=def-0001&d.to=JFK',
     );
   });
 });
 
-describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () => {
+describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
+  it('?view=settings is the Settings page: three linked sections, each with its line, and no definition needed', async () => {
+    renderWithProviders(<App />, { search: '?view=settings' });
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    const list = screen.getByRole('list', { name: COPY.settingsView.sectionsLabel });
+    const sections = within(list).getAllByRole('region');
+    expect(sections.map((s) => s.getAttribute('aria-labelledby'))).toHaveLength(3);
+    expect(
+      within(list)
+        .getAllByRole('link')
+        .map((l) => [l.textContent, l.getAttribute('href')]),
+    ).toEqual([
+      ['Price sources', '/?view=providers'],
+      ['Alerts', '/?view=alerts'],
+      ['System', '/?view=status'],
+    ]);
+    const lines = [COPY.settingsView.priceSources, COPY.settingsView.alerts, COPY.settingsView.system];
+    for (const line of lines) expect(within(list).getByText(line)).toBeInTheDocument();
+    // Settings is the top of its trail, so it has none of its own
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  it('a section link opens that view under its new heading', async () => {
+    const { user } = renderWithProviders(<App />, { search: '?view=settings' });
+    await user.click(await screen.findByRole('link', { name: 'Price sources' }));
+    expect(await screen.findByRole('heading', { name: 'Price sources' })).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('providers');
+  });
+
+  it.each([
+    ['?view=providers', 'Price sources', 'Settings › Price sources'],
+    ['?view=alerts&def=def-0001', 'Alerts', 'Settings › Alerts'],
+    ['?view=status', 'System', 'Settings › System'],
+  ])('%s: the heading reads "%s" under the trail "%s"', async (search, heading, trail) => {
+    renderWithProviders(<App />, { search });
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(crumbs).toHaveTextContent(trail);
+    expect(within(crumbs).getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('view=settings'),
+    );
+    expect(within(crumbs).getByText(heading)).toHaveAttribute('aria-current', 'page');
+  });
+
+  it.each([
+    ['a search’s page', '?view=dates&def=def-0001', 'Trips › Worked example'],
+    ['the Edit page', '?view=definitions&edit=def-0001', 'Trips › Worked example › Edit'],
+    ['History', '?view=history&def=def-0001', 'Trips › Worked example › Price over time'],
+  ])('%s has the trail "%s"', async (_name, search, trail) => {
+    renderWithProviders(<App />, { search });
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    await waitFor(() => expect(crumbs).toHaveTextContent(trail));
+    expect(within(crumbs).getByRole('list').tagName).toBe('OL');
+    expect(crumbs.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  });
+
+  it('the Edit and History trails link their search name back to its page, and Trips to the list', async () => {
+    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001' });
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    const name = await within(crumbs).findByRole('link', { name: 'Worked example' });
+    expect(name).toHaveAttribute('href', '/?view=dates&def=def-0001');
+    expect(within(crumbs).getByRole('link', { name: 'Trips' })).toHaveAttribute('href', '/?view=searches');
+  });
+
+  it('the Edit page has no back link of its own beside the trail', async () => {
+    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001' });
+    await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    expect(screen.queryByRole('link', { name: /^Back to/ })).toBeNull();
+  });
+});
+
+describe('the top bar has no run line and no Run now (spec rev 55 §11; design 2026-11-08 Ruling 11)', () => {
   // why: the never-run state's Search now is the page's primary action; every run action lives on the search it acts on
   it('a never-run search’s page shows one Search now, the page’s, and the bar none', async () => {
     server.use(
@@ -425,182 +459,60 @@ describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () 
     );
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
     await screen.findByText('Not searched yet', { selector: 'p.font-bold' });
-    const bar = await screen.findByRole('region', { name: 'Run status' });
-    await within(bar).findByText('No run yet for this search.');
     // why: the page's Search now carries its estimate sentence (spec rev 55 §11 never-run state) once it is in
     expect(await screen.findAllByRole('button', { name: /^Search now/ })).toHaveLength(1);
-    expect(within(bar).queryByRole('button', { name: /Search now|Run now/ })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
   });
 
-  it.each(['dates&def=def-0001', 'definitions&edit=def-0001'])(
-    'no Run now on the %s view, and none on the detail',
+  it.each(['searches', 'dates&def=def-0001', 'definitions&edit=def-0001', 'settings', 'providers', 'status'])(
+    'the %s view shows no run line, no Cancel or Resume in the bar and no Run now',
     async (view) => {
+      server.use(
+        serveCards([
+          searchCard({
+            name: 'Worked example',
+            latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
+          }),
+        ]),
+      );
       renderWithProviders(<App />, { search: `?view=${view}` });
-      await screen.findByRole('region', { name: 'Run status' });
-      await screen.findByRole('navigation', { name: 'Views' });
+      await screen.findByRole('navigation', { name: 'Main' });
+      await screen.findByRole('link', { name: 'Searching: Worked example' });
+      expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
       expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
     },
   );
-
-  it('the first screen shows no Run now, and its bar names no search’s run', async () => {
-    renderWithProviders(<App />, { search: '?view=searches' });
-    await screen.findByRole('list', { name: COPY.searchesView.listLabel });
-    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
-  });
-
-  it('the Trip page shows no Run now either', async () => {
-    renderWithProviders(<App />, {
-      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    await screen.findByRole('region', { name: 'Run status' });
-    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-  });
 });
 
-describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
-  const RESUME = {
-    sentence: 'Stopped at 14 Oct 15:00: its spending limit was reached.',
-    fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true as const },
-  };
+describe('"Searching: <name>" in the top bar (Ruling 10; Review Focus 2)', () => {
   const running = searchCard({
     id: 'def-0001',
     name: 'Birmingham → Frankfurt',
     latestRun: latestRun({ id: 'exec-run', status: 'running', finishedAt: null, estimatedFinishAt: null }),
   });
-  const stoppedAt = (id: string, name: string, startedAt: string, sentence: string) =>
-    searchCard({
-      id,
-      name,
-      latestRun: latestRun({
-        id: `exec-${id}`,
-        status: 'paused_budget',
-        startedAt,
-        finishedAt: null,
-        stop: { sentence, fix: RESUME.fix },
-      }),
-    });
-  const serveRuns = (cards: ReturnType<typeof searchCard>[]) =>
-    server.use(
-      serveCards(cards),
-      http.get(`${API}/executions/:id`, ({ params }) => {
-        const card = cards.find((c) => c.latestRun?.id === params.id);
-        const run = card?.latestRun;
-        return HttpResponse.json(
-          execution(
-            run === undefined || run === null
-              ? {}
-              : { id: run.id, status: run.status, stop: run.stop, finishedAt: null },
-          ),
-        );
-      }),
-    );
-  const bar = () => screen.findByRole('region', { name: 'Run status' });
 
-  it.each(['searches', 'providers', 'alerts', 'status', 'history'])(
-    'on the %s view the active run of any search shows with its search named and no Cancel or Resume',
+  it.each(['searches', 'settings', 'providers', 'alerts', 'status', 'history'])(
+    'on the %s view a running search is named, linking to its page',
     async (view) => {
-      serveRuns([running, stoppedAt('d2', 'Other', '2026-10-14T14:00:00.000Z', 'Older stop.')]);
+      server.use(serveCards([running]));
       renderWithProviders(<App />, {
         search: `?view=${view}${view === 'history' || view === 'alerts' ? '&def=def-0001' : ''}`,
       });
-      const region = await bar();
-      const name = await within(region).findByRole('link', { name: 'Birmingham → Frankfurt:' });
-      expect(name).toHaveAttribute('href', '/?view=dates&def=def-0001');
-      expect(await within(region).findByText('Searching')).toBeInTheDocument();
-      expect(within(region).queryByRole('button', { name: 'Cancel' })).toBeNull();
-      expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull();
-      expect(screen.getByRole('region', { name: COPY.monthSpendLabel })).toHaveTextContent(
-        'this month: £32 of £35',
+      const link = await screen.findByRole('link', { name: 'Searching: Birmingham → Frankfurt' });
+      expect(link).toHaveAttribute('href', expect.stringContaining('view=dates'));
+      expect(link).toHaveAttribute('href', expect.stringContaining('def=def-0001'));
+      expect(screen.getByRole('region', { name: COPY.topBar.limitsLabel })).toHaveTextContent(
+        'Spent £32 of £35 this month',
       );
     },
   );
 
-  it('with no active run it shows the latest stopped run of any search, named, with its sentence and no Resume', async () => {
-    serveRuns([
-      stoppedAt('d1', 'Older', '2026-10-13T10:00:00.000Z', 'The older stop.'),
-      stoppedAt('d2', 'Newer', '2026-10-14T10:00:00.000Z', 'The newer stop.'),
-      searchCard({ id: 'd3', name: 'Done' }),
-    ]);
-    renderWithProviders(<App />, { search: '?view=providers' });
-    const region = await bar();
-    expect(await within(region).findByRole('link', { name: 'Newer:' })).toBeInTheDocument();
-    expect(await within(region).findByText('The newer stop.')).toBeInTheDocument();
-    expect(within(region).queryByText('The older stop.')).toBeNull();
-    expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull();
-  });
-
-  it('with no run to show, only the month’s spend is there', async () => {
-    serveRuns([searchCard()]);
+  it('with no search running only the limits are there', async () => {
+    server.use(serveCards([searchCard()]));
     renderWithProviders(<App />, { search: '?view=status' });
-    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
-    await screen.findByRole('navigation', { name: 'Views' });
-    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
-  });
-
-  it('on a search’s page (def=) the bar follows that search, unnamed, with Cancel; a stopped one offers Resume', async () => {
-    serveRuns([running]);
-    const first = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    // why: the region is re-read after the definitions arrive (the bar swaps from "any run" to the page's search)
-    expect(
-      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
-        name: 'Cancel',
-      }),
-    ).toBeInTheDocument();
-    expect(within(await bar()).queryByRole('link', { name: /:$/ })).toBeNull();
-    first.unmount();
-    server.use(
-      http.get(`${API}/executions/:id`, () =>
-        HttpResponse.json(execution({ status: 'paused_budget', stop: RESUME })),
-      ),
-    );
-    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    expect(
-      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
-        name: 'Resume',
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it('on the Trip page the bar follows the search by def=, with controls', async () => {
-    serveRuns([running]);
-    renderWithProviders(<App />, {
-      search: '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28',
-    });
-    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-  });
-
-  it('on the Edit page the bar follows the edit= search, with controls, whatever def= says', async () => {
-    serveRuns([running]);
-    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001&def=other' });
-    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-  });
-
-  it('while the definitions load on a search’s page the bar names no other search’s run, only the month’s spend', async () => {
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    serveRuns([running]);
-    server.use(
-      http.get(`${API}/definitions`, async () => {
-        await gate;
-        return HttpResponse.json([definition()]);
-      }),
-    );
-    const { client } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
-    // only the definitions are still in flight: every other read (the cards included, were they wanted) has answered
-    await waitFor(() => expect(client.isFetching()).toBe(1));
-    await screen.findByRole('navigation', { name: 'Views' });
-    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
-    expect(screen.queryByRole('link', { name: /:$/ })).toBeNull();
-    release();
-    expect(
-      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
-        name: 'Cancel',
-      }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: COPY.topBar.limitsLabel })).toBeInTheDocument();
+    await screen.findByRole('navigation', { name: 'Main' });
+    expect(screen.queryByText(/^Searching:/)).toBeNull();
   });
 });

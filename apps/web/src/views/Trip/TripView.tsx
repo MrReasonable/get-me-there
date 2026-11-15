@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import { useProvidersWatch, useTrip } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
+import { Crumbs } from '../../components/Crumbs.js';
 import { Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
 import { BACK_TO_DATES } from '../../state/resultsState.js';
 import { type TripUiState, tripQueryOf } from '../../state/tripState.js';
-import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { hrefWith } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
 import { AboutPrice } from './AboutPrice.js';
 import { AnswerCard } from './AnswerCard.js';
@@ -18,24 +19,6 @@ import { SearchLog } from './SearchLog.js';
 import './trip.css';
 
 const T = COPY.trip;
-
-/** Trips › the search's name › the dates (design §4), the search's link keeping its page's filters (`d.*`). */
-function Crumbs({ name, dates }: { name: string; dates: string }) {
-  const trips = navPatch('searches');
-  return (
-    <nav aria-label={T.crumbsLabel} className="trip-crumbs">
-      <a href={hrefWith(trips)} onClick={navigateTo(trips)}>
-        {T.crumbTrips}
-      </a>
-      <span aria-hidden="true"> › </span>
-      <a href={hrefWith(BACK_TO_DATES)} onClick={navigateTo(BACK_TO_DATES)} data-testid="trip-back">
-        {name}
-      </a>
-      <span aria-hidden="true"> › </span>
-      <span aria-current="page">{dates}</span>
-    </nav>
-  );
-}
 
 /**
  * Design 2026-11-08 §6.1 (trip-page plan Task 7): one pair of dates of a search, ending in a booking link. The whole
@@ -61,7 +44,13 @@ export function TripView({ definition, state }: { definition: DefinitionResponse
     <div className="trip" data-testid="trip-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
       {synthetic && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
-      <Crumbs name={definition.name} dates={dates} />
+      <Crumbs
+        items={[
+          { label: COPY.crumbs.trips, href: hrefWith(navPatch('searches')) },
+          { label: definition.name, href: hrefWith(BACK_TO_DATES), testId: 'trip-back' },
+          { label: dates },
+        ]}
+      />
       <h2 className="trip-title">
         {dates} {r === undefined ? null : <span className="trip-nights">{T.nights(r.nights)}</span>}
       </h2>

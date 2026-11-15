@@ -61,3 +61,6 @@ export type TripQuery = z.input<typeof apiContract.tripQuerySchema>;
 
 /** Design 2026-11-08 §6.1: one trip's dates in one call (`GET /definitions/:id/trip`). */
 export type TripResponse = z.output<typeof apiContract.tripResponseSchema>;
+
+/** `GET /budget`: every scope's usage and the month's cap. */
+export type BudgetResponse = z.output<typeof apiContract.budgetResponseSchema>;

@@ -35,7 +35,7 @@ const MONEY_FILES = new Set([
   'src/views/Alerts/ruleText.ts',
   'src/format.ts',
   'src/components/PriceCell.tsx',
-  'src/components/StatusBar.tsx',
+  'src/components/TopBar.tsx',
   // WP19: the coverage section's ledger costs (moved from the Coverage view), and the overview legend's band ranges,
   // scale values in [data-scale], never fares
   'src/views/Dates/CoverageSection.tsx',

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
 import { LoadError } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
+import { SettingsCrumbs } from '../Settings/SettingsView.js';
 import { EventsTable } from './EventsTable.js';
 import { RuleForm } from './RuleForm.js';
 import { describeRule } from './ruleText.js';
@@ -39,6 +40,9 @@ export function AlertsView(props: { definitionId: string }) {
 
   return (
     <section aria-labelledby="alerts-heading" className="alerts grid gap-5 pt-5">
+      <div className="alerts-wide">
+        <SettingsCrumbs title={COPY.crumbs.alerts} />
+      </div>
       <div className="alerts-wide space-y-2">
         <h2 id="alerts-heading" className="h-view">
           {C.heading}

@@ -2,21 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 
 // why: every user-facing count agrees with its noun at 1 and at more than 1 (CodeRabbit finding on copy.ts).
-const buckets = { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0 };
 const cases: ReadonlyArray<[string, string, string]> = [
-  [
-    'progress',
-    COPY.progress({ stage: 's', provider: 'p', buckets, total: 1 }),
-    COPY.progress({ stage: 's', provider: 'p', buckets, total: 2 }),
-  ],
-  ['spendRunCalls', COPY.spendRunCalls(0, '1'), COPY.spendRunCalls(0, '2000')],
-  ['spendRunFreeCalls', COPY.spendRunFreeCalls(0, '1'), COPY.spendRunFreeCalls(0, '2000')],
-  ['spendProviderMonth', COPY.spendProviderMonth('P', 0, '1'), COPY.spendProviderMonth('P', 0, '10')],
-  [
-    'spendProviderLifetime',
-    COPY.spendProviderLifetime('P', 0, '1'),
-    COPY.spendProviderLifetime('P', 0, '10'),
-  ],
+  ['runProgress.calendar', COPY.runProgress.calendar(0, 1, null), COPY.runProgress.calendar(0, 2, null)],
+  ['topBar.callsLeftMonth', COPY.topBar.callsLeftMonth(0, 1), COPY.topBar.callsLeftMonth(0, 100)],
+  ['topBar.callsLeftTrial', COPY.topBar.callsLeftTrial(0, 1), COPY.topBar.callsLeftTrial(0, 24)],
   ['requestRow', COPY.requestRow(1, '1', 1, '£1'), COPY.requestRow(2, '2', 2, '£1')],
   ['requestRowTiles', COPY.requestRowTiles(1, '1', 1, 1, '£1'), COPY.requestRowTiles(2, '2', 2, 2, '£1')],
   ['usageWindow', COPY.usageWindow(0, '1', 'a', 'b'), COPY.usageWindow(0, '5', 'a', 'b')],

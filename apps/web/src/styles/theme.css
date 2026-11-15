@@ -1,0 +1,115 @@
+/* =====================================================================================================================
+   The shared tokens (design 2026-11-08 §5.1, Task 4), light and dark: the page colours, the label-kind tints (seller,
+   google, calendar, cached, not seen), the heat ramp and its ink, the stale amber and the focus ring. Every page that
+   shows a price label, a heat cell or a crumb reads them, so a label reads the same colours on the Trips page, the
+   Search page and the Trip page. Every text pair's WCAG ratio is written beside it and asserted by
+   test/views/trip/contrast.test.ts, which reads this file. Spec §4's CSP blocks inline styles: nothing is set from markup.
+   ===================================================================================================================== */
+
+:root {
+  --t-bg: #f5f4f0;
+  --t-surface: #ffffff;
+  --t-sunk: #f0eee9;
+  --t-ink: #17191c; /* 17.0:1 on surface */
+  --t-muted: #5c636c; /* 6.1:1 on surface, 5.5:1 on bg */
+  --t-line: #e2dfd8;
+  --t-accent: #0a58ca; /* 6.4:1 on surface, 5.9:1 on bg */
+  --t-accent-hover: #0847a3;
+  --t-accent-ink: #ffffff; /* 6.4:1 on accent */
+  --t-focus: #0a58ca; /* the focus ring: 6.4:1 on surface, 5.9:1 on bg (3:1 is the bar) */
+  --t-seller-bg: #e2f1e7;
+  --t-seller-ink: #17643a; /* 6.2:1 */
+  --t-google-bg: #e5edf8;
+  --t-google-ink: #1f4a82; /* 7.5:1 */
+  --t-cal-bg: #fbeed2;
+  --t-cal-ink: #74500a; /* 6.3:1 */
+  --t-cache-bg: #ebe9e4;
+  --t-cache-ink: #4a5057; /* 6.7:1 */
+  --t-old-ink: #5c636c; /* "not seen again": 6.1:1 on surface */
+  --t-old-line: #858c95; /* its dashed edge: 3.4:1 on surface */
+  --t-warn: #8f5200; /* the stale age: 5.1:1 or more on every label's ground and on surface */
+  --t-bad: #b3261e; /* 6.5:1 on surface */
+  --t-ok: #17643a; /* 6.2:1 on surface */
+  /* The heat ramp, cheapest first, and the two inks a cell takes by its ground */
+  --t-heat-1: #0f6b4f;
+  --t-heat-2: #3f8f6f;
+  --t-heat-3: #86b9a2;
+  --t-heat-4: #c9dfd3;
+  --t-heat-5: #ecf2ee;
+  --t-heat-ink-dark: #ffffff;
+  --t-heat-ink-light: #17191c;
+  --t-gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --t-bg: #121416;
+    --t-surface: #1b1e21;
+    --t-sunk: #16191b;
+    --t-ink: #eceef0; /* 14.9:1 on surface */
+    --t-muted: #a5acb5; /* 7.3:1 on surface, 8.1:1 on bg */
+    --t-line: #2c3035;
+    --t-accent: #6aa6ff; /* 6.8:1 on surface */
+    --t-accent-hover: #8dbaff;
+    --t-accent-ink: #0b1220; /* 7.6:1 on accent */
+    --t-focus: #6aa6ff;
+    --t-seller-bg: #173526;
+    --t-seller-ink: #8fd6aa; /* 7.9:1 */
+    --t-google-bg: #1a2a40;
+    --t-google-ink: #9cc0f0; /* 7.7:1 */
+    --t-cal-bg: #3a2c10;
+    --t-cal-ink: #f0c873; /* 8.5:1 */
+    --t-cache-bg: #2a2d31;
+    --t-cache-ink: #c3c8ce; /* 8.2:1 */
+    --t-old-ink: #a5acb5; /* 7.3:1 on surface */
+    --t-old-line: #7d848d; /* 4.2:1 on surface */
+    --t-warn: #f0b860; /* 7.4:1 or more on every label's ground and on surface */
+    --t-bad: #ff8a80; /* 7.3:1 on surface */
+    --t-ok: #8fd6aa; /* 7.9:1 on surface */
+    --t-heat-1: #2fae83;
+    --t-heat-2: #1d7053;
+    --t-heat-3: #1d5a45;
+    --t-heat-4: #1a3b30;
+    --t-heat-5: #1a2622;
+    --t-heat-ink-dark: #0b1210;
+    --t-heat-ink-light: #dfe5e2;
+  }
+}
+
+/* Breadcrumbs (Ruling 12): one ordered list in a nav named "Breadcrumb"; its colours follow the page it sits on (the
+   departure board's ink, or the Trip page's tokens through --crumb-ink and --crumb-link). */
+.crumbs {
+  font-size: 13px;
+  color: var(--crumb-ink, var(--ink-2));
+  margin-bottom: 6px;
+}
+.crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.crumbs li > [aria-hidden="true"] {
+  margin: 0 0.35em;
+  white-space: pre;
+}
+.crumbs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--crumb-link, var(--ink));
+  text-decoration: underline;
+}
+.crumbs a:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.crumbs [aria-current] {
+  color: var(--crumb-ink, var(--ink-2));
+}
+.trip {
+  --crumb-ink: var(--t-muted);
+  --crumb-link: var(--t-accent);
+}

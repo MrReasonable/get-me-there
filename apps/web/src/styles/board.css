@@ -153,7 +153,7 @@
   }
 
   /* ------------------------------------------------------------------------------------------------------------------
-     The concourse shell: steel strip, brand flaps, two-tier nav, status line
+     The concourse shell: steel strip, brand flaps, the two-item nav, the health line and the limits
      ------------------------------------------------------------------------------------------------------------------ */
   .topbar {
     padding: 10px var(--gutter) 8px;
@@ -169,13 +169,6 @@
     box-shadow:
       inset 0 0 0 1px #000,
       0 1px 0 rgb(255 255 255 / 0.5);
-  }
-  .nav-tier-name {
-    font: 600 14px / 1 var(--font-flap);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--ink-2);
-    padding-right: 4px;
   }
   .nav-link {
     display: inline-flex;
@@ -198,18 +191,83 @@
     background: var(--board);
     border-bottom: 4px solid currentColor;
   }
-  .nav-menu-button {
-    min-height: 44px;
+  .brand-link {
+    display: inline-flex;
+    color: inherit;
+    text-decoration: none;
   }
 
-  /* The status line: the run, the failing checks, the spend */
-  .statusline {
+  /* The status row (Ruling 10): the health line on the left, the limits on the right; under the nav on a phone */
+  .topbar-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0 24px;
+    margin-top: 4px;
     font-size: 14px;
     color: var(--ink-2);
   }
-  .statusline .status-word {
-    font-weight: 700;
+  .health-line {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .health-words {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+  }
+  .health-glyph {
+    font-size: 12px;
+    line-height: 1;
+  }
+  .health-ok {
+    color: #17643a;
+  }
+  .health-warn {
+    color: var(--ink-warn);
+  }
+  .health-bad {
+    color: var(--ink-bad);
+  }
+  .limits {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 18px;
+  }
+  .limit-item {
+    min-height: 24px;
+  }
+  .limit-item[data-cost] {
+    font-weight: 600;
     color: var(--ink);
+  }
+
+  /* One run's progress (Ruling 11): a bar over the calendar's dates, then flights, or the stop and its actions */
+  .run-progress {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .run-bar {
+    width: 100%;
+    height: 8px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+    accent-color: var(--t-accent);
+    background: var(--steel-lo);
+  }
+  .run-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .run-actions:empty {
+    display: none;
   }
 
   .view-main {
@@ -521,72 +579,11 @@
     display: inline-flex;
     gap: calc(var(--cg, 2px) * 3);
   }
-  .nav-here {
-    color: var(--flap-ink);
-    background: var(--board);
-  }
   .topbar {
     position: relative;
   }
-  /* The phone's full nav: a steel shelf that drops over the page from under the strip */
-  .nav-panel {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    z-index: 40;
-    display: grid;
-    gap: 6px;
-    padding: 10px var(--gutter) 14px;
-    background: linear-gradient(180deg, var(--steel-hi), var(--steel));
-    border-bottom: 1px solid var(--steel-edge);
-    box-shadow: 0 8px 18px rgb(0 0 0 / 0.28);
-  }
-  .nav-panel[hidden] {
-    display: none;
-  }
-  .statusline {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    column-gap: 18px;
-  }
-  .statusbar-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    column-gap: 22px;
-    margin-top: 4px;
-  }
-  .run-status {
-    flex: 1 1 0;
-    min-width: min(100%, 18rem);
-    align-items: center;
-    column-gap: 16px;
-  }
-  .statusline-details > summary {
-    font-weight: 600;
-  }
-  .statusline-details[open] {
-    flex-basis: 100%;
-  }
-  .run-numbers {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    column-gap: 16px;
-    padding: 0 0 4px 36px;
-    font-size: 13px;
-  }
-  .run-numbers .link {
-    min-height: 32px;
-  }
   .tag-glyph:empty {
     display: none;
-  }
-  .topbar .statusline .status-word[data-status="failed"],
-  .topbar .statusline .status-word[data-status="cancelled"] {
-    color: var(--ink-bad);
   }
 }
 
@@ -598,16 +595,9 @@
     --cw: 9px;
     padding: 4px;
   }
-  .nav-tier-name {
-    font-size: 13px;
-  }
   .nav-link {
     padding: 0 10px;
     font-size: 14px;
-  }
-  .statusline {
-    column-gap: 12px;
-    font-size: 13.5px;
   }
   .brand {
     padding: 5px 7px;
@@ -629,34 +619,17 @@
     flex-wrap: nowrap;
     column-gap: 10px;
   }
-  .run-numbers {
-    padding-left: 0;
-  }
-  .statusbar-row {
-    column-gap: 14px;
-    margin-top: 0;
-  }
-  /* One nav row: the current tier and view, and the menu */
-  .topbar nav {
-    flex-wrap: nowrap;
-  }
-  .topbar .nav-tier-name {
-    font-size: 12px;
-    letter-spacing: 0.06em;
-  }
-  /* The current view's name on one line, cut with an ellipsis: a long search name otherwise wraps past its tile and
-  under the menu button. The page's own heading and the tile's title carry the whole name. */
-  .topbar .nav-here {
+  .topbar-status {
     display: block;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    line-height: 40px;
   }
-  .nav-menu-button {
-    flex: none;
-    padding: 2px 8px;
-    font-size: 14px;
+  .health-line {
+    min-height: 0;
+  }
+  .limits {
+    column-gap: 12px;
+  }
+  /* One row for the logo and the two nav links; the health line and the limits wrap under it */
+  .topbar nav ul {
+    flex-wrap: nowrap;
   }
 }

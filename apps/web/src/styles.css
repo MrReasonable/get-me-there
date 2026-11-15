@@ -12,6 +12,7 @@
 @import "@fontsource/atkinson-hyperlegible-next/700.css";
 @import "@fontsource/atkinson-hyperlegible-mono/400.css";
 
+@import "./styles/theme.css";
 @import "./styles/world.css";
 @import "./styles/board.css";
 

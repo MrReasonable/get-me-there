@@ -5,6 +5,7 @@ import { cardName, StatusCard } from '../components/StatusCard.js';
 import { COPY } from '../copy.js';
 import { Flaps } from '../flaps/Flaps.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
+import { SettingsCrumbs } from './Settings/SettingsView.js';
 import './status.css';
 
 type Check = apiContract.StatusCheck;
@@ -55,6 +56,7 @@ export function StatusView() {
     if (q.error)
       return (
         <div className="status-view space-y-4 pt-5">
+          <SettingsCrumbs title={COPY.crumbs.system} />
           <h2 className="h-view">{COPY.statusView.heading}</h2>
           <div role="alert" className="plate notice flex flex-wrap items-center gap-3 font-semibold">
             <span aria-hidden="true" className="tag tag-bad">
@@ -81,6 +83,7 @@ export function StatusView() {
   const groups = groupedCards(q.data.checks);
   return (
     <div className="status-view space-y-4 pt-5">
+      <SettingsCrumbs title={COPY.crumbs.system} />
       <div className="space-y-1">
         <h2 className="h-view">{COPY.statusView.heading}</h2>
         {/* why: V11 (ui-b1-001): the ticking age is plain text; only a change of state (stale or not) is announced */}

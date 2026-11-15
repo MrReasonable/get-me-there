@@ -98,15 +98,16 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
 });
 
 describe('the Playwright smoke’s nav and Trip page selectors match the rendered markup', () => {
-  it('the nav: two tiers labelled by their names, the current entry with its non-colour cue, 44 px links', () => {
-    renderWithProviders(<Nav current="dates" search={{ id: 'def-0001', name: 'Worked example' }} />, {
-      search: '?view=dates&def=def-0001',
-    });
+  it('the nav: two links named Trips and Settings, the current entry with its non-colour cue, 44 px links', () => {
+    renderWithProviders(<Nav current="trips" />, { search: '?view=dates&def=def-0001' });
     const nav = screen.getByRole('navigation', { name: SMOKE.nav });
-    const lists = SMOKE.navTiers.map((name) => within(nav).getByRole('list', { name }));
-    expect(lists).toHaveLength(2);
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual([...SMOKE.navItems]);
     const current = one(SMOKE.navCurrent);
-    expect(current).toHaveTextContent('Worked example');
+    expect(current).toHaveTextContent('Trips');
     expect(current.className).toContain('border-b-4');
     for (const link of within(nav).getAllByRole('link')) expect(link.className).toContain('min-h-11');
   });
@@ -128,6 +129,7 @@ describe('the Playwright smoke’s nav and Trip page selectors match the rendere
     );
     expect(await screen.findByRole('region', { name: SMOKE.tripCard })).toBeInTheDocument();
     expect(one(SMOKE.tripPage)).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: SMOKE.crumbs })).toBeInTheDocument();
     expect(one(SMOKE.tripBack)).toHaveAttribute('href', expect.stringContaining('view=dates'));
     expect(one(SMOKE.priceLabel).tagName).toBe('SUMMARY');
     expect(one(SMOKE.aboutPrice).tagName).toBe('SUMMARY');
