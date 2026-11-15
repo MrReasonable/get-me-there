@@ -43,6 +43,11 @@ describe("runLine: mockup 02's run line (Rulings 6 and 7)", () => {
     );
   });
 
+  // why: CodeRabbit CR6: with only part of the search's counts known, the calendar clause is left out
+  it('leaves the calendar count out when it is not known for the whole search', () => {
+    expect(line({ calendar: null })).toBe('Searched today 16:40–17:02 · 23 dates with flights read');
+  });
+
   it('the singulars, and none read yet', () => {
     expect(line({ calendar: { priced: 1, total: 1 }, readDates: 1 })).toBe(
       'Searched today 16:40–17:02 · calendar prices for 1 of 1 date · 1 date with flights read',

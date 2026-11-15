@@ -143,8 +143,8 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   const runActive = status !== undefined && RUNNING.has(status);
   // why: the card answers what the page's scoped read cannot (Ruling 7: the run's counts over its whole space, whether
   // its dates changed since, and Ruling 8's reason for finding nothing), re-read only while its run is going
-  const card: SearchCard | null =
-    useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id) ?? null;
+  const cards = useCards({ poll: runActive });
+  const card: SearchCard | null = cards.data?.cards.find((c) => c.id === definition.id) ?? null;
 
   // why: Price over time reads the route history, which the run's end changes: it is re-read with the page's own read;
   // the run's end also re-reads the card (final review M5), whose whole-space counts the run line takes once the card
@@ -221,8 +221,14 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
         now={now}
         refused={refused}
         card={card}
+        scoped={Object.values(scopeQuery(state)).some((v) => v !== undefined)}
       />
       <Filters definition={definition} state={state} />
+      {/* why: a re-read that fails over a read already shown keeps its error and Retry whatever that read held, a
+      search never run included (CodeRabbit CR5); with no read yet, Pending says the error */}
+      {data !== null && model !== null && query.error !== null ? (
+        <LoadError error={query.error} retry={() => void query.refetch()} />
+      ) : null}
       {data === null || model === null ? (
         <Pending query={query} />
       ) : data.executions.length === 0 ? null : (
@@ -232,7 +238,6 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
               {D.onDemandOnly(data.executions.filter((e) => e.isChild).length)}
             </p>
           ) : null}
-          {query.error !== null ? <LoadError error={query.error} retry={() => void query.refetch()} /> : null}
           <CheapestTrips
             definition={definition}
             data={data}
@@ -286,6 +291,9 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
           <WhatWasSearched
             definition={definition}
             card={card}
+            cardRead={
+              cards.data !== undefined ? null : { error: cards.error, retry: () => void cards.refetch() }
+            }
             logOpen={logOpen}
             onLogToggle={() => setLogOpen((o) => !o)}
             requested={asked('searched')}

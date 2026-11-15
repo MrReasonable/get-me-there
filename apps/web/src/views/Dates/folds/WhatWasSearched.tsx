@@ -1,5 +1,6 @@
 import type { ReducedMark } from '@gmt/core';
 import type { DefinitionResponse, SearchCard } from '../../../api/types.js';
+import { LoadError, Loading } from '../../../components/LoadState.js';
 import { COPY } from '../../../copy.js';
 import { isThinCoverage } from '../../../lib/thinCoverage.js';
 import { CoverageSection } from '../CoverageSection.js';
@@ -23,6 +24,7 @@ const MARKS: readonly ReducedMark[] = [
 export function WhatWasSearched({
   definition,
   card,
+  cardRead,
   logOpen,
   onLogToggle,
   requested,
@@ -30,6 +32,11 @@ export function WhatWasSearched({
 }: {
   definition: DefinitionResponse;
   card: SearchCard | null;
+  /**
+   * The cards read while it has not answered: still loading (no error), or failed with its error and Retry; null once
+   * it has. A card read that has not answered is not a search with nothing found (CodeRabbit CR10).
+   */
+  cardRead: { error: Error | null; retry: () => void } | null;
   /** Whether the full search log is open: the page's state, opened by a landing or the log's own button. */
   logOpen: boolean;
   onLogToggle: () => void;
@@ -48,7 +55,13 @@ export function WhatWasSearched({
       onHandled={onHandled}
     >
       {marks === null ? (
-        <p>{F.searchedNone}</p>
+        cardRead === null ? (
+          <p>{F.searchedNone}</p>
+        ) : cardRead.error !== null ? (
+          <LoadError error={cardRead.error} retry={cardRead.retry} />
+        ) : (
+          <Loading />
+        )
       ) : (
         <table className="sfold-table">
           <tbody>

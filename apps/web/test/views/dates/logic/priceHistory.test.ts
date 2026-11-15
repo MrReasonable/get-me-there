@@ -30,6 +30,21 @@ describe('lowestPerRun', () => {
     ]);
   });
 
+  // why: CodeRabbit CR28: a history holds a series per source; the lowest of a run is found across all of them
+  it('picks the lowest of a run from a second calendar series of the same history, with that point’s provenance', () => {
+    const lower = point('r1', 12, 35_000);
+    const camoufox = { ...lower, provenance: { ...lower.provenance, providerId: 'camoufox' } };
+    const h = routeHistory({
+      calendarSeries: [
+        { providerId: 'travelpayouts', cabin: 'economy', points: [point('r1', 48, 40_000)] },
+        { providerId: 'camoufox', cabin: 'economy', points: [camoufox] },
+      ],
+    });
+    const [only] = lowestPerRun([h], [run('r1')]);
+    expect(only?.pricePence).toBe(35_000);
+    expect(only?.provenance.providerId).toBe('camoufox');
+  });
+
   it('orders by the run, not by when its lowest price was fetched, and dates the row by the run’s start', () => {
     // r2 is the newer run, but its lowest price was fetched before r1's
     const h = history(point('r1', 1, 40_000), point('r2', 30, 39_000));

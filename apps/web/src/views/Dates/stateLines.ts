@@ -139,12 +139,13 @@ function timeSpan(start: IsoDateTime, end: IsoDateTime | null, now: IsoDateTime,
  * Mockup 02's run line, before its "what was searched" link: "Searched today 16:40–17:02 · calendar prices for 2,146 of
  * 2,184 dates · 23 dates with flights read". Its day is "today", "yesterday" or the date ("12 Mar"); a run that ended on
  * a later day names that day at its end; a run with no end yet (a stopped one) names its start ("from 09:12"). The
- * calendar counts are the latest run's over the whole search (Ruling 7's `marks`); the flights clause counts the dates
- * in view whose flights were read by any search so far (Ruling 6), so it is a total, never the run's own.
+ * calendar counts are the latest run's over the whole search (Ruling 7's `marks`); null leaves that clause out (only part
+ * of the search's counts are known: CodeRabbit CR6). The flights clause counts the dates in view whose flights were read
+ * by any search so far (Ruling 6), so it is a total, never the run's own.
  */
 export function runLine(d: {
   run: { startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null };
-  calendar: { priced: number; total: number };
+  calendar: { priced: number; total: number } | null;
   readDates: number;
   now: IsoDateTime;
   c: PageCopy;
@@ -153,7 +154,7 @@ export function runLine(d: {
   const head = d.run.startedAt === null ? null : timeSpan(d.run.startedAt, d.run.finishedAt, d.now, d.c);
   return [
     ...(head === null ? [] : [P.searched(head)]),
-    P.calendarPrices(d.calendar.priced, d.calendar.total),
+    ...(d.calendar === null ? [] : [P.calendarPrices(d.calendar.priced, d.calendar.total)]),
     P.datesWithFlightsRead(d.readDates),
   ].join(' · ');
 }

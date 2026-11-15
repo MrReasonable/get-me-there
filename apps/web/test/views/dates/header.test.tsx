@@ -121,6 +121,45 @@ describe('a search’s header (design 2026-11-08 §5, mockup 02)', () => {
     expect(await screen.findByTestId('dates-run')).toHaveTextContent('calendar prices for 11 of 93 dates');
   });
 
+  // why: CodeRabbit CR6: a read narrowed by From or To counts part of the search, so without the card's counts for
+  // this run the line leaves the count out rather than give the part as the whole
+  it('a narrowed read with no card of this run leaves the calendar count out of the run line', async () => {
+    server.use(serveCards([wholeCard({ id: 'exec-0000' })]));
+    renderDates({
+      body: workedDates({ origins: ['LHR'] }),
+      search: '?view=dates&def=def-0001&d.from=LHR',
+    });
+    const line = await screen.findByTestId('dates-run');
+    expect(line).toHaveTextContent(
+      /^Searched today 13:00–14:00 · \d+ dates? with flights read · what was searched$/,
+    );
+    expect(line).not.toHaveTextContent('calendar prices');
+  });
+
+  // why: CodeRabbit CR7: the run's own poll says it finished before the date-pairs read does; the line takes its times
+  // from the same summary as its status, so a finished run never reads "from HH:MM"
+  it('a run the poll says finished, in a read that still says running, names its finish', async () => {
+    server.use(serveCards([wholeCard()]));
+    serveRun({
+      status: 'completed',
+      startedAt: '2026-10-14T12:00:00.000Z',
+      finishedAt: '2026-10-14T13:00:00.000Z',
+    });
+    renderDates({
+      body: {
+        ...workedDates(),
+        executions: [
+          runSummary({
+            status: 'running',
+            startedAt: asIsoDateTime('2026-10-14T12:00:00.000Z'),
+            finishedAt: null,
+          }),
+        ],
+      },
+    });
+    expect(await screen.findByTestId('dates-run')).toHaveTextContent(/^Searched today 13:00–14:00 · /);
+  });
+
   it('the dates with flights read count every date in view whose flights were read (Ruling 6)', async () => {
     const over = { pairingRead: 'over-limit' as const, pairing: figurePairing({ which: 'over-limit' }) };
     renderDates({

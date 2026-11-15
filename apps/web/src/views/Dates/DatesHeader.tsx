@@ -85,6 +85,8 @@ export interface DatesHeaderProps {
   refused: StartRefusalCode | null;
   /** The search's card (`/cards`), for what the page's scoped read cannot say: Ruling 7's whole-search counts. */
   card: SearchCard | null;
+  /** The read is narrowed (From, To or a journey limit applied), so its counts are not the whole search's. */
+  scoped: boolean;
 }
 
 /**
@@ -95,7 +97,7 @@ export interface DatesHeaderProps {
  * of 2,184 dates · 23 dates with flights read · what was searched") once a run has started and is not going; then the
  * state under it (`PageState`: `RunProgress` while a run goes or once it stopped).
  */
-export function DatesHeader({ definition, data, model, run, now, refused, card }: DatesHeaderProps) {
+export function DatesHeader({ definition, data, model, run, now, refused, card, scoped }: DatesHeaderProps) {
   const airports = useAirportDetails([...definition.origins, ...definition.destinations]);
   const latest: RunSummary | undefined = data?.executions.find((e) => !e.isChild);
   const own = run !== undefined && latest !== undefined && run.id === latest.id ? run : undefined;
@@ -104,7 +106,8 @@ export function DatesHeader({ definition, data, model, run, now, refused, card }
   // they count the run's whole space (Ruling 7), which a read narrowed by From or To cannot. Right after a run ends the
   // run's poll says so before the card does, so for a moment the line counts the read in view (one origin, say), until
   // the card's own re-read lands: the page asks for it itself at the run's end (`useRunRereads`' `ended`, final review
-  // M5), never waiting on the top bar's cards poll
+  // M5), never waiting on the top bar's cards poll. A narrowed read's counts are part of the search, so the run line
+  // leaves its calendar count out until the card's arrive (CodeRabbit CR6); an unnarrowed read is the whole search.
   const cardRun = card?.latestRun ?? null;
   const sameRun =
     cardRun !== null && latest !== undefined && cardRun.id === latest.id && cardRun.status === status;
@@ -114,7 +117,9 @@ export function DatesHeader({ definition, data, model, run, now, refused, card }
     : wholeOf(pairs);
   const calendar = sameRun
     ? { priced: cardRun.marks.priced, total: cardRun.datePairs }
-    : { priced: pricedCount(pairs), total: pairs.length };
+    : scoped
+      ? null
+      : { priced: pricedCount(pairs), total: pairs.length };
   // why: the line is known once the read and (for a run) the run's own read are in: until then nothing is guessed
   const line: StateLine | null =
     data === null || model === null
@@ -143,7 +148,9 @@ export function DatesHeader({ definition, data, model, run, now, refused, card }
     latest.startedAt !== null &&
     status !== undefined &&
     !IN_FLIGHT.has(status)
-      ? runLine({ run: latest, calendar, readDates: model.readDates, now, c: COPY })
+      ? // why: the times come from the same summary as the status (the run's own poll when it has answered), so a run
+        // the poll says finished never reads "from HH:MM" off an older read (CodeRabbit CR7)
+        runLine({ run: own ?? latest, calendar, readDates: model.readDates, now, c: COPY })
       : null;
   const edit = { view: 'definitions', edit: definition.id, def: null };
   return (

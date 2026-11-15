@@ -2,6 +2,7 @@ import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords, isoDateTimeOfEpo
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
+import { STATUS_KEY } from '../../../src/api/statusQuery.js';
 import { COPY } from '../../../src/copy.js';
 import {
   at,
@@ -13,12 +14,12 @@ import {
   workedDates,
 } from '../../fixtures.dates.js';
 import { API, execution, statusReport } from '../../fixtures.js';
-import { latestRun, searchCard } from '../../fixtures.searches.js';
+import { cardsResponse, latestRun, searchCard } from '../../fixtures.searches.js';
 import { cellAt, fetchPoint, routeHistory } from '../../fixtures.wp10.js';
 import { datesError, serveDates } from '../../msw/datesHandlers.js';
 import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { NOW } from '../../render.js';
+import { NOW, settled } from '../../render.js';
 import { jargonIn, mainPathWords } from './jargon.js';
 import { findTrips, renderDates } from './render.js';
 
@@ -136,6 +137,48 @@ describe('Price over time', () => {
     expect(screen.queryByText(/£1\b/)).toBeNull();
   });
 
+  // why: CodeRabbit CR9: the lowest of some airport pairs' histories is not the search's lowest, so the summary and the
+  // rows wait until every airport pair's history has answered
+  it('claims no lowest price while one airport pair’s history is still being read', async () => {
+    let release: (body: ReturnType<typeof routeHistory>) => void = () => {};
+    const held = new Promise<ReturnType<typeof routeHistory>>((resolve) => {
+      release = resolve;
+    });
+    let heldArrived: () => void = () => {};
+    const arrived = new Promise<void>((resolve) => {
+      heldArrived = resolve;
+    });
+    const history = (points: ReturnType<typeof point>[]) =>
+      routeHistory({ calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points }] });
+    server.use(
+      http.get(`${API}/routes/:origin/:destination/history`, async ({ params }) => {
+        if (params.origin === 'LGW' && params.destination === 'EWR') {
+          heldArrived();
+          return HttpResponse.json(await held);
+        }
+        return HttpResponse.json(history([point(1, 30_000)]));
+      }),
+    );
+    server.use(serveCards([card()]));
+    const { client } = renderDates({ body: { ...workedDates(real), executions: runs(1) } });
+    await findTrips();
+    await arrived;
+    // the other three airport pairs' histories have answered: only LGW → EWR is still out
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryCache()
+          .findAll({ queryKey: ['history', 'route'] })
+          .filter((q) => q.state.data !== undefined),
+      ).toHaveLength(3),
+    );
+    const summary = fold(F.priceOverTime).querySelector('summary');
+    expect(summary).not.toHaveTextContent('lowest calendar price');
+    expect(screen.queryByRole('list', { name: F.priceHeading })).toBeNull();
+    release(history([point(1, 20_000)]));
+    await waitFor(() => expect(summary).toHaveTextContent('lowest calendar price £200'));
+  });
+
   it('gives each point its label: Cached for the cache, Calendar for the browser, age, and the truncated mark', async () => {
     serveHistory([point(1, 37_200, { truncated: true }), point(2, 38_000)]);
     server.use(serveCards([card()]));
@@ -238,6 +281,51 @@ describe('What was searched', () => {
     // the first five sum to the total the summary names
     const sum = rows.slice(0, 5).reduce((n, r) => n + Number((r[1] ?? '0').replace(/,/g, '')), 0);
     expect(sum).toBe(2184);
+  });
+
+  // why: CodeRabbit CR10: a card read that failed (or has not answered) is not a search that found nothing: it says
+  // its error with Retry, or that it is loading, never "Not searched yet"
+  it('says a failed card read as an error with Retry, and a pending one as loading, never as not searched', async () => {
+    let fail = true;
+    let hits = 0;
+    server.use(
+      http.get(`${API}/definitions/cards`, () => {
+        hits += 1;
+        return fail
+          ? HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })
+          : HttpResponse.json(cardsResponse([card()]));
+      }),
+    );
+    const { user } = renderDates({ body: workedDates(real) });
+    await findTrips();
+    const d = fold(F.searched);
+    expect(await within(d).findByRole('alert')).toHaveTextContent('Could not load: boom');
+    expect(within(d).queryByText(F.searchedNone)).toBeNull();
+    fail = false;
+    await user.click(within(d).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(hits).toBe(2));
+    expect(await within(d).findAllByRole('row')).toHaveLength(6);
+    expect(within(d).queryByRole('alert')).toBeNull();
+  });
+
+  it('says loading while the card read has not answered', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/definitions/cards`, async () => {
+        await held;
+        return HttpResponse.json(cardsResponse([card()]));
+      }),
+    );
+    renderDates({ body: workedDates(real) });
+    await findTrips();
+    const d = fold(F.searched);
+    expect(within(d).getByRole('status')).toHaveTextContent(COPY.loading);
+    expect(within(d).queryByText(F.searchedNone)).toBeNull();
+    release();
+    expect(await within(d).findAllByRole('row')).toHaveLength(6);
   });
 
   it('adds the thin-coverage line only when most searched dates had no price listed', async () => {
@@ -403,10 +491,14 @@ describe('Alert', () => {
         HttpResponse.json(statusReport([{ id: 'email', area: 'email', summary: 'email', ...over }])),
       ),
     );
-    renderDates({ body: workedDates(real) });
+    const { client } = renderDates({ body: workedDates(real) });
     await findTrips();
     const d = await waitFor(() => fold(/^Alert/));
-    await waitFor(() => expect(within(d).queryByText(F.emailNotSet)).toBeNull());
+    // why: CodeRabbit CR26: the advice comes only from the status report, so its absence is checked once the report
+    // has been read and handed to the page (`settled`: nothing in flight, then the query client's own hand-off)
+    await waitFor(() => expect(client.getQueryData(STATUS_KEY)).toBeDefined());
+    await settled(client);
+    expect(within(d).queryByText(F.emailNotSet)).toBeNull();
     expect(within(d).queryByRole('link', { name: F.emailSetUp })).toBeNull();
   });
 });
@@ -457,9 +549,10 @@ describe('Alert, the calendar-prices line and the cooldown in words', () => {
 
 describe('Price over time, review fixes', () => {
   it('orders the runs by the run and dates each by its start, however late its lowest price was fetched', async () => {
-    // exec-1 is the newer run; its lowest price was fetched earlier than exec-2's
+    // exec-1 is the newer run; its lowest price was fetched earlier (60 h ago) than exec-2's (48 h ago), so ordering by
+    // fetch time, newest first, would put exec-2 first (CodeRabbit CR27)
     serveHistory([
-      point(1, 37_200, { at: isoDateTimeOfEpochMs(Date.parse(NOW) - 40 * 3_600_000) }),
+      point(1, 37_200, { at: isoDateTimeOfEpochMs(Date.parse(NOW) - 60 * 3_600_000) }),
       point(2, 38_000),
     ]);
     server.use(serveCards([card()]));
@@ -508,6 +601,10 @@ describe('Price over time, review fixes', () => {
     expect(await within(d).findByRole('alert')).toBeInTheDocument();
     expect(within(d).getByRole('list', { name: F.priceHeading })).toBeInTheDocument();
     expect(within(d).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    // why: CodeRabbit CR9: without LGW → EWR's history the runs shown may not be the lowest: they say so, and the
+    // summary names no lowest
+    expect(within(d).getByText(F.pricePartial)).toBeInTheDocument();
+    expect(d.querySelector('summary')).not.toHaveTextContent('lowest calendar price');
   });
 
   it('picks up the run that finishes on the page: its row appears when the page re-reads at the run’s end', async () => {

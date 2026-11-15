@@ -16,7 +16,7 @@ import { API, definition, execution } from '../../fixtures.js';
 import { latestRun, searchCard } from '../../fixtures.searches.js';
 import { renderedCopy } from '../../guards.js';
 import { datesError, heldDates } from '../../msw/datesHandlers.js';
-import { type CardRequests, serveCards } from '../../msw/searchesHandlers.js';
+import { type CardRequests, serveCards, serveCardsBy } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { findLower, findTrips, renderDates } from './render.js';
 
@@ -109,6 +109,21 @@ describe('the page’s states (spec §11)', () => {
     expect(await screen.findByText('Could not load: internal error')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(hits).toBe(2));
+  });
+
+  // why: CodeRabbit CR5: a re-read that fails after a read with no runs keeps its error visible with Retry, never
+  // the never-run page alone (an error never looks empty)
+  it('a failed re-read of a never-run search shows the error with Retry', async () => {
+    const { client } = renderDates({ body: { executions: [], executionId: null } });
+    expect(await screen.findByText('Not searched yet', { selector: 'p.font-bold' })).toBeInTheDocument();
+    server.use(
+      http.get(`${API}/definitions/:id/date-pairs`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'internal error' } }, { status: 500 }),
+      ),
+    );
+    await act(() => client.refetchQueries({ queryKey: ['date-pairs'] }));
+    expect(await screen.findByText('Could not load: internal error')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
   });
 
   it('no state says a banned word, nor "no flights" outside "that isn\'t the same as no flights" and the key', async () => {
@@ -220,6 +235,7 @@ describe('a refused Search now and a search naming no source (Review Focus 1 of 
 });
 
 describe('a run going (Ruling 11; Review Focus 2)', () => {
+  afterEach(() => vi.useRealTimers());
   const running = (over: Parameters<typeof execution>[0] = {}, search?: string) => {
     serveRun({ status: 'running', estimatedFinishAt: '2026-10-14T16:40:00.000Z', ...over });
     return renderDates({
@@ -271,9 +287,31 @@ describe('a run going (Ruling 11; Review Focus 2)', () => {
   });
 
   it('the polite status names the kind of state only, so a poll that moves a count announces nothing', async () => {
+    // why: CodeRabbit CR31: a later poll moves the visible count; the status stays exactly "Searching"
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
+    let searched = 120;
+    server.use(
+      serveCardsBy(() => [
+        searchCard({
+          id: 'def-0001',
+          latestRun: latestRun({
+            status: 'running',
+            finishedAt: null,
+            datePairs: 405,
+            datePairsSearched: searched,
+          }),
+        }),
+      ]),
+    );
     running();
     const status = await screen.findByRole('status', { name: P.stateLabel });
-    await waitFor(() => expect(status).toHaveTextContent(/^Searching$/));
+    const line = await stateLine();
+    await waitFor(() => expect(line).toHaveTextContent('Reading the calendar, 120 of 405 dates'));
+    expect(status).toHaveTextContent(/^Searching$/);
+    searched = 240;
+    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+    await waitFor(() => expect(line).toHaveTextContent('Reading the calendar, 240 of 405 dates'));
+    expect(status).toHaveTextContent(/^Searching$/);
   });
 });
 

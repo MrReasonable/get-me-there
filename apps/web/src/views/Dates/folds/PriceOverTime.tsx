@@ -38,8 +38,10 @@ const ageOf = (p: RunPoint, now: IsoDateTime): number => worstCaseAgeHours(effec
 const dayOf = (at: IsoDateTime): string => formatIsoDateShort(londonDateOf(at));
 
 export interface PriceHistory {
-  /** This search's runs' lowest calendar prices, newest first, at most six. */
+  /** This search's runs' lowest calendar prices, newest first, at most six; none while an airport pair's is read. */
   points: readonly RunPoint[];
+  /** Every airport pair's history answered, so the points are the search's lowest (not when one failed). */
+  complete: boolean;
   loading: boolean;
   error: Error | null;
   /** Reads every airport pair's history again (a failed read's Retry, and a run reaching its end). */
@@ -64,13 +66,14 @@ export function usePriceHistory(definition: DefinitionResponse, data: DecodedDat
       (data?.executions ?? []).filter((e) => !e.isChild).map((e) => ({ id: e.id, startedAt: e.startedAt })),
     [data],
   );
-  // why: a handful of small arrays per render; the points follow the reads without a memo to keep in step
-  const points = lowestPerRun(
-    queries.map((q) => q.data),
-    runs,
-  );
+  // why: a handful of small arrays per render; the points follow the reads without a memo to keep in step. The lowest
+  // of some airport pairs' histories is not the search's lowest (CodeRabbit CR9): there are none while a pair's is
+  // still being read, and once one has failed the rest show beside its error, marked as maybe not the lowest
+  const histories = queries.map((q) => q.data);
+  const settled = queries.every((q) => !q.isPending);
   return {
-    points,
+    points: settled ? lowestPerRun(histories, runs) : [],
+    complete: histories.every((h) => h !== undefined),
     loading: data === null || queries.some((q) => q.isPending),
     error: queries.find((q) => q.error !== null)?.error ?? null,
     refetch: () => {
@@ -150,7 +153,8 @@ export function PriceOverTime({
   requested: boolean;
   onHandled: () => void;
 }) {
-  const low = lowestOf(history.points);
+  // why: CodeRabbit CR9: the summary names the lowest only when every airport pair's history is in
+  const low = history.complete ? lowestOf(history.points) : null;
   const historyQuery = `?view=history&def=${encodeURIComponent(definition.id)}`;
   return (
     <Fold
@@ -175,6 +179,7 @@ export function PriceOverTime({
               <RunRow key={p.executionId} point={p} />
             ))}
           </ul>
+          {history.complete ? null : <p className="sfold-note">{F.pricePartial}</p>}
         </>
       )}
       <p className="sfold-note">{F.priceNotTrips}</p>

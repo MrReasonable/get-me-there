@@ -708,6 +708,7 @@ export const COPY = {
       lowestCalendar: 'lowest calendar price',
       priceNone: 'No calendar prices have been read for this search yet.',
       priceNotTrips: 'These are calendar prices, not trips with flights read.',
+      pricePartial: "Some airports' prices couldn't be read, so these may not be the lowest.",
       fullHistory: 'Full price history',
       searched: 'What was searched',
       count: (n: number) => thousands(n),
