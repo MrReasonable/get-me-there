@@ -14,7 +14,7 @@ import {
   workedDates,
 } from '../fixtures.dates.js';
 import { API, definition, providersResponse, resultsResponse } from '../fixtures.js';
-import { latestRun, lowerOnCalendar, searchCard } from '../fixtures.searches.js';
+import { cardTrip, latestRun, lowerOnCalendar, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
 import { serveDates } from '../msw/datesHandlers.js';
 import { serveCards } from '../msw/searchesHandlers.js';
@@ -509,6 +509,10 @@ describe('the top bar has no run line and no Run now (spec rev 55 §11; design 2
       await screen.findByRole('link', { name: 'Searching: Worked example' });
       expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
       expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+      // why: CodeRabbit CR12: the bar itself (the page's own RunProgress may offer them below it)
+      const bar = screen.getByRole('banner');
+      expect(within(bar).queryByRole('button', { name: COPY.runProgress.cancel })).toBeNull();
+      expect(within(bar).queryByRole('button', { name: COPY.runProgress.resume })).toBeNull();
     },
   );
 });
@@ -516,7 +520,10 @@ describe('the top bar has no run line and no Run now (spec rev 55 §11; design 2
 describe('"Searching: <name>" in the top bar (Ruling 10; Review Focus 2)', () => {
   const running = searchCard({
     id: 'def-0001',
-    name: 'Birmingham → Frankfurt',
+    name: 'London → New York',
+    origins: ['LHR'],
+    destinations: ['JFK'],
+    trips: [cardTrip({ origin: 'LHR', destination: 'JFK' })],
     latestRun: latestRun({ id: 'exec-run', status: 'running', finishedAt: null, estimatedFinishAt: null }),
   });
 
@@ -527,7 +534,7 @@ describe('"Searching: <name>" in the top bar (Ruling 10; Review Focus 2)', () =>
       renderWithProviders(<App />, {
         search: `?view=${view}${view === 'history' || view === 'alerts' ? '&def=def-0001' : ''}`,
       });
-      const link = await screen.findByRole('link', { name: 'Searching: Birmingham → Frankfurt' });
+      const link = await screen.findByRole('link', { name: 'Searching: London → New York' });
       expect(link).toHaveAttribute('href', expect.stringContaining('view=dates'));
       expect(link).toHaveAttribute('href', expect.stringContaining('def=def-0001'));
       expect(screen.getByRole('region', { name: COPY.topBar.limitsLabel })).toHaveTextContent(

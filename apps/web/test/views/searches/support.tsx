@@ -36,6 +36,26 @@ export const BHX_FRA = apiContract.airportsResponseSchema.parse([
   },
 ]);
 
+/** The London → New York example's airports (Heathrow → JFK), served the same way. */
+export const LHR_JFK = apiContract.airportsResponseSchema.parse([
+  {
+    iata: 'LHR',
+    name: 'Heathrow',
+    city: 'London',
+    country: 'GB',
+    tz: 'Europe/London',
+    metro: 'LON',
+  },
+  {
+    iata: 'JFK',
+    name: 'John F. Kennedy International Airport',
+    city: 'New York',
+    country: 'US',
+    tz: 'America/New_York',
+    metro: 'NYC',
+  },
+]);
+
 /** Answers an airports lookup with the rows whose code is the query. */
 export function airportRows(rows = BHX_FRA) {
   return http.get(`${API}/airports`, ({ request }) => {

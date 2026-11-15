@@ -22,7 +22,7 @@ import {
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 import { freeProviders, pickDate } from './formSupport.js';
-import { airportRows } from './support.js';
+import { airportRows, LHR_JFK } from './support.js';
 
 // Design 2026-11-08 Rulings 13–14 (Trips and Search Task 7): the new-search panel's four fields, Where to look with each
 // source's cost, the short More options with Repeat, the one-sentence estimate and the press, and the Edit page that
@@ -62,7 +62,7 @@ function serve(answer = () => HttpResponse.json(estimateResponse())) {
   const estimates: unknown[] = [];
   const creates: unknown[] = [];
   server.use(
-    airportRows(),
+    airportRows(LHR_JFK),
     http.get(`${API}/budget`, () => HttpResponse.json(searchApiMonth())),
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       estimates.push(await request.json());
@@ -88,9 +88,9 @@ const renderPanel = (providers = allSources()) =>
 
 /** From and To by code, then both dates. */
 async function fill(user: ReturnType<typeof renderPanel>['user']) {
-  await user.type(screen.getByRole('combobox', { name: PLAN_COPY.from }), 'BHX{Enter}');
-  await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'FRA{Enter}');
-  await screen.findByRole('button', { name: 'Remove FRA' });
+  await user.type(screen.getByRole('combobox', { name: PLAN_COPY.from }), 'LHR{Enter}');
+  await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'JFK{Enter}');
+  await screen.findByRole('button', { name: 'Remove JFK' });
   pickDate(PLAN_COPY.earliest, '2027-01-10');
   pickDate(PLAN_COPY.latest, '2027-03-31');
 }

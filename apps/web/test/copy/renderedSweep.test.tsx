@@ -50,7 +50,7 @@ import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
 import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
-import { airportRows } from '../views/searches/support.js';
+import { airportRows, LHR_JFK } from '../views/searches/support.js';
 
 /**
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
@@ -440,7 +440,7 @@ describe('the new-search panel says no banned word, no main-path term and no "£
       perScope: [{ scope: 'provider-month:travelpayouts', estimated: 60_000, cap: 50_000, fits: false }],
     };
     server.use(
-      airportRows(),
+      airportRows(LHR_JFK),
       http.get(`${API}/providers`, () => HttpResponse.json(providers)),
       http.post(`${API}/definitions/estimate`, () =>
         HttpResponse.json(
@@ -467,9 +467,9 @@ describe('the new-search panel says no banned word, no main-path term and no "£
     );
     const { user } = renderWithProviders(<App />, { search: '?view=searches' });
     const from = await screen.findByRole('combobox', { name: PLAN_COPY.from });
-    await user.type(from, 'BHX{Enter}');
-    await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'FRA{Enter}');
-    await screen.findByRole('button', { name: 'Remove FRA' });
+    await user.type(from, 'LHR{Enter}');
+    await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'JFK{Enter}');
+    await screen.findByRole('button', { name: 'Remove JFK' });
     fireEvent.change(screen.getByLabelText(PLAN_COPY.earliest), { target: { value: '2027-01-10' } });
     fireEvent.change(screen.getByLabelText(PLAN_COPY.latest), { target: { value: '2027-03-31' } });
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
