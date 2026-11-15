@@ -20,7 +20,7 @@ import { type DayModel, dayModel, dayName, dayScale, heatOf, monthsOf, panelOrde
 
 const C = COPY.calendar;
 /** Ruling 18: a sideways swipe of at least this many pixels turns the month at 375 px. */
-export const SWIPE_PX = 50;
+const SWIPE_PX = 50;
 
 export interface CalendarProps {
   definition: DefinitionResponse;

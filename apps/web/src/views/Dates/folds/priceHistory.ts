@@ -24,7 +24,7 @@ export interface SearchRun {
 }
 
 /** How many runs the fold lists. */
-export const PRICE_RUNS_SHOWN = 6;
+const PRICE_RUNS_SHOWN = 6;
 
 /**
  * The lowest point of each of `runs` (this search's parent runs, newest first) over every history given (a history

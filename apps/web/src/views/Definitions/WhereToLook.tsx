@@ -24,7 +24,7 @@ function ticked(draft: Draft, id: Source): boolean {
  * SearchApi is ticked into both stages and out of both, and while it checks fares booking options are fetched (spec
  * §5.4, the zod rule too). A source ticked on without a refresh interval takes the install's preset one.
  */
-export function withSource(draft: Draft, id: Source, on: boolean, refreshHours: number): Draft {
+function withSource(draft: Draft, id: Source, on: boolean, refreshHours: number): Draft {
   const { discovery, verification, discoveryRefreshHours } = draft.providers;
   const without = (list: readonly ProviderId[]) => list.filter((p) => p !== id);
   const toggled = (list: readonly ProviderId[]) => (on ? [...without(list), id] : without(list));
@@ -44,7 +44,7 @@ export function withSource(draft: Draft, id: Source, on: boolean, refreshHours: 
 }
 
 /** The draft with a source taken out of both stages (a source the panel shows only because this search uses it). */
-export function withoutSource(draft: Draft, id: ProviderId): Draft {
+function withoutSource(draft: Draft, id: ProviderId): Draft {
   const without = (list: readonly ProviderId[]) => list.filter((p) => p !== id);
   return {
     ...draft,

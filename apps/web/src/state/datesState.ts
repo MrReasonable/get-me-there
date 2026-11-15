@@ -19,7 +19,7 @@ export const DATES_PARAMS = {
 } as const;
 
 /** The three folds under the calendar, by the value `d.fold` names them with. */
-export const FOLD_IDS = ['price', 'searched', 'alert'] as const;
+const FOLD_IDS = ['price', 'searched', 'alert'] as const;
 export type FoldId = (typeof FOLD_IDS)[number];
 
 /** The fold a URL asks to open, or null (a value that names none is ignored, never an error). */

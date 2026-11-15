@@ -13,7 +13,7 @@ import { stayMark } from './overview.js';
 const C = COPY.calendar;
 const S = COPY.searchesView;
 /** Ruling 18: the panel lists a day's first five stays, then "Show N more stays". */
-export const DAY_FIRST = 5;
+const DAY_FIRST = 5;
 
 export interface DayPanelProps {
   /** The region's id, which the open day's button names (`aria-controls`). */
