@@ -90,3 +90,22 @@ export function tripHref(
   if (filters.journey) p.set(DATES_PARAMS.journey, filters.journey);
   return `?${p.toString()}`;
 }
+
+/**
+ * A trip's address from a search's page (Trips and Search Task 9 fix round 1, ruling): `tripHref`'s, carrying every
+ * `d.*` parameter the page holds (its stay range, airports, journey limit, week switch, folds), so the Trip page's crumb
+ * back (`BACK_TO_DATES`, which keeps `d.*`) returns to the same filtered view. A multi-airport trip's own airports
+ * replace the page's `d.from`/`d.to`, as `tripHref` sets them. Cheapest trips and the day panel both link through it; a
+ * Trips card keeps `tripHref` alone.
+ */
+export function searchPageTripHref(
+  defId: string,
+  depart: string,
+  ret: string,
+  airports: { from?: string; to?: string },
+  page: URLSearchParams,
+): string {
+  const p = new URLSearchParams(tripHref(defId, depart, ret, airports));
+  for (const [k, v] of page) if (k.startsWith('d.') && !p.has(k)) p.set(k, v);
+  return `?${p.toString()}`;
+}

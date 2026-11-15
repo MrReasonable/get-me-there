@@ -1,6 +1,12 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseTripState, tripHref, tripPatch, tripQueryOf } from '../../src/state/tripState.js';
+import {
+  parseTripState,
+  searchPageTripHref,
+  tripHref,
+  tripPatch,
+  tripQueryOf,
+} from '../../src/state/tripState.js';
 import { hrefWith } from '../../src/state/urlState.js';
 
 // Design 2026-11-08 §6.1 (plan Task 6): the Trip page's URL (`def`, `depart`, `return`, `d.from`, `d.to`,
@@ -114,6 +120,34 @@ describe("tripPatch and tripHref (one builder: Ruling 9's parameters)", () => {
     ).toBe(
       '?view=trip&def=def-1&depart=2027-03-14&return=2027-03-24&d.from=LGW&d.to=JFK%2CEWR&d.journey=1500',
     );
+  });
+  // Task 9 fix round 1 (ruling): a trip linked from a search's page carries the page's filters, so the Trip page's crumb
+  // back returns to the same filtered view
+  it('searchPageTripHref carries every d.* of the page, the trip’s own airports over the page’s, nothing else', () => {
+    const page = new URLSearchParams(
+      'view=dates&def=def-1&d.nights=10-11&d.week=best&d.journey=1500&d.from=LGW&d.coverage=open&row=old',
+    );
+    const href = searchPageTripHref('def-1', '2027-03-14', '2027-03-24', {}, page);
+    expect(Object.fromEntries(new URLSearchParams(href))).toEqual({
+      view: 'trip',
+      def: 'def-1',
+      depart: '2027-03-14',
+      return: '2027-03-24',
+      'd.nights': '10-11',
+      'd.week': 'best',
+      'd.journey': '1500',
+      'd.from': 'LGW',
+      'd.coverage': 'open',
+    });
+    // a multi-airport trip's own pair replaces the page's airport filter
+    const own = searchPageTripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LHR', to: 'JFK' }, page);
+    expect(new URLSearchParams(own).get('d.from')).toBe('LHR');
+    expect(new URLSearchParams(own).get('d.to')).toBe('JFK');
+    expect(new URLSearchParams(own).get('d.nights')).toBe('10-11');
+    // a page without filters gives tripHref's own address
+    expect(
+      searchPageTripHref('def-1', '2027-03-14', '2027-03-24', {}, new URLSearchParams('view=dates')),
+    ).toBe(tripHref('def-1', '2027-03-14', '2027-03-24', {}));
   });
   it('an address from tripHref parses back to the same trip', () => {
     const href = tripHref('def-1', '2027-03-14', '2027-03-24', { from: 'LGW', journey: '900' });

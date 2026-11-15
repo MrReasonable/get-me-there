@@ -68,6 +68,7 @@ export function CheapestTrips({
     pointOfSale: data.pointOfSale,
     destinationNotes: definition.destinationNotes,
     showCarriers: true,
+    onSearchPage: true,
   };
   const f = run?.flights ?? null;
   const stopping =

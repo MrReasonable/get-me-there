@@ -101,7 +101,7 @@ export function DayPanel({
                 key={p.index}
                 figure={f}
                 details={verifiedDetailOf(data.verifiedDetails, p, f)}
-                search={{ ...search, showCarriers: true }}
+                search={{ ...search, showCarriers: true, onSearchPage: true }}
                 pair={p}
                 earlierNote={
                   f.fromEarlierSearch ? (runActive ? S.previousSearchReplaced : S.previousSearchDetail) : null

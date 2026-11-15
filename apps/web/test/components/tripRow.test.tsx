@@ -71,6 +71,40 @@ describe('TripRow', () => {
     expect(window.location.search).toBe(link.getAttribute('href'));
   });
 
+  // Task 9 fix round 1 (ruling): on a search's page the › carries the page's d.* filters (one helper,
+  // searchPageTripHref); on a Trips card it is built from scratch as before
+  it('on a search’s page › carries the page’s filters; on a card it does not', async () => {
+    const page = renderWithProviders(
+      <ul>
+        <TripRow
+          details={null}
+          search={{ ...search, onSearchPage: true }}
+          pair={pair}
+          figure={pairingFig()}
+        />
+      </ul>,
+      { search: '?view=dates&def=d1&d.nights=10-11&d.week=best' },
+    );
+    const link = screen.getByRole('link', { name: 'Details for Wed 11 Nov → Sat 28 Nov' });
+    const href = new URLSearchParams(link.getAttribute('href') ?? '');
+    expect([href.get('view'), href.get('d.nights'), href.get('d.week')]).toEqual(['trip', '10-11', 'best']);
+    await page.user.click(link);
+    expect(new URLSearchParams(window.location.search).get('d.nights')).toBe('10-11');
+    page.unmount();
+    // a card's row, even under a URL holding d.* (it never reads the URL)
+    renderWithProviders(
+      <ul>
+        <TripRow details={null} search={search} pair={pair} figure={pairingFig()} />
+      </ul>,
+      { search: '?view=searches&d.nights=10-11' },
+    );
+    expect(
+      new URLSearchParams(
+        screen.getByRole('link', { name: 'Details for Wed 11 Nov → Sat 28 Nov' }).getAttribute('href') ?? '',
+      ).get('d.nights'),
+    ).toBeNull();
+  });
+
   it("marks a pairing leg's next-day arrival and a date-line return from the list's own day offsets", () => {
     renderRow({
       figure: pairingFig({

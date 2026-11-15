@@ -10,7 +10,10 @@ import { SMOKE } from './selectors.js';
 // Spec §9 item 6: one Playwright smoke in fixture mode, through the real api and the built SPA (WP19 Task 19.9, the
 // Dates view). Every price here is synthetic, and every view must say so beside the red banner (spec §5.5).
 
-/** The smoke's stay range is 10–11 nights; it narrows it to 10, so each day of the calendar shows one stay. */
+/**
+ * The smoke's stay range is 10–11 nights; it narrows it to 10, so each day of the calendar shows one stay and the Trip
+ * page's crumb back has a filter to keep.
+ */
 const NIGHTS = '10-10';
 
 /**
@@ -135,8 +138,8 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(stop).toHaveCSS('outline-width', '2px');
 
   // (3) Enter opens the day's panel below the calendar, focus on its heading (Ruling 18); its trip row's › opens the
-  // Trip page, whose URL carries the dates and whose card shows the synthetic price beside the red banner; the
-  // breadcrumb back returns to the search's page. Escape on the panel puts focus back on the day.
+  // Trip page, whose URL carries the dates and the search page's filters and whose card shows the synthetic price
+  // beside the red banner; the breadcrumb back keeps the filter. Escape on the panel puts focus back on the day.
   await stop.press('Enter');
   const dayPanel = page.getByRole('region', { name: SMOKE.dayPanel });
   await expect(dayPanel).toBeVisible();
@@ -151,6 +154,8 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   expect(url.searchParams.get('view')).toBe('trip');
   expect(url.searchParams.get('depart')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(url.searchParams.get('return')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  // Task 9 fix round 1 (ruling): a trip link from the Search page carries the page's filters
+  expect(url.searchParams.get('d.nights')).toBe(NIGHTS);
   await expect(banner(page)).toBeVisible();
   await expect(
     page.getByRole('region', { name: SMOKE.tripCard }).getByTestId('price-cell').first(),
@@ -161,6 +166,7 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(trips(page)).toBeVisible();
   const back = new URL(page.url()).searchParams;
   expect(back.get('view')).toBe('dates');
+  expect(back.get('d.nights')).toBe(NIGHTS);
   expect(back.get('depart')).toBeNull();
 
   // (4) a search's page by its id, ?view=definitions landing on Searches (the old Definitions URL), the breadcrumb naming the

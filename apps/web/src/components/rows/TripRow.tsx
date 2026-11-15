@@ -3,8 +3,8 @@ import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { rowBookingTarget, type VerifiedDetails } from '../../lib/bookingTarget.js';
 import { dayOffsetOf, type LegWordsFacts, legWords } from '../../lib/legWords.js';
-import { tripHref } from '../../state/tripState.js';
-import { navigateToQuery } from '../../state/urlState.js';
+import { searchPageTripHref, tripHref } from '../../state/tripState.js';
+import { navigateToQuery, useSearchParams } from '../../state/urlState.js';
 import { BookLink } from '../BookLink.js';
 import {
   DatesCell,
@@ -33,6 +33,11 @@ export interface RowSearch {
 export interface TripRowSearch extends RowSearch {
   /** The airlines of each way, on the Search page and its day panel; the Trips cards leave them off (mockup 01). */
   showCarriers?: boolean;
+  /**
+   * The row sits on a search's page (Cheapest trips, a day's panel): › carries the page's `d.*` filters
+   * (`searchPageTripHref`), so the Trip page's crumb back returns to the same view. A Trips card's row leaves it off.
+   */
+  onSearchPage?: boolean;
 }
 
 export interface TripRowProps {
@@ -115,12 +120,12 @@ export function TripRow({ figure, details, search, pair, earlierNote = null }: T
   const target = rowBookingTarget(pair, figure, search.cabin, details?.booking ?? null, search.pointOfSale);
   const pairName = search.multiAirport ? R.pair(figure.origin, figure.destination) : null;
   const legs = legsOf(figure, details, search.showCarriers === true);
-  const href = tripHref(
-    search.id,
-    pair.departureDate,
-    pair.returnDate,
-    search.multiAirport ? { from: figure.origin, to: figure.destination } : {},
-  );
+  const page = useSearchParams();
+  const airports = search.multiAirport ? { from: figure.origin, to: figure.destination } : {};
+  const href =
+    search.onSearchPage === true
+      ? searchPageTripHref(search.id, pair.departureDate, pair.returnDate, airports, page)
+      : tripHref(search.id, pair.departureDate, pair.returnDate, airports);
   return (
     <li
       className={earlierNote === null ? 'trip-row' : 'trip-row trip-row-earlier'}

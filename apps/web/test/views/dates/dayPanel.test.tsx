@@ -26,6 +26,7 @@ import {
   dayButton,
   findCalendar,
   findDayPanel,
+  findTrips,
   renderDates,
   rowText,
   tripRows,
@@ -218,6 +219,36 @@ describe('the day panel (Ruling 18)', () => {
       expect.stringContaining('from=LHR'),
     );
     expect(within(calendarRows(panel)[0] ?? panel).queryByTestId('row-airports')).toBeNull();
+  });
+});
+
+// Task 9 fix round 1 (ruling): a trip linked from the Search page, in Cheapest trips or a day's panel, carries the page's
+// filters, so the Trip page's crumb back returns to the same filtered view
+describe('trip links from the Search page keep its filters', () => {
+  it('Cheapest trips and the day panel link the Trip page with the page’s d.* state', async () => {
+    const search = '?view=dates&def=def-0001&d.nights=10-11&d.week=best';
+    const { user } = renderDates({
+      def: ONE_PAIR,
+      search,
+      body: {
+        origins: ['LHR'],
+        destinations: ['JFK'],
+        rest: { no_data: 1 },
+        pairs: { [at('2027-03-14', 10)]: pricedPair(pairingFig(), {}, 1) },
+      },
+    });
+    const details = /^Details for Sun 14 Mar → Wed 24 Mar$/;
+    const params = (a: HTMLElement) => new URLSearchParams(a.getAttribute('href') ?? '');
+    const fromSection = params(within(await findTrips()).getByRole('link', { name: details }));
+    await findCalendar();
+    await user.click(dayButton('2027-03-14'));
+    const panel = await findDayPanel(/^Sun 14 Mar: \d+ stays?$/);
+    const fromPanel = params(within(panel).getByRole('link', { name: details }));
+    for (const p of [fromSection, fromPanel]) {
+      expect([p.get('view'), p.get('depart'), p.get('return')]).toEqual(['trip', '2027-03-14', '2027-03-24']);
+      expect([p.get('d.nights'), p.get('d.week')]).toEqual(['10-11', 'best']);
+    }
+    expect(fromPanel.toString()).toBe(fromSection.toString());
   });
 });
 
