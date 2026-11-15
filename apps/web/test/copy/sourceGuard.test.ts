@@ -228,15 +228,11 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
     expect(panel).toMatch(/export const estimateMoney = /);
   });
 
-  // why: spec rev 55 §11 — the tie line formats its price only through the same cost formatter (WP20 Task 20.10), and
-  // the flights block's own words format none: every flight amount is a PriceCell (ruling C3)
-  it('the tie line formats money only through the estimate panel’s formatter; the flights block formats none', () => {
-    const tie = src.find((s) => s.file === 'src/views/Dates/TieLine.tsx');
-    expect(tie).toBeDefined();
-    expect(moneyOffenders('src/views/Elsewhere.tsx', tie?.text ?? '')).toEqual([]);
-    expect(tie?.text).toMatch(/estimateMoney\(pricePence, \{ wholePounds: true \}\)/);
-    for (const f of ['Flights.tsx', 'FlightRow.tsx', 'flightLines.ts']) {
-      const file = src.find((s) => s.file === `src/views/Dates/${f}`);
+  // why: spec rev 55 §11 (ruling C3): the flight words that outlived the flights block format no money; every flight
+  // amount is a PriceCell
+  it('the flight words and the flight reads format no money', () => {
+    for (const f of ['src/views/Dates/flightLines.ts', 'src/lib/flightReads.ts']) {
+      const file = src.find((s) => s.file === f);
       expect(file, f).toBeDefined();
       expect(moneyOffenders('src/views/Elsewhere.tsx', file?.text ?? '')).toEqual([]);
       expect(file?.text).not.toMatch(/estimateMoney/);

@@ -32,7 +32,6 @@ import {
   readFlightListResponseSchema,
 } from './flights.js';
 import {
-  calendarGapResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
   itineraryHistoryResponseSchema,
@@ -142,7 +141,6 @@ export const ROUTES: readonly RouteDef[] = [
     request: readFlightListRequestSchema,
   }),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
-  route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
   route(
     'GET',
     '/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',

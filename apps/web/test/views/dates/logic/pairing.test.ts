@@ -3,15 +3,7 @@ import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import { describe, expect, it } from 'vitest';
 import type { FlightList } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
-import {
-  allReturnsInOrder,
-  bookingNote,
-  mismatchOf,
-  pairingOf,
-  readDoneWords,
-  returnNote,
-  returnsWereRead,
-} from '../../../../src/views/Dates/pairing.js';
+import { pairingOf, readDoneWords, returnNote } from '../../../../src/views/Dates/pairing.js';
 import {
   flightList,
   listedFlight,
@@ -35,11 +27,6 @@ const withBooking = (over: Partial<BookingRead>): FlightList => {
   const booking = PAIRING_FIXTURE.returns.booking;
   if (booking === null) throw new Error('fixture: no booking');
   return withReturns({ booking: { ...booking, ...over } });
-};
-const SKIPPED: Pick<BookingRead, 'attempt' | 'returnIndex' | 'offers'> = {
-  attempt: null,
-  returnIndex: null,
-  offers: [],
 };
 
 describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as core and the api)', () => {
@@ -271,12 +258,6 @@ describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as cor
     const p = pairingOf(list, PAIRING_LIMITS);
     expect(p?.returns.shown.map((r) => r.fromMinor)).toEqual([118_000, 121_000, 125_000]);
     expect(p?.returns).toMatchObject({ moreRead: 2, moreOutside: 1, overLimit: false });
-    const read = list.returns?.attempts[0]?.returns;
-    if (p === null || read === undefined) throw new Error('no pairing');
-    // why: the list's own (parsed) returns, as the section passes them: the shown ones are found by identity
-    expect(allReturnsInOrder(read, p, PAIRING_LIMITS).map((r) => r.fromMinor)).toEqual([
-      118_000, 121_000, 125_000, 100_000, 130_000,
-    ]);
   });
 
   it('every return over the limits: the cheapest of all leads, fits false, overLimit', () => {
@@ -291,23 +272,6 @@ describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as cor
     const p = pairingOf(list, PAIRING_LIMITS);
     expect(p).toMatchObject({ fits: false, fromMinor: 120_400 });
     expect(p?.returns).toMatchObject({ overLimit: true, moreRead: 0 });
-  });
-});
-
-describe('mismatchOf (spec rev 56 §6.9: both figures named, nothing reconciled)', () => {
-  it('null when the cheapest offer equals the shown return\'s "from" price, and with no offer', () => {
-    expect(mismatchOf(pairingOf(FIXTURE, PAIRING_LIMITS))).toBeNull();
-    expect(mismatchOf(null)).toBeNull();
-    expect(mismatchOf(pairingOf(withReturns({ booking: null }), PAIRING_LIMITS))).toBeNull();
-  });
-  it('the two prices when the cheapest offer differs', () => {
-    const dearer = withBooking({
-      offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
-    });
-    expect(mismatchOf(pairingOf(dearer, PAIRING_LIMITS))).toEqual({
-      offerMinor: 119_500,
-      fromMinor: 118_000,
-    });
   });
 });
 
@@ -349,13 +313,6 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     );
     expect(note({ resultsStated: 1 })).toBeNull();
     expect(note({ resultsStated: 0 })).toBeNull();
-  });
-  it('returnsWereRead: exactly a return read whose status is read', () => {
-    expect(returnsWereRead(FIXTURE)).toBe(true);
-    expect(returnsWereRead(flightList())).toBe(false);
-    expect(
-      returnsWereRead(withReturns({ status: 'not-verified', rule: null, attempts: [], booking: null })),
-    ).toBe(false);
   });
   it('21.7 code M6: nothing for a list read without a return phase (or stored before them): it shows as the outbound list', () => {
     expect(returnNote(flightList(), COPY, true)).toBeNull();
@@ -400,51 +357,6 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     expect(returnNote(flightList({ returns: returnRead() }), COPY, true)).toBeNull();
     // the fixture's last attempt showed a "View more" control and stated no count
     expect(returnNote(FIXTURE, COPY, true)).toBe('Google listed more return flights than this app read');
-  });
-});
-
-describe('bookingNote (spec rev 56 §11: a booking read that did not finish, with what happens next)', () => {
-  const note = (over: Partial<BookingRead>) => bookingNote(withBooking(over), COPY, true);
-  it('each of the seven non-read statuses in words; null for read and for no booking read', () => {
-    const next =
-      'sellers not read: tried again when the next search reaches this date, or press Read flights for this date now';
-    expect(note({ status: 'select-failed', rule: 'select-return:not-found', offers: [] })).toBe(next);
-    expect(note({ status: 'not-settled', rule: 'booking:not-settled', offers: [] })).toBe(next);
-    expect(note({ status: 'unrecognised', rule: 'currency', offers: [] })).toBe(next);
-    // why: final review B-I3: with no read to go now, after the refresh and no button named
-    expect(
-      bookingNote(
-        withBooking({ status: 'not-settled', rule: 'booking:not-settled', offers: [] }),
-        COPY,
-        false,
-      ),
-    ).toBe("sellers not read: read again once the read is nearly as old as this search's refresh");
-    expect(note({ status: 'expand-failed', rule: 'more-options' })).toBe(
-      'sellers read before the list could be expanded; the cheapest may be missing',
-    );
-    // why: 21.7 prov-014: an expansion that failed before any offer read none: one note, the transient one
-    expect(note({ status: 'expand-failed', rule: 'more-options', offers: [] })).toBe(next);
-    expect(note({ status: 'skipped', rule: 'older-rule', ...SKIPPED })).toBe(
-      'sellers not read: a step before them was not made',
-    );
-    expect(note({ status: 'skipped', rule: 'not-cheapest-view', ...SKIPPED })).toBe(
-      'sellers not read: the list was not on its Cheapest view',
-    );
-    expect(note({ status: 'skipped', rule: 'reload:not-settled', ...SKIPPED })).toBe(
-      'sellers not read: the list could not be loaded again',
-    );
-    expect(note({ status: 'skipped', rule: 'second-selection', ...SKIPPED })).toBe(
-      'sellers not read: the second outbound could not be selected',
-    );
-    expect(note({ status: 'not-verified', rule: null, ...SKIPPED })).toBe(
-      'sellers are not yet read on this kind of machine',
-    );
-    expect(note({ status: 'no-pairing', rule: null, ...SKIPPED })).toBe(
-      'no return flight to read sellers for',
-    );
-    expect(bookingNote(FIXTURE, COPY, true)).toBeNull();
-    expect(bookingNote(withReturns({ booking: null }), COPY, true)).toBeNull();
-    expect(bookingNote(flightList(), COPY, true)).toBeNull();
   });
 });
 

@@ -2,7 +2,6 @@ import { apiContract, asIsoDate, microGbpToPence } from '@gmt/core';
 import type { z } from 'zod';
 import type {
   AirportsResponse,
-  CalendarGapResponse,
   CoverageCheckResponse,
   CoverageResponse,
   DefinitionResponse,
@@ -588,37 +587,6 @@ export function coverageResponse(
     onDemand: [],
     scheduledOnly: [],
     browserLeftFor: 'next-scheduled-run',
-    ...over,
-  });
-}
-
-export function calendarGap(
-  over: Partial<In<typeof apiContract.calendarGapResponseSchema>> = {},
-): CalendarGapResponse {
-  return apiContract.calendarGapResponseSchema.parse({
-    cheapestVerified: {
-      pricePence: 41200,
-      provenance: provSearch,
-      stale: false,
-      ageHours: 'unknown',
-      truncated: false,
-      cell: cell('LHR', 'JFK', '2027-03-14', '2027-03-28', 14),
-      itineraryHash: 'hash-verified-1',
-      notSeenInLatest: null,
-    },
-    cells: [
-      {
-        cell: cell('LHR', 'EWR', '2027-04-02', '2027-04-16', 14),
-        calendar: {
-          pricePence: 39900,
-          provenance: provCalendar,
-          stale: false,
-          ageHours: 50,
-          truncated: false,
-        },
-        verifyAvailable: true,
-      },
-    ],
     ...over,
   });
 }

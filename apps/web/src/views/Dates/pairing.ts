@@ -1,10 +1,8 @@
 import {
-  type BookingRead,
   bookingReturnOf,
   cheapestOffer,
   cheapestPairing,
   chooseReturnsToShow,
-  compareReturns,
   type FlightLimits,
   fitsLimits,
   type ListedFlight,
@@ -159,28 +157,6 @@ export function pairingOf(list: FlightList, limits: FlightLimits): PairingView |
   };
 }
 
-/**
- * Every return of the pairing's attempt for "show all return flights" (spec rev 56 §11): those shown first (the
- * pairing's return leading), then the rest in `compareReturns` order.
- */
-export function allReturnsInOrder(
-  returns: readonly ListedReturn[],
-  p: Pick<PairingView, 'ret'>,
-  limits: FlightLimits,
-): ListedReturn[] {
-  const shown = shownReturns(returns, p.ret, limits).shown;
-  return [...shown, ...returns.filter((x) => !shown.includes(x)).sort(compareReturns)];
-}
-
-/**
- * The mismatch line's two figures (spec rev 56 §6.9: "the cheapest offer read is £1,195; Google's list showed from
- * £1,180"): the cheapest offer's stated price and the shown return's "from" price, when they differ; else null.
- */
-export function mismatchOf(p: PairingView | null): { offerMinor: number; fromMinor: number } | null {
-  if (p === null || p.offer === null || p.offer.priceMinor === p.fromMinor) return null;
-  return { offerMinor: p.offer.priceMinor, fromMinor: p.fromMinor };
-}
-
 /** A skipped step's rule in words: the worker's known rule tokens, `reload:<end>` by its first word, else general. */
 function skippedWords(rule: string | null, c: FlightCopy): string {
   const head = (rule ?? '').split(':')[0] ?? '';
@@ -240,47 +216,6 @@ export function returnNote(list: FlightList, c: typeof COPY, readNow: boolean, a
       throw new RangeError(`returnNote: no status ${String(unknownStatus)}`);
     }
   }
-}
-
-/**
- * Spec rev 56 §11 "Status notes": what a booking read that did not finish says, with what happens next by `readNow`
- * (final review B-I3); null for a `read` one and for a list with no booking read (none was asked: the "Back:" line then
- * says "sellers not read").
- */
-export function bookingNote(list: FlightList, c: typeof COPY, readNow: boolean): string | null {
-  const F = c.flights;
-  const b: BookingRead | null = list.returns?.booking ?? null;
-  if (b === null) return null;
-  switch (b.status) {
-    case 'read':
-      return null;
-    case 'expand-failed':
-      // why: 21.7 prov-014: an expansion that failed before any offer read none, so it says only that the sellers were
-      // not read and are tried again (it is a transient end), never "sellers read before …"
-      return b.offers.length === 0 ? F.bookingTransient(readNow) : F.bookingExpandFailed;
-    case 'skipped':
-      return F.bookingSkipped(skippedWords(b.rule, F));
-    case 'not-verified':
-      return F.bookingNotVerified;
-    case 'no-pairing':
-      return F.bookingNoPairing;
-    case 'select-failed':
-    case 'not-settled':
-    case 'unrecognised':
-      return F.bookingTransient(readNow);
-    default: {
-      const unknownStatus: never = b.status;
-      throw new RangeError(`bookingNote: no status ${String(unknownStatus)}`);
-    }
-  }
-}
-
-/**
- * Whether a list's return read was read (spec rev 56 §11): then the outbound marks drop "; return not read" and the
- * limits line says the windows apply to the outbound.
- */
-export function returnsWereRead(list: FlightList): boolean {
-  return list.returns?.status === 'read';
 }
 
 /**

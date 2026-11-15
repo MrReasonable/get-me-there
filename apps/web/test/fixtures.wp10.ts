@@ -104,7 +104,7 @@ export function priceAt(
   };
 }
 
-/** A price cell without its cell and hash (calendar-gap, panel prices). */
+/** A price cell without its cell and hash (panel prices). */
 export function bare(p: PriceCellData & { cell: Cell }): PriceCellData {
   return {
     pricePence: p.pricePence,

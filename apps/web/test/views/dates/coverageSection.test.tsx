@@ -7,7 +7,7 @@ import { workedDates } from '../../fixtures.dates.js';
 import { API, coverageResponse, definition, execution } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
-import { findBoard, renderDates } from './render.js';
+import { findTrips, renderDates } from './render.js';
 
 const rowTexts = (table: HTMLElement) =>
   within(table)
@@ -437,7 +437,7 @@ describe('the coverage section in the Dates view (spec §11)', () => {
       }),
     );
     const { user, client } = renderDates({ body: workedDates() });
-    await findBoard();
+    await findTrips();
     const toggle = screen.getByRole('button', { name: 'Coverage of the latest run' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText(COPY.datesView.coverageNotFiltered)).toBeInTheDocument();
@@ -451,16 +451,18 @@ describe('the coverage section in the Dates view (spec §11)', () => {
     expect(new URLSearchParams(window.location.search).get('d.coverage')).toBeNull();
   });
 
-  it('d.coverage=open opens it, and the header line’s coverage link opens it', async () => {
+  it('d.coverage=open opens it', async () => {
     renderDates({ body: workedDates(), search: '?view=dates&def=def-0001&d.coverage=open' });
     expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
   });
 
-  it('the header line’s coverage link opens it', async () => {
+  it('the run line’s "what was searched" opens it (until Task 10 folds it)', async () => {
     const { user } = renderDates({ body: workedDates() });
-    await findBoard();
+    await findTrips();
     await user.click(
-      await within(await screen.findByTestId('dates-run')).findByRole('link', { name: /^Searched / }),
+      await within(await screen.findByTestId('dates-run')).findByRole('link', {
+        name: COPY.searchPage.whatWasSearched,
+      }),
     );
     expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
   });

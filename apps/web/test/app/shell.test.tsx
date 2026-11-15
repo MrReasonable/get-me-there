@@ -254,7 +254,8 @@ describe('the page never blanks (review tsr-002)', () => {
 });
 
 describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19.7)', () => {
-  const board = () => screen.findByRole('table', { name: /^Best dates/ });
+  // why: a search's page has drawn once its Cheapest trips section has (design 2026-11-08 §5.2)
+  const board = () => screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
   const search = () => window.location.search;
 
   it('an absent view opens Searches, the first screen, whatever the number of searches, and the URL is rewritten with replace', async () => {
@@ -263,7 +264,7 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
     expect(await screen.findByRole('list', { name: COPY.searchesView.listLabel })).toBeInTheDocument();
     await waitFor(() => expect(search()).toBe('?def=def-0001&view=searches'));
     expect(window.history.length).toBe(before);
-    expect(screen.queryByRole('table', { name: /^Best dates/ })).toBeNull();
+    expect(screen.queryByRole('region', { name: COPY.searchPage.cheapestHeading })).toBeNull();
   });
 
   it('?view=dates without def= lands on Searches, even with one search; with def= it is that search’s page', async () => {
@@ -342,7 +343,7 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
 });
 
 describe('filters kept across views (spec §11: the filters live in the URL and travel with every link)', () => {
-  it("History's crumb back to the search keeps every d.*, and the board is restored with no request for the stay filter or the sort", async () => {
+  it("History's crumb back to the search keeps every d.*, and the page is restored with no request for the stay filter or an old sort", async () => {
     const requests: URL[] = [];
     server.use(serveDates(workedDates({ destinations: [asIata('JFK')] }), requests));
     const filters = 'd.nights=10-11&d.from=LHR&d.to=JFK&d.journey=900&d.sort=journey.asc&d.week=best';
@@ -353,7 +354,7 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
     expect(back).toHaveAttribute('href', `/?view=dates&def=def-0001&${filters}`);
     await user.click(back);
     expect(window.location.search).toBe(`?view=dates&def=def-0001&${filters}`);
-    expect(await screen.findByRole('table', { name: /^Best dates/ })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading })).toBeInTheDocument();
     expect(requests.length).toBeGreaterThan(0);
     for (const r of requests)
       expect([...r.searchParams.keys()].sort()).toEqual(['destinations', 'maxJourneyMinutes', 'origins']);

@@ -1,28 +1,38 @@
 import { COPY } from '../src/copy.js';
 
 const D = COPY.datesView;
+const P = COPY.searchPage;
 const OVERVIEW = '[data-testid="dates-overview"]';
 
 /**
- * What the Playwright smoke looks for on the Dates view, the Trip page and the nav, shared with the jsdom test
- * that proves each one matches the markup (test/e2e/selectors.test.tsx; review arch2-001, ui-r2-002): the smoke needs
- * a running api, so it cannot run in `pnpm test`, but its selectors can never drift from the components (WP19 Task
+ * What the Playwright smoke looks for on a search's page, the Trip page and the nav, shared with the jsdom test that
+ * proves each one matches the markup (test/e2e/selectors.test.tsx; review arch2-001, ui-r2-002): the smoke needs a
+ * running api, so it cannot run in `pnpm test`, but its selectors can never drift from the components (WP19 Task
  * 19.9).
  */
 export const SMOKE = {
-  /** The board: a table captioned "Best dates" (its caption goes on with the order note and the shown count). */
-  boardTable: /^Best dates/,
-  /** A board row: each carries its date pair's index. */
-  boardRow: 'tr[data-pair]',
-  /** A board row's link to its Trip page ("Open 14 Mar 2027 to 28 Mar 2027"). */
-  rowLink: /^Open \d{1,2} [A-Z][a-z]{2} \d{4} to \d{1,2} [A-Z][a-z]{2} \d{4}$/,
+  /** Design 2026-11-08 §5.2: the two sections, each a region named by its heading. */
+  cheapestTrips: P.cheapestHeading,
+  lowerOnCalendar: P.lowerHeading,
+  /** The shared rows (Ruling 20): a trip, and a calendar price. */
+  tripRow: '[data-testid="trip-row"]',
+  calendarRow: '[data-testid="calendar-row"]',
+  /** A trip row's › to its Trip page ("Details for Sun 14 Mar → Wed 24 Mar", a pair before the dates when several). */
+  detailsLink: /^Details for /,
+  /** The run line under the header ("Searched today 16:40–17:02 · calendar prices for … · what was searched"). */
+  runLine: '[data-testid="dates-run"]',
+  /** The one filter row (Ruling 16), a group named "Filter". */
+  filterRow: P.filterLabel,
+  /** Lower on the calendar's link down to the calendar, and the calendar's anchor. */
+  seeAll: P.seeAll,
+  calendar: '#calendar',
   /** The overview's one tab stop (roving tabindex). */
   overviewTabStop: `${OVERVIEW} [data-cell][tabindex="0"]`,
   /** Every overview cell. */
   overviewCell: `${OVERVIEW} [data-cell]`,
-  /** A cell ringed because its date pair is a shown board row (spec §11 Rings). */
+  /** A cell ringed because its date pair is a trip Cheapest trips shows (spec §11 Rings). */
   ringedCell: `${OVERVIEW} [data-cell][data-ringed]`,
-  /** The cell lit from the board, or lit itself. */
+  /** The cell lit under the pointer or the focus. */
   litCell: `${OVERVIEW} [data-cell][data-lit]`,
   /** A cell's glyphs: one per mark it carries. */
   cellGlyphs: '[data-testid="cell-glyphs"]',
@@ -32,8 +42,6 @@ export const SMOKE = {
   legendGlyph: '[data-testid="legend-glyph"]',
   readout: '[data-testid="dates-readout"]',
   openThese: D.overview.openThese,
-  /** A board row as a stacked card below 900 px. */
-  phoneCard: '[data-testid="board-card"]',
   previousMonth: D.overview.previousMonth,
   nextMonth: D.overview.nextMonth,
   coverageToggle: D.coverageToggle,
@@ -62,14 +70,6 @@ export const SMOKE = {
   searchCard: '[data-card]',
   /** A card's actions: its links and buttons. */
   cardAction: '[data-card] [data-testid="card-actions"] :is(a, button)',
-  /** The flights block of a date pair on a search's page (absent where flight lists cannot be read). */
-  flightsBlock: '[data-testid="flights-block"]',
-  /**
-   * The pairing section of a read list: the Back line, the other returns and the seller's price (WP21 Task 21.8). The
-   * fixture-only smoke cannot show one (the fixture provider has no flight lists), so no e2e run uses it; the jsdom
-   * test pins that it matches a rendered block with returns.
-   */
-  pairing: '[data-testid="flights-pairing"]',
-  /** The one line under the board when flight lists cannot be read here. */
+  /** The one line under Lower on the calendar when flight lists cannot be read here (no row offers a read). */
   flightsUnavailable: '[data-testid="flights-unavailable"]',
 } as const;

@@ -1,30 +1,40 @@
-import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
-import { screen, waitFor, within } from '@testing-library/react';
-import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
-import { COPY } from '../../../src/copy.js';
 import {
-  at,
-  bucketsOf,
-  calendarFig,
-  priced,
-  pricedPair,
-  runSummary,
-  workedDates,
-} from '../../fixtures.dates.js';
-import { API, execution } from '../../fixtures.js';
+  apiContract,
+  asIsoDateTime,
+  BANNED_WORD_ALLOWLIST,
+  findBannedWords,
+  NO_STOP_CAUSE_TEXT,
+} from '@gmt/core';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { POLL_MS } from '../../../src/api/queries.js';
+import { REFUSED_COPY } from '../../../src/copy/refused.js';
+import { COPY } from '../../../src/copy.js';
+import { at, bucketsOf, priced, pricedPair, runSummary, workedDates } from '../../fixtures.dates.js';
+import { API, definition, execution } from '../../fixtures.js';
+import { latestRun, searchCard } from '../../fixtures.searches.js';
 import { renderedCopy } from '../../guards.js';
 import { datesError, heldDates } from '../../msw/datesHandlers.js';
+import { type CardRequests, serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { findBoard, renderDates } from './render.js';
+import { findLower, findTrips, renderDates } from './render.js';
 
-// Spec §11 Dates "States": one component test per state, each said in words, never colour alone.
+// Spec §11 Dates "States" (design 2026-11-08 Ruling 11): one component test per state, each said in words, never colour
+// alone; a run going or stopped is `RunProgress`'s, with Cancel, the stop's sentence and fix, and Resume.
 
+const P = COPY.searchPage;
+const RP = COPY.runProgress;
 const serveRun = (over: Parameters<typeof execution>[0]) =>
   server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution(over))));
-const noFlights = () => expect(renderedCopy()).not.toMatch(/no flights/i);
+const stopped = (status: 'paused_budget' | 'paused_error' | 'interrupted' | 'cancelled') => ({
+  ...workedDates(),
+  executions: [runSummary({ status, finishedAt: null })],
+});
+const stateLine = () => screen.findByTestId('state-line');
+const actions = () => screen.getByRole('group', { name: P.actionsLabel });
 
-describe('the Dates view’s states (spec §11)', () => {
+describe('the page’s states (spec §11)', () => {
   it('no search: "No search yet" with a link to Searches', async () => {
     renderDates({ def: null });
     expect(screen.getByText(/^No search yet\./)).toBeInTheDocument();
@@ -32,22 +42,20 @@ describe('the Dates view’s states (spec §11)', () => {
     expect(link.getAttribute('href')).toContain('view=searches');
   });
 
-  it('never run: "Not searched yet" with the estimate sentence and Search now (no Run now); no board; every date pair not searched', async () => {
+  it('never run: "Not searched yet" with the estimate sentence and Search now; no sections; every date not searched', async () => {
     renderDates({ body: { executions: [], executionId: null } });
     expect(await screen.findByText('Not searched yet', { selector: 'p.font-bold' })).toBeInTheDocument();
-    // the estimate sentence beside the press (spec rev 55 §11 never-run state)
     const sentence = await screen.findByRole('status', { name: COPY.newSearch.estimateRegion });
     await waitFor(() => expect(sentence).toHaveTextContent(/^About /));
     expect(screen.getByRole('button', { name: /^Search now/ })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-    expect(screen.queryByRole('table', { name: /^Best dates/ })).toBeNull();
+    expect(screen.queryByRole('region', { name: P.cheapestHeading })).toBeNull();
     expect(screen.queryByTestId('dates-run')).toBeNull();
     const cells = document.querySelectorAll('[data-cell]');
     expect(cells.length).toBeGreaterThan(0);
     expect([...cells].every((c) => c.getAttribute('data-marks') === 'not-searched')).toBe(true);
   });
 
-  it('on-demand searches but no parent run: "Not searched yet" with their count and their figures', async () => {
+  it('checks run on their own but no parent run: "Not searched yet" with their count, and their prices', async () => {
     renderDates({
       body: {
         executionId: null,
@@ -56,125 +64,14 @@ describe('the Dates view’s states (spec §11)', () => {
       },
     });
     expect(
-      await screen.findByText(/^Not searched yet: fares were checked for 1 date pair on their own so far/),
+      await screen.findByText(
+        /^Not searched yet: 1 date was checked on its own so far, and the prices found are below\.$/,
+      ),
     ).toBeInTheDocument();
-    expect(await findBoard()).toHaveTextContent('£412');
+    expect(await findTrips()).toHaveTextContent('£412');
   });
 
-  it('run in progress: the board captioned "partial: still searching", the searching line, unreached date pairs not searched', async () => {
-    serveRun({ status: 'running', startedAt: '2026-10-14T14:20:00.000Z' });
-    renderDates({
-      body: {
-        executions: [
-          runSummary({
-            status: 'running',
-            startedAt: asIsoDateTime('2026-10-14T14:20:00.000Z'),
-            finishedAt: null,
-          }),
-        ],
-        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(30_000), { buckets: bucketsOf({ priced: 1 }) }) },
-      },
-    });
-    const table = await findBoard();
-    await waitFor(() => expect(table.querySelector('caption')).toHaveTextContent('partial: still searching'));
-    await waitFor(() =>
-      expect(screen.getByTestId('state-line')).toHaveTextContent(/^Searching · 1 of 93 date pairs/),
-    );
-    // a run going has no header line yet: its state line says how far it has got
-    expect(screen.queryByTestId('dates-run')).toBeNull();
-    expect(table).toHaveTextContent('3 of 4 airport pairs not searched');
-  });
-
-  it('stopped: the stop’s sentence and fix and Resume (the fix names it), the board shows the prices found before the stop, and the header line', async () => {
-    serveRun({
-      status: 'paused_budget',
-      stop: {
-        sentence: "Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.",
-        fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true },
-      },
-    });
-    const { user } = renderDates({
-      body: {
-        executions: [runSummary({ status: 'paused_budget', finishedAt: null })],
-        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(30_000)) },
-      },
-    });
-    expect(
-      await screen.findByText("Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.", {
-        selector: '[data-testid="stop-sentence"]',
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Raise the limit in Edit, then Resume')).toBeInTheDocument();
-    expect(screen.queryByText(/^Paused:/)).toBeNull();
-    expect(screen.getByText('The board shows the prices found before the stop.')).toBeInTheDocument();
-    // the header line counts what the run got to (a stopped run has no end yet: it names its start)
-    expect(screen.getByTestId('dates-run')).toHaveTextContent(
-      /^Searched today from 13:00 · 1 of 93 date pairs priced, 92 not searched · the Aviasales cache$/,
-    );
-    let resumed = '';
-    server.use(
-      http.post(`${API}/executions/:id/resume`, ({ params }) => {
-        resumed = String(params.id);
-        return HttpResponse.json(execution({ status: 'running' }));
-      }),
-    );
-    await user.click(screen.getByRole('button', { name: 'Resume' }));
-    await waitFor(() => expect(resumed).toBe('exec-0001'));
-    expect(await findBoard()).toBeInTheDocument();
-  });
-
-  it('stale: the header’s stale label only when every figure is stale, and each stale figure labelled', async () => {
-    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'refresh' } });
-    renderDates({
-      body: {
-        pairs: { [at('2027-03-14', 10)]: pricedPair(stale), [at('2027-03-15', 10)]: pricedPair(stale) },
-      },
-    });
-    await findBoard();
-    expect(screen.getByText("Every price shown is older than this search's refresh.")).toBeInTheDocument();
-    expect(within(await findBoard()).getAllByLabelText(/older than this search's refresh/)).toHaveLength(2);
-  });
-
-  it('not every figure stale: no header label, the stale figure still labelled', async () => {
-    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'refresh' } });
-    renderDates({
-      body: {
-        pairs: {
-          [at('2027-03-14', 10)]: pricedPair(stale),
-          [at('2027-03-15', 10)]: pricedPair(calendarFig()),
-        },
-      },
-    });
-    const table = await findBoard();
-    expect(screen.queryByText(/^Every price shown is/)).toBeNull();
-    expect(within(table).getAllByLabelText(/older than this search's refresh/)).toHaveLength(1);
-  });
-
-  it('no prices but coverage: "No prices in this run" with the header line and the six buckets under it, never "no flights"', async () => {
-    renderDates({ body: { rest: { empty: 1, no_data: 1, error: 1, skipped: 1 } } });
-    expect(await screen.findByText('No prices in this run.')).toBeInTheDocument();
-    const line = await screen.findByTestId('dates-run');
-    expect(line).toHaveTextContent(/· 0 of 93 date pairs priced, 93 couldn't be read · /);
-    expect(screen.getByTestId('dates-run-buckets')).toHaveTextContent(
-      'by airport pair: 93 no fares, 93 no cached data, 93 error, 93 skipped',
-    );
-    noFlights();
-  });
-
-  it('thin coverage: the next-move line, with the coverage-check link and "not evidence that no flights exist"', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    expect(screen.getByText(/which is not evidence that no flights exist/)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'Open the coverage check for this search' });
-    expect(
-      Object.fromEntries(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams),
-    ).toMatchObject({
-      view: 'definitions',
-      edit: 'def-0001',
-    });
-  });
-
-  it('too many to read: the 422’s count of date pairs on airport pairs, the bound, and the airport filter as the way under it', async () => {
+  it('too many to read: the 422’s count, the bound, and From or To as the way under it; the filter row stays', async () => {
     server.use(
       datesError(422, 'too_many_cells', 'the scope has 100000 cells, above 50000', {
         cells: 100_000,
@@ -184,38 +81,19 @@ describe('the Dates view’s states (spec §11)', () => {
     renderDates();
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(
-      'This search asks about 100000 date pairs on its airport pairs in scope, more than the 50000 this page reads at once.',
+      'This search covers 100,000 combinations of dates and airports, more than the 50,000 this page reads at once. Pick one airport in From or To above to bring it under 50,000.',
     );
-    expect(alert).toHaveTextContent('Narrow the origins or destinations in the filters above');
-    expect(screen.getByRole('form', { name: 'Filters' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: P.filterLabel })).toBeInTheDocument();
   });
 
-  it('no price within the filters: the board’s line, the counts over the filtered scope with the six buckets under them, and Clear filters', async () => {
-    const { user } = renderDates({
-      body: { destinations: ['JFK'], rest: { error: 1, not_run: 1 } },
-      search: '?view=dates&def=def-0001&d.to=JFK&d.nights=10-10',
-    });
-    expect(
-      await screen.findByText('No date pair in these filters has a price found so far.'),
-    ).toBeInTheDocument();
-    const box = screen.getByText('No date pair in these filters has a price found so far.').closest('div');
-    // a date pair with one airport pair in error and one not searched is not searched (§6.6); the error stays in view
-    expect(box).toHaveTextContent('0 of 31 date pairs priced, 31 not searched');
-    expect(box).toHaveTextContent('by airport pair: 31 error, 31 not searched');
-    expect(renderedCopy()).not.toMatch(/no date pair exists|no flights/i);
-    await user.click(within(box ?? document.body).getByRole('button', { name: 'Clear filters' }));
-    const p = new URLSearchParams(window.location.search);
-    expect([p.get('d.to'), p.get('d.nights')]).toEqual([null, null]);
-  });
-
-  it('loading: a labelled loading state in the board’s place', async () => {
+  it('loading: a labelled loading state in the sections’ place', async () => {
     const held = heldDates();
     server.use(held.handler);
     renderDates();
     await held.arrived();
-    expect(screen.getByText('Loading dates for these filters')).toHaveAttribute('role', 'status');
+    expect(screen.getByText(COPY.datesView.loadingFiltered)).toHaveAttribute('role', 'status');
     held.release(workedDates());
-    expect(await findBoard()).toBeInTheDocument();
+    expect(await findTrips()).toBeInTheDocument();
   });
 
   it('a load error with Retry', async () => {
@@ -232,9 +110,210 @@ describe('the Dates view’s states (spec §11)', () => {
     await waitFor(() => expect(hits).toBe(2));
   });
 
-  it('no state says a banned word', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
+  it('no state says a banned word, nor "no flights" outside "that isn\'t the same as no flights"', async () => {
+    const r = renderDates({ body: workedDates() });
+    await findTrips();
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST)).toEqual([]);
+    r.unmount();
+    renderDates({ body: { rest: { empty: 4 } } });
+    await findTrips();
+    expect(renderedCopy().replace(/isn't the same as no flights/g, '')).not.toMatch(/no flights/i);
+  });
+});
+
+describe('a stopped run (spec rev 55 §8.1 "Stop causes", Ruling 11)', () => {
+  it('the sentence as-is and its fix as a line, with Resume when the fix names Resume; the prices before the stop stay', async () => {
+    serveRun({
+      status: 'paused_budget',
+      stop: {
+        sentence: "Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.",
+        fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true },
+      },
+    });
+    const { user } = renderDates({ body: stopped('paused_budget') });
+    const line = await stateLine();
+    expect(
+      await within(line).findByText("Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached."),
+    ).toHaveAttribute('data-testid', 'stop-sentence');
+    expect(within(line).getByTestId('stop-fix')).toHaveTextContent('Raise the limit in Edit, then Resume');
+    expect(line).not.toHaveTextContent(/^(Paused|Stopped):/);
+    let resumed = '';
+    server.use(
+      http.post(`${API}/executions/:id/resume`, ({ params }) => {
+        resumed = String(params.id);
+        return HttpResponse.json(execution({ status: 'running' }));
+      }),
+    );
+    await user.click(within(line).getByRole('button', { name: RP.resume }));
+    await waitFor(() => expect(resumed).toBe('exec-0001'));
+    expect(await findTrips()).toBeInTheDocument();
+  });
+
+  it('a fix that offers a fresh search: no Resume, and Search again among the actions', async () => {
+    serveRun({
+      status: 'paused_budget',
+      stop: {
+        sentence: "Stopped at the browser worker's limit of 100 pages for this run.",
+        fix: { text: 'Search again to carry on (prices already found are reused)', command: null },
+      },
+    });
+    renderDates({ body: stopped('paused_budget') });
+    const line = await stateLine();
+    await within(line).findByTestId('stop-sentence');
+    expect(within(line).queryByRole('button', { name: RP.resume })).toBeNull();
+    expect(within(actions()).getByRole('button', { name: COPY.searchAgain.label })).toBeInTheDocument();
+  });
+
+  it('in native mode a fix’s command is a code element', async () => {
+    serveRun({
+      status: 'paused_error',
+      stop: {
+        sentence: 'The browser worker could not be reached.',
+        fix: { text: 'Start the browser worker, then Search again', command: 'pnpm gmt start' },
+      },
+    });
+    renderDates({ body: stopped('paused_error') });
+    const code = await within(await stateLine()).findByText('pnpm gmt start');
+    expect(code.tagName).toBe('CODE');
+  });
+
+  it('a run with no stored cause (written before migration 0011) reads NO_STOP_CAUSE_TEXT, never "paused: error"', async () => {
+    serveRun({ status: 'paused_error', stop: null });
+    renderDates({ body: stopped('paused_error') });
+    expect(await within(await stateLine()).findByText(NO_STOP_CAUSE_TEXT.sentence)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/paused: error|Paused: /);
+  });
+});
+
+describe('a refused Search now and a search naming no source (Review Focus 1 of WP20)', () => {
+  it('each refusal code in Task 20.5’s words', async () => {
+    for (const code of apiContract.startRefusalCodes) {
+      const r = renderDates({
+        body: { executions: [], executionId: null },
+        search: `?view=dates&def=def-0001&refused=${code}`,
+      });
+      expect(
+        await screen.findByText(code === 'cap' ? REFUSED_COPY.cap : REFUSED_COPY[code]),
+        code,
+      ).toBeInTheDocument();
+      r.unmount();
+    }
+  });
+
+  it('a never-run search naming no source says so from its own data, with the way to set one up', async () => {
+    renderDates({
+      body: { executions: [], executionId: null, discoveryProviders: [] },
+      def: definition({ providers: { discovery: [], verification: [], discoveryRefreshHours: {} } }),
+    });
+    const line = await stateLine();
+    await waitFor(() => expect(line).toHaveTextContent(P.noSource));
+    const link = within(line).getByRole('link', { name: P.noSourceFix });
+    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('view')).toBe('providers');
+    expect(within(line).queryByRole('button', { name: /^Search now/ })).toBeNull();
+  });
+});
+
+describe('a run going (Ruling 11; Review Focus 2)', () => {
+  const running = (over: Parameters<typeof execution>[0] = {}, search?: string) => {
+    serveRun({ status: 'running', estimatedFinishAt: '2026-10-14T16:40:00.000Z', ...over });
+    return renderDates({
+      ...(search === undefined ? {} : { search }),
+      body: {
+        executions: [
+          runSummary({
+            status: 'running',
+            startedAt: asIsoDateTime('2026-10-14T14:20:00.000Z'),
+            finishedAt: null,
+          }),
+        ],
+        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(30_000), { buckets: bucketsOf({ priced: 1 }) }) },
+      },
+    });
+  };
+
+  it('the progress counts the whole search, never the filtered stays; prices so far show in their sections', async () => {
+    running({}, '?view=dates&def=def-0001&d.nights=10-10');
+    const line = await stateLine();
+    // one date priced, the other 92 not searched (no rest given)
+    await waitFor(() =>
+      expect(line).toHaveTextContent('Reading the calendar, 1 of 93 dates · about 100 min left'),
+    );
+    expect(line).not.toHaveTextContent(/nights|airport/);
+    expect(await findLower()).toHaveTextContent('£300');
+    // the calendar marks the rest not searched
+    expect(document.querySelectorAll('[data-marks~="not-searched"]').length).toBeGreaterThan(20);
+  });
+
+  it('with the card’s latest run this very run, the progress says the card’s counts (the same as the first screen)', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'def-0001',
+          latestRun: latestRun({
+            status: 'running',
+            finishedAt: null,
+            datePairs: 405,
+            datePairsSearched: 120,
+          }),
+        }),
+      ]),
+    );
+    running({}, '?view=dates&def=def-0001&d.to=JFK');
+    await waitFor(async () =>
+      expect(await stateLine()).toHaveTextContent('Reading the calendar, 120 of 405 dates'),
+    );
+  });
+
+  it('the polite status names the kind of state only, so a poll that moves a count announces nothing', async () => {
+    running();
+    const status = await screen.findByRole('status', { name: P.stateLabel });
+    await waitFor(() => expect(status).toHaveTextContent(/^Searching$/));
+  });
+});
+
+describe('a finished run (spec rev 55 §11)', () => {
+  it('reads the run line once; the status says "Searched"; no state below it', async () => {
+    renderDates({ body: workedDates() });
+    const status = await screen.findByRole('status', { name: P.stateLabel });
+    await waitFor(() => expect(status).toHaveTextContent(/^Searched$/));
+    expect(screen.getByTestId('dates-run')).toHaveTextContent(/^Searched today 13:00–14:00 · /);
+    expect(screen.getAllByText(/^Searched today/)).toHaveLength(1);
+    expect(await stateLine()).toBeEmptyDOMElement();
+  });
+});
+
+describe('the page’s card read (ruling R-scope)', () => {
+  afterEach(() => vi.useRealTimers());
+  // why: only the interval is faked and the clock never moves by itself, so each step is exact
+  const fakeClock = () =>
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
+  it('re-reads the cards while its run is going, for the whole search’s counts', async () => {
+    fakeClock();
+    const cards: CardRequests = [];
+    server.use(
+      serveCards(
+        [searchCard({ id: 'def-0001', latestRun: latestRun({ status: 'running', finishedAt: null }) })],
+        cards,
+      ),
+    );
+    serveRun({ status: 'running' });
+    renderDates({
+      body: { ...workedDates(), executions: [runSummary({ status: 'running', finishedAt: null })] },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('state-line')).toHaveTextContent(/^Reading the calendar, /),
+    );
+    const before = cards.length;
+    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+    await waitFor(() => expect(cards.length).toBeGreaterThan(before));
+  });
+  it('reads them once for a run that is not going', async () => {
+    fakeClock();
+    const cards: CardRequests = [];
+    server.use(serveCards([searchCard({ id: 'def-0001' })], cards));
+    renderDates({ body: workedDates() });
+    await screen.findByTestId('dates-run');
+    await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 3));
+    expect(cards).toHaveLength(1);
   });
 });

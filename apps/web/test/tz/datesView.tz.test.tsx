@@ -1,5 +1,5 @@
 import { asIsoDate } from '@gmt/core';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TripView } from '../../src/views/Trip/TripView.js';
@@ -9,7 +9,7 @@ import { tripBody } from '../fixtures.trip.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
-import { boardRows, findBoard, renderDates } from '../views/dates/render.js';
+import { calendarRows, findCalendar, findLower, renderDates, rowText } from '../views/dates/render.js';
 
 // Review focus 3 for the Dates view (WP19 Tasks 19.4, 19.5): run by `test:tz` under America/Los_Angeles and
 // Asia/Tokyo. Every date the view shows is formatted from its `YYYY-MM-DD` string, so a browser west or east of
@@ -45,30 +45,24 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     expect(new Date(2027, 0, 1).getTimezoneOffset()).toBe(JAN_OFFSET_MINUTES[zone]);
   });
 
-  it('a 2027-03-14 date pair reads 14 Mar on the board, and a 2027-04-01 one reads 1 Apr (April, not March)', async () => {
+  it('a 2027-03-14 date reads Sun 14 Mar in its row, and a 2027-04-01 one Thu 1 Apr (April, not March)', async () => {
     renderDates({ body });
-    const rows = boardRows(await findBoard());
-    expect(rows[0]?.querySelectorAll('td')[1]).toHaveTextContent('14 Mar 2027');
-    expect(rows[0]?.querySelectorAll('td')[2]).toHaveTextContent('24 Mar 2027');
-    expect(rows[2]?.querySelectorAll('td')[1]).toHaveTextContent('1 Apr 2027');
-    expect(rows[2]?.querySelectorAll('td')[2]).toHaveTextContent('13 Apr 2027');
+    const rows = calendarRows(await findLower());
+    expect(rowText(rows[0] ?? document.body)).toContain('Sun 14 Mar → Wed 24 Mar');
+    expect(rowText(rows[2] ?? document.body)).toContain('Thu 1 Apr → Tue 13 Apr');
   });
 
-  it('the phone card reads the same dates', async () => {
+  it('the same dates at phone width', async () => {
     setViewportWidth(375);
     renderDates({ body });
-    const cards = await screen.findAllByTestId('board-card');
-    expect(within(cards[0] ?? document.body).getByRole('link')).toHaveTextContent(
-      '14 Mar 2027–24 Mar 2027 (10n)',
-    );
-    expect(within(cards[2] ?? document.body).getByRole('link')).toHaveTextContent(
-      '1 Apr 2027–13 Apr 2027 (12n)',
-    );
+    const rows = calendarRows(await findLower());
+    expect(rowText(rows[0] ?? document.body)).toContain('Sun 14 Mar → Wed 24 Mar');
+    expect(rowText(rows[2] ?? document.body)).toContain('Thu 1 Apr → Tue 13 Apr');
   });
 
   it('the overview puts a 2027-03-31 date pair in March’s month and a 2027-04-01 one in April’s, and the readout names 14 Mar', async () => {
     renderDates({ body });
-    await findBoard();
+    await findCalendar();
     expect(cellAt('2027-03-31', 11)?.closest('table')?.querySelector('caption')).toHaveTextContent(
       'Mar 2027',
     );

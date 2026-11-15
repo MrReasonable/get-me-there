@@ -21,6 +21,11 @@ export interface CalendarRowProps {
   pair: RowPair;
   /** Starts reading this date pair's flights; null where flights can't be read from here, which shows no button. */
   onRead: ((target: ReadTarget) => void) | null;
+  /**
+   * A read under way: this row's (`this`: the button stays, says "Reading flights…" and is not pressed again, so it keeps
+   * focus) or another row's (`other`: the button is disabled, one read at a time); null when none is.
+   */
+  reading?: 'this' | 'other' | null;
 }
 
 /**
@@ -28,7 +33,7 @@ export interface CalendarRowProps {
  * dates, the nights, what is known of its flights (`readStateWords`) and "Read flights". A search with several airports
  * names the pair.
  */
-export function CalendarRow({ figure, search, pair, onRead }: CalendarRowProps) {
+export function CalendarRow({ figure, search, pair, onRead, reading = null }: CalendarRowProps) {
   const pairName = search.multiAirport ? R.pair(figure.origin, figure.destination) : null;
   return (
     <li className="trip-row trip-row-cal" data-testid="calendar-row">
@@ -48,17 +53,20 @@ export function CalendarRow({ figure, search, pair, onRead }: CalendarRowProps) 
         <button
           type="button"
           className="row-read"
-          aria-label={R.readFlightsFor(stayDates(pair), pairName)}
-          onClick={() =>
+          aria-label={reading === 'this' ? undefined : R.readFlightsFor(stayDates(pair), pairName)}
+          aria-disabled={reading === 'this' ? true : undefined}
+          disabled={reading === 'other'}
+          onClick={() => {
+            if (reading !== null) return;
             onRead({
               departureDate: pair.departureDate,
               returnDate: pair.returnDate,
               origin: figure.origin,
               destination: figure.destination,
-            })
-          }
+            });
+          }}
         >
-          {R.readFlights}
+          {reading === 'this' ? COPY.flights.reading : R.readFlights}
         </button>
       )}
     </li>

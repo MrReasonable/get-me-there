@@ -5,7 +5,6 @@ import { formatIsoDate } from '../../format.js';
 import { tripPatch } from '../../state/tripState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { CheaperCached, FigurePrice } from './BoardCard.js';
-import { howFarChecked } from './howFar.js';
 import type { CellView } from './OverviewMonth.js';
 
 const O = COPY.datesView.overview;
@@ -32,21 +31,20 @@ export function cellDates(c: Pick<CellView, 'date' | 'column' | 'model'>): strin
 }
 
 /**
- * Spec §11 Overview "Readout": the cell under the pointer or the focus, in one line beside the legend: its dates and
- * nights; the figure through PriceCell's row form (point of sale in words, "≈" on a converted price, "not checked"
- * on a calendar price) with how far checked ("cheapest of the rows read" on a truncated figure) and airports; or its
- * marks with their counts by bucket. It is every cell's `aria-describedby`, so an amount is read only from PriceCell.
- * Its "Open these dates" link is the touch path to the detail (revision 50).
+ * Spec §11 Overview "Readout" (until Task 9 replaces the calendar): the cell under the pointer or the focus, in one line
+ * beside the legend: its dates and nights; the figure through PriceCell's row form (point of sale in words, "≈" on a
+ * converted price, "not checked" on a calendar price) and airports; or its marks with their counts by bucket. It is
+ * every cell's `aria-describedby`, so an amount is read only from PriceCell. Its "Open these dates" link is the touch
+ * path to the detail (revision 50).
  */
 export function Readout({
   id,
   cell,
-  airportPairs,
-  journeyLimit,
   notes,
 }: {
   id: string;
   cell: CellView | null;
+  /** Unread since "how far checked" went (Ruling 21); the calendar still passes them until Task 9 replaces it. */
   airportPairs: number;
   journeyLimit: number | null;
   notes: DefinitionResponse['destinationNotes'];
@@ -69,18 +67,13 @@ export function Readout({
               <>
                 <FigurePrice figure={f} notes={notes} />
                 <CheaperCached figure={f} notes={notes} />
-                <span>{howFarChecked(lead, airportPairs, journeyLimit).join(' · ')}</span>
                 <span>{COPY.datesView.airports(f.origin, f.destination)}</span>
               </>
             ) : (
               <>
                 <span>{cell.model.marks.map((m) => M.words[m]).join(' · ') || O.noMark}</span>
-                {/* why: a date pair's own counts say how far it was checked; a band's are summed by bucket */}
-                {cell.model.pairs.length === 1 && cell.model.pairs[0] !== undefined ? (
-                  <span>{howFarChecked(cell.model.pairs[0], airportPairs, journeyLimit).join(' · ')}</span>
-                ) : (
-                  <span>{O.buckets(COPY.bucketBreakdown(cell.model.buckets))}</span>
-                )}
+                {/* why: its counts by bucket (summed over a band); "how far checked" went with the board (Ruling 21) */}
+                <span>{O.buckets(COPY.bucketBreakdown(cell.model.buckets))}</span>
               </>
             )}
           </>

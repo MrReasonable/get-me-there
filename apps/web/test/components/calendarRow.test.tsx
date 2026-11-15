@@ -2,6 +2,7 @@ import { asIata, asIsoDate } from '@gmt/core';
 import { screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
+import { COPY } from '../../src/copy.js';
 import { airportPairIndex, calendarFig, provCached } from '../fixtures.dates.js';
 import { renderWithProviders } from '../render.js';
 
@@ -70,6 +71,27 @@ describe('CalendarRow', () => {
       origin: 'LGW',
       destination: 'JFK',
     });
+  });
+
+  it('while its read goes the button stays, says "Reading flights…" and is not pressed again; another row\'s read disables it', async () => {
+    const onRead = vi.fn();
+    const r = renderWithProviders(
+      <ul>
+        <CalendarRow figure={calendarFig()} search={search} pair={pair} onRead={onRead} reading="this" />
+      </ul>,
+    );
+    const reading = screen.getByRole('button', { name: COPY.flights.reading });
+    expect(reading).toHaveAttribute('aria-disabled', 'true');
+    expect(reading).toBeEnabled();
+    await r.user.click(reading);
+    expect(onRead).not.toHaveBeenCalled();
+    r.unmount();
+    renderWithProviders(
+      <ul>
+        <CalendarRow figure={calendarFig()} search={search} pair={pair} onRead={onRead} reading="other" />
+      </ul>,
+    );
+    expect(screen.getByRole('button', { name: 'Read flights for Tue 17 Nov → Fri 27 Nov' })).toBeDisabled();
   });
 
   it('a search with several airports prefixes the row with its pair; one airport does not', () => {

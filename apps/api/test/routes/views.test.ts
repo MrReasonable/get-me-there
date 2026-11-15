@@ -277,59 +277,6 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
   });
 });
 
-describe('GET /api/definitions/:id/calendar-gap (spec §10, §6.9)', () => {
-  it('lists calendar prices below the cheapest class-verified price', async () => {
-    const { x, def, s } = await world();
-    s.tile('E1', C2, { status: 'priced', pricePence: 70_000, fetchedAt: at(-1), tileIndex: 9 });
-    const gap = await get(
-      x,
-      `/api/definitions/${def.id}/calendar-gap`,
-      '/api/definitions/:id/calendar-gap',
-      apiContract.calendarGapResponseSchema,
-    );
-    expect(gap.cheapestVerified).toMatchObject({
-      pricePence: 60_000,
-      itineraryHash: 'hV',
-      provenance: { providerId: 'fixture' },
-    });
-    expect(gap.cells.map((c) => [c.cell.departureDate, c.calendar.pricePence, c.verifyAvailable])).toEqual([
-      ['2026-11-02', 45_000, true],
-    ]);
-  });
-  it('verifyAvailable is what the engine would do for the cell, never a constant (review prov M2)', async () => {
-    const { x, def, s } = await world();
-    s.tile('E1', C2, { status: 'priced', pricePence: 70_000, fetchedAt: at(-1), tileIndex: 9 });
-    const preview = vi
-      .spyOn(x.engine, 'childCapPreview')
-      .mockReturnValue({ ok: false, code: 'window', message: 'outside the window' });
-    const gap = await get(
-      x,
-      `/api/definitions/${def.id}/calendar-gap`,
-      '/api/definitions/:id/calendar-gap',
-      apiContract.calendarGapResponseSchema,
-    );
-    expect(gap.cells.map((c) => c.verifyAvailable)).toEqual([false]);
-    expect(preview).toHaveBeenCalledWith(def.id, expect.objectContaining({ departureDate: '2026-11-02' }));
-  });
-  it('is empty when the definition has no verification provider', async () => {
-    const x = await createHarness();
-    h = x;
-    const def = x.ports.repos.definitions.create(
-      exampleDefinitionInput({
-        providers: { discovery: ['fixture'], verification: [], discoveryRefreshHours: {} },
-      }),
-    );
-    expect(
-      await get(
-        x,
-        `/api/definitions/${def.id}/calendar-gap`,
-        '/api/definitions/:id/calendar-gap',
-        apiContract.calendarGapResponseSchema,
-      ),
-    ).toEqual({ cheapestVerified: null, cells: [] });
-  });
-});
-
 describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate (spec §10, View B side panel)', () => {
   const route = '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate';
   it("returns the cell's outcomes per stage and provider, its prices with provenance, and the verify cap from the engine", async () => {

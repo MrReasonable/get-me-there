@@ -12,7 +12,6 @@ export type ExecutionResponse = z.output<typeof apiContract.executionResponseSch
 export type ResultsResponse = z.output<typeof apiContract.resultsResponseSchema>;
 export type ExecutionSummary = z.output<typeof apiContract.executionSummarySchema>;
 export type CoverageResponse = z.output<typeof apiContract.coverageResponseSchema>;
-export type CalendarGapResponse = z.output<typeof apiContract.calendarGapResponseSchema>;
 export type AirportsResponse = z.output<typeof apiContract.airportsResponseSchema>;
 export type PriceCellData = z.output<typeof apiContract.priceCellSchema>;
 export type UsageRow = z.output<typeof apiContract.usageSchema>;

@@ -4,6 +4,7 @@ import { COPY } from '../../copy.js';
 import { rowBookingTarget, type VerifiedDetails } from '../../lib/bookingTarget.js';
 import { dayOffsetOf, type LegWordsFacts, legWords } from '../../lib/legWords.js';
 import { tripHref } from '../../state/tripState.js';
+import { navigateToQuery } from '../../state/urlState.js';
 import { BookLink } from '../BookLink.js';
 import {
   DatesCell,
@@ -150,7 +151,13 @@ export function TripRow({ figure, details, search, pair, earlierNote = null }: T
           )}
         </div>
       ))}
-      <a className="row-go" href={href} aria-label={R.detailsFor(stayDates(pair), pairName)}>
+      {/* why: in place, as the app's other links go (a plain click would reload the page); its address is the click's */}
+      <a
+        className="row-go"
+        href={href}
+        onClick={navigateToQuery(href)}
+        aria-label={R.detailsFor(stayDates(pair), pairName)}
+      >
         ›
       </a>
     </li>

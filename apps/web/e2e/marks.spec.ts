@@ -23,7 +23,7 @@ const PARTLY_CASE: PerfCase = {
 test('a partly-not-searched cell keeps its stripes, and its glyphs sit on its own fill', async ({ page }) => {
   await servePerfCase(page, PARTLY_CASE);
   await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
-  await expect(page.getByRole('table', { name: SMOKE.boardTable })).toBeVisible();
+  await expect(page.locator(SMOKE.overviewTabStop)).toBeVisible();
   const striped = page.locator(`${SMOKE.overviewCell}[data-marks~="partly"]`);
   await expect(striped.first()).toBeVisible();
   await expect(striped.first()).toHaveCSS('background-image', /repeating-linear-gradient/);
@@ -53,7 +53,7 @@ test('forced colours: every marked overview cell still shows its glyphs', async 
   await page.emulateMedia({ forcedColors: 'active' });
   await servePerfCase(page, PARTLY_CASE);
   await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
-  await expect(page.getByRole('table', { name: SMOKE.boardTable })).toBeVisible();
+  await expect(page.locator(SMOKE.overviewTabStop)).toBeVisible();
   const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
   await expect(marked.first()).toBeVisible();
   expect(await marked.count()).toBeGreaterThan(0);

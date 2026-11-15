@@ -79,8 +79,6 @@ export const api = {
     call(c.tripResponseSchema, 'GET', '/api/definitions/:id/trip', { params: { id }, query }),
   coverage: (id: string) =>
     call(c.coverageResponseSchema, 'GET', '/api/definitions/:id/coverage', { params: { id } }),
-  calendarGap: (id: string) =>
-    call(c.calendarGapResponseSchema, 'GET', '/api/definitions/:id/calendar-gap', { params: { id } }),
   airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
   cellDetail: (id: string, k: CellKey) =>
     call(

@@ -4,10 +4,9 @@ import type { ExecutionResponse } from '../../src/api/types.js';
 import { runProgressOf } from '../../src/components/RunProgress.js';
 import { COPY } from '../../src/copy.js';
 import { readingCount } from '../../src/lib/flightsReading.js';
-import { stateLine as pageLine } from '../../src/views/Dates/stateLines.js';
+import { stateLine as pageLine, runProgressFor } from '../../src/views/Dates/stateLines.js';
 import { execution } from '../fixtures.js';
 import { latestRun, searchCard } from '../fixtures.searches.js';
-import { NOW as NOW_ISO } from '../render.js';
 
 // Ruling R-reading (WP20 Task 20.6 review): one rule for the card and a search's page: a run is reading flights while
 // its flight step has not ended and has lists still to get; "Reading flights · N of M" counts the lists in hand, read
@@ -82,28 +81,19 @@ describe('the card and the page say the same', () => {
     if (run === null) throw new Error('the card has a run');
     return runProgressOf(run).flightsRead;
   };
-  const page = (f: Flights | null) =>
-    pageLine({
-      latest: execution({ status: 'running', stage: 'discovery', flights: f }),
-      pairs: [],
-      whole: { searched: 0, total: 0 },
-      providers: [],
-      reused: 0,
-      spaceChanged: false,
-      noSource: false,
-      now: NOW_ISO,
-      c: COPY,
-    });
+  // why: Ruling 11: the page's run is `RunProgress` too, over `runProgressFor`, and its state names the kind
+  const run = (f: Flights | null) => execution({ status: 'running', stage: 'discovery', flights: f });
+  const page = (f: Flights | null) => ({
+    kind: pageLine({ latest: run(f), spaceChanged: false, noSource: false, c: COPY }).kind,
+    read: runProgressFor(run(f), { searched: 0, total: 0 }, null).flightsRead,
+  });
   it('read and reused together, on both', () => {
     expect(card(plan())).toBe(5);
-    expect(page(plan())).toEqual({ kind: 'reading', text: 'Reading flights · 5 of 10 date pairs' });
+    expect(page(plan())).toEqual({ kind: 'reading', read: 5 });
   });
   it('in confirm mode: the dates checked, with no denominator, on both', () => {
     expect(card(confirming())).toBe(9);
-    expect(page(confirming())).toEqual({
-      kind: 'reading',
-      text: 'Checking flights: 9 dates so far; 3 trips with flights read.',
-    });
+    expect(page(confirming())).toEqual({ kind: 'reading', read: 9 });
   });
   it('in confirm mode a step that has stopped of its own accord is still on the calendar, on both', () => {
     expect(card(confirming({}, 'patience'))).toBeNull();

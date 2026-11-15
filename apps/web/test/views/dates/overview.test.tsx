@@ -11,10 +11,10 @@ import {
 } from '../../fixtures.dates.js';
 import { poundsOutsidePrices } from '../../guards.js';
 import { setViewportWidth } from '../../viewport.js';
-import { boardRows, findBoard, renderDates } from './render.js';
+import { findCalendar, findTrips, renderDates, tripRows } from './render.js';
 
-// Spec §11 Dates "Overview": months, strips, the one scale, the numeric legend, the readout, rings both ways, folded
-// bands, touch and the phone layout.
+// Spec §11 Dates "Overview" (the calendar, until Task 9 replaces it): months, strips, the one scale, the numeric legend,
+// the readout, the rings on the trips the page shows, folded bands, touch and the phone layout.
 
 const overview = () => screen.getByTestId('dates-overview');
 const cell = (date: string, from: number) => {
@@ -44,7 +44,7 @@ const WIDE = { ...DATES_SPACE, maxNights: 22 };
 describe('the overview (spec §11 Overview)', () => {
   it('draws the window’s months in order, each a table captioned by its name, with a strip of stay cells per day', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     const tables = within(overview()).getAllByRole('table');
     expect(tables.map((t) => t.querySelector('caption')?.textContent)).toEqual(['Mar 2027', 'Apr 2027']);
     expect(overview().querySelectorAll('[data-cell]')).toHaveLength(93);
@@ -55,14 +55,14 @@ describe('the overview (spec §11 Overview)', () => {
 
   it('no cell prints an amount', async () => {
     renderDates({ body: twelve });
-    await findBoard();
+    await findCalendar();
     for (const c of overview().querySelectorAll('[data-cell]')) expect(c.textContent).not.toMatch(/£|\d/);
     expect(poundsOutsidePrices()).toEqual([]);
   });
 
   it('shades current figures on one scale by rank quintile; the legend prints each band’s range', async () => {
     renderDates({ body: twelve });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-14', 10)).toHaveAttribute('data-shade', '0');
     expect(cell('2027-03-25', 10)).toHaveAttribute('data-shade', '4');
     const legend = screen.getByTestId('dates-legend');
@@ -75,7 +75,7 @@ describe('the overview (spec §11 Overview)', () => {
 
   it('a superseded figure is off the scale: no shade, its mark, counted in the legend', async () => {
     renderDates({ body: twelve });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-31', 11)).toHaveAttribute('data-shade', 'none');
     expect(cell('2027-03-31', 11).getAttribute('data-marks')).toContain('superseded');
     expect(screen.getByTestId('dates-legend')).toHaveTextContent('superseded by a later search: 1');
@@ -83,7 +83,7 @@ describe('the overview (spec §11 Overview)', () => {
 
   it('fewer than ten figures give the flat shade, and the legend says so', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-14', 10)).toHaveAttribute('data-shade', 'flat');
     expect(screen.getByTestId('dates-legend')).toHaveTextContent(
       'One shade for 9 current prices: fewer than 10 are too few for price bands',
@@ -92,7 +92,7 @@ describe('the overview (spec §11 Overview)', () => {
 
   it('the stay filter applies first: only the stays in view are drawn, and the shading is over them', async () => {
     renderDates({ body: twelve, search: '?view=dates&def=def-0001&d.nights=11-12' });
-    await findBoard();
+    await findCalendar();
     expect(overview().querySelectorAll('[data-cell]')).toHaveLength(62);
     expect(overview().querySelector('[data-from="10"]')).toBeNull();
     expect(screen.getByTestId('dates-legend')).toHaveTextContent('No current price in view to shade');
@@ -100,39 +100,40 @@ describe('the overview (spec §11 Overview)', () => {
 
   it('a calendar figure carries the "not checked" glyph', async () => {
     renderDates({ body: twelve });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-14', 10).getAttribute('data-marks')).toBe('notChecked');
     expect(within(cell('2027-03-14', 10)).getByTestId('cell-glyphs')).toHaveTextContent('◫');
   });
 });
 
 describe('the readout and the cell’s names (spec §11 Overview)', () => {
-  it('pointing at a cell shows its date pair beside the legend: dates, nights, the figure through PriceCell with point of sale, how far checked, airports', async () => {
+  it('pointing at a cell shows its date pair beside the legend: dates, nights, the figure through PriceCell with point of sale, airports', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     expect(readout()).toHaveTextContent('Point at or focus a dot to read its date pair here.');
     fireEvent.pointerOver(cell('2027-03-22', 11));
     const r = readout();
     expect(r).toHaveTextContent('22 Mar 2027–2 Apr 2027 (11n)');
     expect(within(r).getByTestId('price-cell')).toHaveTextContent('£330');
     expect(within(r).getByTestId('point-of-sale')).toHaveTextContent('market not stated');
+    // why: the price's own truncated mark; "how far checked" ("read was cut short") went with the board (Ruling 21)
     expect(r).toHaveTextContent('cheapest of the rows read');
-    expect(r).toHaveTextContent('read was cut short');
+    expect(r).not.toHaveTextContent('read was cut short');
     expect(r).toHaveTextContent('LGW → JFK');
   });
 
   it('a cell without a figure reads its marks with their counts by bucket', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     fireEvent.pointerOver(cell('2027-03-18', 10));
     expect(readout()).toHaveTextContent('error');
-    expect(readout()).toHaveTextContent('3 no cached data · 1 error');
+    expect(readout()).toHaveTextContent('by airport pair: 3 no cached data, 1 error');
     expect(within(readout()).queryByTestId('price-cell')).toBeNull();
   });
 
   it('a cell’s accessible name gives its dates, nights and rank or mark in words, and its description is the readout', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     // why: design 2026-11-08 §5.1: the fresh verified figure (14 → 25 Mar) is rank 1, the cheaper calendar price rank 2
     expect(cell('2027-03-14', 11)).toHaveAccessibleName('14 Mar 2027–25 Mar 2027, 11 nights: rank 1');
     expect(cell('2027-03-14', 10)).toHaveAccessibleName('14 Mar 2027–24 Mar 2027, 10 nights: rank 2');
@@ -144,8 +145,8 @@ describe('the readout and the cell’s names (spec §11 Overview)', () => {
   });
 });
 
-describe('rings both ways (spec §11 Rings; design 2026-11-08 §5.2)', () => {
-  /** Ten board rows: seven calendar prices and three trips with flights read (fresh verified figures). */
+describe('rings (spec §11 Rings; design 2026-11-08 §5.2)', () => {
+  /** Ten priced dates: seven calendar prices and three trips with flights read (fresh verified figures). */
   const readTrips = new Set([16, 18, 20]);
   const mixed: DatesOptions = {
     rest: { no_data: 4 },
@@ -159,12 +160,12 @@ describe('rings both ways (spec §11 Rings; design 2026-11-08 §5.2)', () => {
       }),
     ),
   };
-  // why: design 2026-11-08 §5.2: the overview outlines only the board's trips with flights read, not every shown row
-  it('with 3 trips with flights read among 10 board rows, only those 3 are outlined, and the legend says so', async () => {
+  // why: design 2026-11-08 §5.2: the calendar outlines only the trips with flights read that Cheapest trips shows
+  it('the three trips Cheapest trips shows are outlined, no calendar price is, and the legend says so', async () => {
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     renderDates({ body: mixed });
-    const table = await findBoard();
-    expect(boardRows(table)).toHaveLength(10);
+    expect(tripRows(await findTrips())).toHaveLength(3);
+    await findCalendar();
     const ringed = [...overview().querySelectorAll('[data-ringed]')];
     expect(ringed.map((c) => c.getAttribute('data-cell'))).toEqual([
       '2027-03-16|10',
@@ -172,21 +173,16 @@ describe('rings both ways (spec §11 Rings; design 2026-11-08 §5.2)', () => {
       '2027-03-20|10',
     ]);
     expect(ringed[0]?.className).toContain('shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]');
-    // a calendar price on the board is not outlined
     expect(cell('2027-03-14', 10)).not.toHaveAttribute('data-ringed');
     expect(screen.getByTestId('dates-legend')).toHaveTextContent('outlined: trips with flights read');
-    // hovering a row lights its cell and a ringed cell lights its row; nothing scrolls
-    fireEvent.pointerEnter(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-16', 10)).toHaveAttribute('data-lit');
-    fireEvent.pointerLeave(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-16', 10)).not.toHaveAttribute('data-lit');
+    // a ringed cell lights itself; nothing scrolls
     fireEvent.pointerOver(cell('2027-03-18', 10));
-    expect(boardRows(table)[1]).toHaveAttribute('data-lit');
+    expect(cell('2027-03-18', 10)).toHaveAttribute('data-lit');
     expect(scroll).not.toHaveBeenCalled();
   });
-  it('a board of calendar prices alone outlines nothing', async () => {
+  it('calendar prices alone outline nothing', async () => {
     renderDates({ body: twelve });
-    await findBoard();
+    await findCalendar();
     expect(overview().querySelectorAll('[data-ringed]')).toHaveLength(0);
   });
 });
@@ -203,7 +199,7 @@ describe('folded bands (spec §11 Folded bands)', () => {
 
   it('a stay range of 13 folds into seven bands, each named by its range; a band shows its cheapest figure’s shade and the stripes when any date pair in it has a cell not searched', async () => {
     renderDates({ body: wide });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(7);
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-band', '12-13');
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-shade', 'flat');
@@ -216,7 +212,7 @@ describe('folded bands (spec §11 Folded bands)', () => {
 
   it('a click opens the band into its stays for that month; the band’s header button and Escape close it', async () => {
     const { user } = renderDates({ body: wide });
-    await findBoard();
+    await findCalendar();
     await user.click(cell('2027-03-14', 12));
     expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(8);
     expect(cell('2027-03-14', 13)).toHaveAccessibleName('14 Mar 2027–27 Mar 2027, 13 nights: rank 1');
@@ -234,7 +230,7 @@ describe('folded bands (spec §11 Folded bands)', () => {
 
   it('a band cell without a figure reads its marks and its buckets summed', async () => {
     renderDates({ body: wide });
-    await findBoard();
+    await findCalendar();
     fireEvent.pointerOver(cell('2027-03-15', 20));
     expect(readout()).toHaveTextContent('departing 15 Mar 2027, 20–21 nights');
     expect(readout()).toHaveTextContent('partly not searched');
@@ -249,7 +245,7 @@ describe('folded bands (spec §11 Folded bands)', () => {
         pairs: { ...wide.pairs, [at('2027-03-14', 13)]: pricedPair(priced(30_000, { basis: 'verified' })) },
       },
     });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-ringed');
   });
 });
@@ -257,7 +253,7 @@ describe('folded bands (spec §11 Folded bands)', () => {
 describe('opening the detail', () => {
   it('a click on a cell opens the Trip page with the date pair in the URL', async () => {
     const { user } = renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     await user.click(cell('2027-03-17', 10));
     expect([url().get('view'), url().get('depart'), url().get('return')]).toEqual([
       'trip',
@@ -268,7 +264,7 @@ describe('opening the detail', () => {
 
   it('touch: a first tap shows the readout, a second tap on the same cell opens the detail', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     const c = cell('2027-03-15', 10);
     fireEvent.pointerDown(c, { pointerType: 'touch' });
     fireEvent.click(c);
@@ -281,7 +277,7 @@ describe('opening the detail', () => {
 
   it('the readout’s "Open these dates" link opens the detail', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findCalendar();
     fireEvent.pointerDown(cell('2027-03-15', 10), { pointerType: 'touch' });
     fireEvent.click(cell('2027-03-15', 10));
     const link = screen.getByRole('link', { name: 'Open these dates' });
@@ -295,7 +291,7 @@ describe('the phone overview (spec §11 Phone)', () => {
   it('one month at a time with Previous and Next, each day a row with its strip; the legend and readout present', async () => {
     setViewportWidth(375);
     const { user } = renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
+    await findCalendar();
     expect(within(overview()).getByRole('region', { name: 'Mar 2027' })).toBeInTheDocument();
     expect(within(overview()).queryByRole('region', { name: 'Apr 2027' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled();
@@ -309,7 +305,7 @@ describe('the phone overview (spec §11 Phone)', () => {
   it('a swipe turns the month; the readout stays while it does', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
+    await findCalendar();
     fireEvent.pointerDown(cell('2027-03-14', 10), { pointerType: 'touch' });
     fireEvent.click(cell('2027-03-14', 10));
     expect(readout()).toHaveTextContent('14 Mar 2027');

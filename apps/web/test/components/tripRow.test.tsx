@@ -64,6 +64,13 @@ describe('TripRow', () => {
     );
   });
 
+  it('› opens the Trip page in place, at exactly its own address (no page load)', async () => {
+    const { user } = renderRow({ figure: pairingFig() });
+    const link = screen.getByRole('link', { name: 'Details for Wed 11 Nov → Sat 28 Nov' });
+    await user.click(link);
+    expect(window.location.search).toBe(link.getAttribute('href'));
+  });
+
   it("marks a pairing leg's next-day arrival and a date-line return from the list's own day offsets", () => {
     renderRow({
       figure: pairingFig({

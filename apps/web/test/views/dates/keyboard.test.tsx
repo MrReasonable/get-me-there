@@ -5,15 +5,16 @@ import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CELL_FOCUS } from '../../../src/views/Dates/OverviewMonth.js';
 import { at, DATES_SPACE, type DatesOptions, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
+import { definition } from '../../fixtures.js';
 import { flightPair } from '../../fixtures.searches.js';
 import { serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
-import { findBoard, renderDates } from './render.js';
+import { findCalendar, renderDates } from './render.js';
 
-// Spec §11 Overview "Keyboard" and Accessibility: the overview is one tab stop with a roving tabindex, the arrow,
-// page and home/end keys move through it, Enter opens the detail (or a closed band), focus is always visible, and Tab
-// reaches the view's controls in their reading order.
+// Spec §11 Overview "Keyboard" and Accessibility: the overview (the calendar, until Task 9) is one tab stop with a
+// roving tabindex, the arrow, page and home/end keys move through it, Enter opens the detail (or a closed band), focus is
+// always visible, and Tab reaches the page's controls in their reading order.
 
 const focused = () => document.activeElement?.getAttribute('data-cell') ?? null;
 const url = () => new URLSearchParams(window.location.search);
@@ -22,7 +23,7 @@ const stops = () =>
 
 async function focusOverview(o: DatesOptions = workedDates()) {
   const r = renderDates({ body: o });
-  await findBoard();
+  await findCalendar();
   const first = stops()[0];
   if (!(first instanceof HTMLElement)) throw new Error('no tab stop');
   first.focus();
@@ -82,7 +83,7 @@ describe('the overview’s keyboard (spec §11)', () => {
   it('at phone width a key that leaves the drawn month shows the month it lands in', async () => {
     setViewportWidth(375);
     const { user } = renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
+    await findCalendar();
     const months = () => [
       ...new Set(
         [...document.querySelectorAll<HTMLElement>('[data-cell]')].map((c) => c.dataset.date?.slice(0, 7)),
@@ -129,36 +130,47 @@ describe('the overview’s keyboard (spec §11)', () => {
   });
 });
 
-describe('Tab order across the view (spec §11 Accessibility)', () => {
-  it('the header’s line and its actions, the filters, the board’s sort buttons, each row’s link, Show 10 more, the overview’s one stop, then the coverage toggle', async () => {
-    const { user } = renderDates({ body: workedDates() });
-    await findBoard();
+describe('Tab order across the page (spec §11 Accessibility; mockup 02)', () => {
+  it("the crumbs, the actions, the run line's link, the filter row, the trips, the lower dates, the calendar's one stop, then the coverage toggle", async () => {
+    const { user } = renderDates({
+      body: {
+        ...workedDates(),
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(priced(41_200, { basis: 'verified' })),
+          [at('2027-03-15', 10)]: pricedPair(priced(30_000)),
+        },
+      },
+    });
+    await findCalendar();
     await screen.findByTestId('dates-run');
     const seen: string[] = [];
     document.body.focus();
-    // why: each of the ten rows has its link and its price label (a disclosure) in the tab order
     for (let i = 0; i < 60; i += 1) {
       await user.tab();
       const el = document.activeElement;
       if (el === null || el === document.body) break;
+      const labelled = el instanceof HTMLInputElement ? (el.labels?.[0]?.textContent ?? null) : null;
       seen.push(
         el.getAttribute('data-cell') !== null
           ? 'overview'
-          : (el.getAttribute('aria-label') ?? el.textContent ?? ''),
+          : (el.getAttribute('aria-label') ?? labelled ?? el.textContent ?? ''),
       );
       if (el.textContent === 'Coverage of the latest run') break;
     }
     const index = (label: string | RegExp) =>
       seen.findIndex((s) => (typeof label === 'string' ? s === label : label.test(s)));
     const order = [
-      index(/^Searched today /),
+      index('Trips'),
       index('Search again'),
       index('Edit'),
-      index('Clear filters'),
-      index('Depart'),
-      index('Journey time'),
-      index(/^Open 14 Mar 2027/),
-      index('Show 1 more'),
+      index('what was searched'),
+      index('Shortest stay'),
+      index('One per week'),
+      // the synthetic trip's price is no link (spec §5.5): its label is the row's first stop
+      index(/^Google price · /),
+      index(/^Details for /),
+      index(/^Calendar · /),
+      index('See all on the calendar'),
       index('overview'),
       index('Coverage of the latest run'),
     ];
@@ -168,58 +180,42 @@ describe('Tab order across the view (spec §11 Accessibility)', () => {
     ).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(seen.filter((s) => s === 'overview')).toHaveLength(1);
-    expect(screen.getAllByRole('link', { name: /^Open \d/ })).toHaveLength(10);
   });
 });
 
-// Design 2026-11-08 §5.3: a row's flights open with a keyboard-operable button.
-describe('a row’s flights button (design 2026-11-08 §5.3)', () => {
+// Ruling 20: a calendar row's "Read flights" is a real button, in the tab order after its label.
+describe('a calendar row’s Read flights button', () => {
   async function renderOne() {
     server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
     const r = renderDates({
+      def: definition({ origins: ['LHR'], destinations: ['JFK'] }),
       body: {
+        origins: ['LHR'],
+        destinations: ['JFK'],
         discoveryProviders: ['travelpayouts', 'camoufox'],
-        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(90_000)) },
+        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(90_000), {}, 1) },
       },
     });
-    await findBoard();
-    const button = await screen.findByRole('button', { name: /^Show flights/ });
+    await findCalendar();
+    const button = await screen.findByRole('button', { name: /^Read flights for/ });
     return { ...r, button };
   }
 
-  it('is a real button in the tab order, after the row’s link', async () => {
+  it('is a real button in the tab order, after the row’s label', async () => {
     const { user, button } = await renderOne();
-    const link = screen.getByRole('link', { name: /^Open 14 Mar 2027/ });
-    link.focus();
-    // why: the row's price label (a disclosure) sits between its link and its flights button
-    await user.tab();
-    expect(screen.getByTestId('price-label').querySelector('summary')).toHaveFocus();
+    const label = screen.getByTestId('price-label').querySelector('summary');
+    if (!(label instanceof HTMLElement)) throw new Error('the row has its label');
+    label.focus();
     await user.tab();
     expect(button).toHaveFocus();
     expect(button.tagName).toBe('BUTTON');
     expect(button).not.toHaveAttribute('tabindex', '-1');
   });
 
-  it.each([
-    ['Enter', '{Enter}'],
-    ['Space', ' '],
-  ])('opens with %s and closes with it again, keeping focus', async (_name, key) => {
-    const { user, button } = await renderOne();
-    button.focus();
-    expect(document.querySelector('[data-flights-for]')).toBeNull();
-    await user.keyboard(key);
-    expect(button).toHaveAttribute('aria-expanded', 'true');
-    expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull();
-    expect(button).toHaveFocus();
-    await user.keyboard(key);
-    expect(button).toHaveAttribute('aria-expanded', 'false');
-    expect(document.querySelector('[data-flights-for]')).toBeNull();
-  });
-
-  // why: jsdom computes no focus ring; the rule that draws it is the stylesheet's, on every focusable element
-  it('carries no rule that hides its focus ring: the page-wide :focus-visible outline is the one that draws it', async () => {
-    const css = readFileSync(resolve(__dirname, '../../../src/styles/world.css'), 'utf8');
-    expect(css).toMatch(/:focus-visible\s*\{[^}]*outline/);
+  // why: jsdom computes no focus ring; the rule that draws it is the rows' stylesheet's
+  it('carries a visible focus ring: the rows draw it on :focus-visible', async () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/components/rows/rows.css'), 'utf8');
+    expect(css).toMatch(/\.trip-row :is\(a, button\):focus-visible\s*\{[^}]*outline: 2px solid/);
     const { button } = await renderOne();
     expect(button.className).not.toMatch(/outline-none|focus:outline-0/);
   });

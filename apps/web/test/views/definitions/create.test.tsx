@@ -208,9 +208,9 @@ describe('saved definitions (spec §8.1)', () => {
 });
 
 describe('the App (spec §11 layout)', () => {
-  it('a search’s page survives a view switch, the top bar is on every view, and a board row opens the Trip page', async () => {
+  it('a search’s page survives a view switch, the top bar is on every view, and a trip row opens the Trip page', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    await screen.findByRole('table', { name: /^Best dates/ });
+    await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await user.click(within(nav).getByRole('link', { name: 'Settings' }));
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
@@ -218,13 +218,11 @@ describe('the App (spec §11 layout)', () => {
     expect(await screen.findByRole('region', { name: COPY.topBar.limitsLabel })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
     // why: WP19 Task 19.7: the Trip page is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3),
-    // and a board row opens the Trip page
+    // and a trip row's › opens the Trip page
     await user.click(within(nav).getByRole('link', { name: 'Trips' }));
     await user.click(await screen.findByRole('link', { name: /^All trips and dates for / }));
-    const board = await screen.findByRole('table', { name: /^Best dates/ });
-    const [first] = within(board).getAllByRole('row').slice(1);
-    if (first === undefined) throw new Error('the board has a row');
-    await user.click(within(first).getAllByRole('link')[0] ?? first);
+    const trips = await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
+    await user.click(within(trips).getAllByRole('link', { name: /^Details for / })[0] ?? trips);
     expect(new URLSearchParams(window.location.search).get('view')).toBe('trip');
   });
 
@@ -255,7 +253,7 @@ describe('the App (spec §11 layout)', () => {
       ),
     );
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    await screen.findByRole('table', { name: /^Best dates/ });
+    await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
     expect(screen.getAllByText(/Synthetic data: the fixture provider is enabled/)).toHaveLength(1);
   });
 

@@ -3,10 +3,9 @@ import {
   type DecodedDatePairs,
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
-  rankTierOf,
   type StartRefusalCode,
 } from '@gmt/core';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import {
   DATES_DRAWN_MARK,
@@ -15,7 +14,7 @@ import {
   useLatestRun,
   useProvidersWatch,
 } from '../../api/queries.js';
-import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
+import type { DefinitionResponse, ExecutionResponse, SearchCard } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
@@ -24,21 +23,20 @@ import { useNow } from '../../now.js';
 import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '../../state/datesState.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
-import { BoardTable } from './BoardTable.js';
-import { type BoardModel, boardModel, PAGE_SIZE } from './board.js';
-import { ConfirmLine } from './ConfirmLine.js';
+import { nothingFound, nothingFoundText } from '../Searches/cardWords.js';
+import { type BoardModel, boardModel, shownCount } from './board.js';
+import { CheapestTrips, type NoTrip } from './CheapestTrips.js';
 import { CoverageSection } from './CoverageSection.js';
-import { confirmStepGoing } from './confirmWords.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters } from './Filters.js';
-import { type Animate, browserAnimate } from './flip.js';
+import { CALENDAR_ID, LowerOnCalendar } from './LowerOnCalendar.js';
 import { Overview } from './OverviewGrid.js';
-import { changeCount, IDLE, onProgress, onTerminal, onTimer, type Reread, readDecision } from './refresh.js';
-import { NoPriceInFilters, NoSearch, TooManyCells } from './States.js';
-import { bucketsUnder, countsClauses } from './stateLines.js';
-import { UpdateBoard } from './UpdateBoard.js';
+import { IDLE, onProgress, onTerminal, onTimer, type Reread } from './refresh.js';
+import { NoSearch, TooManyCells } from './States.js';
+import './dates.css';
 
 const D = COPY.datesView;
+const P = COPY.searchPage;
 const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 
 /** A clock and a timer the run re-reads go through; tests inject both (WP19 §0: no fixed waits, injected clocks). */
@@ -56,235 +54,146 @@ const browserClock: RereadClock = {
 
 export interface DatesViewProps {
   definition: DefinitionResponse | null;
-  /** The transition's Web Animations call (WP19 §6: injected so jsdom tests can spy on it). */
-  animate?: Animate;
   clock?: RereadClock;
 }
 
 /**
- * Spec §11 Dates (`?view=dates`, the default view): which dates to fly. It reads `GET /definitions/:id/date-pairs`
- * through core's decoder, applies the stay range, ranks with core's `rankDatePairs`, applies the week switch, and
- * renders the header line, the filters and the board (Task 19.4), then the overview and the coverage section.
+ * Design 2026-11-08 §5 (mockup 02): a search's page (`?view=dates&def=`). It reads `GET /definitions/:id/date-pairs`
+ * through core's decoder, applies the stay range, ranks with core's `rankDatePairs` and splits the ranking by core's
+ * shared rules, then renders the header (crumbs, name, meta line, actions, run line and the run's progress), the filter
+ * row, Cheapest trips and Lower on the calendar, then the calendar (the overview, until Task 9) and the coverage section.
  */
-export function DatesView({ definition, animate = browserAnimate, clock = browserClock }: DatesViewProps) {
+export function DatesView({ definition, clock = browserClock }: DatesViewProps) {
   if (definition === null) return <NoSearch />;
-  // why: a new search starts with its own reads, rings and shown rows
-  return <DatesOf key={definition.id} definition={definition} animate={animate} clock={clock} />;
+  // why: a new search starts with its own reads and shown rows
+  return <DatesOf key={definition.id} definition={definition} clock={clock} />;
 }
 
-interface Read {
+/** A read and the instant it was shown at: ranks use one instant per read, so they never drift between re-reads. */
+interface Shown {
   data: DecodedDatePairs;
-  /** The scope the read answered (the route's query), so a filter change never shows another scope's figures. */
-  scope: string;
-  /** The instant the read was shown at: ranks and shading use one instant per read, so they never drift. */
   now: IsoDateTime;
 }
-interface Track {
-  seen: DecodedDatePairs | undefined;
-  shown: Read | null;
-  pending: Read | null;
-  changes: number;
-  token: number;
-  message: string;
-}
 
-function DatesOf({
-  definition,
-  animate,
-  clock,
-}: {
-  definition: DefinitionResponse;
-  animate: Animate;
-  clock: RereadClock;
-}) {
+function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock: RereadClock }) {
   const params = useSearchParams();
-  // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened (the nav names it)
+  // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened
   useEffect(() => writeLastSearch(definition.id), [definition.id]);
   const state = useMemo(() => parseDatesState(params, definition), [params, definition]);
   // why: spec rev 55 §11 URLs — a refused Search now opens the new search's page with `refused=<code>`; a value that is
   // no refusal code is ignored, never an error
   const refused = refusalOf(params.get('refused'));
-  const scope = scopeQuery(state);
-  const scopeKey = JSON.stringify(scope);
-  const query = useDatePairs(definition.id, scope);
+  const query = useDatePairs(definition.id, scopeQuery(state));
   const providers = useProvidersWatch();
   const now = useNow();
-  const [visible, setVisible] = useState(PAGE_SIZE);
+  // why: "Show 10 more" presses; a filter change shows the first five of its own trips again
+  const [presses, setPresses] = useState(0);
   const [lit, setLit] = useState<number | null>(null);
-  const held = useRef(false);
-  const captionRef = useRef<HTMLElement>(null);
-  const [track, setTrack] = useState<Track>({
-    seen: undefined,
-    shown: null,
-    pending: null,
-    changes: 0,
-    token: 0,
-    message: '',
-  });
-  // why: the board model is memoised on the options' values, so one object per distinct set of them
+  // why: each read is placed with the instant it arrived (React's "adjust state when a prop changes"); a filter's new
+  // scope has no data until its own read answers, so another scope's figures are never shown (WP19 §6)
+  const [shown, setShown] = useState<Shown | null>(null);
+  if ((query.data ?? null) !== (shown?.data ?? null))
+    setShown(query.data === undefined ? null : { data: query.data, now });
   const options = useMemo(
-    () => ({ nights: state.nights, bestPerWeek: state.bestPerWeek, sort: state.sort }),
-    [state.nights, state.bestPerWeek, state.sort],
+    () => ({ nights: state.nights, bestPerWeek: state.bestPerWeek }),
+    [state.nights, state.bestPerWeek],
   );
+  const filterKey = `${JSON.stringify(scopeQuery(state))}|${JSON.stringify(options)}`;
+  const [seenFilters, setSeenFilters] = useState(filterKey);
+  if (seenFilters !== filterKey) {
+    setSeenFilters(filterKey);
+    setPresses(0);
+  }
 
-  const executionId = (track.shown ?? track.pending)?.data.executionId ?? null;
-  // why: spec rev 55 §11 — the latest run, polled while it is going (the bar's poll of the same run is the same query)
+  const data = shown?.data ?? null;
+  const executionId = data?.executionId ?? null;
+  // why: spec rev 55 §11 — the latest run, polled while it is going (the top bar's poll of the same run is one query)
   const watch = useLatestRun(executionId);
   const run: ExecutionResponse | undefined = watch.data?.id === executionId ? watch.data : undefined;
-  const latest = track.shown?.data.executions.find((e) => !e.isChild);
+  const latest = data?.executions.find((e) => !e.isChild);
   const status = run?.status ?? latest?.status;
   const runActive = status !== undefined && RUNNING.has(status);
-  // why: the card answers two things the page's scoped read cannot: whether the space changed since that run started
-  // (the api's own `spaceChangedSince`, never the search's updatedAt, which a Repeat weekly save also moves), and the
-  // whole search's counts while the run goes (ruling R-scope), so the cards are re-read only while it is going
-  const card = useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id);
-  const cardRun = card?.latestRun ?? null;
-  const sameRun = cardRun !== null && cardRun.id === executionId;
-  const spaceChanged = sameRun && card?.spaceChangedSince === true;
-  // why: the card's counts only while it describes this run as it now stands (a card read before the run moved is not)
-  const cardWhole =
-    cardRun !== null && sameRun && cardRun.status === status
-      ? { searched: cardRun.datePairsSearched, total: cardRun.datePairs }
-      : null;
-
-  // why: a new read is placed while rendering (React's "adjust state when a prop changes"), so a filtered read is
-  // never drawn for one frame under the previous scope, and a held read never touches the board
-  if (query.data !== track.seen) {
-    const data = query.data;
-    let next: Track = { ...track, seen: data };
-    if (data !== undefined) {
-      const read: Read = { data, scope: scopeKey, now };
-      if (track.shown === null || track.shown.scope !== scopeKey) {
-        next = { ...next, shown: read, pending: null, changes: 0 };
-      } else {
-        // why: the change count only decides a held read (refresh.ts readDecision applies every other one), so the two
-        // boards are built only while the board is held (WP19 Task 19.9: each is a rank of up to 36,400 date pairs)
-        const changes =
-          runActive && held.current
-            ? changeCount(
-                boardModel(track.shown.data.pairs, options, track.shown.now),
-                boardModel(data.pairs, options, now),
-                visible,
-              )
-            : 0;
-        next =
-          readDecision({ runActive, held: held.current, sameScope: true, changes }) === 'hold'
-            ? { ...next, pending: read, changes, message: D.pendingChanges(changes) }
-            : { ...next, shown: read, pending: null, changes: 0, token: track.token + 1, message: D.updated };
-      }
-    }
-    setTrack(next);
-  }
-  const applyPending = () =>
-    setTrack((t) =>
-      t.pending === null
-        ? t
-        : { ...t, shown: t.pending, pending: null, changes: 0, token: t.token + 1, message: D.updated },
-    );
-  const onHold = (h: boolean) => {
-    held.current = h;
-    // why: revision 50: once the pointer and the focus have left the board, a pending read applies in place
-    if (!h) applyPending();
-  };
+  // why: the card answers what the page's scoped read cannot (Ruling 7: the run's counts over its whole space, whether
+  // its dates changed since, and Ruling 8's reason for finding nothing), re-read only while its run is going
+  const card: SearchCard | null =
+    useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id) ?? null;
 
   useRunRereads(run, () => void query.refetch(), clock);
 
-  const shown = track.shown !== null && track.shown.scope === scopeKey ? track.shown : null;
   const model: BoardModel | null = useMemo(
     () => (shown === null ? null : boardModel(shown.data.pairs, options, shown.now)),
     [shown, options],
   );
+  const tripsShown = model === null ? 0 : shownCount(model.trips.length, presses);
   useEffect(() => {
-    // why: WP19 §6: the performance test measures from the response mark to this one, after the view commits
+    // why: WP19 §6: the performance test measures from the response mark to this one, after the header and both
+    // sections commit, and again after a filter change or "Show 10 more"
     if (model !== null) performance.mark(DATES_DRAWN_MARK);
-  }, [model]);
-
-  const data = shown?.data ?? null;
-  // why: spec §11 Rings, as changed by design 2026-11-08 §5.2: of the board's shown rows only the trips with flights
-  // read are outlined on the overview (a calendar price alone is not), the legend saying so
+  }, [model, tripsShown]);
+  // why: the calendar outlines the trips the page shows (design 2026-11-08 §5.2: a calendar price alone is not)
   const ringed = useMemo(
-    () =>
-      new Set(
-        (model?.rows ?? [])
-          .slice(0, visible)
-          .filter((p) => p.figure !== null && rankTierOf(p.figure) < 2)
-          .map((p) => p.index),
-      ),
-    [model, visible],
+    () => new Set((model?.trips ?? []).slice(0, tripsShown).map((p) => p.index)),
+    [model, tripsShown],
   );
   return (
-    <div className="dates-view space-y-5">
+    <div className="dates-view search-page token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
       {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
         <SyntheticBanner />
       ) : null}
-      {/* why: the refusal speaks only while the search has no run: once a press starts one, the page shows that run */}
       <DatesHeader
         definition={definition}
         data={data}
         model={model}
-        state={state}
         run={run}
         now={now}
         refused={refused}
-        spaceChanged={spaceChanged}
-        cardWhole={cardWhole}
+        card={card}
       />
       <Filters definition={definition} state={state} />
-      <p role="status" className="sr-only">
-        {track.message}
-      </p>
-      <Body
-        query={query}
-        data={data}
-        model={model}
-        state={state}
-        runActive={runActive}
-        board={(m, d) => (
-          <BoardTable
+      {data === null || model === null ? (
+        <Pending query={query} />
+      ) : data.executions.length === 0 ? null : (
+        <>
+          {data.executionId === null ? (
+            <p className="search-section-sub">
+              {D.onDemandOnly(data.executions.filter((e) => e.isChild).length)}
+            </p>
+          ) : null}
+          {query.error !== null ? <LoadError error={query.error} retry={() => void query.refetch()} /> : null}
+          <CheapestTrips
             definition={definition}
-            data={d}
-            model={m}
-            state={state}
+            data={data}
+            trips={model.trips}
+            shown={tripsShown}
+            onShowMore={() => setPresses((n) => n + 1)}
+            overLimit={model.overLimit}
+            limit={state.journey ?? definition.constraints.maxJourneyMinutes ?? null}
+            run={run}
             runActive={runActive}
-            visible={visible}
-            onShowMore={() => setVisible((v) => v + PAGE_SIZE)}
+            filtered={filtersActive(state)}
+            noTrip={noTripOf(model, state, runActive, card)}
+          />
+          <LowerOnCalendar
+            definition={definition}
+            data={data}
+            lower={model.lower}
+            hasTrip={model.trips.length > 0}
+          />
+        </>
+      )}
+      {data !== null && model !== null ? (
+        <div id={CALENDAR_ID} className="search-calendar">
+          <Overview
+            definition={definition}
+            data={data}
+            model={model}
+            state={state}
+            ringed={ringed}
             lit={lit}
             onLight={setLit}
-            token={track.token}
-            animate={animate}
-            captionRef={captionRef}
-            onHold={onHold}
-            update={
-              track.pending !== null && track.pending.scope === scopeKey ? (
-                <UpdateBoard changes={track.changes} onApply={applyPending} />
-              ) : null
-            }
           />
-        )}
-      />
-      {/* why: design 2026-11-08 §5.5 — under the board: how checking flights ended (nothing for a run with no summary) */}
-      {data !== null && run?.flights != null ? (
-        <ConfirmLine
-          confirm={run.flights.confirm}
-          ended={run.flights.ended}
-          stopCause={run.flights.stopCause}
-          // why: final whole-branch review: only a running run reads pages (a pending one is queued or waiting to
-          // resume), the rule stateLines and the card's words apply
-          running={run.status === 'running' && confirmStepGoing(run.flights)}
-          planned={run.flights.planned}
-        />
-      ) : null}
-      {data !== null && model !== null ? (
-        <Overview
-          definition={definition}
-          data={data}
-          model={model}
-          state={state}
-          ringed={ringed}
-          lit={lit}
-          onLight={setLit}
-        />
+        </div>
       ) : null}
       <CoverageSection definition={definition} open={state.coverageOpen} />
     </div>
@@ -297,65 +206,48 @@ function refusalOf(v: string | null): StartRefusalCode | null {
 }
 
 /**
- * The board's place: the state the read is in (spec §11 States), or the board itself. A never-searched search shows no
- * board (its state line says so, with Search now, and the overview marks every date pair not searched); a stopped run's
- * board shows the prices found before the stop (its state line says why).
+ * What "Cheapest trips" says with no trip (Review Focus 3, Ruling 8), the first that applies: calendar prices below, so
+ * "No flights read yet for these dates…"; the filters leave no price; the search is still going; else the card's
+ * reason the search found nothing ("No prices were found. That isn't the same as no flights." when it names none).
  */
-function Body({
-  query,
-  data,
-  model,
-  state,
-  runActive,
-  board,
-}: {
-  query: ReturnType<typeof useDatePairs>;
-  data: DecodedDatePairs | null;
-  model: BoardModel | null;
-  state: DatesUiState;
-  runActive: boolean;
-  board: (m: BoardModel, d: DecodedDatePairs) => ReactNode;
-}) {
-  if (data === null || model === null) {
-    const e = query.error;
-    if (e instanceof ApiError && e.code === 'too_many_cells') {
-      const cells = e.detailNumber('cells');
-      const bound = e.detailNumber('bound');
-      if (cells !== null && bound !== null) return <TooManyCells cells={cells} bound={bound} />;
-    }
-    if (e !== null) return <LoadError error={e} retry={() => void query.refetch()} />;
-    return (
-      <p role="status" className="loading-line">
-        {D.loadingFiltered}
-      </p>
-    );
+function noTripOf(
+  model: BoardModel,
+  state: DatesUiState,
+  runActive: boolean,
+  card: SearchCard | null,
+): NoTrip | null {
+  if (model.trips.length > 0) return null;
+  if (model.lower.length > 0) return { text: P.noTrip, clear: false };
+  if (filtersActive(state)) return { text: P.noPriceInFilters, clear: true };
+  if (runActive) return { text: P.stillSearching, clear: false };
+  const found = card === null ? null : nothingFound(card);
+  return {
+    text: found === null ? COPY.searchesView.nothingFound.nothing : nothingFoundText(found),
+    clear: false,
+  };
+}
+
+/** The page's read while it loads or fails: the route's 422 `too_many_cells`, a load error with Retry, or loading. */
+function Pending({ query }: { query: ReturnType<typeof useDatePairs> }) {
+  const e = query.error;
+  if (e instanceof ApiError && e.code === 'too_many_cells') {
+    const cells = e.detailNumber('cells');
+    const bound = e.detailNumber('bound');
+    if (cells !== null && bound !== null) return <TooManyCells cells={cells} bound={bound} />;
   }
-  if (data.executions.length === 0) return null;
-  const onDemand = data.executions.filter((e) => e.isChild).length;
+  if (e !== null) return <LoadError error={e} retry={() => void query.refetch()} />;
   return (
-    <>
-      {query.error !== null ? <LoadError error={query.error} retry={() => void query.refetch()} /> : null}
-      {data.executionId === null ? (
-        <p className="plate notice font-semibold">{D.onDemandOnly(onDemand)}</p>
-      ) : null}
-      {model.ranked.length > 0 ? (
-        board(model, data)
-      ) : filtersActive(state) ? (
-        <NoPriceInFilters
-          counts={countsClauses(model.inView, COPY)}
-          buckets={bucketsUnder(model.inView, COPY)}
-        />
-      ) : (
-        <p className="plate notice font-semibold">{runActive ? D.partial : D.noPricesInRun}</p>
-      )}
-    </>
+    <p role="status" className="loading-line">
+      {D.loadingFiltered}
+    </p>
   );
 }
 
 /**
- * Spec §11 Run landing: while the latest parent run is pending or running, a progress change from the status bar's
- * execution poll re-reads the route at most once every 30 s (a trailing read keeps the last change), and the run
- * leaving pending or running is read at once. The state machine is refresh.ts; this hook feeds it and keeps its timer.
+ * Spec §11 Run landing, Ruling 17: while the latest parent run is pending or running, a progress change from its poll
+ * re-reads the route at most once every 30 s (a trailing read keeps the last change), and the run leaving pending or
+ * running is read at once. Each read shows as it lands; rows carry their ages. The state machine is refresh.ts; this
+ * hook feeds it and keeps its timer.
  */
 function useRunRereads(run: ExecutionResponse | undefined, reread: () => void, clock: RereadClock): void {
   const machine = useRef<Reread>(IDLE);

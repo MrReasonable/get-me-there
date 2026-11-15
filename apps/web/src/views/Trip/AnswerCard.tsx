@@ -9,11 +9,10 @@ import { listText } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
+import { type ListsState, refusalWords } from '../../lib/flightReads.js';
 import { readStateWords } from '../../lib/readStateWords.js';
 import { useNow } from '../../now.js';
 import { FlightRead } from '../Dates/BoardCard.js';
-import type { ListsState } from '../Dates/board.js';
-import { refusalWords } from '../Dates/Flights.js';
 import { hoursText } from '../Dates/flightLines.js';
 import { readAt } from '../Dates/stateLines.js';
 import { Amount } from './Amount.js';
@@ -132,8 +131,8 @@ function Actions({
           departureDate: r.departureDate,
           returnDate: r.returnDate,
         };
-  // final review M3: a calendar price is checked where it stands too (the search page's calendar-gap links open its
-  // Trip page on its own airports for this), as is a read trip or a verified price
+  // final review M3: a calendar price is checked where it stands too, on its own airports, as is a read trip or a
+  // verified price
   const check =
     (state.kind === 'trip' || state.kind === 'verified' || f?.basis === 'calendar') &&
     r.verificationConfigured &&

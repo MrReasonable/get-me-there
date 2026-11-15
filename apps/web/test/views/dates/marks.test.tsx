@@ -15,7 +15,7 @@ import {
   verifiedFig,
 } from '../../fixtures.dates.js';
 import { renderedCopy } from '../../guards.js';
-import { findBoard, renderDates } from './render.js';
+import { findCalendar, renderDates } from './render.js';
 
 // Spec §9's pinned review focus "Coverage marks never read as no flights" and "Nothing conveyed by colour alone", for
 // the overview (spec rev 55 §3, §6.6, §11: the five marks): each unpriced date pair's mark in words on the cell, its
@@ -51,7 +51,7 @@ describe('coverage marks never read as no flights (spec §9)', () => {
   ];
   it('each unpriced date pair alone: the cell’s mark, its accessible name and its readout use that mark’s words', async () => {
     renderDates({ body: body(alone.map(([b]) => b)) });
-    await findBoard();
+    await findCalendar();
     alone.forEach(([, mark], i) => {
       const c = cell(`2027-03-${15 + i}`, 10);
       expect(c.getAttribute('data-marks'), mark).toBe(mark);
@@ -62,8 +62,13 @@ describe('coverage marks never read as no flights (spec §9)', () => {
     });
     // an error cell says "couldn't be read" in its name (spec rev 55 §11)
     expect(cell('2027-03-17', 10)).toHaveAccessibleName(/couldn't be read$/);
-    // why: the thin-coverage line's own words ("not evidence that no flights exist") are the spec's, and the only ones
-    expect(renderedCopy().replaceAll(COPY.searchPage.thinCoverage, '')).not.toMatch(/no flights/i);
+    // why: Review Focus 3's own sentence ("No flights read yet for these dates…") and "That isn't the same as no
+    // flights" are the only ones that say it
+    expect(
+      renderedCopy()
+        .replaceAll(COPY.searchPage.noTrip, '')
+        .replace(/isn't the same as no flights/g, ''),
+    ).not.toMatch(/no flights/i);
   });
 
   it('mixed with the others, §6.6’s precedence decides, and "partly not searched" when some are not searched', async () => {
@@ -75,7 +80,7 @@ describe('coverage marks never read as no flights (spec §9)', () => {
       [{ error: 3 }, 'not-searched partly'],
     ];
     renderDates({ body: body(mixed.map(([b]) => b)) });
-    await findBoard();
+    await findCalendar();
     mixed.forEach(([, mark], i) => {
       expect(cell(`2027-03-${15 + i}`, 10).getAttribute('data-marks'), String(i)).toBe(mark);
     });
@@ -83,7 +88,7 @@ describe('coverage marks never read as no flights (spec §9)', () => {
 
   it('one empty airport pair and three not searched is "not searched" with the stripes, never "no price shown"', async () => {
     renderDates({ body: body([{ empty: 1 }]) });
-    await findBoard();
+    await findCalendar();
     const c = cell('2027-03-15', 10);
     expect(c).toHaveAccessibleName(/: not searched, partly not searched$/);
     expect(c.className).toContain('dates-partly');
@@ -92,7 +97,7 @@ describe('coverage marks never read as no flights (spec §9)', () => {
 
   it('no mark reads "no flights", and "no fares" only under "no price shown" in the key', async () => {
     renderDates({ body: body([{ empty: 4 }, { no_data: 4 }, { error: 4 }, { skipped: 4 }, {}]) });
-    await findBoard();
+    await findCalendar();
     const overview = screen.getByTestId('dates-overview');
     expect(within(overview).queryAllByRole('button', { name: /no fares|no flights/ })).toEqual([]);
   });
@@ -109,14 +114,14 @@ describe('coverage marks never read as no flights (spec §9)', () => {
         },
       },
     });
-    await findBoard();
+    await findCalendar();
     expect(cell('2027-03-15', 10)).toHaveAttribute('data-shade', 'none');
     expect(cell('2027-03-15', 10).getAttribute('data-marks')).toBe('not-searched');
     expect(cell('2027-03-14', 10)).toHaveAttribute('data-shade', 'flat');
     expect(cell('2027-03-14', 10).getAttribute('data-marks')).toBe('partly');
     expect(cell('2027-03-14', 10).className).toContain('dates-partly');
     fireEvent.pointerOver(cell('2027-03-14', 10));
-    expect(readout()).toHaveTextContent('price from an earlier search');
+    expect(within(readout()).getByTestId('price-cell')).toHaveTextContent('£412');
   });
 });
 
@@ -145,7 +150,7 @@ describe('distinct marks, never colour alone (spec §9, §11)', () => {
         },
       },
     });
-    await findBoard();
+    await findCalendar();
     const legend = screen.getByTestId('dates-legend');
     // 31 days × 3 stays = 93 date pairs: 3 priced, 1 empty, 86 no cached data (the rest), 1 error, 1 skipped, 1 not run
     const key = (m: string) => {
@@ -188,7 +193,7 @@ describe('distinct marks, never colour alone (spec §9, §11)', () => {
       ]),
     );
     renderDates({ body: { rest: { no_data: 4 }, pairs: eleven } });
-    await findBoard();
+    await findCalendar();
     const legend = screen.getByTestId('dates-legend');
     expect(legend).toHaveTextContent('brighter is cheaper');
     expect(legend).toHaveTextContent(/band 1: £\d/);

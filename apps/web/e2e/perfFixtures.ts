@@ -18,10 +18,11 @@ import {
 import type { Page } from '@playwright/test';
 
 /**
- * The performance test's world (spec §9 item 6, WP19 Task 19.9): a synthetic search and the responses the Dates view
+ * The performance test's world (spec §9 item 6, WP19 Task 19.9): a synthetic search and the responses a search's page
  * reads, every one parsed through `@gmt/core`'s contract schemas so the test serves only bodies the api could send.
  * The date-pairs bodies are built by core's `encodeDatePairs` from a decoded read, so they are the codec's own output.
- * Every price is the fixture provider's, `sourceKind: 'synthetic'` (spec §5.5).
+ * Every calendar price is the fixture provider's, `sourceKind: 'synthetic'` (spec §5.5); one date in thirteen is a trip
+ * with flights read, priced from the browser's flight list.
  */
 
 /** The instant the page's clock is installed at; every age and run time is relative to it. */
@@ -93,6 +94,50 @@ const PROVENANCE = provenanceSchema.parse({
   cabin: 'economy',
 });
 
+/** The browser's flight-list provenance of the read trips (a real source, its own page, GBP, UK point of sale). */
+const FLIGHT_LIST = provenanceSchema.parse({
+  providerId: 'camoufox',
+  sourceKind: 'scraped-self',
+  fetchedAt: FETCHED,
+  maxAgeHours: 0,
+  fx: { converted: false },
+  pointOfSale: 'GB',
+  cabin: 'economy',
+});
+
+/**
+ * Whether date pair `i` is a trip with flights read (design 2026-11-08 Ruling 4): one in thirteen, so Cheapest trips
+ * has thousands of rows to page through ("Show 10 more") and Lower on the calendar its calendar prices below them.
+ */
+const isReadTrip = (i: number): boolean => i % 13 === 5;
+
+/** A read trip's pairing group (spec rev 56 §10): a seller's offer for both legs, as the api decodes it. */
+function pairingOf(pence: number): NonNullable<DatePairFigure['pairing']> {
+  return {
+    pricePence: pence,
+    fromPence: pence,
+    isFrom: false,
+    seller: 'QQ Travel',
+    fare: null,
+    offersRead: 3,
+    complete: true,
+    which: 'cheapest',
+    departOut: '07:15',
+    arriveOut: '18:05',
+    departBack: '14:20',
+    arriveBack: '06:25',
+    legs: {
+      out: { durationMinutes: 650, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 0 },
+      back: { durationMinutes: 725, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: 1 },
+    },
+    mismatch: false,
+    provenance: FLIGHT_LIST,
+    stale: false,
+    ageHours: 1,
+    bookingUrl: null,
+  };
+}
+
 /** A price for date pair `i`; `seed` changes the whole order, so a second read re-ranks every row. */
 function priceOf(i: number, seed: number): number {
   // why: a multiplicative hash over £300–£799 in whole pounds; another seed moves every date pair's rank
@@ -122,33 +167,38 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
     const unpriced = !c.everyPriced && i % 7 === 3;
     const which = i % airportPairs;
     const ap = pairsOfAirports[which] ?? pairsOfAirports[0];
+    const pence = priceOf(i, seed);
+    const read = isReadTrip(i);
     const figure: DatePairFigure | null =
       unpriced || ap === undefined
         ? null
         : {
             price: {
-              pricePence: priceOf(i, seed),
-              provenance: PROVENANCE,
+              // why: a read trip's price is its pairing's (£100 above the calendar price it replaced)
+              pricePence: read ? pence + 10_000 : pence,
+              provenance: read ? FLIGHT_LIST : PROVENANCE,
               stale: false,
               ageHours: 1,
               truncated: false,
             },
-            basis: 'calendar',
+            basis: read ? 'pairing' : 'calendar',
             origin: ap.origin,
             destination: ap.destination,
             airportPair: which,
             superseded: false,
             notSeenInLatest: null,
-            journeyMinutes: null,
+            journeyMinutes: read ? 650 + 725 : null,
             departOut: null,
             arriveOut: null,
             departBack: null,
             arriveBack: null,
             fromEarlierSearch: false,
             cheaperCached: null,
-            gridPrice: null,
-            pairing: null,
-            pairingRead: 'not-read',
+            gridPrice: read
+              ? { pricePence: pence, provenance: PROVENANCE, stale: false, truncated: false }
+              : null,
+            pairing: read ? pairingOf(pence + 10_000) : null,
+            pairingRead: read ? 'within' : 'not-read',
             listReason: null,
             hasBookingOptions: false,
           };

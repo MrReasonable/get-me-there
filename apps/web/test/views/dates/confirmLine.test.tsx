@@ -1,16 +1,17 @@
 import type { ConfirmSummary } from '@gmt/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import { ConfirmLine } from '../../../src/views/Dates/ConfirmLine.js';
 import { workedDates } from '../../fixtures.dates.js';
 import { API, execution } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
-import { findBoard, renderDates } from './render.js';
+import { findTrips, renderDates } from './render.js';
 
-// Design 2026-11-08 §5.5: how checking flights ended, in one line under the board. The exact copy is pinned in
-// logic/confirmWords.test.ts; here the component renders it, and the search page puts it under the board and in its
-// state line.
+// Design 2026-11-08 §5.5, Ruling 22: how reading flights ended, the stopping sentence after "Cheapest trips"' lead. The
+// exact copy is pinned in logic/confirmWords.test.ts; here the component renders it, and the page puts it in the
+// section's lead, never in the run line.
 
 const summary = (over: Partial<ConfirmSummary> = {}): ConfirmSummary => ({
   mode: 'confirm',
@@ -20,30 +21,38 @@ const summary = (over: Partial<ConfirmSummary> = {}): ConfirmSummary => ({
   stop: 'patience',
   ...over,
 });
+const input = (over: Partial<Parameters<typeof ConfirmLine>[0]['input'] & object> = {}) => ({
+  confirm: summary(),
+  ended: null,
+  stopCause: null,
+  running: false,
+  planned: 18,
+  theseFive: false,
+  ...over,
+});
+const LEAD = COPY.searchPage.cheapestLead;
 
 describe('ConfirmLine', () => {
-  it('renders the line as plain text', () => {
-    render(<ConfirmLine confirm={summary()} ended={null} stopCause={null} running={false} planned={18} />);
-    expect(screen.getByTestId('confirm-line')).toHaveTextContent(
-      "Checked 18 dates; 7 trips with flights read. 31 dates look cheaper on the calendar but weren't checked.",
+  it('the lead, then the sentence as plain text', () => {
+    render(<ConfirmLine lead={LEAD} input={input()} />);
+    expect(screen.getByText(LEAD, { exact: false })).toHaveTextContent(
+      "Flights read for these dates. Checked 18 dates; 7 trips with flights read. Reading stopped after 12 reads in a row found nothing cheaper than the five cheapest. 31 dates look cheaper on the calendar but weren't checked.",
     );
   });
 
-  it('renders nothing for a run with no summary (a run before the change, or one that never reached the step)', () => {
-    const { container } = render(
-      <ConfirmLine confirm={null} ended={null} stopCause={null} running={false} planned={0} />,
-    );
-    expect(container).toBeEmptyDOMElement();
+  it('the lead alone for a run with no summary (a run before the change, or one that never reached the step)', () => {
+    const { container } = render(<ConfirmLine lead={LEAD} input={input({ confirm: null })} />);
+    expect(container).toHaveTextContent(/^Flights read for these dates\.$/);
+    expect(screen.queryByTestId('confirm-line')).toBeNull();
+    render(<ConfirmLine lead={LEAD} input={null} />);
+    expect(screen.queryByTestId('confirm-line')).toBeNull();
   });
 
   it('while the step runs, the running words', () => {
     render(
       <ConfirmLine
-        confirm={summary({ confirmed: 3, stop: null })}
-        ended={null}
-        stopCause={null}
-        running
-        planned={9}
+        lead={LEAD}
+        input={input({ confirm: summary({ confirmed: 3, stop: null }), running: true, planned: 9 })}
       />,
     );
     expect(screen.getByTestId('confirm-line')).toHaveTextContent(
@@ -66,66 +75,33 @@ const flights = (over: Partial<NonNullable<ReturnType<typeof execution>['flights
 });
 
 describe('the search page', () => {
-  it('shows the line under the board, and the header line adds no flights clause of its own', async () => {
+  it('puts the sentence in Cheapest trips’ lead; the run line says only the dates with flights read', async () => {
     serveRun({ status: 'completed', flights: flights() });
     renderDates({ body: workedDates() });
-    const table = await findBoard();
-    const line = await screen.findByTestId('confirm-line');
+    const trips = await findTrips();
+    const line = await within(trips).findByTestId('confirm-line');
     expect(line).toHaveTextContent('Checked 18 dates; 7 trips with flights read.');
-    // under the table, not inside it
-    expect(table.contains(line)).toBe(false);
-    expect(table.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByTestId('dates-run')).not.toHaveTextContent(/flights read for/);
+    const run = await screen.findByTestId('dates-run');
+    expect(run).not.toHaveTextContent(/Checked|flights read for/);
+    expect(run.contains(line)).toBe(false);
   });
 
-  it('shows an ending page by the stop detail the api reports', async () => {
-    serveRun({
-      status: 'completed',
-      flights: flights({
-        planned: 3,
-        read: 3,
-        ended: 'stopped',
-        confirm: summary({ confirmed: 1, uncheckedCheaper: 120, stop: null }),
-        stopCause: { kind: 'detail', detail: 'quota' },
-      }),
-    });
-    renderDates({ body: workedDates() });
-    expect(await screen.findByTestId('confirm-line')).toHaveTextContent(
-      "Stopped checking flights after 3 dates because the browser worker's plan has no calls left; 1 trip with flights read. 120 dates weren't checked.",
-    );
-  });
-
-  it('shows no line for a run stored before the change', async () => {
-    serveRun({ status: 'completed', flights: flights({ confirm: null }) });
-    renderDates({ body: workedDates() });
-    await findBoard();
-    await waitFor(() => expect(screen.getByTestId('dates-run')).toBeInTheDocument());
-    expect(screen.queryByTestId('confirm-line')).toBeNull();
-  });
-
-  it('while the step runs, the state line and the line under the board say it in the same words', async () => {
-    serveRun({
-      status: 'running',
-      stage: 'discovery',
-      flights: flights({ planned: 9, read: 4, reused: 1, confirm: summary({ confirmed: 3, stop: null }) }),
-    });
-    renderDates({ body: workedDates() });
-    const words = 'Checking flights: 9 dates so far; 3 trips with flights read.';
-    expect(await screen.findByTestId('confirm-line')).toHaveTextContent(words);
-    await waitFor(() => expect(screen.getByTestId('state-line')).toHaveTextContent(words.replace(/\.$/, '')));
-    expect(screen.getByTestId('state-line')).not.toHaveTextContent(/ of \d+/);
-  });
-
-  // why: final whole-branch review: a pending run (queued, or waiting to resume) reads no pages, so the line under the
-  // board does not say "Checking flights"; only a running one does, as the state line and the card decide it
-  it('a pending run with a step still going: the line under the board does not say it is checking flights', async () => {
+  it('a pending run with a step still going does not say it is checking flights', async () => {
     serveRun({
       status: 'pending',
       flights: flights({ planned: 9, read: 4, reused: 1, confirm: summary({ confirmed: 3, stop: null }) }),
     });
     renderDates({ body: workedDates() });
-    const line = await screen.findByTestId('confirm-line');
+    const line = await within(await findTrips()).findByTestId('confirm-line');
     expect(line).toHaveTextContent('3 trips with flights read');
     expect(line).not.toHaveTextContent(/Checking flights/);
+  });
+
+  it('a run stored before the change has no sentence', async () => {
+    serveRun({ status: 'completed', flights: flights({ confirm: null }) });
+    renderDates({ body: workedDates() });
+    const trips = await findTrips();
+    await waitFor(() => expect(screen.getByTestId('dates-run')).toBeInTheDocument());
+    expect(within(trips).queryByTestId('confirm-line')).toBeNull();
   });
 });

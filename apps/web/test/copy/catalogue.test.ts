@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BANNED_WORD_ALLOWLIST, findBannedWords, SOURCE_LABELS } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 
@@ -110,8 +110,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.windowRolling': [182, 7],
   'searchesView.repeats': [[1, 4], '05:00'],
   'searchesView.repeatsDaily': ['05:00'],
-  'searchesView.searching': [120, 405, 'about 1h 40m left'],
-  'searchesView.left': ['1h 40m'],
   'searchesView.searchedMeta': ['2h ago'],
   'searchesView.tripsLabel': ['Birmingham → Frankfurt'],
   'searchesView.leaveWindow': ['10 Jan – 31 Mar'],
@@ -134,102 +132,38 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.undoOf': ['Birmingham → Frankfurt'],
   'searchesView.removeFailedLine': ['HTTP 500'],
   'searchesView.restoreFailedLine': ['HTTP 500'],
-  'datesView.scopeAirports': [2, 4],
   'datesView.scopeNights': [10, 14],
-  'datesView.journeyBounds': [60, 6000],
-  'datesView.showMore': [10],
-  'datesView.showing': [10, 42],
-  'datesView.bestPerWeek': [26],
-  'datesView.openDates': ['14 Mar 2027', '28 Mar 2027'],
-  'datesView.arrives': ['06:40', 1],
-  'datesView.arrivesOn': ['Monday 15 March 2027'],
   'datesView.airports': ['LHR', 'JFK'],
   'datesView.cachedFromPair': ['LGW', 'EWR'],
-  'datesView.howFar.itinerarySearched': [1, 4],
-  'datesView.howFar.notReached': [2],
-  'datesView.howFar.selectedOther': [1],
-  'datesView.howFar.onDemand': [1],
-  'datesView.howFar.partiallyVerified': [2],
-  'datesView.howFar.unconfirmed': [1],
-  'datesView.howFar.bucket': [3, 'no cached data'],
-  'datesView.howFar.notSearched': [1, 2],
-  'datesView.howFar.noneWithin': ['10h 00m'],
-  'datesView.updateBoard': [3],
-  'datesView.pendingChanges': [3],
   'datesView.onDemandOnly': [2],
   'datesView.tooManyCells': [100000, 50000],
-  'datesView.howFar.calendar': ["from Google's date grid"],
   'datesView.legend.noPriceParts': [12, 3],
   'datesView.legend.striped': [4],
   // WP20 Task 20.6: a search's page (spec rev 55 §11)
-  'searchPage.route': ['London → New York', 'LHR, LGW → JFK, EWR'],
-  'searchPage.windowSpan': ['10 Jan 2027', '31 Mar 2027'],
-  'searchPage.windowRolling': [182, 7, '21 Oct 2026 – 20 Apr 2027'],
+  'searchPage.leaveRolling': ['14 Mar – 13 Apr'],
+  'searchPage.eachWayUnder': ['25h'],
   'searchPage.searched': ['today 09:12–11:41'],
   'searchPage.dayTime': ['yesterday', '11:44'],
   'searchPage.span': ['09:12', '11:41'],
   'searchPage.fromOnly': ['09:12'],
-  'searchPage.pricedOf': [300, 405],
-  'searchPage.noPriceShown': [20],
-  'searchPage.notSearched': [60],
-  'searchPage.notReached': [20],
-  'searchPage.couldntRead': [5],
-  'searchPage.reused': [120],
-  'searchPage.readingFlights': [3, 10, 'about 8m left'],
-  'searchPage.flightsReadFor': [4, 10],
-  'searchPage.flightsFailed': [2],
-  'searchPage.noneSearched': [405],
-  'searchPage.staleAll': ["older than this search's refresh"],
-  'searchPage.gapLead': [3],
+  'searchPage.calendarPrices': [2146, 2184],
+  'searchPage.datesWithFlightsRead': [23],
+  'searchPage.journeyChip': ['20h'],
+  'searchPage.journeyChipRemove': ['20h'],
+  'searchPage.overLimit': [2, '25h'],
+  'searchPage.showMore': [10],
+  'searchPage.inAll': [155],
   // WP20 Task 20.10: the flights on a search's page
-  'flights.outcomeAt': ['11:44'],
-  'flights.head': ['3d ago', '12 Mar 11:44'],
-  'flights.otherPair': ['LGW', 'EWR'],
-  'flights.times': ['07:15', '18:05', 1],
   'flights.changes': [1],
   'flights.operatedBy': ['Virgin Atlantic', 'Delta'],
-  'flights.within': ['10h 50m', '25h'],
-  'flights.overLimit': ['26h', '25h'],
-  'flights.arrivesOutside': ['03:10'],
-  'flights.departsOutside': ['06:10'],
-  'flights.more': [3, 1],
-  'flights.notRead': ['its monthly limit is used up'],
-  'flights.noFlightsWhen': ['11:44'],
-  'flights.noneForCell': [2, 1],
-  'flights.readButton': [2],
   // WP21 Task 21.7: the return leg on a search's page (spec rev 56 §11)
-  'flights.headPairing': ['next-cheapest', true, '3d ago', '12 Mar 11:44'],
-  'flights.headPairingOver': [true, '3d ago', null],
-  'flights.headPairingWhenRead': ['next-cheapest', true, '3d ago', '12 Mar 11:44'],
-  'flights.pairingHeadOverWhenRead': ['3d ago'],
-  'flights.triedSomeWhenRead': [1, 3],
-  'flights.returnsShown': [5, true],
-  'flights.withinLeg': ['return', '12h 05m', '25h'],
-  'flights.overLimitLeg': ['return', '26h', '25h'],
-  'flights.stopsOver': ['return', 2, 1],
-  'flights.limitsWithReturns': [
-    'airline settings not applied to flights read',
-    'windows apply to the outbound',
-  ],
-  'flights.limitsOutboundOnly': ['return leg not read', 'airline settings not applied to flights read'],
-  'flights.pairingHead': ['next-cheapest'],
-  'flights.pairingHeadWhenRead': ['cheapest', '3d ago'],
-  'flights.noOutboundFits': [4],
-  'flights.returnTimes': ['14:20', '06:25', -1],
   'flights.sellerLine': ['QQ Fares', 'Economy Basic', 3],
-  'flights.returnMore': [2, 1],
   'flights.returnCounts': [2, 1],
   'flights.moreListed': [12, 10],
-  'flights.triedSome': [1, 5],
   'flights.returnSkipped': ['the wait between pages ran past its time'],
   'flights.returnTransient': [false],
-  'flights.bookingTransient': [true],
-  'flights.bookingSkipped': ['the list was not on its Cheapest view'],
   'flights.readDoneReturns': ['14 → 24 Mar', 2],
   'datesView.pairingTimes': ['07:15', '14:20'],
-  'datesView.readAgo': [6],
-  'datesView.pairingChanges': ['direct', '1 change'],
-  'datesView.flightsToggleOf': ['14 Mar 2027', '24 Mar 2027'],
   'datesView.confirm.dates': [18],
   'datesView.confirm.trips': [7],
   'datesView.confirm.unread': [2],
@@ -240,14 +174,12 @@ const SAMPLES: Record<string, unknown[]> = {
   'datesView.confirm.unchecked': [120],
   'datesView.confirm.stopped': ['9 dates', "the browser's time ran out"],
   'datesView.confirm.running': [9, '3 trips with flights read'],
-  'datesView.gridShowed': ['the date grid'],
-  'datesView.gridShowedAt': ['10 Mar 09:30'],
-  'datesView.sellerCoverage': [1, 2],
+  'datesView.confirm.patience': [12, 'these five'],
+  'datesView.confirm.theseTrips': [5],
+  'datesView.confirm.cheapestTrips': [5],
   'datesView.pairingBeneath': ['9d ago'],
   'datesView.listFailed': ["the browser worker's monthly limit is used up"],
-  'flights.openLinkName': ['14 → 24 Mar'],
   'flights.datesShort': ['14', '24 Mar'],
-  'flights.tie': [6, '£86', true, 4],
   'flights.readDone': ['14 → 24 Mar'],
   'flights.readNotDone': ['14 → 24 Mar'],
   // WP19 (Task 19.5): the overview, its legend and readout
@@ -400,13 +332,6 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'alertsView.requireAll',
       'alertsView.classVerified',
       'alertsView.classPartial',
-      // WP20 Task 20.6: the same banner on a search's page, its reference a class-verified price
-      'searchPage.gapLead',
-      // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
-      'datesView.howFar.verified',
-      'datesView.howFar.partiallyVerified',
-      // the departure board: a row's state word on its flaps, shown only on a row whose figure is class verified
-      'datesView.stateFlap.verified',
     ]);
     // why: the exemption list must not outlive its strings: a renamed or removed key would otherwise leave a stale
     // entry, and a new string later added at that path would inherit the exemption unreviewed.
@@ -443,9 +368,9 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     // the walk must find the main path's own blocks, so it cannot pass by reaching nothing
     for (const p of [
       'searchPage',
-      'searchesView.searching',
+      'searchesView.datesChanged',
       'datesView.marks',
-      'datesView.howFar',
+      'datesView.confirm',
       'repeatWeekly',
     ])
       expect(
@@ -487,19 +412,6 @@ describe('glyph set (review ui I2)', () => {
   it('the provider marks are four distinct short names', () => {
     expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
   });
-  // why: the phone face prints a provider mark and one-glyph marks (spec §11 provenance); the Dates view's phone key
-  // names each in full, as the Calendar's phone legend did before revision 48 retired it
-  it('the Dates phone key names every provider mark with its full name, and the fixture as synthetic', () => {
-    const line = COPY.datesView.phoneKey.providers;
-    for (const id of ['travelpayouts', 'searchapi', 'camoufox', 'fixture'] as const) {
-      expect(line).toContain(`${COPY.providerMark[id]} `);
-      expect(line).toContain(COPY.provider[id]);
-    }
-    expect(line).toContain(SOURCE_LABELS.synthetic);
-  });
-  it('the Dates phone key names every price-mark glyph a face can show', () => {
-    for (const g of Object.values(COPY.priceMarkGlyph)) expect(COPY.datesView.phoneKey.glyphs).toContain(g);
-  });
 });
 
 describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', () => {
@@ -520,13 +432,18 @@ describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', (
     expect(COPY.datesView.legend.striped(4)).toBe('striped: partly not searched (4)');
     expect(COPY.datesView.legend.dot).toBe('each dot is one stay length');
   });
-  it('the header line’s clauses and the flights clauses', () => {
+  it('the run line’s clauses and the sections’ counts, in dates (design 2026-11-08, mockup 02)', () => {
     const P = COPY.searchPage;
-    expect(P.pricedOf(1, 1)).toBe('1 of 1 date pair priced');
-    expect(P.reused(120)).toBe('(120 reused from earlier runs)');
-    expect(P.readingFlights(3, 10, null)).toBe('Reading flights · 3 of 10 date pairs');
-    expect(P.flightsReadFor(4, 10)).toBe('flights read for 4 of 10 date pairs');
-    expect(P.noneSearched(405)).toBe('0 of 405 searched');
+    expect(P.calendarPrices(2146, 2184)).toBe('calendar prices for 2,146 of 2,184 dates');
+    expect(P.calendarPrices(1, 1)).toBe('calendar prices for 1 of 1 date');
+    expect(P.datesWithFlightsRead(23)).toBe('23 dates with flights read');
+    expect(P.datesWithFlightsRead(1)).toBe('1 date with flights read');
+    expect(P.overLimit(1, '25h')).toBe("1 date's trips are over 25h each way.");
+    expect(P.overLimit(2, '25h')).toBe("2 dates' trips are over 25h each way.");
+    expect(P.inAll(155)).toBe('155 dates in all.');
+    expect(P.leaveRolling('9 Nov – 9 May')).toBe('leave 9 Nov – 9 May (moves forward each day)');
+    expect(COPY.datesView.confirm.theseTrips(5)).toBe('these five');
+    expect(COPY.datesView.confirm.cheapestTrips(12)).toBe('the 12 cheapest');
   });
 });
 
@@ -541,12 +458,11 @@ const MAIN_PATH_FILES = [
   'components/Crumbs.tsx',
   'components/StopWords.tsx',
   'components/Nav.tsx',
-  'lib/leftWords.ts',
 ];
 /** The coverage section keeps the set-up terms by spec (§11), each with its line; it is not on the main path. */
 const SET_UP_FILES = new Set(['views/Dates/CoverageSection.tsx']);
 /** Provenance notes keep §2's source names on every view (spec rev 55 §11: "no Camoufox outside provenance notes"). */
-const PROVENANCE_KEYS = ['provider', 'providerShort', 'providerMark', 'datesView.phoneKey.providers'];
+const PROVENANCE_KEYS = ['provider', 'providerShort', 'providerMark'];
 
 function mainPathFiles(): string[] {
   const out = MAIN_PATH_FILES.map((f) => join(SRC, f));
@@ -603,20 +519,7 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
   const collected: Collected = { strings: [], fns: [], problems: [] };
   collect(COPY, '', collected);
   const texts = collected.strings.map((x) => x.text);
-  it('the head names a seller\'s stated price only when one is shown (21.7 prov-001); an offer is never "from"', () => {
-    const seller = "; the first Back price is a seller's stated price";
-    expect(F.headPairing('cheapest', true, '3d ago', null)).toContain(seller);
-    expect(F.headPairing('cheapest', false, '3d ago', null)).not.toContain('seller');
-    expect(F.headPairingOver(true, '3d ago', null)).toContain(seller);
-    expect(F.headPairingOver(false, '3d ago', null)).not.toContain('seller');
-    expect(F.headPairingWhenRead('over', false, '3d ago', null)).toContain(
-      'for the cheapest outbound read, which was over your limits when read, 3d ago',
-    );
-    // the mismatch line: "from" before the return's price only
-    expect(`${F.mismatchOffer} £1,195${F.mismatchFrom} ${F.from} £1,180`).toBe(
-      "the cheapest offer read is £1,195; Google's list showed from £1,180",
-    );
-    expect(F.mismatchOffer).not.toMatch(/\bfrom\b/);
+  it('an offer is never "from" (21.7 prov-001): only the mismatch mark and a "from" price say it', () => {
     expect(D.mismatchMark).toMatch(/from$/);
     expect(D.fromPrice).toBe('from');
     // an offer's line names its seller and count, never "from"
@@ -633,28 +536,12 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
     expect(texts.filter((t) => /each seller|every seller|lowest seller price/i.test(claims(t)))).toEqual([]);
     expect(COPY.basisKindName.seller).toBe('cheapest of the sellers read, not checked with the airline');
   });
-  it('"round trip" is spelt one way on Out, Back and the board: never "round-trip total" or "roundtrip"', () => {
-    expect(F.roundTrip).toBe('round trip');
+  it('"round trip" is spelt one way: never "round-trip total" or "roundtrip"', () => {
     expect(texts.filter((t) => /round[- ]trip total|roundtrip/i.test(t))).toEqual([]);
   });
-  it("the read button's pages from the response, the limits lines", () => {
-    expect(F.readButton(2)).toBe('Read flights for this date (free, up to 2 pages)');
-    expect(F.readButton(1)).toBe('Read flights for this date (free, 1 page)');
-    expect(F.limitsWithReturns(F.settingsNotApplied, F.windowsOutboundOnly)).toBe(
-      'airline settings not applied to flights read · windows apply to the outbound',
-    );
-    expect(F.limitsOutboundOnly(F.returnNotRead, F.settingsNotApplied)).toBe(
-      'return leg not read; airline settings not applied to flights read',
-    );
-  });
-  it('the counts clause and the marks', () => {
+  it('the counts clause', () => {
     expect(F.returnCounts(2, 1)).toBe('2 return options unread, 1 for other airports or days');
     expect(F.returnCounts(1, 0)).toBe('1 return option unread');
     expect(F.returnCounts(0, 3)).toBe('3 return options for other airports or days');
-    expect(F.stopsOver('return', 2, 1)).toBe('return 2 changes: over your 1-change limit');
-    expect(F.stopsOver('outbound', 1, 0)).toBe('outbound 1 change: over your direct-only limit');
-    expect(F.returnTimes('14:20', '06:25', 1)).toBe('depart 14:20, arrive 06:25 +1');
-    expect(F.returnTimes('22:00', '23:50', -1)).toBe('depart 22:00, arrive 23:50 −1');
-    expect(F.returnTimes('09:00', '11:00', 0)).toBe('depart 09:00, arrive 11:00');
   });
 });

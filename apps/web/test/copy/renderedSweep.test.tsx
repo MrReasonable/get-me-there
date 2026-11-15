@@ -1,8 +1,7 @@
 import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
-import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { App } from '../../src/App.js';
 import { RunProgress, type RunProgressRun } from '../../src/components/RunProgress.js';
 import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
@@ -22,7 +21,6 @@ import {
 import {
   API,
   budgetResponse,
-  calendarGap,
   calendarRow,
   estimate,
   estimateResponse,
@@ -43,7 +41,6 @@ import {
   latestRun,
   lowerOnCalendar,
   noPrices,
-  pairingList,
   searchCard,
 } from '../fixtures.searches.js';
 import { readTrip, tripBody } from '../fixtures.trip.js';
@@ -53,7 +50,6 @@ import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
 import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
-import { autoOpenFlights } from '../views/dates/render.js';
 import { airportRows } from '../views/searches/support.js';
 
 /**
@@ -67,7 +63,7 @@ const CONTENT: Record<Swept, () => Promise<HTMLElement>> = {
   // sweeps it in the shell, its folds closed
   trip: () => screen.findByRole('region', { name: COPY.trip.cardLabel }),
   searches: () => screen.findByRole('list', { name: COPY.searchesView.listLabel }),
-  dates: () => screen.findByRole('table', { name: /^Best dates/ }),
+  dates: () => screen.findByRole('region', { name: COPY.searchPage.cheapestHeading }),
   // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
   history: async () => {
     const figure = await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle });
@@ -106,7 +102,6 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
             }),
           ),
         ),
-        http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())),
         http.get(`${API}/definitions/:id/trip`, () => HttpResponse.json(tripBody(readTrip()))),
       );
       // why: core's filterRows hides failed rows by default (spec §6.9); every class is in the URL so every row's copy is swept.
@@ -279,9 +274,9 @@ describe('the top bar and run progress say no banned word, no set-up term and no
   });
 });
 
-describe('a search\'s page with the return leg says no banned word, no set-up term, no "£" outside a price (Task 21.7)', () => {
-  it('view=dates: a pairing figure, a calendar figure with its pairing beneath, the pairing section', async () => {
-    const board: DatesOptions = {
+describe('a search\'s page says no banned word, no set-up term, no "£" outside a price (Task 8)', () => {
+  it('view=dates: trips on two airport pairs, lower dates with their read states and Read flights, the stopping sentence and the over-limit line', async () => {
+    const page: DatesOptions = {
       discoveryProviders: ['travelpayouts', 'camoufox'],
       pairs: {
         [at('2027-03-14', 10)]: pricedPair(
@@ -291,65 +286,54 @@ describe('a search\'s page with the return leg says no banned word, no set-up te
           }),
         ),
         [at('2027-03-15', 10)]: pricedPair(
-          calendarFig({
-            price: { ...calendarFig().price, pricePence: 130_000, provenance: provCached() },
-            pairingRead: 'offers-incomplete',
-            pairing: figurePairing({
-              isFrom: true,
-              seller: null,
-              fare: null,
-              complete: false,
-              offersRead: 2,
-            }),
-          }),
+          calendarFig({ price: { ...calendarFig().price, pricePence: 30_000, provenance: provCached() } }),
         ),
         [at('2027-03-16', 10)]: pricedPair(
           calendarFig({
-            price: { ...calendarFig().price, pricePence: 131_000, provenance: provCached() },
+            price: { ...calendarFig().price, pricePence: 31_000, provenance: provCached() },
             pairingRead: 'list-failed',
             listReason: 'network',
+          }),
+        ),
+        [at('2027-03-17', 10)]: pricedPair(
+          calendarFig({
+            price: { ...calendarFig().price, pricePence: 32_000 },
+            pairingRead: 'over-limit',
+            pairing: figurePairing({ which: 'over-limit' }),
           }),
         ),
       },
     };
     server.use(
-      serveDates(board),
-      serveFlightLists(
-        (d, r) =>
-          flightPair(
-            d,
-            r,
-            d === '2027-03-14'
-              ? {
-                  list: pairingList({
-                    returns: {
-                      ...PAIRING_FIXTURE.returns,
-                      booking:
-                        PAIRING_FIXTURE.returns.booking === null
-                          ? null
-                          : {
-                              ...PAIRING_FIXTURE.returns.booking,
-                              moreControl: true,
-                              offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
-                            },
-                    },
-                  }),
-                }
-              : {},
-          ),
-        { pagesPlanned: 2 },
+      serveDates(page),
+      serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }),
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            status: 'completed',
+            startedAt: '2026-10-14T12:00:00.000Z',
+            finishedAt: '2026-10-14T13:00:00.000Z',
+            flights: {
+              planned: 9,
+              read: 9,
+              reused: 0,
+              failed: 0,
+              ended: null,
+              confirm: { mode: 'confirm', confirmed: 6, unread: 1, uncheckedCheaper: 3, stop: 'patience' },
+              stopCause: null,
+            },
+          }),
+        ),
       ),
     );
-    // why: design 2026-11-08 §5.3 — rows are closed by default; the sweep reads their opened detail too
-    const stopOpening = autoOpenFlights();
-    onTestFinished(stopOpening);
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    await screen.findByRole('table', { name: /^Best dates/ });
-    await waitFor(() => expect(document.querySelector('[data-testid="flights-pairing"]')).not.toBeNull());
+    await screen.findByRole('region', { name: COPY.searchPage.cheapestHeading });
+    await screen.findAllByRole('button', { name: /^Read flights for/ });
+    await screen.findByTestId('confirm-line');
+    await screen.findByTestId('dates-run');
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
     expect(jargonIn(mainPathWords())).toEqual([]);
-    // why: design 2026-11-08 §4.1: "not every seller read" is the one allowed use of the phrase (a negation)
     expect(renderedCopy().replace(/not every seller read/gi, '')).not.toMatch(
       /each seller|every seller|verified/i,
     );

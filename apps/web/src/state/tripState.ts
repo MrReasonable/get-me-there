@@ -41,7 +41,6 @@ export function tripQueryOf(s: TripUiState): apiContract.TripQuery {
     from: s.from,
     to: s.to,
     journey: s.journey,
-    sort: { key: 'price', dir: 'asc' },
     bestPerWeek: false,
     coverageOpen: false,
   });
