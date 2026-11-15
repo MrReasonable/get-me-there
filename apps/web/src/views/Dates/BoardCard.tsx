@@ -1,92 +1,15 @@
-import { type DatePairFigure, type DatePairPairing, stopDetailClause } from '@gmt/core';
-import type { DefinitionResponse } from '../../api/types.js';
+import { type DatePairPairing, stopDetailClause } from '@gmt/core';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import type { ListsState } from '../../lib/flightReads.js';
-import { calendarStyled, flightReadLine, pairingKindOf, type ReadFigure, sellerOf } from './board.js';
+import { flightReadLine, type ReadFigure, sellerOf } from './board.js';
 
 // What outlived the board (design 2026-11-08 Ruling 21): a calendar figure's flight read beneath its price, which the
-// Trip page's card shows (`FlightRead`), and the figure's price with "cached from £X (origin → destination)" that the
-// calendar's readout shows until Task 9 replaces it (`FigurePrice`, `CheaperCached`). Every amount renders inside
-// PriceCell.
+// Trip page's card shows (`FlightRead`). Every amount renders inside PriceCell.
 
 const D = COPY.datesView;
 const F = COPY.flights;
-
-/** The figure's price in PriceCell's row form (or its phone face), with decision 54's marks and the destination note. */
-export function FigurePrice({
-  figure,
-  notes,
-  face = false,
-  bare = false,
-}: {
-  figure: DatePairFigure;
-  notes: DefinitionResponse['destinationNotes'];
-  face?: boolean;
-  /** The amount alone: a row whose one label says the rest (design 2026-11-08 §5.1). */
-  bare?: boolean;
-}) {
-  const p = figure.price;
-  return (
-    <PriceBoundary>
-      <PriceCell
-        bare={bare}
-        pricePence={p.pricePence}
-        provenance={p.provenance}
-        calendar={calendarStyled(figure.basis)}
-        // why: spec rev 56 §6.9, design 2026-11-08 §4.1: a pairing figure's source is the browser worker's flight list;
-        // its price is a seller's or Google's, said by the kind of the figure's own pairing group
-        {...(figure.basis === 'pairing' && figure.pairing !== null
-          ? { sourceLabel: D.pairingSource[pairingKindOf(figure.pairing)] }
-          : {})}
-        stale={p.stale}
-        truncated={p.truncated}
-        superseded={figure.superseded}
-        notSeenInLatestHours={figure.notSeenInLatest?.ageHours ?? null}
-        destination={figure.destination}
-        destinationNote={notes[figure.destination] ?? null}
-        face={face}
-      />
-    </PriceBoundary>
-  );
-}
-
-/**
- * Decision 38: a verified figure that hides a cheaper current calendar price says "cached from £X", through PriceCell
- * with its own destination, truncated and stale marks, and its own airport pair named (revision 50).
- */
-export function CheaperCached({
-  figure,
-  notes,
-}: {
-  figure: DatePairFigure;
-  notes: DefinitionResponse['destinationNotes'];
-}) {
-  const c = figure.cheaperCached;
-  if (c === null) return null;
-  return (
-    <span
-      className="mt-1.5 flex flex-wrap items-baseline gap-1 text-xs text-fg-2"
-      data-testid="cheaper-cached"
-    >
-      <span>{D.cachedFrom}</span>
-      <PriceBoundary>
-        <PriceCell
-          pricePence={c.pricePence}
-          provenance={c.provenance}
-          calendar
-          stale={c.stale}
-          truncated={c.truncated}
-          destination={c.destination}
-          destinationNote={notes[c.destination] ?? null}
-          compact
-        />
-      </PriceBoundary>
-      <span>{D.cachedFromPair(c.origin, c.destination)}</span>
-    </span>
-  );
-}
 
 /**
  * A price a pairing carries, through PriceCell's compact face with the flight list's provenance (its stale mark, age);

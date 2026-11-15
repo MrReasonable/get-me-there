@@ -4,16 +4,12 @@ import {
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
-  type FigureBasis,
   flightsRead,
   type IsoDateTime,
   lowerOnCalendar,
   overLimitCount,
-  type PairingKind,
   type PairingRead,
-  pairingKindOf,
   rankDatePairs,
-  resultBasisOf,
   type StopDetail,
 } from '@gmt/core';
 import type { COPY } from '../../copy.js';
@@ -44,8 +40,6 @@ export interface BoardModel {
   inView: readonly DatePair[];
   /** The date pairs in view with a figure, best first (core's `rankDatePairs`). */
   ranked: readonly DatePair[];
-  /** A date pair's price rank, 1 for the best, by index; only date pairs with a figure have one. */
-  rankOf: ReadonlyMap<number, number>;
   /** Ruling 4: the trips (core's `cheapestTrips`), in rank order; one per departure week with the switch on. */
   trips: readonly FigurePair[];
   /** Ruling 5: the calendar prices below the cheapest trip (core's `lowerOnCalendar`), by price; one per week likewise. */
@@ -69,7 +63,6 @@ function perWeek<P extends DatePair>(rows: readonly P[]): P[] {
 export function boardModel(pairs: readonly DatePair[], o: BoardOptions, now: IsoDateTime): BoardModel {
   const inView = inStay(pairs, o.nights);
   const ranked = rankDatePairs(inView, now);
-  const rankOf = new Map(ranked.map((p, i) => [p.index, i + 1]));
   const trips = cheapestTrips(ranked);
   const lower = lowerOnCalendar(ranked);
   let readDates = 0;
@@ -77,7 +70,6 @@ export function boardModel(pairs: readonly DatePair[], o: BoardOptions, now: Iso
   return {
     inView,
     ranked,
-    rankOf,
     // why: revision 50: the week switch applies after ranking, so each week's row is its best by the section's order
     trips: o.bestPerWeek ? perWeek(trips) : trips,
     lower: o.bestPerWeek ? perWeek(lower) : lower,
@@ -94,15 +86,6 @@ export function shownCount(total: number, presses: number): number {
 /** What the next "Show N more" adds: up to ten, never more than are left; 0 when every row is shown. */
 export function nextPage(total: number, shown: number): number {
   return Math.max(0, Math.min(PAGE_SIZE, total - shown));
-}
-
-/**
- * Whether a figure of this basis is calendar-styled (spec rev 56 §6.9, §11): a calendar price, and a pairing figure,
- * which is never checked with the airline (the dashed outline, "not checked"); core's exhaustive `resultBasisOf`
- * decides, so a new basis fails to compile there before it reaches a face here.
- */
-export function calendarStyled(basis: FigureBasis): boolean {
-  return resultBasisOf(basis) === 'calendar';
 }
 
 /**
@@ -195,5 +178,3 @@ export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
   if (q.seller === null) throw new RangeError('sellerOf: an offer names its seller (spec rev 56 §10)');
   return q.seller;
 }
-
-export { type PairingKind, pairingKindOf };

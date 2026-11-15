@@ -1,5 +1,5 @@
 /* =====================================================================================================================
-   Split-flap cells, the boards they sit on, the overview's lamp matrix and the concourse shell.
+   Split-flap cells, the boards they sit on and the concourse shell.
    ===================================================================================================================== */
 
 @layer components {
@@ -393,84 +393,9 @@
   }
 }
 
-/* ------------------------------------------------------------------------------------------------------------------
-   The overview: a lamp matrix. Each day a row of stay-length lamps; brighter is cheaper. A lamp without a figure is
-   dark and carries its mark's glyph; "partly not searched" adds stripes in the lamp's own ink.
-   ------------------------------------------------------------------------------------------------------------------ */
-@layer components {
-  .lamp {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    min-height: 24px;
-    flex: 1 1 0;
-    overflow: hidden;
-    padding: 0;
-    font: 700 10px / 1 var(--font-ui);
-    border-radius: 50%;
-    cursor: pointer;
-    border: 0;
-  }
-  /* Neutral: a dark socket with light glyphs */
-  .lamp-none {
-    color: var(--flap-ink);
-    background: var(--lamp-off);
-    border-radius: 2px;
-    box-shadow: inset 0 0 0 1px #4a5055;
-  }
-  .lamp[data-ringed] {
-    outline: 2px solid var(--flap-ink);
-    outline-offset: 1px;
-  }
-  .lamp[data-lit] {
-    outline: 3px solid var(--amber);
-    outline-offset: 2px;
-    z-index: 2;
-  }
-  .lamp:focus-visible {
-    z-index: 3;
-  }
-  .ov-day {
-    font: 500 12px / 1 var(--font-flap);
-    letter-spacing: 0.04em;
-    color: var(--flap-ink-2);
-    white-space: nowrap;
-  }
-  .ov-weekend .ov-day {
-    color: var(--flap-ink);
-    font-weight: 700;
-  }
-  .ov-month-name {
-    --cw: 12px;
-    --cg: 1px;
-  }
-  .legend-swatch {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    font: 700 10px / 1 var(--font-ui);
-    border-radius: 50%;
-  }
-}
-
 @media (forced-colors: active) {
   .f {
     border: 1px solid CanvasText;
-  }
-  .lamp,
-  .legend-swatch {
-    border: 1px solid CanvasText;
-  }
-  .lamp[data-ringed] {
-    outline-color: CanvasText;
-  }
-  .lamp[data-lit] {
-    outline-color: Highlight;
   }
 }
 

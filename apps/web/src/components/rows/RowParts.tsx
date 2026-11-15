@@ -97,12 +97,13 @@ export function DatesCell({
   multiAirport,
 }: {
   pair: RowPair;
-  figure: Pick<DatePairFigure, 'origin' | 'destination'>;
+  /** The figure whose airports a multi-airport row names; null for a stay with no price (it names none). */
+  figure: Pick<DatePairFigure, 'origin' | 'destination'> | null;
   multiAirport: boolean;
 }) {
   return (
     <div className="row-dates">
-      {multiAirport ? (
+      {multiAirport && figure !== null ? (
         <span className="row-airports" data-testid="row-airports">
           {R.pair(figure.origin, figure.destination)}
         </span>

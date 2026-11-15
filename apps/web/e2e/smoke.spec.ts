@@ -10,7 +10,7 @@ import { SMOKE } from './selectors.js';
 // Spec §9 item 6: one Playwright smoke in fixture mode, through the real api and the built SPA (WP19 Task 19.9, the
 // Dates view). Every price here is synthetic, and every view must say so beside the red banner (spec §5.5).
 
-/** The smoke's stay range is 10–11 nights; it narrows it to 10 so "Back to dates" has a filter to keep. */
+/** The smoke's stay range is 10–11 nights; it narrows it to 10, so each day of the calendar shows one stay. */
 const NIGHTS = '10-10';
 
 /**
@@ -100,7 +100,7 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(searchName);
 
   // (2) the search's page: the run line, the banner, Cheapest trips (the fixture checks fares, so its dates are trips;
-  // none is lower on the calendar) with their labels, the legend and the calendar's keyboard and rings
+  // none is lower on the calendar) with their labels, the calendar with its key, its keyboard and its days' prices
   await page.goto(`/?view=dates&def=${defId}&d.nights=${NIGHTS}`);
   await expect(trips(page)).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(searchName);
@@ -117,38 +117,40 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(first.getByRole('link', { name: SMOKE.detailsLink })).toBeVisible();
   await expect(lower(page)).toHaveCount(0);
   await expectNoSidewaysScroll(page);
-  await expect(page.locator(SMOKE.legend)).toBeVisible();
-  const stop = page.locator(SMOKE.overviewTabStop);
+  await expect(page.getByRole('list', { name: SMOKE.calendarKey }).getByRole('listitem')).toHaveCount(5);
+  // Ruling 18: each day of the window prints its trip's price with the dot (one stay in view each, so a trip a day)
+  await expect(page.locator(SMOKE.tripDay)).toHaveCount(await rows.count());
+  await expect(page.locator(SMOKE.tripDay).first().getByTestId('price-cell')).toContainText('£');
+  const stop = page.locator(SMOKE.calendarTabStop);
   await expect(stop).toHaveCount(1);
-  const before = await stop.getAttribute('data-cell');
+  const before = await stop.getAttribute('data-day');
   // why: focus-visible applies once the keyboard is in use: focus() puts focus on the tab stop and the arrow key that
-  // follows switches the page to keyboard modality, so the outline is then computed as for a Tab user.
+  // follows switches the page to keyboard modality, so the ring is then computed as for a Tab user.
   await stop.focus();
   await page.keyboard.press('ArrowRight');
   await expect(stop).toHaveCount(1);
-  await expect(stop).not.toHaveAttribute('data-cell', before ?? '');
+  await expect(stop).not.toHaveAttribute('data-day', before ?? '');
   await expect(stop).toBeFocused();
   await expect(stop).toHaveCSS('outline-style', 'solid');
-  // the black gap of the one focus ring (world.css, unlayered): no lamp's own ring shadow may take its place
-  await expect(stop).toHaveCSS(
-    'box-shadow',
-    /rgb\(0, 0, 0\) 0px 0px 0px 2px, rgb\(0, 0, 0\) 0px 0px 0px 7px$/,
-  );
-  await stop.hover();
-  await expect(page.locator(SMOKE.litCell)).toHaveCount(1);
-  // the trips Cheapest trips shows are ringed on the calendar, and only they (design 2026-11-08 §5.2)
-  await expect(page.locator(SMOKE.ringedCell)).toHaveCount(await rows.count());
+  await expect(stop).toHaveCSS('outline-width', '2px');
 
-  // (3) a calendar day opens its Trip page (design 2026-11-08 §6.1; until Task 9's day panel), whose URL carries the
-  // dates and the search page's filters, and whose card shows the synthetic price beside the red banner; the breadcrumb
-  // back keeps the filter
+  // (3) Enter opens the day's panel below the calendar, focus on its heading (Ruling 18); its trip row's › opens the
+  // Trip page, whose URL carries the dates and whose card shows the synthetic price beside the red banner; the
+  // breadcrumb back returns to the search's page. Escape on the panel puts focus back on the day.
   await stop.press('Enter');
+  const dayPanel = page.getByRole('region', { name: SMOKE.dayPanel });
+  await expect(dayPanel).toBeVisible();
+  await expect(dayPanel.getByRole('heading')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dayPanel).toHaveCount(0);
+  await expect(stop).toBeFocused();
+  await stop.press('Enter');
+  await dayPanel.locator(SMOKE.tripRow).first().getByRole('link', { name: SMOKE.detailsLink }).click();
   await expect(page.getByRole('region', { name: SMOKE.tripCard })).toBeVisible();
   const url = new URL(page.url());
   expect(url.searchParams.get('view')).toBe('trip');
   expect(url.searchParams.get('depart')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(url.searchParams.get('return')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(url.searchParams.get('d.nights')).toBe(NIGHTS);
   await expect(banner(page)).toBeVisible();
   await expect(
     page.getByRole('region', { name: SMOKE.tripCard }).getByTestId('price-cell').first(),
@@ -159,7 +161,6 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(trips(page)).toBeVisible();
   const back = new URL(page.url()).searchParams;
   expect(back.get('view')).toBe('dates');
-  expect(back.get('d.nights')).toBe(NIGHTS);
   expect(back.get('depart')).toBeNull();
 
   // (4) a search's page by its id, ?view=definitions landing on Searches (the old Definitions URL), the breadcrumb naming the
@@ -193,26 +194,26 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(page.getByRole('table').first()).toContainText(SOURCE_LABELS.synthetic);
 });
 
-test('forced colours: every mark keeps its glyph, and the current nav entry its bar', async ({ page }) => {
+test('forced colours: the calendar key keeps its words, and the current nav entry its bar', async ({
+  page,
+}) => {
   // (7) spec §11: nothing by colour alone; jsdom cannot apply forced colours, so the browser checks it here
   await page.emulateMedia({ forcedColors: 'active' });
   await page.goto(`/?view=dates&def=${await searchId(page)}`);
   await expect(trips(page)).toBeVisible();
-  const marks = page.locator(SMOKE.legendMark);
-  expect(await marks.count()).toBeGreaterThan(0);
-  for (const m of await marks.all()) {
-    const glyph = m.locator(SMOKE.legendGlyph);
-    await expect(glyph).toBeVisible();
-    // why: the five marks (spec rev 55 §11): "priced" is its shade ("brighter is cheaper"), every other mark has a glyph
-    if ((await m.getAttribute('data-mark')) !== 'priced') await expect(glyph).not.toHaveText('');
+  const key = page.getByRole('list', { name: SMOKE.calendarKey }).getByRole('listitem');
+  await expect(key).toHaveCount(5);
+  for (const item of await key.all()) {
+    await expect(item).toBeVisible();
+    await expect(item).not.toHaveText('');
   }
-  // why: the overview's marked cells need a seed that has some; marks.spec.ts holds that forced-colours case
+  // why: the days of every kind need a seed that has them; marks.spec.ts holds that forced-colours case
   const current = page.getByRole('navigation', { name: SMOKE.nav }).locator(SMOKE.navCurrent);
   await expect(current).toHaveCSS('border-bottom-style', 'solid');
   await expect(current).toHaveCSS('border-bottom-width', '4px');
 });
 
-test('at 375px a search’s page shows its rows, one month of 24px cells, a tap shows the readout, and the filter row fits @phone', async ({
+test('at 375px a search’s page shows its rows, one month of days with its month buttons, a tap opens the day’s panel, and the filter row fits @phone', async ({
   page,
 }) => {
   await page.goto(`/?view=dates&def=${await searchId(page)}`);
@@ -223,31 +224,35 @@ test('at 375px a search’s page shows its rows, one month of 24px cells, a tap 
   expect((rowBox?.x ?? 0) + (rowBox?.width ?? 0)).toBeLessThanOrEqual(375);
   await expect(page.getByRole('button', { name: SMOKE.previousMonth })).toBeVisible();
   await expect(page.getByRole('button', { name: SMOKE.nextMonth })).toBeVisible();
-  const cells = page.locator(SMOKE.overviewCell);
-  const months = await cells.evaluateAll(
-    (all) => new Set(all.map((c) => c.getAttribute('data-date')?.slice(0, 7))).size,
+  const days = page.locator(SMOKE.calendarDay);
+  const months = await days.evaluateAll(
+    (all) => new Set(all.map((c) => c.getAttribute('data-day')?.slice(0, 7))).size,
   );
   expect(months).toBe(1);
-  // why: spec §11 Phone: every cell's box is at least 24 × 24 px, and nothing spills out of a cell
-  const small = await cells.evaluateAll((all) =>
+  // why: every day's box is at least 24 × 24 px, and nothing spills out of a day
+  const small = await days.evaluateAll((all) =>
     all
       .filter((c) => {
         const r = c.getBoundingClientRect();
         return r.width < 24 || r.height < 24;
       })
-      .map((c) => c.getAttribute('data-cell')),
+      .map((c) => c.getAttribute('data-day')),
   );
   expect(small).toEqual([]);
-  const spilled = await cells.evaluateAll((all) =>
+  // why: the printed price clips its own overflow, so it is measured as well as the day
+  const spilled = await days.evaluateAll((all) =>
     all
-      .filter((c) => c.scrollWidth > c.clientWidth || c.scrollHeight > c.clientHeight)
-      .map((c) => c.getAttribute('data-cell')),
+      .filter((c) =>
+        [c, c.querySelector('.cal-dp')].some(
+          (e) => e !== null && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1),
+        ),
+      )
+      .map((c) => c.getAttribute('data-day')),
   );
   expect(spilled).toEqual([]);
-  // revision 50: a first tap on a cell shows its readout (and does not leave the view)
-  const cell = cells.nth(3);
-  await cell.tap();
-  await expect(page.locator(SMOKE.readout)).toContainText(/\d{1,2} [A-Z][a-z]{2} \d{4}/);
+  // Ruling 18: a tap on a day opens its panel below the calendar (and does not leave the page)
+  await days.first().tap();
+  await expect(page.getByRole('region', { name: SMOKE.dayPanel })).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
   // why: Ruling 16: one filter row, wrapping on a phone (no fold); it fits the window
   const filters = page.getByRole('group', { name: SMOKE.filterRow });
@@ -257,10 +262,22 @@ test('at 375px a search’s page shows its rows, one month of 24px cells, a tap 
   await expectNoSidewaysScroll(page);
 });
 
+/** The Trip page reached as an operator reaches it: a day's panel on the search's page, then its trip row's ›. */
+async function openTripFromDay(page: Page, id: string) {
+  await page.goto(`/?view=dates&def=${id}`);
+  await page.locator(SMOKE.calendarTabStop).press('Enter');
+  await page
+    .getByRole('region', { name: SMOKE.dayPanel })
+    .locator(SMOKE.tripRow)
+    .first()
+    .getByRole('link', { name: SMOKE.detailsLink })
+    .click();
+}
+
 /** What each view shows only once its data has loaded: a named heading, table or row, never a timeout. */
 const LOADED: Record<string, (page: Page) => Locator> = {
   dates: (p) => p.locator(SMOKE.tripRow),
-  // why: the Trip page is reached from the calendar's day (its URL carries the dates) until Task 9's day panel
+  // why: the Trip page is reached from a day's panel (its trip row's › carries the dates)
   trip: (p) => p.getByRole('region', { name: SMOKE.tripCard }),
   history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
   searches: (p) => p.locator(SMOKE.searchCard),
@@ -282,10 +299,8 @@ test('at 375px the nav is one row of two 44px links, the top bar wraps under it,
     await page.emulateMedia({ colorScheme });
     for (const [view, loaded] of Object.entries(LOADED)) {
       const label = `${view}, ${colorScheme}`;
-      if (view === 'trip') {
-        await page.goto(`/?view=dates&def=${id}`);
-        await page.locator(SMOKE.overviewTabStop).press('Enter');
-      } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
+      if (view === 'trip') await openTripFromDay(page, id);
+      else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
       const nav = page.getByRole('navigation', { name: SMOKE.nav });
       await expect(nav).toBeVisible();
       // why: Ruling 9 — the same two links in one row at every width, no menu
@@ -323,10 +338,8 @@ test('at 1280px every loaded view fits without scrolling sideways, light and dar
     await page.emulateMedia({ colorScheme });
     for (const [view, loaded] of Object.entries(LOADED)) {
       const label = `${view}, ${colorScheme}`;
-      if (view === 'trip') {
-        await page.goto(`/?view=dates&def=${id}`);
-        await page.locator(SMOKE.overviewTabStop).press('Enter');
-      } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
+      if (view === 'trip') await openTripFromDay(page, id);
+      else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
       await expect(loaded(page).first(), label).toBeVisible();
       const limits = page.getByRole('region', { name: COPY.topBar.limitsLabel });
       await expect(limits, label).toBeVisible();

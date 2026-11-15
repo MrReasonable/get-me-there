@@ -19,23 +19,27 @@ export function useSearchParams(): URLSearchParams {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
-/** The href for the current URL with `patch` applied (null deletes); every other parameter is kept. */
-export function hrefWith(patch: Record<string, string | null>): string {
+/**
+ * The href for the current URL with `patch` applied (null deletes); every other parameter is kept. `hash` (with its
+ * "#") names the link's own fragment, an anchor on the page it opens; without one the page's fragment is kept.
+ */
+export function hrefWith(patch: Record<string, string | null>, hash: string = window.location.hash): string {
   const p = new URLSearchParams(window.location.search);
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) p.delete(k);
     else p.set(k, v);
   }
   // why: the fragment is not a search parameter, so an anchor the page was opened at survives every edit.
-  return `${window.location.pathname}?${p.toString()}${window.location.hash}`;
+  return `${window.location.pathname}?${p.toString()}${hash}`;
 }
 
-/** Applies `patch` to the URL: `push` for navigation, `replace` for filter edits. */
+/** Applies `patch` to the URL: `push` for navigation, `replace` for filter edits; `hash` as `hrefWith` takes it. */
 export function updateSearchParams(
   patch: Record<string, string | null>,
   mode: 'push' | 'replace' = 'replace',
+  hash?: string,
 ): void {
-  const url = hrefWith(patch);
+  const url = hrefWith(patch, hash);
   if (mode === 'push') window.history.pushState(null, '', url);
   else window.history.replaceState(null, '', url);
   for (const l of listeners) l();
@@ -50,12 +54,12 @@ export interface NavClick {
   preventDefault(): void;
 }
 
-/** onClick for an <a href={hrefWith(patch)}>: client-side navigation that keeps the link a real link. */
-export function navigateTo(patch: Record<string, string | null>) {
+/** onClick for an <a href={hrefWith(patch, hash)}>: client-side navigation that keeps the link a real link. */
+export function navigateTo(patch: Record<string, string | null>, hash?: string) {
   return (e: NavClick) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
-    updateSearchParams(patch, 'push');
+    updateSearchParams(patch, 'push', hash);
   };
 }
 

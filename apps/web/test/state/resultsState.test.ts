@@ -52,6 +52,19 @@ describe('URL state shared by the views (spec §11: parameters persist across vi
     window.history.replaceState(null, '', '/');
   });
 
+  // Task 9 (the Trips card's counts link): a link may name its own fragment, which replaces the page's
+  it('a link may name its fragment: the address and the click go there, the parameters kept', () => {
+    window.history.replaceState(null, '', '/?view=searches#top');
+    expect(hrefWith({ view: 'dates', def: 'd1' }, '#calendar')).toBe('/?view=dates&def=d1#calendar');
+    updateSearchParams({ view: 'dates', def: 'd1' }, 'push', '#calendar');
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=d1', '#calendar']);
+    window.history.replaceState(null, '', '/?view=searches');
+    const go = navigateTo({ view: 'dates', def: 'd1' }, '#calendar');
+    go({ metaKey: false, ctrlKey: false, shiftKey: false, button: 0, preventDefault: () => undefined });
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=d1', '#calendar']);
+    window.history.replaceState(null, '', '/');
+  });
+
   it('a nav click navigates in place; a modified click is left to the browser', () => {
     window.history.replaceState(null, '', '/?view=results');
     let prevented = 0;

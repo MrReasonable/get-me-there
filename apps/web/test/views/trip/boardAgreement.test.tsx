@@ -1,10 +1,12 @@
-import { asIsoDate, type DatePairFigure, decodeDatePairs } from '@gmt/core';
+import { asIsoDate, type DatePairFigure, decodeDatePairs, isTrip } from '@gmt/core';
+import { SYNTHETIC_BOOKING_URL, SYNTHETIC_SELLER_BOOKING } from '@gmt/core/testing';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { TripResponse } from '../../../src/api/types.js';
 import { COPY } from '../../../src/copy.js';
 import type { TripUiState } from '../../../src/state/tripState.js';
+import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
 import { TripView } from '../../../src/views/Trip/TripView.js';
 import {
   at,
@@ -15,21 +17,26 @@ import {
   pairingFig,
   pricedPair,
   provCached,
+  provFlightList,
   provGrid,
   provSearched,
   verifiedFig,
 } from '../../fixtures.dates.js';
 import { API, definition } from '../../fixtures.js';
+import { searchCard } from '../../fixtures.searches.js';
 import { trip, tripBody } from '../../fixtures.trip.js';
+import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
-import { renderDates } from '../dates/render.js';
+import { dayButton, findCalendar, findDayPanel, renderDates } from '../dates/render.js';
+import { renderInShell } from '../searches/support.js';
 
 // Design 2026-11-08 §6.5, goal 4 (trip-page plan Task 7; Review Focus 5): for every figure basis, the Search page's row
 // for a pair of dates (a trip row in Cheapest trips, or a calendar row in Lower on the calendar, from the decoded
-// date-pairs payload) and the Trip page's card (from a trip read carrying the same figure, as the api's
-// `datePairFigureOf` composes both) show the same price, the same label and the same seller. A calendar figure a later
-// search did not see again is in neither section (Ruling 3); the day panel shows it (Task 9 extends this test).
+// date-pairs payload), the same pair's row in its day's panel (Task 9) and the Trip page's card (from a trip read
+// carrying the same figure, as the api's `datePairFigureOf` composes both) show the same price, the same label and the
+// same seller. A calendar figure a later search did not see again is in neither section (Ruling 3): the day panel and
+// the Trip page show it. For a trip, the Trips page's card shows it too, linking the same booking target.
 
 const DEPART = '2027-03-14';
 const NIGHTS = 10;
@@ -82,6 +89,8 @@ const FIGURES: ReadonlyArray<readonly [string, DatePairFigure]> = [
     'a calendar figure from the Aviasales cache',
     calendarFig({ price: { ...calendarFig().price, provenance: provCached() } }),
   ],
+  // why: Task 8 dropped this case (no Search-page row showed it); the day panel does (Ruling 4, Review Focus 5)
+  ['a calendar figure a later search did not see again', calendarFig({ superseded: true })],
   ['a verified figure', verifiedFig()],
   // why: final review I1: where SearchApi read booking options, both surfaces say "Seller"
   [
@@ -98,18 +107,40 @@ const sellerIn = (el: Element | null): string | null => el?.textContent?.split('
 /** The label's detail, as the reader opens it (its words name the seller where the price is one). */
 const detailIn = (el: Element | null): string | null =>
   el?.querySelector('[data-testid="price-label"] .price-label-pop p')?.textContent ?? null;
-/** The page's row for the one pair of dates: its trip row, or its calendar row. */
-const rowOf = () => screen.findByTestId(/^(trip|calendar)-row$/);
+/** A section's row for the one pair of dates (its trip row, or its calendar row), or null when no section shows it. */
+const sectionRowOf = async (): Promise<HTMLElement | null> => {
+  await findCalendar();
+  return screen.queryByTestId(/^(trip|calendar)-row$/);
+};
+/** The pair's row in its day's panel (14 Mar), opened by a click on the day: the day's one stay with a price leads. */
+async function panelRowOf(user: { click: (el: Element) => Promise<void> }): Promise<HTMLElement> {
+  await user.click(dayButton(DEPART));
+  const panel = await findDayPanel(/^Sun 14 Mar: \d+ stays$/);
+  const row = within(panel).getAllByRole('listitem')[0];
+  if (row === undefined) throw new Error('the day panel lists no stay');
+  return row;
+}
+/** What a row shows of its price: the amount, the label as the eye reads it, the label's detail, the link out. */
+const shownBy = (row: Element) => ({
+  amount: amountIn(row.querySelector('[data-testid="price-cell"]')),
+  label: row.querySelector('[data-testid="price-label"] summary')?.textContent ?? null,
+  detail: detailIn(row),
+  href: row.querySelector('a[target="_blank"]')?.getAttribute('href') ?? null,
+});
 
-describe("the Search page's row and the Trip card agree, figure by figure (design §6.5)", () => {
+describe("the Search page's row, the day panel's and the Trip card agree, figure by figure (design §6.5)", () => {
   it.each(FIGURES)('%s', async (_name, figure) => {
     const body: DatesOptions = {
       discoveryProviders: ['camoufox'],
       pairs: { [at(DEPART, NIGHTS)]: pricedPair(figure) },
     };
-    // the board's row, from the date-pairs payload the board decodes
+    // the board's row, from the date-pairs payload the board decodes: a section's, where one shows it (a trip, or a
+    // current calendar price), and the day panel's always
     const board = renderDates({ body });
-    const row = await rowOf();
+    const section = await sectionRowOf();
+    expect(section === null).toBe(figure.superseded && figure.basis === 'calendar');
+    const row = await panelRowOf(board.user);
+    if (section !== null) expect(shownBy(row)).toEqual(shownBy(section));
     const boardPrice = amountIn(row.querySelector('[data-testid="price-cell"]'));
     // why: CodeRabbit PR #58 finding 18: both surfaces showing no amount, or the same wrong one, must fail: the board
     // shows the figure's own price, in whole pounds with thousands commas, written out here independently
@@ -169,9 +200,11 @@ describe("the Search page's row and the Trip card link the same search, in the i
       pairs: { [at(DEPART, NIGHTS)]: pricedPair(figure) },
     };
     const board = renderDates({ body });
-    const row = await rowOf();
-    const boardHref = row.querySelector('a[target="_blank"]')?.getAttribute('href') ?? null;
+    const section = await sectionRowOf();
+    const boardHref = section?.querySelector('a[target="_blank"]')?.getAttribute('href') ?? null;
     expect(boardHref).toContain('gl=US');
+    // the day panel's row links the same search
+    expect(shownBy(await panelRowOf(board.user)).href).toBe(boardHref);
     board.unmount();
 
     const decoded = decodeDatePairs(datesResponse(body)).pairs.find(
@@ -187,5 +220,96 @@ describe("the Search page's row and the Trip card link the same search, in the i
     });
     const card = await screen.findByRole('region', { name: COPY.trip.cardLabel });
     expect(within(card).getByRole('link').getAttribute('href')).toBe(boardHref);
+  });
+});
+
+// Review Focus 5 (Task 9): the same pair of dates on the Trips page's card, the Search page's section, its day panel and
+// the Trip page shows the same price, label and booking target: a current verified trip with a seller's booking, a read
+// trip with its own booking page, and a verified price the latest search did not see again (only the day panel and the
+// Trip page show it, "Not seen again", linked nowhere).
+describe('the card, the section, the day panel and the Trip page agree (Review Focus 5)', () => {
+  const CASES: ReadonlyArray<readonly [string, DatePairFigure]> = [
+    [
+      'a current verified trip with a seller’s booking',
+      verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched() }, hasBookingOptions: true }),
+    ],
+    [
+      'a read trip with its own booking page',
+      pairingFig({
+        pairing: figurePairing({ provenance: provFlightList(), bookingUrl: SYNTHETIC_BOOKING_URL }),
+      }),
+    ],
+    [
+      'a verified price the latest search did not see again',
+      verifiedFig({
+        price: { ...verifiedFig().price, provenance: provSearched() },
+        hasBookingOptions: true,
+        notSeenInLatest: { ageHours: 30 },
+      }),
+    ],
+  ];
+
+  it.each(CASES)('%s', async (_name, figure) => {
+    const body: DatesOptions = {
+      origins: ['LHR'],
+      destinations: ['JFK'],
+      discoveryProviders: ['camoufox', 'searchapi'],
+      pairs: { [at(DEPART, NIGHTS)]: pricedPair(figure, {}, 1) },
+    };
+    const def = definition({ origins: ['LHR'], destinations: ['JFK'] });
+    const data = decodeDatePairs(datesResponse(body));
+    const decoded = data.pairs.find((p) => p.departureDate === DEPART && p.nights === NIGHTS)?.figure;
+    if (decoded == null) throw new Error('no decoded figure');
+    const { airportPair: _index, ...wire } = decoded;
+    const details = data.verifiedDetails.find((x) => x.departureDate === DEPART && x.returnDate === RETURN);
+    const booking = figure.basis === 'verified' ? (details?.booking ?? { kind: 'none' as const }) : null;
+    const trip = isTrip(figure);
+
+    // the Search page: its section's row (a trip only) and the day panel's
+    const page = renderDates({ body, def });
+    const section = await sectionRowOf();
+    expect(section !== null).toBe(trip);
+    const panel = shownBy(await panelRowOf(page.user));
+    if (section !== null) expect(shownBy(section)).toEqual(panel);
+    expect(panel.href === null).toBe(!trip);
+    // why: the oracle, written out: the seller's booking the details carry, and the read trip's own booking page
+    if (figure.basis === 'verified' && trip) expect(panel.href).toBe(SYNTHETIC_SELLER_BOOKING.url);
+    if (figure.basis === 'pairing') expect(panel.href).toBe(SYNTHETIC_BOOKING_URL);
+    if (!trip) expect(panel.label).toMatch(/^Not seen again/);
+    page.unmount();
+
+    // the Trips page's card, from a cards read carrying the same trip and details (trips only: Ruling 7)
+    if (trip) {
+      server.use(
+        serveCards([
+          searchCard({
+            name: 'Agreement',
+            origins: ['LHR'],
+            destinations: ['JFK'],
+            trips: [{ figure: wire, departureDate: DEPART, returnDate: RETURN, nights: NIGHTS }],
+            verifiedDetails: data.verifiedDetails,
+          }),
+        ]),
+      );
+      const cards = renderInShell(<SearchesView />);
+      const heading = await screen.findByRole('heading', { level: 2, name: 'Agreement' });
+      const card = heading.closest('li');
+      if (card === null) throw new Error('no card');
+      expect(shownBy(within(card).getByTestId('trip-row'))).toEqual(panel);
+      cards.unmount();
+    }
+
+    // the Trip page, from a trip read carrying the same figure and booking
+    server.use(
+      http.get(`${API}/definitions/:id/trip`, () =>
+        HttpResponse.json(tripBody({ ...tripOf(wire), booking })),
+      ),
+    );
+    renderWithProviders(<TripView definition={def} state={STATE} />, {
+      search: `?view=trip&def=def-0001&depart=${DEPART}&return=${RETURN}`,
+    });
+    const card = await screen.findByRole('region', { name: COPY.trip.cardLabel });
+    const shown = shownBy(card);
+    expect([shown.amount, shown.label, shown.href]).toEqual([panel.amount, panel.label, panel.href]);
   });
 });

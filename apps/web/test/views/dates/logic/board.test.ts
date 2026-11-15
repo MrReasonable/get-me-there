@@ -5,7 +5,6 @@ import { isSyntheticRead } from '../../../../src/lib/bookingTarget.js';
 import type { ListsState } from '../../../../src/lib/flightReads.js';
 import {
   boardModel,
-  calendarStyled,
   FIRST_PAGE,
   flightReadLine,
   LOWER_SHOWN,
@@ -59,10 +58,8 @@ describe('order of operations (spec §11 Filters; WP19 Task 19.4)', () => {
     const pairs = pairsOf(three);
     const all = boardModel(pairs, NO_FILTER, NOW);
     expect(indexes(all.ranked)).toEqual(['2027-03-14/12', '2027-03-15/12', '2027-03-16/10']);
-    expect(all.rankOf.get(all.ranked[2]?.index ?? -1)).toBe(3);
     const filtered = boardModel(pairs, { ...NO_FILTER, nights: { min: 10, max: 11 } }, NOW);
     expect(indexes(filtered.ranked)).toEqual(['2027-03-16/10']);
-    expect(filtered.rankOf.get(filtered.ranked[0]?.index ?? -1)).toBe(1);
     expect(indexes(filtered.lower)).toEqual(['2027-03-16/10']);
   });
 
@@ -142,7 +139,7 @@ describe("the two sections (Rulings 3–6: core's shared rules over the ranking)
     expect(indexes(m.trips)).toEqual(['2027-03-16/10', '2027-03-14/10']);
     expect(indexes(m.lower)).toEqual(['2027-03-17/10', '2027-03-22/10']);
     // the rank stays the rank among every date pair in view
-    expect(m.trips.map((p) => m.rankOf.get(p.index))).toEqual([1, 3]);
+    expect(m.trips.map((p) => m.ranked.indexOf(p) + 1)).toEqual([1, 3]);
   });
 });
 
@@ -263,14 +260,6 @@ describe('isSyntheticRead: the red banner, judged on the whole decoded read (spe
     const run = { progress: [{ providerId: 'travelpayouts' }, { providerId: 'fixture' }] };
     expect(isSyntheticRead(read({}), run)).toBe(true);
     expect(isSyntheticRead(read({}), { progress: [{ providerId: 'travelpayouts' }] })).toBe(false);
-  });
-});
-
-describe('calendarStyled: every basis but verified is calendar-styled (spec rev 56 §6.9: resultBasisOf)', () => {
-  it('verified is not; calendar and pairing are', () => {
-    expect(calendarStyled('verified')).toBe(false);
-    expect(calendarStyled('calendar')).toBe(true);
-    expect(calendarStyled('pairing')).toBe(true);
   });
 });
 

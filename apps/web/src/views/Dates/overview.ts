@@ -1,33 +1,38 @@
 import {
   addDays,
-  type Buckets,
-  markCounts as coreMarkCounts,
+  asIsoDate,
   type DatePair,
+  type DatePairFigure,
   type DatePairSpace,
-  datePairIndex,
-  foldNights,
+  dayMark,
+  formatPence,
   type IsoDate,
   type IsoMonth,
+  isTrip,
   monthOf,
-  type NightsBand,
+  type PriceLabelKind,
   type ReducedMark,
   reducedMark,
+  staleWords,
 } from '@gmt/core';
+import { labelAge } from '../../components/PriceLabel.js';
+import { COPY } from '../../copy.js';
 import { monthDays, weekdayIndex } from '../../format.js';
-import { type Band, isCurrent, type QuintileScale } from './shade.js';
+import { figureLabelKind } from '../../lib/figureLabel.js';
+import { rowDay } from '../../lib/legWords.js';
+import { buildScale, isCurrent, type QuintileScale } from './shade.js';
 
-// The overview's model (spec §11 Dates "Overview"; spec rev 55 §3, §6.6, WP20 Task 20.6): the window's months, each
-// day's strip of stay-length (or folded band) cells, and what each cell shows: its shade (one scale, current figures
-// only), or one of the five marks of core's `reducedMark` (imported, never re-implemented: ruling A8), with the striped
-// "partly not searched" mark and the figure marks. Pure: no clock, no DOM.
+// The calendar's model (Trips and Search plan, Ruling 18; mockup 02): the window's months, each departure day's stays in
+// view, the one mark of the day (core's `dayMark`, never re-implemented here), the one price it prints and its name,
+// the heat scale over the printed prices, and the day panel's order. Pure: no clock (today is a parameter), no DOM.
+
+/** A month's first day. */
+const firstOf = (month: IsoMonth): IsoDate => asIsoDate(`${month}-01`);
 
 /** Monday-first weeks of one month, null for padding (moved from the Calendar view's grid, WP19 §4). */
 export function weeksOf(month: IsoMonth): Array<Array<IsoDate | null>> {
-  const dates = monthDays(month);
-  const first = dates[0];
-  const cells: Array<IsoDate | null> =
-    first === undefined ? [] : Array.from({ length: weekdayIndex(first) }, () => null);
-  cells.push(...dates);
+  const cells: Array<IsoDate | null> = Array.from({ length: weekdayIndex(firstOf(month)) }, () => null);
+  cells.push(...monthDays(month));
   while (cells.length % 7 !== 0) cells.push(null);
   const weeks: Array<Array<IsoDate | null>> = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
@@ -39,243 +44,141 @@ export function monthsOf(space: Pick<DatePairSpace, 'departureFrom' | 'departure
   const out: IsoMonth[] = [];
   if (space.departureFrom > space.departureTo) return out;
   const last = monthOf(space.departureTo);
-  for (let m = monthOf(space.departureFrom); ; ) {
-    out.push(m);
-    if (m === last) return out;
-    const days = monthDays(m);
-    const end = days[days.length - 1];
-    if (end === undefined) return out;
-    m = monthOf(addDays(end, 1));
-  }
-}
-
-/** The six buckets of spec §3 (the coverage section's; the main path shows the five marks below them). */
-export type BucketName = 'priced' | 'empty' | 'no_data' | 'error' | 'skipped' | 'not_run';
-
-/**
- * Spec rev 55 §3, §6.6, §11: the five marks of the month key, in the order the key lists them: priced (shaded), no
- * price shown (no fares and no cached data), couldn't be read (error), not reached (skipped), not searched (not run).
- */
-export const KEY_MARKS = [
-  'priced',
-  'no-price-shown',
-  'couldnt-read',
-  'not-reached',
-  'not-searched',
-] as const satisfies readonly ReducedMark[];
-
-/**
- * §6.6's roll-up precedence over a date pair's airport pairs (their buckets as counts): any priced, then any not
- * searched, then any error, then any no fares (the rest being no fares, no cached data or skipped), then any no cached
- * data, then skipped. Null when no airport pair is in scope.
- */
-export function bucketOf(b: Buckets): BucketName | null {
-  if (b.priced > 0) return 'priced';
-  if (b.not_run > 0) return 'not_run';
-  if (b.error > 0) return 'error';
-  if (b.empty > 0) return 'empty';
-  if (b.no_data > 0) return 'no_data';
-  if (b.skipped > 0) return 'skipped';
-  return null;
-}
-
-/**
- * Every mark the key names (spec rev 55 §11 Overview): the five marks of `reducedMark` (a priced cell is shown by its
- * shade; every other one by its glyph), the striped "partly not searched" (some airport pairs in scope not searched,
- * whatever the mark), the figure's "not checked" (a calendar price), "superseded" and "not seen", "none within <limit>"
- * (every price left out for a known journey time), and "unshown" (a price was found but none can be the figure:
- * partially verified, unconfirmed or failed).
- */
-export type Mark =
-  | (typeof KEY_MARKS)[number]
-  | 'partly'
-  | 'notChecked'
-  | 'superseded'
-  | 'notSeen'
-  | 'noneWithin'
-  | 'unshown';
-export const MARK_ORDER: readonly Mark[] = [
-  ...KEY_MARKS,
-  'partly',
-  'notChecked',
-  'superseded',
-  'notSeen',
-  'noneWithin',
-  'unshown',
-];
-/** The marks a cell draws as a glyph or pattern: every mark but priced, which is its shade. */
-export type CellMark = Exclude<Mark, 'priced'>;
-export const CELL_MARKS: readonly CellMark[] = MARK_ORDER.filter((m): m is CellMark => m !== 'priced');
-
-/** One cell of a day's strip: a single stay length, or a folded band of them. */
-export interface Column {
-  from: number;
-  to: number;
-}
-
-/**
- * The columns of a day: the folded bands of the stay range in view (at most 12; `foldNights`), with the band at
- * `open` (its `from`) opened into its stay lengths.
- */
-export function columnsFor(bands: readonly NightsBand[], open: number | null): Column[] {
-  return bands.flatMap((b) =>
-    b.from === open && b.to > b.from
-      ? Array.from({ length: b.to - b.from + 1 }, (_x, i) => ({ from: b.from + i, to: b.from + i }))
-      : [{ from: b.from, to: b.to }],
-  );
-}
-
-/** The bands of a stay range in view, or none when no stay is in view. */
-export function bandsOf(range: { min: number; max: number } | null): NightsBand[] {
-  return range === null ? [] : foldNights(range.min, range.max);
-}
-
-/** What one cell shows. */
-export interface CellModel {
-  /** The date pairs in the cell (one, or a band's), in stay order. */
-  pairs: DatePair[];
-  /** The best-ranked date pair with a figure (a current one first), or null. */
-  lead: DatePair | null;
-  /** The shade: a band, the flat shade, or null (unshaded: no figure, or one off the scale). */
-  shade: Band | 'flat' | null;
-  /** The cell's one of the five marks, core's `reducedMark` over its summed buckets; null with no airport pair in scope. */
-  mark: ReducedMark | null;
-  marks: CellMark[];
-  /** The six buckets summed over the cell's date pairs. */
-  buckets: Buckets;
-}
-
-const ZERO: Buckets = { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 };
-function sum(pairs: readonly DatePair[]): Buckets {
-  const s = { ...ZERO };
-  for (const p of pairs) {
-    s.priced += p.buckets.priced;
-    s.empty += p.buckets.empty;
-    s.no_data += p.buckets.no_data;
-    s.error += p.buckets.error;
-    s.skipped += p.buckets.skipped;
-    s.not_run += p.buckets.not_run;
-    s.reused += p.buckets.reused;
-  }
-  return s;
-}
-
-/**
- * A cell's model (spec §11 Overview, revision 50; spec rev 55 §6.6): a cell with a current figure is shaded on the one
- * scale (a band cell by its cheapest current figure), and a calendar figure also carries "not checked"; a superseded or
- * not-seen figure is drawn with its mark on a neutral fill, never on the scale; a cell without a figure carries its one
- * of the five marks (core's `reducedMark` over its airport pairs), never a shade, so one empty airport pair and three
- * not searched is "not searched", never "no price shown"; and the striped "partly not searched" whenever some (but not
- * all) of its airport pairs are not searched, priced or not.
- */
-export function cellModel(
-  pairs: readonly DatePair[],
-  rankOf: ReadonlyMap<number, number>,
-  scale: QuintileScale,
-): CellModel {
-  const ranked = pairs
-    .filter((p) => p.figure !== null)
-    .sort((a, b) => (rankOf.get(a.index) ?? Infinity) - (rankOf.get(b.index) ?? Infinity));
-  const lead = ranked[0] ?? null;
-  const buckets = sum(pairs);
-  const total =
-    buckets.priced + buckets.empty + buckets.no_data + buckets.error + buckets.skipped + buckets.not_run;
-  const partly = buckets.not_run > 0 && buckets.not_run < total;
-  // why: a cell with no airport pair in scope has no mark at all (core reads an empty bucket set as not searched)
-  const mark = total === 0 ? null : reducedMark(buckets);
-  const marks: CellMark[] = [];
-  let shade: CellModel['shade'] = null;
-  const f = lead?.figure ?? null;
-  if (f !== null) {
-    // why: a current figure is always on the scale it was built from, so a scale that is not banded is flat
-    if (isCurrent(f)) shade = scale.mode === 'quintile' ? scale.band(f.price.pricePence) : 'flat';
-    else marks.push(f.superseded ? 'superseded' : 'notSeen');
-    // why: spec rev 56 §11: a pairing figure is never checked with the airline either (an exhaustive switch: R-order)
-    switch (f.basis) {
-      case 'calendar':
-      case 'pairing':
-        marks.push('notChecked');
-        break;
-      case 'verified':
-        break;
-      default: {
-        const unknownBasis: never = f.basis;
-        throw new RangeError(`cellModel: no basis ${String(unknownBasis)}`);
-      }
-    }
-    if (partly) marks.push('partly');
-    return { pairs: [...pairs], lead, shade, mark, marks, buckets };
-  }
-  if (pairs.some((p) => p.journeyLeftOut > 0)) marks.push('noneWithin');
-  if (mark === 'priced') {
-    if (!marks.includes('noneWithin')) marks.push('unshown');
-  } else if (mark !== null) {
-    marks.push(mark);
-  }
-  if (partly) marks.push('partly');
-  return { pairs: [...pairs], lead, shade, mark, marks, buckets };
-}
-
-/** The date pairs of a cell on `date` for `column`, from the decoded pairs in index order (none outside the space). */
-export function pairsAt(
-  pairs: readonly DatePair[],
-  space: DatePairSpace,
-  date: IsoDate,
-  column: Column,
-): DatePair[] {
-  const out: DatePair[] = [];
-  // why: WP19 Task 19.9: the day's first stay is looked up once and its other stays follow it in index order (a day's
-  // stays are consecutive indices, core's order), so a folded band of 8 stays costs one date lookup, not 8
-  const first = datePairIndex(space, date, addDays(date, space.minNights));
-  if (first === null) return out;
-  for (let n = Math.max(column.from, space.minNights); n <= Math.min(column.to, space.maxNights); n += 1) {
-    const p = pairs[first + n - space.minNights];
-    if (p !== undefined) out.push(p);
-  }
+  // why: 31 days after a month's first day is always in the next month (no month is longer)
+  for (let m = monthOf(space.departureFrom); m <= last; m = monthOf(addDays(firstOf(m), 31))) out.push(m);
   return out;
 }
 
-/**
- * The key's five counts (spec rev 55 §11 Overview legend): each date pair in view once, by core's `reducedMark`, so
- * they are the same counts as the header line and the card (`datePairSearched` is priced or no price shown).
- */
-export function keyCounts(pairs: readonly DatePair[]): Record<ReducedMark, number> {
-  // why: Ruling 7: one count of the marks for the key and the cards (core's `markCounts`)
-  return coreMarkCounts(pairs.map((p) => p.buckets));
-}
-
-/**
- * "No price shown" named by its parts ("12 no fares, 3 no cached data"): each date pair the key counts as no price
- * shown, by its §6.6 precedence bucket (no fares before no cached data), so the parts sum to that mark's count.
- */
-export function noPriceParts(pairs: readonly DatePair[]): { empty: number; no_data: number } {
-  const parts = { empty: 0, no_data: 0 };
+/** Each departure day of the date pairs in view, with its stays in index order (one pass over the pairs). */
+export function staysByDay(pairs: readonly DatePair[]): Map<IsoDate, DatePair[]> {
+  const days = new Map<IsoDate, DatePair[]>();
   for (const p of pairs) {
-    if (reducedMark(p.buckets) !== 'no-price-shown') continue;
-    if (bucketOf(p.buckets) === 'empty') parts.empty += 1;
-    else parts.no_data += 1;
+    const day = days.get(p.departureDate);
+    if (day === undefined) days.set(p.departureDate, [p]);
+    else day.push(p);
   }
-  return parts;
+  return days;
 }
 
-/** Each cell mark's count over the date pairs in view, one date pair at a time (the key's other numbers). */
-export function markCounts(
-  pairs: readonly DatePair[],
-  rankOf: ReadonlyMap<number, number>,
-  scale: QuintileScale,
-): Record<CellMark, number> {
-  const counts: Record<CellMark, number> = {
-    'no-price-shown': 0,
-    'couldnt-read': 0,
-    'not-reached': 0,
-    'not-searched': 0,
-    partly: 0,
-    notChecked: 0,
-    superseded: 0,
-    notSeen: 0,
-    noneWithin: 0,
-    unshown: 0,
+/** A calendar day: its date, and today's date (a day before today has departed). */
+export interface CalendarDay {
+  date: IsoDate;
+  today: IsoDate;
+}
+
+/** The one price a day prints: the wire's price cell, the label kind it carries, and whether it is a trip's (the dot). */
+export interface DayPrice {
+  cell: DatePairFigure['price'];
+  kind: PriceLabelKind;
+  trip: boolean;
+}
+
+/** What a calendar day shows. */
+export interface DayModel {
+  /** Core's `dayMark` over the day's stays, or `out`: a departed day or one outside the window, blank and inert. */
+  mark: ReducedMark | 'out';
+  /** The price it prints, or null. */
+  price: DayPrice | null;
+  /** It has prices, but none is current: it prints none and its name says "not seen again". */
+  notSeenOnly: boolean;
+  /** Its stays in view, in stay order (none when out). */
+  stays: DatePair[];
+}
+
+const OUT: DayModel = { mark: 'out', price: null, notSeenOnly: false, stays: [] };
+
+/** The cheaper of two figures, the first on a tie. */
+const cheaper = (a: DatePairFigure | null, b: DatePairFigure): DatePairFigure =>
+  a !== null && a.price.pricePence <= b.price.pricePence ? a : b;
+
+/**
+ * Ruling 18: a day's mark is core's `dayMark` over its stays in view; a departed day (before today) or a day with no
+ * stay (outside the window) is out. It prints its cheapest current trip's price (core's `isTrip`) with the dot when it
+ * has a trip, else its lowest current calendar price (superseded and not-seen figures left out); a day whose only prices
+ * are not current prints none and says "not seen again".
+ */
+export function dayModel(day: CalendarDay, pairs: readonly DatePair[]): DayModel {
+  if (day.date < day.today || pairs.length === 0) return OUT;
+  let trip: DatePairFigure | null = null;
+  let calendar: DatePairFigure | null = null;
+  let priced = false;
+  for (const p of pairs) {
+    const f = p.figure;
+    if (f === null) continue;
+    priced = true;
+    // why: a figure that is not a trip but is current is a calendar price (a current verified figure is a trip)
+    if (isTrip(f)) trip = cheaper(trip, f);
+    else if (isCurrent(f)) calendar = cheaper(calendar, f);
+  }
+  const lead = trip ?? calendar;
+  return {
+    mark: dayMark(pairs.map((p) => p.buckets)),
+    price: lead === null ? null : { cell: lead.price, kind: figureLabelKind(lead), trip: trip !== null },
+    notSeenOnly: lead === null && priced,
+    stays: [...pairs],
   };
-  for (const p of pairs) for (const m of cellModel([p], rankOf, scale).marks) counts[m] += 1;
-  return counts;
+}
+
+/**
+ * A day's accessible name (Ruling 18): "Wed 11 Nov, £372, Calendar · 3h" (its label kind and age, with the stale words
+ * when the wire marks it stale), "…, £412, Seller · 3h, trip with flights read", or the day and why it prints no price
+ * ("…, not searched", "…, not seen again"). An out day has no name: it is no button.
+ */
+export function dayName(date: IsoDate, m: DayModel): string {
+  const C = COPY.calendar;
+  const T = COPY.trip;
+  const day = rowDay(date);
+  const p = m.price;
+  if (p !== null) {
+    const label = T.labelText(T.label[p.kind], labelAge(p.cell.ageHours));
+    const said = p.cell.stale === false ? label : T.labelStale(label, staleWords(p.cell.stale));
+    return C.dayPrice(day, formatPence(p.cell.pricePence), said, p.trip);
+  }
+  if (m.notSeenOnly) return C.dayMark(day, C.notSeenAgain);
+  // why: an out day is never named (it is no button); its words would be a mark's all the same
+  return C.dayMark(day, C.markWords[m.mark === 'out' ? 'not-searched' : m.mark]);
+}
+
+/** The heat ramp's steps, cheapest first, or the one flat step of a scale with too few or too close prices. */
+export type Heat = 1 | 2 | 3 | 4 | 5 | 'flat';
+const HEATS = [1, 2, 3, 4, 5] as const;
+
+/**
+ * Ruling 18's heat scale: the quintiles of the prices the days print (current prices only: a trip or a current calendar
+ * price), flat under ten prices or a spread under 10% of the cheapest (decision 38).
+ */
+export function dayScale(days: Iterable<DayModel>): QuintileScale {
+  const prices: number[] = [];
+  for (const m of days) if (m.price !== null) prices.push(m.price.cell.pricePence);
+  return buildScale(prices);
+}
+
+/** A printed price's step on the ramp: its quintile, cheapest first, or the flat step. */
+export function heatOf(scale: QuintileScale, pence: number): Heat {
+  const band = scale.band(pence);
+  return band === null ? 'flat' : HEATS[band];
+}
+
+/** What a stay with no figure shows in the day panel: its mark, every price over the journey limit, or none to show. */
+export type StayMark = Exclude<ReducedMark, 'priced'> | 'over-limit' | 'unshown';
+
+/**
+ * A stay with no figure, by why it has none: every price left out for the journey limit (`over-limit`), a price found
+ * that can't be shown (`unshown`: partly checked or not confirmed), else its own mark (core's `reducedMark`).
+ */
+export function stayMark(p: DatePair): StayMark {
+  if (p.journeyLeftOut > 0) return 'over-limit';
+  const mark = reducedMark(p.buckets);
+  return mark === 'priced' ? 'unshown' : mark;
+}
+
+/**
+ * The day panel's order: the trips, cheapest first; then the day's other prices (calendar prices, and those a later
+ * search did not see again), cheapest first; then the stays with no price, in stay order. Equal prices keep stay order.
+ */
+export function panelOrder(stays: readonly DatePair[]): DatePair[] {
+  const rank = (p: DatePair): number => (p.figure === null ? 2 : isTrip(p.figure) ? 0 : 1);
+  const pence = (p: DatePair): number => p.figure?.price.pricePence ?? 0;
+  // why: Array.prototype.sort is stable, so equal ranks and prices keep the stays' own order
+  return [...stays].sort((a, b) => rank(a) - rank(b) || pence(a) - pence(b));
 }

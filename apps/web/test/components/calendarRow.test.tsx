@@ -124,4 +124,34 @@ describe('CalendarRow', () => {
     expect(screen.getByRole('button')).toHaveAccessibleName('Read flights for Tue 17 Nov → Fri 27 Nov');
     expect(screen.getByRole('button')).toHaveTextContent('Read flights');
   });
+
+  // Ruling 18 (Task 9): the day panel lists every stay of a day; one without a price is a calendar row with a dash, its
+  // word and its line, and never a price or a label
+  it('a stay with no price: a dash, its word and its line, no label; Read flights reads the dates alone', async () => {
+    const onRead = vi.fn();
+    const { user } = renderWithProviders(
+      <ul>
+        <CalendarRow
+          figure={null}
+          empty={{ name: 'No price listed', line: COPY.calendar.stayLine['no-price-shown'] }}
+          search={{ ...search, multiAirport: true }}
+          pair={pair}
+          onRead={onRead}
+        />
+      </ul>,
+    );
+    const row = screen.getByRole('listitem');
+    expect(row).toHaveTextContent('—');
+    expect(row).toHaveTextContent('No price listed');
+    expect(row).toHaveTextContent("That isn't the same as no flights.");
+    expect(row).toHaveTextContent('Tue 17 Nov → Fri 27 Nov');
+    expect(row).toHaveTextContent('Nights 10');
+    expect(row).not.toHaveTextContent('£');
+    expect(screen.queryByTestId('price-label')).toBeNull();
+    // no airport pair to name: the stay has no price on any of them
+    expect(screen.queryByTestId('row-airports')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Read flights for Tue 17 Nov → Fri 27 Nov' }));
+    expect(onRead).toHaveBeenCalledTimes(1);
+    expect(onRead).toHaveBeenCalledWith({ departureDate: '2026-11-17', returnDate: '2026-11-27' });
+  });
 });

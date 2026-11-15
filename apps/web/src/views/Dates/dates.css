@@ -1,28 +1,3 @@
-/* The Dates overview's patterns (spec §11 Overview). Stylesheet rules, not inline styles: spec §4's CSP blocks inline
-   styles. A pattern, not a colour, so the meaning survives greyscale, colour-blindness and forced colours (where the
-   glyph beside it carries it too). */
-
-/* Partly not searched: stripes in the cell's own text colour, so they keep that colour's contrast on every shade. */
-.dates-partly {
-  background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px);
-}
-
-/* The glyphs sit on the cell's own fill (the button's background colour, inherited), so a stripe in the glyphs' own ink
-   never crosses their strokes: the glyph is the cue that must not rely on colour, and it keeps the band's text-on-fill
-   contrast on every shade. */
-.dates-partly .dates-glyphs {
-  background-color: inherit;
-  padding: 0 1px;
-}
-
-/* A month of the overview off screen skips style, layout and paint until it nears the viewport (WP19 Task 19.9: the
-   performance bound over 400 days). `auto` keeps the size it last rendered at, so the page does not jump; its cells
-   stay in the accessibility tree and reachable by keyboard, and find-in-page still finds them. */
-.dates-month {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 18rem;
-}
-
 /* =====================================================================================================================
    A search's page (design 2026-11-08 §5, mockup 02): the header, the filter row and the two sections on the shared
    tokens (styles/theme.css) inside `.token-page` (styles/page.css), light and dark. The rows are rows.css's.
@@ -174,7 +149,7 @@
     padding: 10px 18px 14px;
     border-top: 1px solid var(--t-line);
   }
-  /* the calendar and the coverage section keep their own look below the sections (Tasks 9 and 10 replace them) */
+  /* the calendar, and the coverage section with its own look below it (Task 10 replaces it) */
   .search-calendar,
   .search-page > .coverage-plate {
     margin-top: 28px;
@@ -183,44 +158,9 @@
 }
 
 /* =====================================================================================================================
-   The calendar (the overview, until Task 9 replaces it) and the coverage section, on the departure board
+   The coverage section, on the departure board (Task 10 replaces it)
    ===================================================================================================================== */
 @layer components {
-  /* The overview: months of lamps on one board */
-  .ov-months {
-    display: grid;
-    gap: 22px;
-  }
-  .ov-table th {
-    color: var(--flap-ink-2);
-  }
-  .ov-table td {
-    padding: 2px 3px 6px;
-    border-top: 1px solid var(--board-line);
-  }
-  .lamp-strip {
-    gap: 2px;
-  }
-  .lamp {
-    min-width: 13px;
-    min-height: 13px;
-    aspect-ratio: 1;
-  }
-  .lamp-lit {
-    border-radius: 50%;
-    box-shadow: 0 0 6px rgb(255 241 204 / 0.25);
-  }
-  .ov-legend .legend-swatch.lamp-none {
-    border-radius: 2px;
-  }
-  .ov-readout {
-    padding: 8px 12px;
-    color: var(--flap-ink);
-    background: #111315;
-    border: 1px solid #34393d;
-    border-radius: 3px;
-  }
-
   /* The coverage section: one enamel plate, its toggle a painted header */
   .coverage-plate {
     padding: 6px 0 0;
@@ -257,13 +197,293 @@
   }
 }
 
-@media (max-width: 899px) {
-  .lamp {
-    min-width: 24px;
-    min-height: 24px;
-    aspect-ratio: auto;
+/* =====================================================================================================================
+   The calendar (Ruling 18, mockup 02): months of day buttons on the shared tokens, light and dark. A day prints its one
+   price on the heat ramp (--t-heat-1…5, each step with the ink test/views/trip/contrast.test.ts pins for it), a trip's
+   with its dot; a day without a price prints "no price" or the cross on the sunk ground, or is hatched (not searched,
+   not reached). Nothing rests on colour: every cue is a word, a glyph or a pattern, and every day names itself.
+   ===================================================================================================================== */
+@layer components {
+  .cal-section .search-section-sub {
+    max-width: 72ch;
   }
-  .lamp-lit {
+  .cal-card {
+    overflow: hidden;
+  }
+  .cal-turn {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 12px 0;
+  }
+  .cal-turn .btn {
+    min-height: 44px;
+  }
+  .cal-months {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 24px;
+    padding: 16px 18px;
+  }
+  .cal-month {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 3px;
+  }
+  .cal-month-name {
+    padding: 0 3px 6px;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .cal-dow {
+    padding-bottom: 2px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--t-muted);
+    text-align: center;
+  }
+  .cal-month td {
+    padding: 0;
+  }
+  .cal-day {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: 1 / 0.9;
+    padding: 3px 4px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: left;
+    color: var(--t-ink);
+    background: var(--t-surface);
+    overflow: hidden;
+  }
+  button.cal-day {
+    cursor: pointer;
+  }
+  button.cal-day:hover {
+    outline: 2px solid var(--t-accent);
+    outline-offset: 0;
+  }
+  .cal-out {
+    color: var(--t-muted);
+    background: transparent;
+  }
+  .cal-dp {
+    align-self: flex-end;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .cal-dot {
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    font-size: 9px;
+    line-height: 1;
+  }
+  /* the heat ramp: the cheapest step takes the dark ink, the others the light ink (contrast.test.ts) */
+  .cal-day[data-heat="1"] {
+    color: var(--t-heat-ink-dark);
+    background: var(--t-heat-1);
+  }
+  .cal-day[data-heat="2"] {
+    color: var(--t-heat-ink-light);
+    background: var(--t-heat-2);
+  }
+  .cal-day[data-heat="3"] {
+    color: var(--t-heat-ink-light);
+    background: var(--t-heat-3);
+  }
+  /* too few or too close prices for a ramp: one middle step (decision 38) */
+  .cal-day[data-heat="flat"] {
+    color: var(--t-heat-ink-light);
+    background: var(--t-heat-3);
+  }
+  .cal-day[data-heat="4"] {
+    color: var(--t-heat-ink-light);
+    background: var(--t-heat-4);
+  }
+  .cal-day[data-heat="5"] {
+    color: var(--t-heat-ink-light);
+    background: var(--t-heat-5);
+    border-color: var(--t-line);
+  }
+  /* a stale price: the label's amber, on a chip of the surface so it reads on every step */
+  .cal-day[data-stale] .cal-dp {
+    padding: 0 3px;
     border-radius: 3px;
+    color: var(--t-warn);
+    background: var(--t-surface);
+  }
+  /* no price, couldn't read, not seen again: the sunk ground with the day's own words or glyph in muted ink */
+  .cal-day:not([data-heat]):is(
+    [data-mark="priced"],
+    [data-mark="no-price-shown"],
+    [data-mark="couldnt-read"]
+  ) {
+    color: var(--t-muted);
+    background: var(--t-sunk);
+    border-color: var(--t-line);
+  }
+  .cal-day[data-mark="no-price-shown"] .cal-dp {
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+  .cal-day[data-mark="couldnt-read"] .cal-dp {
+    font-size: 13px;
+  }
+  /* the open day */
+  .cal-day[aria-expanded="true"] {
+    outline: 2px solid var(--t-ink);
+    outline-offset: 1px;
+  }
+
+  /* the key, under the months (mockup 02's legend) */
+  .cal-key {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 18px;
+    margin: 0;
+    padding: 0 18px 14px;
+    list-style: none;
+    font-size: 12.5px;
+    color: var(--t-muted);
+  }
+  .cal-key li {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .cal-key-scale {
+    display: inline-flex;
+    gap: 2px;
+  }
+  .cal-key-step {
+    display: inline-block;
+    width: 16px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .cal-key-step[data-heat="1"] {
+    background: var(--t-heat-1);
+  }
+  .cal-key-step[data-heat="2"] {
+    background: var(--t-heat-2);
+  }
+  .cal-key-step[data-heat="3"] {
+    background: var(--t-heat-3);
+  }
+  .cal-key-step[data-heat="4"] {
+    background: var(--t-heat-4);
+  }
+  .cal-key-step[data-heat="5"] {
+    background: var(--t-heat-5);
+    box-shadow: inset 0 0 0 1px var(--t-line);
+  }
+  .cal-key-glyph {
+    display: inline-grid;
+    place-items: center;
+    min-width: 14px;
+    color: var(--t-ink);
+  }
+  .cal-key-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .cal-key-sunk {
+    background: var(--t-sunk);
+    box-shadow: inset 0 0 0 1px var(--t-line);
+    border-radius: 3px;
+  }
+  .cal-key-hatch {
+    background-image: repeating-linear-gradient(135deg, var(--t-sunk) 0 3px, var(--t-surface) 3px 6px);
+    box-shadow: inset 0 0 0 1px var(--t-line);
+  }
+
+  /* the day panel, below the key */
+  .cal-panel {
+    border-top: 1px solid var(--t-line);
+    min-width: 0;
+  }
+  .cal-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px 18px 4px;
+  }
+  .cal-panel-title {
+    font-size: 15px;
+    font-weight: 650;
+  }
+  .cal-panel-head .btn {
+    min-height: 44px;
+  }
+}
+
+/* Not searched and not reached are hatched: a pattern, not a colour; forced colours turn it to a dashed edge (below) */
+.cal-day:is([data-mark="not-searched"], [data-mark="not-reached"]) {
+  color: var(--t-muted);
+  background-image: repeating-linear-gradient(135deg, var(--t-sunk) 0 5px, var(--t-surface) 5px 10px);
+  border-color: var(--t-line);
+}
+/* A focused day: the tokens' ring, unlayered so the board's own focus treatment does not replace it */
+.cal-day:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+@media (max-width: 899px) {
+  @layer components {
+    .cal-months {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 12px 10px;
+    }
+    .cal-month {
+      border-spacing: 2px;
+    }
+    .cal-day {
+      padding: 2px;
+      font-size: 10px;
+    }
+    .cal-dp {
+      font-size: 10px;
+      letter-spacing: -0.01em;
+    }
+    /* at 375 px a day is about 40 px wide: "no price" takes two lines rather than be cut */
+    .cal-day[data-mark="no-price-shown"] .cal-dp {
+      font-size: 9.5px;
+      line-height: 1.05;
+      white-space: normal;
+      text-align: right;
+    }
+  }
+}
+
+@media (forced-colors: active) {
+  .cal-day {
+    border: 1px solid CanvasText;
+  }
+  .cal-day:is([data-mark="not-searched"], [data-mark="not-reached"]) {
+    border-style: dashed;
+  }
+  .cal-day[aria-expanded="true"] {
+    outline-color: Highlight;
   }
 }

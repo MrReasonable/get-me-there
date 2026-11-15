@@ -43,5 +43,13 @@ export const calendarRows = (section: HTMLElement): HTMLElement[] =>
   within(section).queryAllByTestId('calendar-row');
 /** A row's text as the eye reads it, whitespace collapsed. */
 export const rowText = (row: HTMLElement): string => (row.textContent ?? '').replace(/\s+/g, ' ').trim();
-/** The calendar (the overview until Task 9) once it has drawn. */
-export const findCalendar = () => screen.findByTestId('dates-overview');
+/** The calendar's months once they have drawn (Ruling 18). */
+export const findCalendar = () => screen.findByTestId('calendar-months');
+/** A calendar day's button, by its date; throws when the day is not a button (out of the window, departed, not shown). */
+export function dayButton(date: string): HTMLButtonElement {
+  const el = document.querySelector<HTMLButtonElement>(`button[data-day="${date}"]`);
+  if (el === null) throw new Error(`no day button ${date}`);
+  return el;
+}
+/** The open day panel (a region named by its heading, "Sun 14 Mar: 3 stays"). */
+export const findDayPanel = (name: string | RegExp) => screen.findByRole('region', { name });

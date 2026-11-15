@@ -50,9 +50,10 @@ describe('the page’s states (spec §11)', () => {
     expect(screen.getByRole('button', { name: /^Search now/ })).toBeEnabled();
     expect(screen.queryByRole('region', { name: P.cheapestHeading })).toBeNull();
     expect(screen.queryByTestId('dates-run')).toBeNull();
-    const cells = document.querySelectorAll('[data-cell]');
-    expect(cells.length).toBeGreaterThan(0);
-    expect([...cells].every((c) => c.getAttribute('data-marks') === 'not-searched')).toBe(true);
+    // Ruling 18: every day of the window reads not searched
+    const days = document.querySelectorAll('button[data-day]');
+    expect(days.length).toBeGreaterThan(0);
+    expect([...days].every((c) => c.getAttribute('data-mark') === 'not-searched')).toBe(true);
   });
 
   it('checks run on their own but no parent run: "Not searched yet" with their count, and their prices', async () => {
@@ -110,14 +111,19 @@ describe('the page’s states (spec §11)', () => {
     await waitFor(() => expect(hits).toBe(2));
   });
 
-  it('no state says a banned word, nor "no flights" outside "that isn\'t the same as no flights"', async () => {
+  it('no state says a banned word, nor "no flights" outside "that isn\'t the same as no flights" and the key', async () => {
     const r = renderDates({ body: workedDates() });
     await findTrips();
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST)).toEqual([]);
     r.unmount();
     renderDates({ body: { rest: { empty: 4 } } });
     await findTrips();
-    expect(renderedCopy().replace(/isn't the same as no flights/g, '')).not.toMatch(/no flights/i);
+    // why: Ruling 18: the calendar's key says "no price (not 'no flights')"
+    expect(
+      renderedCopy()
+        .replace(/isn't the same as no flights/g, '')
+        .replaceAll(COPY.calendar.key.noPrice, ''),
+    ).not.toMatch(/no flights/i);
   });
 });
 
@@ -240,8 +246,8 @@ describe('a run going (Ruling 11; Review Focus 2)', () => {
     );
     expect(line).not.toHaveTextContent(/nights|airport/);
     expect(await findLower()).toHaveTextContent('£300');
-    // the calendar marks the rest not searched
-    expect(document.querySelectorAll('[data-marks~="not-searched"]').length).toBeGreaterThan(20);
+    // the calendar marks the rest not searched (Ruling 18: each of the other 30 days)
+    expect(document.querySelectorAll('button[data-day][data-mark="not-searched"]')).toHaveLength(30);
   });
 
   it('with the card’s latest run this very run, the progress says the card’s counts (the same as the first screen)', async () => {

@@ -1,5 +1,5 @@
 import { asIsoDate } from '@gmt/core';
-import { fireEvent, screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TripView } from '../../src/views/Trip/TripView.js';
@@ -9,7 +9,15 @@ import { tripBody } from '../fixtures.trip.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
-import { calendarRows, findCalendar, findLower, renderDates, rowText } from '../views/dates/render.js';
+import {
+  calendarRows,
+  dayButton,
+  findCalendar,
+  findDayPanel,
+  findLower,
+  renderDates,
+  rowText,
+} from '../views/dates/render.js';
 
 // Review focus 3 for the Dates view (WP19 Tasks 19.4, 19.5): run by `test:tz` under America/Los_Angeles and
 // Asia/Tokyo. Every date the view shows is formatted from its `YYYY-MM-DD` string, so a browser west or east of
@@ -26,8 +34,6 @@ const body = {
     [at('2027-04-01', 12)]: pricedPair(priced(31_000)),
   },
 };
-const cellAt = (date: string, from: number) =>
-  document.querySelector<HTMLElement>(`[data-testid="dates-overview"] [data-cell="${date}|${from}"]`);
 
 describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) => {
   let previous: string | undefined;
@@ -60,22 +66,20 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     expect(rowText(rows[2] ?? document.body)).toContain('Thu 1 Apr → Tue 13 Apr');
   });
 
-  it('the overview puts a 2027-03-31 date pair in March’s month and a 2027-04-01 one in April’s, and the readout names 14 Mar', async () => {
-    renderDates({ body });
+  it('the calendar puts 31 Mar in March’s month and 1 Apr in April’s, each in its weekday’s column, and names its day', async () => {
+    const { user } = renderDates({ body });
     await findCalendar();
-    expect(cellAt('2027-03-31', 11)?.closest('table')?.querySelector('caption')).toHaveTextContent(
-      'Mar 2027',
-    );
-    expect(cellAt('2027-04-01', 12)?.closest('table')?.querySelector('caption')).toHaveTextContent(
-      'Apr 2027',
-    );
-    // the day number in its own column: 31 Mar 2027 is a Wednesday, 1 Apr a Thursday (Monday first)
-    expect(cellAt('2027-03-31', 11)?.closest('td')?.cellIndex).toBe(2);
-    expect(cellAt('2027-04-01', 12)?.closest('td')?.cellIndex).toBe(3);
-    const c = cellAt('2027-03-14', 10);
-    if (c === null) throw new Error('no cell');
-    fireEvent.pointerOver(c);
-    expect(screen.getByTestId('dates-readout')).toHaveTextContent('14 Mar 2027–24 Mar 2027 (10n)');
+    expect(dayButton('2027-03-31').closest('table')?.querySelector('caption')).toHaveTextContent('Mar 2027');
+    expect(dayButton('2027-04-01').closest('table')?.querySelector('caption')).toHaveTextContent('Apr 2027');
+    // the day in its own column: 31 Mar 2027 is a Wednesday, 1 Apr a Thursday (Monday first)
+    expect(dayButton('2027-03-31').closest('td')?.cellIndex).toBe(2);
+    expect(dayButton('2027-04-01').closest('td')?.cellIndex).toBe(3);
+    expect(dayButton('2027-03-14')).toHaveAccessibleName('Sun 14 Mar, £300, Calendar · 2h');
+    expect(dayButton('2027-04-01')).toHaveAccessibleName('Thu 1 Apr, £310, Calendar · 2h');
+    // the day panel's heading and its row read the same dates
+    await user.click(dayButton('2027-03-14'));
+    const panel = await findDayPanel('Sun 14 Mar: 3 stays');
+    expect(rowText(within(panel).getAllByRole('listitem')[0] ?? panel)).toContain('Sun 14 Mar → Wed 24 Mar');
   });
 
   it('the Trip page’s heading reads Sun 14 Mar and Sun 28 Mar for a 2027-03-14 → 2027-03-28 trip (trip-page plan Task 7)', async () => {

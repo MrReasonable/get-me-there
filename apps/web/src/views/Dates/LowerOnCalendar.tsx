@@ -1,4 +1,4 @@
-import { type DecodedDatePairs, flightLimitsOf } from '@gmt/core';
+import { type DatePair, type DecodedDatePairs, flightLimitsOf, MAX_FLIGHT_LIST_PAIRS } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useId, useMemo } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
@@ -10,18 +10,30 @@ import { type FigurePair, LOWER_SHOWN } from './board.js';
 
 const P = COPY.searchPage;
 
-/** The calendar's region id: "See all on the calendar" lands there (Task 9 keeps it on the new calendar). */
+/** The calendar's anchor: "See all on the calendar" and the Trips cards' counts link land there (Ruling 18). */
 export const CALENDAR_ID = 'calendar';
 
 /**
- * The flight lists of the lower dates the section shows (Ruling 20: Read flights where a read would go now), owned by
- * the page so its words outlive the section (`ReadSaid`) and the no-trip lead knows whether flights can be read here. A
- * read that lands calls the page's re-read, so the date leaves Lower on the calendar and shows as a trip.
+ * The flight lists of the dates the page shows a read for (Ruling 20: Read flights where a read would go now): the lower
+ * dates the section shows, then the open day panel's stays (Ruling 18), at most MAX_FLIGHT_LIST_PAIRS to a request.
+ * Owned by the page so its words outlive the section (`ReadSaid`, the page's one status) and the no-trip lead knows
+ * whether flights can be read here. A read that lands calls the page's re-read, so the date shows as a trip.
  */
-export function useLowerFlights(definition: DefinitionResponse, lower: readonly FigurePair[]): BoardFlights {
+export function usePageFlights(
+  definition: DefinitionResponse,
+  lower: readonly FigurePair[],
+  day: readonly DatePair[] = [],
+): BoardFlights {
   const qc = useQueryClient();
   const keys = lower.slice(0, LOWER_SHOWN).map(pairKey).join(',');
-  const pages = useMemo(() => (keys === '' ? [] : [keys.split(',')]), [keys]);
+  const dayKeys = day.map(pairKey).join(',');
+  const pages = useMemo(() => {
+    const out = keys === '' ? [] : [keys.split(',')];
+    const days = dayKeys === '' ? [] : dayKeys.split(',');
+    for (let i = 0; i < days.length; i += MAX_FLIGHT_LIST_PAIRS)
+      out.push(days.slice(i, i + MAX_FLIGHT_LIST_PAIRS));
+    return out;
+  }, [keys, dayKeys]);
   const limits = useMemo(() => flightLimitsOf(definition.constraints), [definition.constraints]);
   // why: a landed read made the date a trip on the server; the page's read says so once read again
   const onLanded = useCallback(
@@ -50,7 +62,7 @@ export interface LowerOnCalendarProps {
   lower: readonly FigurePair[];
   /** The page has a trip, so these are "lower" than it; without one they are the lowest calendar prices. */
   hasTrip: boolean;
-  /** The shown dates' flight lists and the read on demand (`useLowerFlights`, the page's). */
+  /** The shown dates' flight lists and the read on demand (`usePageFlights`, the page's). */
   flights: BoardFlights;
 }
 

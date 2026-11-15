@@ -133,12 +133,8 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.removeFailedLine': ['HTTP 500'],
   'searchesView.restoreFailedLine': ['HTTP 500'],
   'datesView.scopeNights': [10, 14],
-  'datesView.airports': ['LHR', 'JFK'],
-  'datesView.cachedFromPair': ['LGW', 'EWR'],
   'datesView.onDemandOnly': [2],
   'datesView.tooManyCells': [100000, 50000],
-  'datesView.legend.noPriceParts': [12, 3],
-  'datesView.legend.striped': [4],
   // WP20 Task 20.6: a search's page (spec rev 55 §11)
   'searchPage.leaveRolling': ['14 Mar – 13 Apr'],
   'searchPage.eachWayUnder': ['25h'],
@@ -182,20 +178,13 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.datesShort': ['14', '24 Mar'],
   'flights.readDone': ['14 → 24 Mar'],
   'flights.readNotDone': ['14 → 24 Mar'],
-  // WP19 (Task 19.5): the overview, its legend and readout
-  'datesView.overview.stay': [10, 13],
-  'datesView.overview.closeBand': ['10–13 nights', 'Mar 2027'],
-  'datesView.overview.cellName': ['14 Mar 2027–24 Mar 2027 (10n)', '10 nights', 'rank 3'],
-  'datesView.overview.rank': [3],
-  'datesView.overview.bandDates': ['14 Mar 2027'],
-  'datesView.overview.buckets': ['3 no cached data, 1 not searched'],
-  'datesView.legend.scaleQuintile': [42],
-  'datesView.legend.scaleFlatFew': [4, 10],
-  'datesView.legend.scaleFlatNarrow': [20, '£400', '£430'],
-  'datesView.legend.band': [0, '£300', '£320', 9],
-  'datesView.legend.flat': [4],
-  'datesView.legend.markCount': ['no cached data', 12],
-  bucketBreakdown: [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
+  // Task 9 (Ruling 18): the calendar, its day names and the day panel
+  'calendar.lead': [10, 21],
+  'calendar.dayPrice': ['Wed 11 Nov', '£372', 'Calendar · 3h', false],
+  'calendar.dayMark': ['Wed 11 Nov', 'not searched'],
+  'calendar.panelHeading': ['Wed 11 Nov', 12],
+  'calendar.showMore': [7],
+  'calendar.stayLine.over-limit': ['25h'],
   'historyView.calendarSeries': ['Aviasales cache', 'economy'],
   'historyView.routeSeries': ['Google', '5–15 Nov', 'economy'],
   'historyView.coloursRepeat': [8, 6],
@@ -369,7 +358,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     for (const p of [
       'searchPage',
       'searchesView.datesChanged',
-      'datesView.marks',
+      'calendar',
       'datesView.confirm',
       'repeatWeekly',
     ])
@@ -397,17 +386,14 @@ describe('COPY catalogue (spec §11 banned words)', () => {
 });
 
 describe('glyph set (review ui I2)', () => {
-  // why: WP19 retired the Calendar's glyphs and phone legend; the marks now drawn are the Dates overview's and
-  // PriceCell's, and a glyph both draw must mean the same thing in each
-  it('every symbol means one thing: a glyph in both the Dates marks and the price marks names the same mark', () => {
-    const dates = COPY.datesView.marks.glyph;
+  // why: Task 9 retired the overview's mark glyphs; the calendar draws two (the trip's dot and the cross of a day that
+  // couldn't be read) beside PriceCell's, and a glyph both draw must mean the same thing in each
+  it('every symbol means one thing: the calendar’s glyphs are not the price marks’ glyphs', () => {
     const price = COPY.priceMarkGlyph;
-    expect(new Set(Object.values(dates)).size).toBe(Object.keys(dates).length);
+    const calendar = [COPY.calendar.tripGlyph, COPY.calendar.couldntReadGlyph];
     expect(new Set(Object.values(price)).size).toBe(Object.keys(price).length);
-    for (const [mark, glyph] of Object.entries(price)) {
-      const shared = Object.entries(dates).filter(([, g]) => g === glyph);
-      for (const [other] of shared) expect(other, glyph).toBe(mark);
-    }
+    expect(new Set(calendar).size).toBe(2);
+    for (const g of calendar) expect(Object.values(price), g).not.toContain(g);
   });
   it('the provider marks are four distinct short names', () => {
     expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
@@ -415,22 +401,34 @@ describe('glyph set (review ui I2)', () => {
 });
 
 describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', () => {
-  it('the five marks and the key read as the spec words them; no mark reads "no flights"', () => {
-    const W = COPY.datesView.marks.words;
-    expect([W.priced, W['no-price-shown'], W['couldnt-read'], W['not-reached'], W['not-searched']]).toEqual([
-      'priced',
-      'no price shown',
-      "couldn't be read",
+  // Ruling 18: the key's five items as the ruling words them; a day's words never say "no flights"
+  it('the calendar’s key and a day’s words read as the ruling words them; no mark reads "no flights"', () => {
+    const K = COPY.calendar.key;
+    expect([K.trip, K.couldntRead, K.noPrice, K.hatched]).toEqual([
+      'a trip with flights read; other prices are calendar prices, not fares',
+      "couldn't read",
+      "no price (not 'no flights')",
+      'hatched: not searched or not reached',
+    ]);
+    const W = COPY.calendar.markWords;
+    expect([W['no-price-shown'], W['couldnt-read'], W['not-reached'], W['not-searched']]).toEqual([
+      'no price',
+      "couldn't read",
       'not reached',
       'not searched',
     ]);
     expect(Object.values(W).filter((w) => /no flights/i.test(w))).toEqual([]);
-    expect(COPY.datesView.legend.noPriceParts(12, 3)).toBe('12 no fares, 3 no cached data');
-    // a part at zero is left out (minor 7)
-    expect(COPY.datesView.legend.noPriceParts(0, 3)).toBe('3 no cached data');
-    expect(COPY.datesView.legend.noPriceParts(12, 0)).toBe('12 no fares');
-    expect(COPY.datesView.legend.striped(4)).toBe('striped: partly not searched (4)');
-    expect(COPY.datesView.legend.dot).toBe('each dot is one stay length');
+    expect(Object.values(COPY.calendar.stayName).filter((w) => /no flights/i.test(w))).toEqual([]);
+    expect(COPY.calendar.dayPrice('Wed 11 Nov', '£412', 'Seller · 3h', true)).toBe(
+      'Wed 11 Nov, £412, Seller · 3h, trip with flights read',
+    );
+    expect(COPY.calendar.panelHeading('Wed 11 Nov', 12)).toBe('Wed 11 Nov: 12 stays');
+    expect(COPY.calendar.panelHeading('Wed 11 Nov', 1)).toBe('Wed 11 Nov: 1 stay');
+    expect(COPY.calendar.showMore(7)).toBe('Show 7 more stays');
+    expect(COPY.calendar.showMore(1)).toBe('Show 1 more stay');
+    expect(COPY.calendar.stayLine['over-limit'](null)).toBe(
+      'Every price found for these dates is over the journey limit.',
+    );
   });
   it('the run line’s clauses and the sections’ counts, in dates (design 2026-11-08, mockup 02)', () => {
     const P = COPY.searchPage;

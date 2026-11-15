@@ -1,331 +1,259 @@
-import { type DecodedDatePairs, type IsoDate, type IsoMonth, monthOf } from '@gmt/core';
+import {
+  asIsoDate,
+  type DatePair,
+  type DecodedDatePairs,
+  type IsoDate,
+  type IsoMonth,
+  monthOf,
+} from '@gmt/core';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatIsoMonth } from '../../format.js';
 import { useMediaQuery } from '../../hooks/useMediaQuery.js';
+import type { BoardFlights } from '../../lib/flightReads.js';
 import { PHONE_QUERY } from '../../lib/media.js';
-import type { DatesUiState } from '../../state/datesState.js';
-import { tripPatch } from '../../state/tripState.js';
-import { updateSearchParams } from '../../state/urlState.js';
-import type { BoardModel } from './board.js';
-import { type Layout, moveTo, type Pos } from './keys.js';
-import { Legend } from './Legend.js';
-import { type CellView, OverviewMonth } from './OverviewMonth.js';
-import {
-  bandsOf,
-  type Column,
-  cellModel,
-  columnsFor,
-  keyCounts,
-  markCounts,
-  monthsOf,
-  noPriceParts,
-  pairsAt,
-} from './overview.js';
-import { cellWords, Readout } from './Readout.js';
-import { shadeScale } from './shade.js';
-import { stayRange } from './stayScope.js';
+import { CalendarKey } from './CalendarKey.js';
+import { DayPanel } from './DayPanel.js';
+import { targetOf } from './keys.js';
+import { CalendarMonth, type DayView } from './OverviewMonth.js';
+import { type DayModel, dayModel, dayName, dayScale, heatOf, monthsOf, panelOrder } from './overview.js';
 
-const O = COPY.datesView.overview;
-const M = COPY.datesView.marks;
-/** Spec §11 Phone: a sideways swipe of at least this many pixels turns the month. */
+const C = COPY.calendar;
+/** Ruling 18: a sideways swipe of at least this many pixels turns the month at 375 px. */
 export const SWIPE_PX = 50;
 
-/** A cell's key: its departure day and the first stay of its column. */
-const keyOf = (date: string, from: number) => `${date}|${from}`;
-
-export interface OverviewProps {
+export interface CalendarProps {
   definition: DefinitionResponse;
   data: DecodedDatePairs;
-  model: BoardModel;
-  state: DatesUiState;
-  /** The board's shown rows, by date pair index (spec §11 Rings). */
-  ringed: ReadonlySet<number>;
-  /** The date pair lit from the board, or null. */
-  lit: number | null;
-  onLight: (index: number | null) => void;
+  /** Each departure day's stays in view (`staysByDay` of the page's model), in date order. */
+  byDay: ReadonlyMap<IsoDate, readonly DatePair[]>;
+  /** The stays in view, which the lead names, or null when none is. */
+  stay: { min: number; max: number } | null;
+  /** Today's date: a day before it has departed and is blank. */
+  today: IsoDate;
+  /** The day whose panel is open, or null; the page owns it, so its flight lists are asked with the page's. */
+  openDay: IsoDate | null;
+  onOpenDay: (day: IsoDate | null) => void;
+  /** The page's flight lists and read on demand (`usePageFlights`). */
+  flights: BoardFlights;
+  runActive: boolean;
+  /** The journey limit in minutes, for the day panel's "over the limit" rows. */
+  limit: number | null;
+}
+
+/** The day a button names, from an event's target inside the months, or null. */
+function dayOf(target: EventTarget | null): IsoDate | null {
+  const day =
+    target instanceof Element ? target.closest<HTMLElement>('button[data-day]')?.dataset.day : undefined;
+  return day === undefined ? null : asIsoDate(day);
 }
 
 /**
- * Spec §11 Dates "Overview": below the board, the window's months, each day a strip of stay-length cells (or folded
- * bands, at most 12); one scale for current verified and calendar figures; a non-colour mark for every cell without
- * a figure; the numeric legend, always open, and the readout beside it; rings both ways with the board; the keyboard
- * (one tab stop), touch (a first tap shows the readout) and, on a phone, one month at a time with a swipe. At most
- * 400 days × 12 cells are drawn, plus one open band-month.
+ * Ruling 18 (mockup 02's Calendar): the window's months (every month side by side on a desktop; one at a time at phone
+ * width, with Previous and Next month beside a swipe), each day of the window a button that prints its one price on the
+ * heat ramp, a dot on a trip's (core's `isTrip`), or why it prints none; departed days and days outside the window
+ * blank and inert. One tab stop (roving tabindex): the arrow keys move a day or a week, Page Up and Down a month, Home
+ * and End the week's ends. Enter or a click opens the day panel below the key; Escape or Close puts focus back on the day.
  */
-export function Overview({ definition, data, model, state, ringed, lit, onLight }: OverviewProps) {
+export function Calendar({
+  definition,
+  data,
+  byDay,
+  stay,
+  today,
+  openDay,
+  onOpenDay,
+  flights,
+  runActive,
+  limit,
+}: CalendarProps) {
   const phone = useMediaQuery(PHONE_QUERY);
-  const readoutId = useId();
+  const id = useId();
+  const panelId = `${id}-day`;
   const root = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState<{ month: IsoMonth; from: number } | null>(null);
-  const [focusPos, setFocusPos] = useState<Pos | null>(null);
-  const [hoverPos, setHoverPos] = useState<Pos | null>(null);
-  const [monthIndex, setMonthIndex] = useState(0);
-  const pendingFocus = useRef<string | null>(null);
-  const lastPointer = useRef<string>('mouse');
-
-  const scale = useMemo(() => shadeScale(model.inView), [model.inView]);
-  const range = stayRange(data.space, state.nights);
-  const bands = useMemo(() => bandsOf(range), [range?.min, range?.max]);
   const months = useMemo(() => monthsOf(data.space), [data.space]);
-  // why: spec rev 55 §11 — the key's five counts are core's reducedMark over the date pairs in view, as the header's
-  const counts = useMemo(
-    () => ({
-      key: keyCounts(model.inView),
-      noPrice: noPriceParts(model.inView),
-      cells: markCounts(model.inView, model.rankOf, scale),
-    }),
-    [model, scale],
-  );
+  const [monthIndex, setMonthIndex] = useState(0);
+  const [focusDay, setFocusDay] = useState<IsoDate | null>(null);
+  const pendingFocus = useRef<IsoDate | null>(null);
+  const swipeFrom = useRef<number | null>(null);
 
-  // why: every cell is computed once per read, filter or opened band, never on a hover or a focus (WP19 §6: 1.5 s
-  // for 50,000 cells and 200 ms for a stay-filter change)
+  // why: every day is modelled once per read or filter, never on a focus or a key (WP19 §6's bounds)
   const grid = useMemo(() => {
-    const byMonth = new Map<IsoMonth, Map<IsoDate, CellView[]>>();
-    const byKey = new Map<string, CellView>();
-    const columnsOfMonth = new Map<IsoMonth, Column[]>();
-    for (const m of months) columnsOfMonth.set(m, columnsFor(bands, open?.month === m ? open.from : null));
-    for (const p of model.inView) {
-      const m = monthOf(p.departureDate);
-      let days = byMonth.get(m);
+    const models = new Map<IsoDate, DayModel>();
+    for (const [date, stays] of byDay) {
+      const m = dayModel({ date, today }, stays);
+      if (m.mark !== 'out') models.set(date, m);
+    }
+    const scale = dayScale(models.values());
+    const byMonth = new Map<IsoMonth, Map<IsoDate, DayView>>();
+    for (const [date, model] of models) {
+      const month = monthOf(date);
+      let days = byMonth.get(month);
       if (days === undefined) {
         days = new Map();
-        byMonth.set(m, days);
+        byMonth.set(month, days);
       }
-      if (days.has(p.departureDate)) continue;
-      const cells: CellView[] = (columnsOfMonth.get(m) ?? []).map((column) => {
-        const pairs = pairsAt(data.pairs, data.space, p.departureDate, column);
-        const cm = cellModel(pairs, model.rankOf, scale);
-        const rank = cm.lead === null ? undefined : model.rankOf.get(cm.lead.index);
-        const what =
-          cm.lead !== null && cm.shade !== null && rank !== undefined
-            ? O.rank(rank)
-            : cm.marks.map((x) => M.words[x]).join(', ') || (rank !== undefined ? O.rank(rank) : O.noMark);
-        const v: CellView = {
-          key: keyOf(p.departureDate, column.from),
-          date: p.departureDate,
-          column,
-          model: cm,
-          name: O.cellName(
-            cellWords(p.departureDate, column, cm),
-            O.stay(column.from, column.to),
-            column.to > column.from ? `${what}, ${O.openBand}` : what,
-          ),
-          ringed: pairs.some((x) => ringed.has(x.index)),
-        };
-        byKey.set(v.key, v);
-        return v;
-      });
-      days.set(p.departureDate, cells);
+      const heat = model.price === null ? null : heatOf(scale, model.price.cell.pricePence);
+      days.set(date, { date, model, name: dayName(date, model), heat });
     }
-    return { byMonth, byKey, columnsOfMonth };
-  }, [months, bands, open, model, data, scale, ringed]);
+    return { models, byMonth };
+  }, [byDay, today]);
 
-  const layout: Layout = {
-    columns: (date) => grid.columnsOfMonth.get(monthOf(date)) ?? [],
-    has: (date) => grid.byMonth.get(monthOf(date))?.has(date) === true,
-  };
   const shownMonths = phone ? months.slice(monthIndex, monthIndex + 1) : months;
-  const firstKey = shownMonths
-    .map((m) => grid.byMonth.get(m)?.values().next().value?.[0]?.key)
-    .find((k) => k !== undefined);
-  const focusKey = focusPos === null ? null : keyOf(focusPos.date, focusPos.from);
-  const tabStop =
-    focusPos !== null &&
-    focusKey !== null &&
-    grid.byKey.has(focusKey) &&
-    shownMonths.includes(monthOf(focusPos.date))
-      ? focusKey
-      : (firstKey ?? null);
-  const litCell =
-    lit === null
-      ? null
-      : ([...grid.byKey.values()].find((c) => c.model.pairs.some((p) => p.index === lit))?.key ?? null);
-  const active = hoverPos ?? focusPos;
-  const activeCell = active === null ? null : (grid.byKey.get(keyOf(active.date, active.from)) ?? null);
+  const shown = (d: IsoDate | null): d is IsoDate =>
+    d !== null && grid.models.has(d) && shownMonths.includes(monthOf(d));
+  const firstShown = shownMonths
+    .map((m) => grid.byMonth.get(m)?.keys().next().value)
+    .find((d) => d !== undefined);
+  const tabStop = shown(focusDay) ? focusDay : shown(openDay) ? openDay : (firstShown ?? null);
 
-  const focusCell = (key: string) => {
-    const el = root.current?.querySelector<HTMLButtonElement>(`[data-cell="${key}"]`);
+  const showMonthOf = (d: IsoDate) => {
+    const i = months.indexOf(monthOf(d));
+    if (phone && i >= 0) setMonthIndex(i);
+  };
+  const focusOn = (d: IsoDate) => {
+    const el = root.current?.querySelector<HTMLButtonElement>(`button[data-day="${d}"]`);
     if (el) el.focus();
-    else pendingFocus.current = key;
+    else pendingFocus.current = d;
   };
   useEffect(() => {
-    const key = pendingFocus.current;
-    if (key === null) return;
-    const el = root.current?.querySelector<HTMLButtonElement>(`[data-cell="${key}"]`);
+    const d = pendingFocus.current;
+    if (d === null) return;
+    const el = root.current?.querySelector<HTMLButtonElement>(`button[data-day="${d}"]`);
     if (el) {
       pendingFocus.current = null;
       el.focus();
     }
   });
 
-  // why: one set of native listeners for every cell (delegation): thousands of cells carry no handler of their own
-  const posOf = (t: EventTarget | null): Pos | null => {
-    const el = t instanceof Element ? t.closest<HTMLElement>('[data-cell]') : null;
-    const cell = el?.dataset.cell === undefined ? undefined : grid.byKey.get(el.dataset.cell);
-    return cell === undefined ? null : { date: cell.date, from: cell.column.from };
+  const close = () => {
+    const day = openDay;
+    onOpenDay(null);
+    if (day === null) return;
+    setFocusDay(day);
+    showMonthOf(day);
+    focusOn(day);
   };
-  const noop = () => undefined;
-  const handlers = useRef<{
-    pos: (t: EventTarget | null) => Pos | null;
-    key: (e: KeyboardEvent) => void;
-    click: (e: MouseEvent) => void;
-  }>({ pos: () => null, key: noop, click: noop });
-  handlers.current.pos = posOf;
-  const act = (pos: Pos) => {
-    const cell = grid.byKey.get(keyOf(pos.date, pos.from));
-    if (cell === undefined) return;
-    if (cell.column.to > cell.column.from) {
-      setOpen({ month: monthOf(cell.date), from: cell.column.from });
-      return;
-    }
-    const pair = cell.model.pairs[0];
-    if (pair !== undefined) updateSearchParams(tripPatch(pair), 'push');
-  };
-  handlers.current.key = (e) => {
-    const pos = handlers.current.pos(e.target);
-    if (pos === null) return;
-    if (e.key === 'Escape' && open !== null) {
-      // why: spec §11 Folded bands: Escape closes the open band; focus returns to the band's own cell on that day
+  const turn = (d: 1 | -1) => setMonthIndex((i) => Math.min(months.length - 1, Math.max(0, i + d)));
+  // why: one set of native listeners for every day (delegation, as the board's overview had), each day a real button,
+  // so Enter and Space click it; the listeners read the latest render's handlers through a ref
+  const handlers = useRef({
+    key: (_e: KeyboardEvent) => {},
+    click: (_e: MouseEvent) => {},
+    focus: (_e: FocusEvent) => {},
+    down: (_e: PointerEvent) => {},
+    up: (_e: PointerEvent) => {},
+  });
+  handlers.current = {
+    key: (e) => {
+      const day = dayOf(e.target);
+      const next = day === null ? null : targetOf(day, e.key);
+      if (next === null) return;
       e.preventDefault();
-      setOpen(null);
-      focusCell(keyOf(pos.date, open.from));
-      return;
-    }
-    const next = moveTo(pos, e.key, layout);
-    if (next === null) return;
-    e.preventDefault();
-    setFocusPos(next);
-    const nm = monthOf(next.date);
-    if (phone && nm !== monthOf(pos.date)) setMonthIndex(Math.max(0, months.indexOf(nm)));
-    focusCell(keyOf(next.date, next.from));
+      // why: a key that leaves the window (or reaches a departed day) leaves focus where it is
+      if (!grid.models.has(next)) return;
+      setFocusDay(next);
+      showMonthOf(next);
+      focusOn(next);
+    },
+    click: (e) => {
+      const day = dayOf(e.target);
+      if (day === null) return;
+      setFocusDay(day);
+      // why: the open day's button is a disclosure: a second press closes its panel
+      onOpenDay(day === openDay ? null : day);
+    },
+    focus: (e) => {
+      const day = dayOf(e.target);
+      if (day !== null) setFocusDay(day);
+    },
+    down: (e) => {
+      swipeFrom.current = e.clientX;
+    },
+    up: (e) => {
+      const from = swipeFrom.current;
+      swipeFrom.current = null;
+      if (from === null || !phone) return;
+      const dx = e.clientX - from;
+      if (Math.abs(dx) >= SWIPE_PX) turn(dx < 0 ? 1 : -1);
+    },
   };
-  handlers.current.click = (e) => {
-    const pos = handlers.current.pos(e.target);
-    if (pos === null) return;
-    const same = focusPos !== null && focusPos.date === pos.date && focusPos.from === pos.from;
-    // why: revision 50 (Ian confirmed): on touch, a first tap shows the readout and a second tap opens the detail
-    if (lastPointer.current === 'touch' && !same) {
-      setFocusPos(pos);
-      return;
-    }
-    setFocusPos(pos);
-    act(pos);
-  };
-
   useEffect(() => {
     const el = root.current;
     if (el === null) return;
-    let swipeFrom: number | null = null;
-    const over = (e: Event) => {
-      const pos = handlers.current.pos(e.target);
-      setHoverPos(pos);
-      const cell = pos === null ? undefined : grid.byKey.get(keyOf(pos.date, pos.from));
-      onLightRef.current(
-        cell?.ringed === true
-          ? (cell.model.pairs.find((p) => ringedRef.current.has(p.index))?.index ?? null)
-          : null,
-      );
-    };
-    const leave = () => {
-      setHoverPos(null);
-      onLightRef.current(null);
-    };
-    const focusIn = (e: Event) => {
-      const pos = handlers.current.pos(e.target);
-      if (pos !== null) setFocusPos(pos);
-    };
-    const down = (e: PointerEvent) => {
-      lastPointer.current = e.pointerType;
-      swipeFrom = e.clientX;
-    };
-    const up = (e: PointerEvent) => {
-      if (swipeFrom === null) return;
-      const dx = e.clientX - swipeFrom;
-      swipeFrom = null;
-      if (Math.abs(dx) >= SWIPE_PX) swipeRef.current(dx < 0 ? 1 : -1);
-    };
     const key = (e: KeyboardEvent) => handlers.current.key(e);
     const click = (e: MouseEvent) => handlers.current.click(e);
-    el.addEventListener('pointerover', over);
-    el.addEventListener('pointerleave', leave);
-    el.addEventListener('focusin', focusIn);
-    el.addEventListener('pointerdown', down);
-    el.addEventListener('pointerup', up);
+    const focus = (e: FocusEvent) => handlers.current.focus(e);
+    const down = (e: PointerEvent) => handlers.current.down(e);
+    const up = (e: PointerEvent) => handlers.current.up(e);
     el.addEventListener('keydown', key);
     el.addEventListener('click', click);
+    el.addEventListener('focusin', focus);
+    el.addEventListener('pointerdown', down);
+    el.addEventListener('pointerup', up);
     return () => {
-      el.removeEventListener('pointerover', over);
-      el.removeEventListener('pointerleave', leave);
-      el.removeEventListener('focusin', focusIn);
-      el.removeEventListener('pointerdown', down);
-      el.removeEventListener('pointerup', up);
       el.removeEventListener('keydown', key);
       el.removeEventListener('click', click);
+      el.removeEventListener('focusin', focus);
+      el.removeEventListener('pointerdown', down);
+      el.removeEventListener('pointerup', up);
     };
-  }, [grid]);
-  const onLightRef = useRef(onLight);
-  onLightRef.current = onLight;
-  const ringedRef = useRef(ringed);
-  ringedRef.current = ringed;
-  const turn = (d: 1 | -1) => setMonthIndex((i) => Math.min(months.length - 1, Math.max(0, i + d)));
-  const swipeRef = useRef(turn);
-  swipeRef.current = turn;
+  }, []);
 
-  const openMonth = open === null ? null : open.month;
-  const openBand = open === null ? null : bands.find((b) => b.from === open.from);
+  const open = openDay === null ? undefined : grid.models.get(openDay);
+  const stays = useMemo(() => (open === undefined ? [] : panelOrder(open.stays)), [open]);
   return (
-    <section aria-labelledby={`${readoutId}-h`} className="space-y-3">
-      <h3 id={`${readoutId}-h`} className="h-section">
-        {O.heading}
-      </h3>
-      <div className="frame space-y-4">
-        <div className="ov-key grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)] lg:items-start">
-          <Legend scale={scale} counts={counts} />
-          <Readout id={readoutId} cell={activeCell} notes={definition.destinationNotes} />
-        </div>
-        {openMonth !== null && openBand !== undefined && openBand !== null ? (
-          <button type="button" className="btn btn-quiet min-h-11" onClick={() => setOpen(null)}>
-            {O.closeBand(O.stay(openBand.from, openBand.to), formatIsoMonth(openMonth))}
-          </button>
-        ) : null}
+    <section className="search-section cal-section" aria-labelledby={`${id}-h`}>
+      <h2 id={`${id}-h`} className="search-section-title">
+        {C.heading}
+      </h2>
+      {stay === null ? null : <p className="search-section-sub">{C.lead(stay.min, stay.max)}</p>}
+      <div className="search-card cal-card">
         {phone ? (
-          <nav aria-label={O.monthsLabel} className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className="btn btn-quiet min-h-11"
-              disabled={monthIndex === 0}
-              onClick={() => turn(-1)}
-            >
-              {O.previousMonth}
+          <nav aria-label={C.monthsLabel} className="cal-turn">
+            <button type="button" className="btn btn-sm" disabled={monthIndex === 0} onClick={() => turn(-1)}>
+              {C.previousMonth}
             </button>
             <button
               type="button"
-              className="btn btn-quiet min-h-11"
+              className="btn btn-sm"
               disabled={monthIndex >= months.length - 1}
               onClick={() => turn(1)}
             >
-              {O.nextMonth}
+              {C.nextMonth}
             </button>
           </nav>
         ) : null}
-        <div ref={root} className="ov-months" data-testid="dates-overview">
+        <div ref={root} className="cal-months" data-testid="calendar-months">
           {shownMonths.map((m) => (
-            <OverviewMonth
+            <CalendarMonth
               key={m}
               month={m}
-              days={grid.byMonth.get(m) ?? EMPTY}
-              tabStop={tabStop?.startsWith(m) ? tabStop : null}
-              lit={litCell?.startsWith(m) ? litCell : null}
-              readoutId={readoutId}
-              phone={phone}
+              days={grid.byMonth.get(m) ?? NO_DAYS}
+              tabStop={tabStop !== null && monthOf(tabStop) === m ? tabStop : null}
+              open={openDay !== null && monthOf(openDay) === m ? openDay : null}
+              panelId={panelId}
             />
           ))}
         </div>
+        <CalendarKey />
+        {openDay !== null && open !== undefined ? (
+          <DayPanel
+            key={openDay}
+            id={panelId}
+            date={openDay}
+            stays={stays}
+            definition={definition}
+            data={data}
+            flights={flights}
+            runActive={runActive}
+            limit={limit}
+            onClose={close}
+          />
+        ) : null}
       </div>
     </section>
   );
 }
 
-const EMPTY: ReadonlyMap<IsoDate, readonly CellView[]> = new Map();
+const NO_DAYS: ReadonlyMap<IsoDate, DayView> = new Map();

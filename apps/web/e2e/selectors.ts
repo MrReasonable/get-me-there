@@ -2,7 +2,8 @@ import { COPY } from '../src/copy.js';
 
 const D = COPY.datesView;
 const P = COPY.searchPage;
-const OVERVIEW = '[data-testid="dates-overview"]';
+const C = COPY.calendar;
+const MONTHS = '[data-testid="calendar-months"]';
 
 /**
  * What the Playwright smoke looks for on a search's page, the Trip page and the nav, shared with the jsdom test that
@@ -26,24 +27,21 @@ export const SMOKE = {
   /** Lower on the calendar's link down to the calendar, and the calendar's anchor. */
   seeAll: P.seeAll,
   calendar: '#calendar',
-  /** The overview's one tab stop (roving tabindex). */
-  overviewTabStop: `${OVERVIEW} [data-cell][tabindex="0"]`,
-  /** Every overview cell. */
-  overviewCell: `${OVERVIEW} [data-cell]`,
-  /** A cell ringed because its date pair is a trip Cheapest trips shows (spec §11 Rings). */
-  ringedCell: `${OVERVIEW} [data-cell][data-ringed]`,
-  /** The cell lit under the pointer or the focus. */
-  litCell: `${OVERVIEW} [data-cell][data-lit]`,
-  /** A cell's glyphs: one per mark it carries. */
-  cellGlyphs: '[data-testid="cell-glyphs"]',
-  legend: '[data-testid="dates-legend"]',
-  /** Each mark of the legend, with its glyph in `legendGlyph`. */
-  legendMark: '[data-testid="dates-legend"] [data-mark]',
-  legendGlyph: '[data-testid="legend-glyph"]',
-  readout: '[data-testid="dates-readout"]',
-  openThese: D.overview.openThese,
-  previousMonth: D.overview.previousMonth,
-  nextMonth: D.overview.nextMonth,
+  /** The calendar's one tab stop (roving tabindex), a day's button (Ruling 18). */
+  calendarTabStop: `${MONTHS} button[data-day][tabindex="0"]`,
+  /** Every day of the window, each a button named by its date and what it shows. */
+  calendarDay: `${MONTHS} button[data-day]`,
+  /** A day that prints a price (inside a PriceCell), and one that prints the trip's dot. */
+  pricedDay: `${MONTHS} button[data-day][data-heat]`,
+  tripDay: `${MONTHS} button[data-day][data-trip]`,
+  /** The key: a list named "Key" with its five items. */
+  calendarKey: C.key.label,
+  /** The day panel: a region named "Sun 14 Mar: 3 stays", its Close and its "Show N more stays". */
+  dayPanel: /^\w{3} \d{1,2} \w{3}: \d+ stays?$/,
+  dayClose: C.close,
+  showMoreStays: /^Show \d+ more stays?$/,
+  previousMonth: C.previousMonth,
+  nextMonth: C.nextMonth,
   coverageToggle: D.coverageToggle,
   /** The nav, labelled "Main", with its two links: Trips and Settings (design 2026-11-08 Ruling 9). */
   nav: COPY.navLabel,

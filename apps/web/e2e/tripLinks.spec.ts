@@ -21,8 +21,8 @@ import { expectNoSidewaysScroll } from './layout.js';
 import { SMOKE } from './selectors.js';
 import { FIXTURE_SEARCH, TRIP_NOW } from './tripFixtures.js';
 
-// Design 2026-11-08 §5.1–§5.3 (trip-page plan Task 8; Trips and Search Task 8): the Search page's sections and the Trips
-// page's cards in a real layout, at 375 px and 1280 px, light and dark, with the longest seller name: nothing scrolls
+// Design 2026-11-08 §5.1–§5.3 (trip-page plan Task 8; Trips and Search Tasks 8 and 9): the Search page's sections, its
+// day panel and the Trips page's cards in a real layout, at 375 px and 1280 px, light and dark, with the longest seller name: nothing scrolls
 // sideways, a row's label opens in the flow, and a price is a link only where it can be booked. The date-pairs, run and
 // cards reads are served by route interception (the fixture provider reads no flights); the search is the one the smoke
 // made.
@@ -329,6 +329,23 @@ for (const width of WIDTHS)
         path: `test-results/search-shots/search-${width}-${scheme}.png`,
         fullPage: true,
       });
+
+      // Task 9 (Ruling 18): a day's panel below the calendar, its rows inside the window, nothing sideways
+      await page.locator(`${SMOKE.calendarDay}[data-day="2027-03-14"]`).click();
+      const day = page.getByRole('region', { name: SMOKE.dayPanel });
+      await expect(day).toHaveAccessibleName('Sun 14 Mar: 3 stays');
+      await expect(day.locator(SMOKE.tripRow)).toHaveCount(1);
+      await expect(day.locator(SMOKE.calendarRow)).toHaveCount(2);
+      for (const row of await day.locator(`${SMOKE.tripRow}, ${SMOKE.calendarRow}`).all()) {
+        const box = await row.boundingBox();
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      }
+      expect(await overflowingRows(page)).toEqual([]);
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/search-shots/search-day-${width}-${scheme}.png`,
+        fullPage: true,
+      });
     });
 
     test(`the Trips page at ${width}px, ${scheme}: a trip's › opens its page, no sideways scroll`, async ({
@@ -360,9 +377,14 @@ async function overflowingRows(page: Page): Promise<string[]> {
     );
 }
 
-test('the search page fits every trip row in its box at each width from 720 to 1024 px', async ({ page }) => {
+test('the search page fits every trip row in its box at each width from 720 to 1024 px, a day panel open', async ({
+  page,
+}) => {
   await serveReadable(page);
   await openSearch(page, SWEEP[0], 'light', MOCKUP);
+  // Task 9: the day panel's trip and calendar rows are swept with the sections'
+  await page.locator(`${SMOKE.calendarDay}[data-day="2027-03-14"]`).click();
+  await expect(page.getByRole('region', { name: SMOKE.dayPanel }).locator(SMOKE.tripRow)).toHaveCount(1);
   for (const width of SWEEP) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.locator(SMOKE.tripRow).first()).toBeVisible();

@@ -331,6 +331,10 @@ describe('a search\'s page says no banned word, no set-up term, no "£" outside 
     await screen.findAllByRole('button', { name: /^Read flights for/ });
     await screen.findByTestId('confirm-line');
     await screen.findByTestId('dates-run');
+    // Task 9: the calendar, its key and a day's panel (a trip, calendar prices with every read state, stays with none)
+    const day = await screen.findByRole('button', { name: /^Sun 14 Mar, / });
+    fireEvent.click(day);
+    await screen.findByRole('region', { name: /^Sun 14 Mar: \d+ stays$/ });
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
     expect(jargonIn(mainPathWords())).toEqual([]);

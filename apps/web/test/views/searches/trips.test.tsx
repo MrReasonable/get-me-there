@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { apiContract } from '@gmt/core';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
@@ -207,10 +207,11 @@ describe('the counts line (Rulings 5 and 6)', () => {
       /^23 dates with flights read; these are the cheapest\. 155 dates look lower on the calendar, from £372 Cached.*.$/,
     );
     expect(within(line).getByTestId('price-label')).toHaveTextContent(/^Cached/);
-    expect(within(line).getByRole('link', { name: '155 dates look lower on the calendar' })).toHaveAttribute(
-      'href',
-      '/?view=dates&def=def-0001',
-    );
+    // Task 9: the count links to the search's calendar (its anchor), and a click goes there in place
+    const link = within(line).getByRole('link', { name: '155 dates look lower on the calendar' });
+    expect(link).toHaveAttribute('href', '/?view=dates&def=def-0001#calendar');
+    fireEvent.click(link);
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=def-0001', '#calendar']);
   });
 
   it('a clause shows only when its count is not zero', async () => {

@@ -10,6 +10,7 @@ import { verifiedDetailOf } from '../../lib/bookingTarget.js';
 import { useNow } from '../../now.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
+import { CALENDAR_ID } from '../Dates/LowerOnCalendar.js';
 import { SearchAgainButton } from '../Dates/SearchAgainButton.js';
 import { useAirportDetails } from '../Definitions/airports.js';
 import {
@@ -211,12 +212,15 @@ export function SearchCard({
  * Rulings 5 and 6: under the trips, how many dates have flights read ("23 dates with flights read; these are the
  * cheapest.") and how many look lower on the calendar, from which price, with its label ("155 dates look lower on the
  * calendar, from £372 Calendar · 3h, flights not read."); with no trip, "Calendar prices for 2,146 dates, from £372
- * Calendar · 3h; no flights read yet." Each clause only when its count is not zero; the count links to the Search page.
+ * Calendar · 3h; no flights read yet." Each clause only when its count is not zero; the count links to the Search page's
+ * calendar.
  */
 function CountsLine({ card, link }: { card: Card; link: Record<string, string> }) {
   const lower = card.lowerOnCalendar;
   if (card.readDates === 0 && lower === null) return null;
-  const to = { href: hrefWith(link), onClick: navigateTo(link) };
+  // why: the counts are the calendar's, so the link lands on its anchor (Task 9; the page scrolls there once drawn)
+  const anchor = `#${CALENDAR_ID}`;
+  const to = { href: hrefWith(link, anchor), onClick: navigateTo(link, anchor) };
   const noTrip = card.trips.length === 0;
   return (
     <div className="tcard-lower" data-testid="card-counts">

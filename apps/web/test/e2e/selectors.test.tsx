@@ -1,14 +1,13 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { SMOKE } from '../../e2e/selectors.js';
 import { Nav } from '../../src/components/Nav.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
-import { MARK_ORDER } from '../../src/views/Dates/overview.js';
 import { SearchesView } from '../../src/views/Searches/SearchesView.js';
 import { TripView } from '../../src/views/Trip/TripView.js';
-import { workedDates } from '../fixtures.dates.js';
+import { DATES_SPACE, workedDates } from '../fixtures.dates.js';
 import { API, definition } from '../fixtures.js';
 import { flightPair, searchCard } from '../fixtures.searches.js';
 import { readTrip, tripBody } from '../fixtures.trip.js';
@@ -30,8 +29,8 @@ const one = (selector: string): HTMLElement => {
 };
 
 describe('the Playwright smoke’s Search page selectors match the rendered page', () => {
-  it("desktop: the sections, their rows and links, the run line, the filter row, the calendar's one tab stop, rings, legend, readout and the coverage toggle", async () => {
-    renderDates({ body: workedDates() });
+  it("desktop: the sections, their rows and links, the run line, the filter row, the calendar's one tab stop, its days, the key, the day panel and the coverage toggle", async () => {
+    const { user } = renderDates({ body: workedDates() });
     const trips = await screen.findByRole('region', { name: SMOKE.cheapestTrips });
     const lower = screen.getByRole('region', { name: SMOKE.lowerOnCalendar });
     // the worked example: one current verified trip; the cheaper calendar prices below it
@@ -39,44 +38,44 @@ describe('the Playwright smoke’s Search page selectors match the rendered page
     expect(within(trips).getAllByRole('link', { name: SMOKE.detailsLink })).toHaveLength(1);
     expect(lower.querySelectorAll(SMOKE.calendarRow)).toHaveLength(3);
     expect(within(lower).getByRole('link', { name: SMOKE.seeAll })).toHaveAttribute('href', SMOKE.calendar);
-    expect(one(SMOKE.calendar)).toContainElement(one(SMOKE.overviewTabStop));
+    expect(one(SMOKE.calendar)).toContainElement(one(SMOKE.calendarTabStop));
     expect(await waitFor(() => one(SMOKE.runLine))).toHaveTextContent(/^Searched /);
     expect(screen.getByRole('group', { name: SMOKE.filterRow })).toBeInTheDocument();
 
-    expect(document.querySelectorAll(SMOKE.overviewTabStop)).toHaveLength(1);
-    expect(one(SMOKE.overviewTabStop).tagName).toBe('BUTTON');
-    expect(document.querySelectorAll(SMOKE.overviewCell).length).toBeGreaterThan(10);
-    // why: design 2026-11-08 §5.2: only the trips Cheapest trips shows are outlined
-    expect(document.querySelectorAll(SMOKE.ringedCell)).toHaveLength(1);
-    expect(document.querySelector(SMOKE.litCell)).toBeNull();
-    fireEvent.pointerOver(one(SMOKE.ringedCell));
-    expect(one(SMOKE.litCell)).toHaveAttribute('data-ringed');
-    expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|11');
-    // an unpriced cell carries its glyphs
-    expect(one(`${SMOKE.overviewCell}[data-marks~="no-price-shown"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
-      COPY.datesView.marks.glyph['no-price-shown'],
-    );
+    expect(document.querySelectorAll(SMOKE.calendarTabStop)).toHaveLength(1);
+    expect(one(SMOKE.calendarTabStop).tagName).toBe('BUTTON');
+    expect(document.querySelectorAll(SMOKE.calendarDay)).toHaveLength(31);
+    // why: each priced day prints its price inside a PriceCell; the one trip's day carries the dot
+    expect(document.querySelectorAll(SMOKE.pricedDay)).toHaveLength(8);
+    for (const d of document.querySelectorAll(SMOKE.pricedDay))
+      expect(d.querySelector('[data-testid="price-cell"]')).not.toBeNull();
+    expect(document.querySelectorAll(SMOKE.tripDay)).toHaveLength(1);
+    expect(
+      within(screen.getByRole('list', { name: SMOKE.calendarKey })).getAllByRole('listitem'),
+    ).toHaveLength(5);
 
-    expect(one(SMOKE.legend)).toBeVisible();
-    const marks = document.querySelectorAll(SMOKE.legendMark);
-    expect([...marks].map((m) => m.getAttribute('data-mark'))).toEqual([...MARK_ORDER]);
-    for (const m of marks)
-      if (m.getAttribute('data-mark') !== 'priced')
-        expect(m.querySelector(SMOKE.legendGlyph)?.textContent, m.getAttribute('data-mark') ?? '').not.toBe(
-          '',
-        );
-    expect(marks[0]?.querySelector(SMOKE.legendGlyph)?.className).toContain('lamp-lit');
-
-    fireEvent.pointerOver(one(SMOKE.overviewTabStop));
-    expect(one(SMOKE.readout)).toHaveTextContent('14 Mar 2027');
-    expect(screen.getByRole('link', { name: SMOKE.openThese })).toBeInTheDocument();
+    await user.click(one(SMOKE.tripDay));
+    const panel = await screen.findByRole('region', { name: SMOKE.dayPanel });
+    expect(panel).toHaveAccessibleName('Sun 14 Mar: 3 stays');
+    expect(panel.querySelectorAll(`${SMOKE.tripRow}, ${SMOKE.calendarRow}`)).toHaveLength(3);
+    expect(within(panel).getByRole('button', { name: SMOKE.dayClose })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
       'aria-expanded',
       'false',
     );
   });
 
-  it('phone: the same sections and rows, one month with Previous and Next month, the legend and the readout', async () => {
+  it('a day of more than five stays offers "Show N more stays"', async () => {
+    const { user } = renderDates({ body: { ...workedDates(), space: { ...DATES_SPACE, maxNights: 21 } } });
+    await screen.findByRole('region', { name: SMOKE.cheapestTrips });
+    await user.click(one(SMOKE.calendarTabStop));
+    const panel = await screen.findByRole('region', { name: SMOKE.dayPanel });
+    expect(within(panel).getByRole('button', { name: SMOKE.showMoreStays })).toHaveTextContent(
+      'Show 7 more stays',
+    );
+  });
+
+  it('phone: the same sections and rows, one month with Previous and Next month, the key', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
     const trips = await screen.findByRole('region', { name: SMOKE.cheapestTrips });
@@ -84,13 +83,12 @@ describe('the Playwright smoke’s Search page selectors match the rendered page
     expect(document.querySelectorAll(SMOKE.calendarRow)).toHaveLength(3);
     expect(screen.getByRole('button', { name: SMOKE.previousMonth })).toBeDisabled();
     expect(screen.getByRole('button', { name: SMOKE.nextMonth })).toBeEnabled();
-    const dates = new Set(
-      [...document.querySelectorAll<HTMLElement>(SMOKE.overviewCell)].map((c) => c.dataset.date?.slice(0, 7)),
+    const months = new Set(
+      [...document.querySelectorAll<HTMLElement>(SMOKE.calendarDay)].map((c) => c.dataset.day?.slice(0, 7)),
     );
-    expect([...dates]).toEqual(['2027-03']);
-    expect(one(SMOKE.legend)).toBeInTheDocument();
-    expect(one(SMOKE.readout)).toBeInTheDocument();
-    expect(document.querySelectorAll(SMOKE.overviewTabStop)).toHaveLength(1);
+    expect([...months]).toEqual(['2027-03']);
+    expect(screen.getByRole('list', { name: SMOKE.calendarKey })).toBeInTheDocument();
+    expect(document.querySelectorAll(SMOKE.calendarTabStop)).toHaveLength(1);
   });
 });
 

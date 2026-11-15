@@ -204,3 +204,9 @@
 .trip-row-earlier .row-leg {
   color: var(--t-muted);
 }
+
+/* A stay with no price (the day panel's, Ruling 18): the dash in the price's place, its word under it in muted ink */
+.trip-row .row-none {
+  color: var(--t-muted);
+  font-size: 13px;
+}

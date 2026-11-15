@@ -2,7 +2,9 @@ import {
   apiContract,
   type DecodedDatePairs,
   IN_FLIGHT_STATUSES,
+  type IsoDate,
   type IsoDateTime,
+  londonDateOf,
   type StartRefusalCode,
 } from '@gmt/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -29,10 +31,12 @@ import { CheapestTrips, type NoTrip } from './CheapestTrips.js';
 import { CoverageSection } from './CoverageSection.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters, isOwnStay } from './Filters.js';
-import { CALENDAR_ID, LowerOnCalendar, ReadSaid, useLowerFlights } from './LowerOnCalendar.js';
-import { Overview } from './OverviewGrid.js';
+import { CALENDAR_ID, LowerOnCalendar, ReadSaid, usePageFlights } from './LowerOnCalendar.js';
+import { Calendar } from './OverviewGrid.js';
+import { staysByDay } from './overview.js';
 import { IDLE, onProgress, onTerminal, onTimer, type Reread } from './refresh.js';
 import { NoSearch, TooManyCells } from './States.js';
+import { stayRange } from './stayScope.js';
 import './dates.css';
 
 const D = COPY.datesView;
@@ -62,7 +66,8 @@ export interface DatesViewProps {
  * Design 2026-11-08 §5 (mockup 02): a search's page (`?view=dates&def=`). It reads `GET /definitions/:id/date-pairs`
  * through core's decoder, applies the stay range, ranks with core's `rankDatePairs` and splits the ranking by core's
  * shared rules, then renders the header (crumbs, name, meta line, actions, run line and the run's progress), the filter
- * row, Cheapest trips and Lower on the calendar, then the calendar (the overview, until Task 9) and the coverage section.
+ * row, Cheapest trips and Lower on the calendar, then the calendar with its day panel (Ruling 18) and the coverage
+ * section.
  */
 export function DatesView({ definition, clock = browserClock }: DatesViewProps) {
   if (definition === null) return <NoSearch />;
@@ -96,7 +101,8 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   const now = useNow();
   // why: "Show 10 more" presses; a filter change shows the first five of its own trips again
   const [presses, setPresses] = useState(0);
-  const [lit, setLit] = useState<number | null>(null);
+  // why: Ruling 18: the day whose panel is open; the page owns it, so its stays' flight lists are asked with the page's
+  const [openDay, setOpenDay] = useState<IsoDate | null>(null);
   // why: each read is placed with the instant it arrived (React's "adjust state when a prop changes"); a filter's new
   // scope has no data until its own read answers, so another scope's figures are never shown (WP19 §6)
   const [shown, setShown] = useState<Shown | null>(null);
@@ -133,20 +139,29 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
     [shown, options],
   );
   const tripsShown = model === null ? 0 : shownCount(model.trips.length, presses);
-  const lowerFlights = useLowerFlights(definition, model?.lower ?? NO_ROWS);
+  const byDay = useMemo(() => staysByDay(model?.inView ?? NO_ROWS), [model]);
+  const pageFlights = usePageFlights(
+    definition,
+    model?.lower ?? NO_ROWS,
+    openDay === null ? NO_ROWS : (byDay.get(openDay) ?? NO_ROWS),
+  );
   // why: fix round 1 (Minor 1 ruling): the no-trip lead offers a read only once the flight lists say one can be made
   // here (a search that reads no flight lists, or before they answer, keeps its first sentence alone)
-  const canRead = lowerFlights.meta?.available === true;
+  const canRead = pageFlights.meta?.available === true;
   useEffect(() => {
-    // why: WP19 §6: the performance test measures from the response mark to this one, after the header and both
-    // sections commit, and again after a filter change or "Show 10 more"
+    // why: WP19 §6: the performance test measures from the response mark to this one, after the header, both sections
+    // and the calendar commit, and again after a filter change, "Show 10 more" or a day's panel opening (Task 9)
     if (model !== null) performance.mark(DATES_DRAWN_MARK);
-  }, [model, tripsShown]);
-  // why: the calendar outlines the trips the page shows (design 2026-11-08 §5.2: a calendar price alone is not)
-  const ringed = useMemo(
-    () => new Set((model?.trips ?? []).slice(0, tripsShown).map((p) => p.index)),
-    [model, tripsShown],
-  );
+  }, [model, tripsShown, openDay]);
+  // why: Task 6's carried note: a link to the calendar (a Trips card's counts) opens the page at its anchor, which is
+  // drawn only once the read answers, so the page scrolls to it then, once
+  const landed = useRef(false);
+  useEffect(() => {
+    if (landed.current || model === null) return;
+    landed.current = true;
+    if (window.location.hash === `#${CALENDAR_ID}`) document.getElementById(CALENDAR_ID)?.scrollIntoView();
+  }, [model]);
+  const today = londonDateOf(now);
   return (
     <div className="dates-view search-page token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
@@ -191,23 +206,26 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
             data={data}
             lower={model.lower}
             hasTrip={model.trips.length > 0}
-            flights={lowerFlights}
+            flights={pageFlights}
           />
         </>
       )}
       {/* why: one place, mounted whatever the sections show, so a read's words are announced (a landed read may take
       Lower on the calendar away) */}
-      <ReadSaid flights={lowerFlights} />
+      <ReadSaid flights={pageFlights} />
       {data !== null && model !== null ? (
         <div id={CALENDAR_ID} className="search-calendar">
-          <Overview
+          <Calendar
             definition={definition}
             data={data}
-            model={model}
-            state={state}
-            ringed={ringed}
-            lit={lit}
-            onLight={setLit}
+            byDay={byDay}
+            stay={stayRange(data.space, state.nights)}
+            today={today}
+            openDay={openDay}
+            onOpenDay={setOpenDay}
+            flights={pageFlights}
+            runActive={runActive}
+            limit={state.journey ?? definition.constraints.maxJourneyMinutes ?? null}
           />
         </div>
       ) : null}

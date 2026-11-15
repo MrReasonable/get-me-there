@@ -36,10 +36,11 @@ const MONEY_FILES = new Set([
   'src/format.ts',
   'src/components/PriceCell.tsx',
   'src/components/TopBar.tsx',
-  // WP19: the coverage section's ledger costs (moved from the Coverage view), and the overview legend's band ranges,
-  // scale values in [data-scale], never fares
+  // WP19: the coverage section's ledger costs (moved from the Coverage view), never fares
   'src/views/Dates/CoverageSection.tsx',
-  'src/views/Dates/Legend.tsx',
+  // Task 9 (Ruling 18; Global Constraints): a calendar day's accessible name says its price with its label kind and
+  // age ("Wed 11 Nov, £372, Calendar · 3h"); the day prints that price through PriceCell
+  'src/views/Dates/overview.ts',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
   // WP20 Task 20.5 (spec rev 55 §11): the estimate sentence, the tie line's sibling, formats money only through the

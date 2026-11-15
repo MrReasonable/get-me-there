@@ -45,10 +45,11 @@ export interface PerfCase {
   /** Every date pair priced (true), or every seventh left unpriced with a mixture of the other buckets. */
   everyPriced: boolean;
   /**
-   * Every fifth priced date pair with one airport pair not searched yet, so the overview draws the "partly not
-   * searched" stripes (the marks test; the performance cases leave it out). Needs at least two airport pairs.
+   * Every second day of the window without a price on any of its stays, each such day one unpriced bucket in turn (no
+   * fares, no cached data, an error, skipped, not run), so the calendar draws every kind of day (the marks test; the
+   * performance cases leave it out).
    */
-  partly?: boolean;
+  unpricedDays?: boolean;
 }
 
 /**
@@ -162,9 +163,12 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
   const { origins, destinations } = airports(c);
   const pairsOfAirports = sortedAirportPairs(origins, destinations);
   const airportPairs = pairsOfAirports.length;
+  const stays = c.maxNights - c.minNights + 1;
   const pairs: DatePair[] = Array.from({ length: datePairCount(space) }, (_x, i) => {
     const at = datePairAt(space, i);
-    const unpriced = !c.everyPriced && i % 7 === 3;
+    const day = Math.floor(i / stays);
+    const unpricedDay = c.unpricedDays === true && day % 2 === 1;
+    const unpriced = unpricedDay || (!c.everyPriced && i % 7 === 3);
     const which = i % airportPairs;
     const ap = pairsOfAirports[which] ?? pairsOfAirports[0];
     const pence = priceOf(i, seed);
@@ -202,13 +206,10 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
             listReason: null,
             hasBookingOptions: false,
           };
-    // why: an unpriced date pair carries each unpriced bucket in turn, so the overview draws every mark
-    const partly = c.partly === true && !unpriced && airportPairs > 1 && i % 5 === 0;
+    // why: an unpriced date pair (or day) carries each unpriced bucket in turn, so the calendar draws every mark
     const buckets: Buckets = unpriced
-      ? { ...NONE, ...unpricedBuckets(i, airportPairs) }
-      : partly
-        ? { ...NONE, priced: airportPairs - 1, not_run: 1 }
-        : { ...NONE, priced: airportPairs };
+      ? { ...NONE, ...unpricedBuckets(unpricedDay ? Math.floor(day / 2) : Math.floor(i / 7), airportPairs) }
+      : { ...NONE, priced: airportPairs };
     return {
       index: i,
       departureDate: at.departureDate,
@@ -263,9 +264,9 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
   };
 }
 
-function unpricedBuckets(i: number, airportPairs: number): Partial<Buckets> {
+function unpricedBuckets(turn: number, airportPairs: number): Partial<Buckets> {
   const kinds = ['empty', 'no_data', 'error', 'skipped', 'not_run'] as const;
-  const k = kinds[Math.floor(i / 7) % kinds.length] ?? 'no_data';
+  const k = kinds[turn % kinds.length] ?? 'no_data';
   return { [k]: airportPairs };
 }
 

@@ -615,19 +615,11 @@
 
 /* One focus treatment for every surface: a white ring with a black gap, readable on steel, enamel and board. The
    outline survives forced colours; the shadow is the gap. Unlayered, so no component's or utility's own shadow (a
-   button's, a lamp's ring) can take the ring away from a focused control. */
+   button's) can take the ring away from a focused control. */
 :focus-visible {
   outline: 3px solid var(--focus-out);
   outline-offset: 2px;
   box-shadow:
-    0 0 0 2px var(--focus-in),
-    0 0 0 7px var(--focus-in);
-}
-/* The overview's ringed lamp keeps its inset selection ring under the focus ring (spec §11 Rings: never colour alone) */
-[data-ringed]:focus-visible {
-  box-shadow:
-    inset 0 0 0 2px #000,
-    inset 0 0 0 3px #fff,
     0 0 0 2px var(--focus-in),
     0 0 0 7px var(--focus-in);
 }

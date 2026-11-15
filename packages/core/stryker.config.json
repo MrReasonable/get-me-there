@@ -52,6 +52,7 @@
     "src/flights/returns.ts",
     "src/datePairs/pairing.ts",
     "src/datePairs/views.ts",
+    "src/datePairs/day.ts",
     "src/api-contract/datePairs.ts"
   ],
   "thresholds": {

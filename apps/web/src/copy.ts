@@ -12,6 +12,7 @@ import {
   PROVIDER_NAMES,
   type PriceLabelKind,
   type ProviderId,
+  type ReducedMark,
   type Stage,
   TRUNCATED_NOTE,
 } from '@gmt/core';
@@ -688,6 +689,71 @@ export const COPY = {
     inAll: (n: number) => `${thousands(n)} ${noun(n, 'date', 'dates')} in all.`,
     seeAll: 'See all on the calendar',
   },
+  // --- Trips and Search plan, Ruling 18 (Task 9): a search's calendar, its key and the day panel (mockup 02) ---
+  calendar: {
+    heading: 'Calendar',
+    lead: (min: number, max: number) =>
+      `Each day shows its cheapest trip with flights read, or else its lowest calendar price, for ${
+        min === max
+          ? `a stay of ${min} ${noun(min, 'night', 'nights')}`
+          : `any stay from ${min} to ${max} nights`
+      }. Pick a day to see its stays.`,
+    monthsLabel: 'Months',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
+    // a day's name (Ruling 18): "Wed 11 Nov, £372, Calendar · 3h", "…, £412, Seller · 3h, trip with flights read"
+    dayPrice: (day: string, price: string, label: string, trip: boolean) =>
+      `${day}, ${price}, ${label}${trip ? ', trip with flights read' : ''}`,
+    dayMark: (day: string, words: string) => `${day}, ${words}`,
+    // a day without a price shown, by its mark; a priced day with none shown has no price that can be shown
+    markWords: {
+      priced: 'no price to show',
+      'no-price-shown': 'no price',
+      'couldnt-read': "couldn't read",
+      'not-reached': 'not reached',
+      'not-searched': 'not searched',
+    } satisfies Record<ReducedMark, string>,
+    notSeenAgain: 'not seen again',
+    // what a day prints without a price: "no price", or the cross of a day that couldn't be read
+    noPrice: 'no price',
+    couldntReadGlyph: '×',
+    tripGlyph: '●',
+    // the key's five items (Ruling 18), each worded as the ruling gives it
+    key: {
+      label: 'Key',
+      scale: 'Shade by price:',
+      lower: 'lower',
+      higher: 'higher',
+      trip: 'a trip with flights read; other prices are calendar prices, not fares',
+      couldntRead: "couldn't read",
+      noPrice: "no price (not 'no flights')",
+      hatched: 'hatched: not searched or not reached',
+    },
+    // the day panel: "Wed 11 Nov: 12 stays", five rows, then "Show 7 more stays"
+    panelHeading: (day: string, n: number) => `${day}: ${thousands(n)} ${noun(n, 'stay', 'stays')}`,
+    close: 'Close',
+    showMore: (n: number) => `Show ${thousands(n)} more ${noun(n, 'stay', 'stays')}`,
+    // a stay with no price to show: its word beside the dash, and its line (never "no flights" alone)
+    stayName: {
+      'no-price-shown': 'No price listed',
+      'couldnt-read': "Couldn't read",
+      'not-reached': 'Not reached',
+      'not-searched': 'Not searched',
+      'over-limit': 'Over your limit',
+      unshown: 'No price to show',
+    },
+    stayLine: {
+      'no-price-shown': "The calendar showed no price for these dates. That isn't the same as no flights.",
+      'couldnt-read': "The calendar couldn't be read for these dates; the next search tries them again.",
+      'not-reached': "The latest search stopped before these dates. They'll be searched next time.",
+      'not-searched': "These dates weren't searched yet. They'll be searched next time.",
+      'over-limit': (limit: string | null) =>
+        limit === null
+          ? 'Every price found for these dates is over the journey limit.'
+          : `Every price found for these dates is over ${limit} each way.`,
+      unshown: 'A price was found for these dates, but none can be shown here.',
+    },
+  },
   // --- WP20 Task 20.10: the flights on a search's page (spec rev 55 §11 Flights and Ties, §6.9, §2) ---
   // why: the flight list is Google's page as the browser worker read it, so its words name Google's list; "verified"
   // never appears here (a flight read is never checked with the airline). Amounts are PriceCells placed between these
@@ -748,16 +814,7 @@ export const COPY = {
     scopeNights: (min: number, max: number) =>
       min === max ? `${min} ${noun(min, 'night', 'nights')}` : `${min}–${max} nights`,
     loadingFiltered: 'Loading dates for these filters',
-    airports: (origin: string, destination: string) => `${origin} → ${destination}`,
-    cachedFrom: 'cached from',
-    cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
     // --- spec rev 56 §6.9, §11 Board: the pairing figure and the flight read beneath a calendar figure (Task 21.7) ---
-    // design 2026-11-08 §4.1: the source line says whose price it is, by the kind of the figure's pairing
-    pairingSource: {
-      seller: `${mainPathSource('camoufox')}'s flight list, the cheapest of the sellers read for these two flights`,
-      'google-unread': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
-      'google-incomplete': `${mainPathSource('camoufox')}'s flight list, Google's price for these two flights`,
-    } satisfies Record<'seller' | 'google-unread' | 'google-incomplete', string>,
     // the words beside a pairing figure: whose price it is (design 2026-11-08 §4.1, operator ruling 2026-11-08)
     priceKind: {
       seller: "seller's price",
@@ -829,111 +886,11 @@ export const COPY = {
       `Not searched yet: ${thousands(n)} ${noun(n, 'date was', 'dates were')} checked on ${noun(n, 'its', 'their')} own so far, and the prices found are below.`,
     tooManyCells: (cells: number, bound: number) =>
       `This search covers ${thousands(cells)} combinations of dates and airports, more than the ${thousands(bound)} this page reads at once. Pick one airport in From or To above to bring it under ${thousands(bound)}.`,
-    // the overview (Task 19.5; spec §11 Overview)
-    overview: {
-      heading: 'Overview',
-      monthsLabel: 'Months of the window',
-      previousMonth: 'Previous month',
-      nextMonth: 'Next month',
-      stay: (from: number, to: number) =>
-        from === to ? `${from} ${noun(from, 'night', 'nights')}` : `${from}–${to} nights`,
-      closeBand: (stay: string, month: string) => `Close ${stay} in ${month}`,
-      cellName: (dates: string, stay: string, what: string) => `${dates}, ${stay}: ${what}`,
-      rank: (n: number) => `rank ${n}`,
-      bandDates: (date: string) => `departing ${date}`,
-      openBand: 'opens its stay lengths',
-      noMark: 'no airport pair in scope',
-      readoutLabel: 'Date pair readout',
-      readoutEmpty: 'Point at or focus a dot to read its date pair here.',
-      openThese: 'Open these dates',
-      buckets: (breakdown: string) => `by airport pair: ${breakdown}`,
-    },
-    // spec rev 55 §3, §6.6, §11: the five marks of the month key (priced is a cell's shade), then the cell marks besides
-    marks: {
-      words: {
-        priced: 'priced',
-        'no-price-shown': 'no price shown',
-        'couldnt-read': "couldn't be read",
-        'not-reached': 'not reached',
-        'not-searched': 'not searched',
-        partly: 'partly not searched',
-        notChecked: 'not checked',
-        superseded: 'superseded by a later search',
-        notSeen: 'not seen in latest search',
-        noneWithin: 'none within the journey limit',
-        unshown: 'priced, but no price can be shown here',
-      },
-      glyph: {
-        'no-price-shown': '∅',
-        'couldnt-read': '✕',
-        'not-reached': '–',
-        'not-searched': '○',
-        partly: '▨',
-        notChecked: '◫',
-        superseded: '↺',
-        notSeen: '◌',
-        noneWithin: '⧗',
-        unshown: '◑',
-      },
-    },
-    legend: {
-      title: 'Legend',
-      scaleQuintile: (n: number) =>
-        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank; brighter is cheaper`,
-      scaleFlatFew: (n: number, min: number) =>
-        `One shade for ${n} current ${noun(n, 'price', 'prices')}: fewer than ${min} are too few for price bands`,
-      scaleFlatNarrow: (n: number, min: string, max: string) =>
-        `One shade for ${n} current prices: they span ${min}–${max}, less than 10%, too narrow for price bands`,
-      scaleEmpty: 'No current price in view to shade',
-      band: (band: number, min: string, max: string, n: number) =>
-        `band ${band + 1}: ${min}–${max} (${n} date ${noun(n, 'pair', 'pairs')})`,
-      flat: (n: number) => `one shade: ${n} date ${noun(n, 'pair', 'pairs')}`,
-      offScale:
-        'Prices a later search no longer found (superseded, not seen) are on a plain fill with their mark, never on the scale.',
-      markCount: (words: string, n: number) => `${words}: ${n}`,
-      // why: the parts of "no price shown", by date pair (spec rev 55 §11: "12 no fares, 3 no cached data")
-      noPriceParts: (empty: number, noData: number) =>
-        [
-          ...(empty > 0 ? [`${empty} no fares`] : []),
-          ...(noData > 0 ? [`${noData} no cached data`] : []),
-        ].join(', '),
-      marksLabel: 'Marks',
-      dot: 'each dot is one stay length',
-      striped: (n: number) => `striped: partly not searched (${n})`,
-      notChecked:
-        'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
-      noAmount: 'The dots print no amount: point at or focus one to read its price beside the legend.',
-      ring: 'outlined: trips with flights read',
-    },
     // the coverage section (Task 19.5; what the Coverage view held)
     coverageToggle: 'Coverage of the latest run',
     coverageNotFiltered:
       'The filters above do not narrow this section: it covers the latest run over the whole search.',
   },
-  // --- WP10 (spec §11 History; plan decisions 38, 44, 46, 48). WP19 retired View B (Calendar) and View C (Duration)
-  // with their words; the two that outlived them are bucketBreakdown (the Dates readout) and panel.unconfirmedShort ---
-  // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
-  bucketBreakdown: (b: {
-    priced: number;
-    empty: number;
-    no_data: number;
-    error: number;
-    skipped: number;
-    not_run: number;
-  }) =>
-    (
-      [
-        [b.priced, 'priced'],
-        [b.empty, 'no fares'],
-        [b.no_data, 'no cached data'],
-        [b.error, 'error'],
-        [b.skipped, 'skipped'],
-        [b.not_run, 'not searched'],
-      ] as const
-    )
-      .filter(([n]) => n > 0)
-      .map(([n, words]) => `${n} ${words}`)
-      .join(', '),
   // --- Design 2026-11-08 §5, §6.1 (trip-page plan Task 7): the Trip page, one pair of dates ending in a booking link.
   // Its main path never says definition, cell, date pair, basis, discovery, itinerary search, verdict, reused,
   // superseded or billed calls; a sentence that shows a price takes the price beside it, never inside its words ---
@@ -1319,6 +1276,8 @@ export const COPY = {
     detailsFor: (dates: string, pair: string | null) =>
       pair === null ? `Details for ${dates}` : `Details for ${pair}, ${dates}`,
     readFlights: 'Read flights',
+    // a stay with no price shows a dash where the price would be (its word beside it says why)
+    noPrice: '—',
     readFlightsFor: (dates: string, pair: string | null) =>
       pair === null ? `Read flights for ${dates}` : `Read flights for ${pair}, ${dates}`,
     legTimes: (depart: string, arrive: string) => `${depart} → ${arrive}`,

@@ -3,10 +3,10 @@ import { COPY } from '../src/copy.js';
 import { CELLS_CASE, DATE_PAIRS_CASE, PERF_DEFINITION_ID, PERF_NOW, servePerfCase } from './perfFixtures.js';
 import { SMOKE } from './selectors.js';
 
-// Spec §9 item 6, the performance bound (WP19 Task 19.9; design 2026-11-08 Task 8): the decoded worst cases served
-// through the browser's route interception; a search's page (its header and both sections, then the calendar) drawn
-// within 1.5 s of the response, a stay filter change and "Show 10 more" each redrawn within 200 ms, and no main-thread
-// task longer than 200 ms. Every limit is multiplied by GMT_TIMING_FACTOR (default 1; CI's e2e job runs at 3, revision
+// Spec §9 item 6, the performance bound (WP19 Task 19.9; design 2026-11-08 Tasks 8 and 9): the decoded worst cases
+// served through the browser's route interception; a search's page (its header, both sections and the calendar) drawn
+// within 1.5 s of the response, a stay filter change, "Show 10 more" and a day's panel opening each within 200 ms, and
+// no main-thread task longer than 200 ms. Every limit is multiplied by GMT_TIMING_FACTOR (default 1; CI's e2e job runs at 3, revision
 // 50). Each wait is on its step's User Timing mark (`DATES_DRAWN_MARK`, which the page sets once it has drawn), so a
 // page that never sets it fails at the backstop.
 
@@ -67,7 +67,7 @@ async function markTime(page: Page, name: string): Promise<number> {
 const clearMarks = (page: Page) => page.evaluate(() => Reflect.get(window, '__gmtPerf').clearMarks());
 
 for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
-  test(`${c.name}: drawn within 1.5 s, a stay change and "Show 10 more" each within 200 ms, no long task over 200 ms @perf`, async ({
+  test(`${c.name}: drawn within 1.5 s, a stay change, "Show 10 more" and a day's panel each within 200 ms, no long task over 200 ms @perf`, async ({
     page,
   }) => {
     test.setTimeout(180_000);
@@ -77,7 +77,8 @@ for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
     await page.clock.install({ time: PERF_NOW });
     await page.addInitScript(afterClock);
 
-    // (1) the first read: response to the header, both sections and the calendar drawn
+    // (1) the first read: response to the header, both sections and the calendar drawn (DATES_DRAWN_MARK is set once
+    // the page's commit holds all of them)
     await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
     const response = await markTime(page, RESPONSE);
     const drawn = await markTime(page, DRAWN);
@@ -87,7 +88,7 @@ for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
     await expect(
       page.getByRole('region', { name: SMOKE.lowerOnCalendar }).locator(SMOKE.calendarRow),
     ).toHaveCount(3);
-    await expect(page.locator(SMOKE.overviewCell).first()).toBeVisible();
+    await expect(page.locator(SMOKE.pricedDay).first()).toBeVisible();
     await expect(page.getByRole('alert').filter({ hasText: COPY.syntheticBanner })).toBeVisible();
 
     // (2) a stay filter change: the range applies in the browser, so it is measured from the input event
@@ -109,6 +110,13 @@ for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
     const more = (await markTime(page, DRAWN)) - click;
     await expect(trips.locator(SMOKE.tripRow)).toHaveCount(15);
 
+    // (4) a day's panel (Ruling 18): its region drawn, measured from the click on the day
+    await clearMarks(page);
+    await page.locator(SMOKE.calendarTabStop).click();
+    const dayClick = await markTime(page, CLICK);
+    const panel = (await markTime(page, DRAWN)) - dayClick;
+    await expect(page.getByRole('region', { name: SMOKE.dayPanel })).toBeVisible();
+
     const longTasks: number[] = await page.evaluate(() => Reflect.get(window, '__gmtLongTasks'));
     const longest = Math.max(0, ...longTasks);
     const measured = {
@@ -117,6 +125,7 @@ for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
       drawMs: Math.round(draw),
       stayMs: Math.round(stay),
       showMoreMs: Math.round(more),
+      dayPanelMs: Math.round(panel),
       longestTaskMs: Math.round(longest),
       longTasks: longTasks.length,
       unserved: [...state.unknown],
@@ -126,6 +135,7 @@ for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
     expect(draw, 'header and both sections drawn after the response').toBeLessThanOrEqual(DRAW_MS);
     expect(stay, 'stay filter redraw').toBeLessThanOrEqual(REDRAW_MS);
     expect(more, '"Show 10 more" redraw').toBeLessThanOrEqual(REDRAW_MS);
+    expect(panel, "a day's panel opening").toBeLessThanOrEqual(REDRAW_MS);
     expect(longest, 'longest main-thread task').toBeLessThanOrEqual(LONG_TASK_MS);
   });
 }
