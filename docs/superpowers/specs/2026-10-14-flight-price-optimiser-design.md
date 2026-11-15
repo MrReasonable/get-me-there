@@ -4333,7 +4333,9 @@ synthetic one.
 
 **Settings** (`?view=settings`) is an interim page until stage 3 of the UX redesign replaces it: an `h1` "Settings" and three
 linked sections, each with one line saying what is there, "Price sources" (the Providers view), "Alerts" and "System" (the
-Status view); those views' headings read the same. The three views keep rendering at their own URLs.
+Status view); those views' headings read the same. The three views keep rendering at their own URLs with their own plates
+and boards, on the shared tokens' page ground in light and dark like every view (the board's steel ground is gone); what
+they set straight on the ground, their heading and breadcrumbs, reads the tokens' ink.
 
 The **coverage line** is **"discovery: P priced · E no fares · X no cached data · R error · S skipped · U not searched of M (R′
 reused) · itinerary-searched K of N selected (E outbounds each) +C on demand"** ("outbound" agrees with E; a run that selected
@@ -4343,22 +4345,26 @@ searched. Empty state for no providers. Red synthetic banner (§5.5).
 
 **URLs.** `?view=` names the view: `searches` (the Trips page, the first screen, also for an absent or unknown value, whatever
 the number of searches), `dates` (a search's page, with `def=`; without `def=` it lands on Trips), `trip` (one pair of dates,
-with `depart=` and `return=` as `YYYY-MM-DD`, the search page's `d.from`, `d.to` and `d.journey` carried), `history`,
+with `depart=` and `return=` as `YYYY-MM-DD`, a multi-airport trip's own pair as `t.from` and `t.to`, and the search page's
+`d.*` carried as they were, so the breadcrumb back finds the page's own airport filter, or none), `history`,
 `definitions` (the Edit page, with `edit=<id>`; without `edit=` it lands on Trips), `settings` (the interim Settings page),
 `providers`, `alerts` and `status` (its three sections); `def=` names the search, and `refused=<code>` on a search's page
 carries a refused Search now (below). A search's page keeps its state in `d.nights=10-14` (the stay filter; a stay equal to the
 search's own range is no filter and writes nothing), `d.from` and `d.to` (airports), `d.journey=<minutes>`, `d.week=best`,
-`d.coverage=open` and `d.fold=price|searched|alert` (a link that opens one fold, consumed once it has: below); the Search page
-no longer sorts, so an old `d.sort` is read as nothing. Every nav link keeps `def=` and the filters. The retired values land on
-a search's page, keeping `def=` (and on Trips without it): `?view=calendar` and `?view=duration` open it as it stands (a
+and two asks that are used once and then replaced out of the URL, so they never travel to another search: `d.coverage=open`
+(land on the full search log) and `d.fold=price|searched|alert` (open one fold); the Search page no longer sorts, so an old
+`d.sort` is read as nothing. Every nav link keeps `def=` and the filters and drops a trip's dates and pair. A fragment is
+the page's own: a filter edit keeps it, a link drops it unless it names its own (a card's counts link names `#calendar`,
+which the page scrolls to once and then drops), and no fragment is ever read as part of a parameter. The retired values land
+on a search's page, keeping `def=` (and on Trips without it): `?view=calendar` and `?view=duration` open it as it stands (a
 Calendar `cal.dest=<IATA>` becomes its destination filter; other `cal.*` parameters are ignored), and `?view=coverage` opens
-it with the full search log open. A `?view=trip` URL without a valid date pair, or without `def=`, lands on the search's page
-(Trips without `def=`). `results` is retired: `?view=results` with well-formed `depart=` and `return=` and a `def=` lands on
-`trip`, keeping `def`, `depart`, `return`, `d.from`, `d.to` and `d.journey` and dropping `basis`, `row`, `sort` and every `f.*`;
-one carrying only `row=` (an alert email sent before revision 48) lands on the search's page. Whether the dates are inside the
-search's current dates is the server's answer: outside them the Trip page says so and links back (below). A parameter that no
-longer applies is ignored, never an error. Opening a search's page, or following a card's name, remembers it as the search last
-opened.
+it with the full search log open. A `?view=trip` URL without a valid date pair, or without `def=`, lands on the search's
+page (Trips without `def=`). `results` is retired: `?view=results` with well-formed `depart=` and `return=` and a `def=`
+lands on `trip`, keeping `def`, `depart`, `return`, `d.from`, `d.to` and `d.journey` and dropping `basis`, `row`, `sort` and
+every `f.*`; one carrying only `row=` (an alert email sent before revision 48) lands on the search's page. Whether the dates
+are inside the search's current dates is the server's answer: outside them the Trip page says so and links back (below). A
+parameter that no longer applies is ignored, never an error. Opening a search's page, or following a card's name, remembers
+it as the search last opened.
 
 **One label per price, and the price as the booking link** (the Trip page's
 card and other flights, and the trip and calendar rows of the Trips and Search pages). A price's label is
@@ -4657,10 +4663,11 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
     marks over its whole space, summing to the total, then **Flights read** over the whole search (the card's `readDates`,
     "counted across every search so far", so this fold and the run line, which counts the dates in view, can differ by their
     scope); when more than half of the dates searched showed no price, one line says so and that it isn't the same as no
-    flights; and **Full search log**, which opens the **coverage section** (below, `d.coverage=open`; `?view=coverage` lands
-    there). **Alert**: summary "Alert · off" or "Alert · 2 on"; each of this search's rules that is on, in plain words
-    (`describeRule`: "at most one email every 14 days", "calendar prices, limits not checked"); "Alerts watch calendar prices,
-    not trips with flights read." shown only when every listed rule watches calendar prices; **Change alerts**
+    flights; and **Full search log**, a disclosure button that opens the **coverage section** below (a `d.coverage=open`
+    landing, `?view=coverage` or the status card's link, opens it once). **Alert**: summary "Alert · off" or "Alert · 2 on";
+    each of this search's rules that is on, in plain words (`describeRule`: "Price drops by 10% or more", "at most one email
+    every 14 days", "calendar prices, limits not checked"); "Alerts watch calendar prices, not trips with flights read."
+    shown only when a rule is listed and every listed rule watches calendar prices; **Change alerts**
     (`view=alerts&def=`); and, from the status report (`area: 'email'`, `offReason: 'not-set-up'`), "Email isn't set up yet"
     linking to the Status view. A switch for alerts on trips with flights read waits for stage 4.
   - **The figure** of a date pair, chosen across the airport pairs in scope by the precedence the calendar day had: the cheapest
@@ -4712,8 +4719,8 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
     changes (the poll of that run), at most once every 30 s with a trailing read, and the run leaving pending or running is read
     at once; each read shows as it lands and each row carries its own age, so nothing is held, animated or announced as a
     re-ranking.
-  - **Coverage section** (the full search log inside What was searched; opened by its link, `d.coverage=open` and
-    `?view=coverage`), over the latest parent run: the coverage line (above) over the cells in scope, its set-up terms each
+  - **Coverage section** (the full search log inside What was searched; opened by its button, a `d.coverage=open`
+    landing and `?view=coverage`), over the latest parent run: the coverage line (above) over the cells in scope, its set-up terms each
     with a one-line explanation where first shown; counts per stage × provider with the six-bucket breakdown and "searched" as
     the umbrella beside it, with the "with a price" share; selected but not reached with reason; the browser provider's left
     cells with §3's texts; overrun and parity flags, each line worded by its unit (§8.1); the error list with Retry (only on a
@@ -4733,9 +4740,10 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   It opens from a trip row's ›, a row of a calendar day's panel, a Trips card's
   trip price and an alert email, never from the nav. Its breadcrumb (Trips › the
   search › the dates) returns to the search's page with its filters kept, and
-  the page carries the search page's `d.from`, `d.to` and
-  `d.journey` so it reads the same airport pairs the row it was opened from
-  did. It is one read, `GET /definitions/:id/trip` (§10), and every price in it
+  the page carries a multi-airport trip's own pair (`t.from`, `t.to`) and the
+  search page's `d.from`, `d.to` and `d.journey`, so it reads the same airport
+  pairs the row it was opened from did and the breadcrumb back restores the
+  page's own filter. It is one read, `GET /definitions/:id/trip` (§10), and every price in it
   carries its provenance. The red synthetic banner shows when any provenance
   in the response (the figure, the flight list, the calendar and cached
   prices, the log) is synthetic or the fixture provider's, and no price is
