@@ -493,7 +493,7 @@ export const COPY = {
     lowerLink: (n: number) =>
       `${thousands(n)} ${noun(n, 'date', 'dates')} ${noun(n, 'looks', 'look')} lower on the calendar`,
     lowerFrom: ', from',
-    lowerTail: ', flights not read.',
+    lowerTail: '.',
     calendarOnlyLink: (n: number) => `Calendar prices for ${thousands(n)} ${noun(n, 'date', 'dates')}`,
     calendarOnlyTail: '; no flights read yet.',
     previousRun: 'Trips from the previous search',

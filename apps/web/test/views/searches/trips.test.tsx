@@ -1,3 +1,4 @@
+import { apiContract } from '@gmt/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ import {
 } from '../../fixtures.searches.js';
 import { serveCards } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { renderInShell } from './support.js';
+import { airportRows, renderInShell } from './support.js';
 
 // Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 4, 5, 7, 8, 11, 15, 20 and Review Focus 1 to 3: the Trips page's
 // cards: the three cheapest trips as shared rows, the calendar-count line, run progress with Cancel, and every state.
@@ -67,6 +68,50 @@ describe('a finished search with trips', () => {
       'BHX → FRA · leave 10 Jan – 31 Mar · 10–14 nights · searched 2h ago',
     );
     expect(card.querySelector('.tcard-repeat')).toHaveTextContent('repeats Mondays 05:00');
+  });
+
+  it('names the airports as the airports table does, without the city in front, and the code where it is unknown', async () => {
+    const rows = apiContract.airportsResponseSchema.parse([
+      {
+        iata: 'LHR',
+        name: 'London Heathrow Airport',
+        city: 'London',
+        country: 'GB',
+        tz: 'Europe/London',
+        metro: 'LON',
+      },
+      {
+        iata: 'JFK',
+        name: 'John F Kennedy International Airport',
+        city: 'New York',
+        country: 'US',
+        tz: 'America/New_York',
+        metro: 'NYC',
+      },
+    ]);
+    server.use(
+      serveCards([searchCard({ name: 'Named', origins: ['LHR', 'LGW'], destinations: ['JFK'] })]),
+      airportRows(rows),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('Named');
+    await waitFor(() =>
+      expect(card.querySelector('.tcard-meta')).toHaveTextContent(/^Heathrow, LGW → John F Kennedy · leave/),
+    );
+  });
+
+  it('Search again is the normal primary button once the search is loaded, not a disabled one', async () => {
+    server.use(
+      serveCards([searchCard({ id: 'def-0001', trips })]),
+      http.get(`${API}/definitions`, () => HttpResponse.json([definition({ id: 'def-0001' })])),
+    );
+    renderInShell(<SearchesView />);
+    const again = await within(await cardOf('Birmingham → Frankfurt')).findByRole('button', {
+      name: /^Search again/,
+    });
+    await waitFor(() => expect(again).toBeEnabled());
+    expect(again).toHaveClass('btn-primary');
+    expect(again).not.toHaveAttribute('aria-busy');
   });
 
   it('a search that does not repeat has no repeat tag; a rolling window reads as its offsets', async () => {
@@ -142,7 +187,7 @@ describe('the counts line (Rulings 5 and 6)', () => {
     renderInShell(<SearchesView />);
     const line = within(await cardOf('Birmingham → Frankfurt')).getByTestId('card-counts');
     expect(line).toHaveTextContent(
-      /^23 dates with flights read; these are the cheapest\. 155 dates look lower on the calendar, from £372 Cached.*, flights not read\.$/,
+      /^23 dates with flights read; these are the cheapest\. 155 dates look lower on the calendar, from £372 Cached.*.$/,
     );
     expect(within(line).getByTestId('price-label')).toHaveTextContent(/^Cached/);
     expect(within(line).getByRole('link', { name: '155 dates look lower on the calendar' })).toHaveAttribute(

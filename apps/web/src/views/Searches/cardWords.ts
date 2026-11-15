@@ -2,6 +2,7 @@ import { formatAgo, hoursSince, IN_FLIGHT_STATUSES, type IsoDateTime, STOPPED_ST
 import type { SearchCard } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatIsoDateShort } from '../../format.js';
+import { type AirportRow, shortAirportName } from '../Definitions/airports.js';
 import { parseSchedule } from '../Definitions/schedule.js';
 
 // Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 5 and 8: the words of a card, pure functions from the served
@@ -53,14 +54,33 @@ const isFinished = (run: NonNullable<SearchCard['latestRun']>): boolean =>
   !IN_FLIGHT.has(run.status) && !STOPPED.has(run.status);
 
 /**
+ * An airport named as the mockup does ("Heathrow", "JFK", "Newark"): the table's own short name without its city's name
+ * in front ("London Heathrow" reads "Heathrow"), the code when the table does not know the airport (yet) or the name
+ * is only its city.
+ */
+export function airportLabel(code: string, row: AirportRow | undefined): string {
+  if (row === undefined) return code;
+  const short = shortAirportName(row.name);
+  const rest = short.startsWith(`${row.city} `) ? short.slice(row.city.length + 1).trim() : short;
+  return rest === '' ? code : rest;
+}
+
+/**
  * The card's one meta line (mockup 01): the route's codes, the window, the stay, and when a finished run is on record
  * "searched 3h ago". Only a finished run is "searched"; a running, stopped or never-run search says nothing of when.
  */
-export function metaParts(card: SearchCard, now: IsoDateTime): string[] {
+export function metaParts(
+  card: SearchCard,
+  now: IsoDateTime,
+  airports: ReadonlyMap<string, AirportRow>,
+): string[] {
   const run = card.latestRun;
   const at = run !== null && isFinished(run) ? (run.finishedAt ?? run.startedAt) : null;
   return [
-    S.codes(card.origins.join(', '), card.destinations.join(', ')),
+    S.codes(
+      card.origins.map((c) => airportLabel(c, airports.get(c))).join(', '),
+      card.destinations.map((c) => airportLabel(c, airports.get(c))).join(', '),
+    ),
     card.window.kind === 'relative' ? windowText(card.window) : S.leaveWindow(windowText(card.window)),
     COPY.datesView.scopeNights(card.minNights, card.maxNights),
     ...(at === null ? [] : [S.searchedMeta(formatAgo(hoursSince(at, now)))]),

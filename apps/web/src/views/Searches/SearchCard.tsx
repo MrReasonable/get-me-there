@@ -11,6 +11,7 @@ import { useNow } from '../../now.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
 import { SearchAgainButton } from '../Dates/SearchAgainButton.js';
+import { useAirportDetails } from '../Definitions/airports.js';
 import {
   isActive,
   isStopped,
@@ -63,6 +64,7 @@ export function SearchCard({
 }) {
   const now = useNow();
   const { cancel, resume } = useExecutionActions();
+  const airports = useAirportDetails([...card.origins, ...card.destinations]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (!focusHeading) return;
@@ -100,7 +102,7 @@ export function SearchCard({
             <span className="tcard-repeat">{scheduleText(card.schedule)}</span>
           )}
         </div>
-        <p className="tcard-meta">{metaParts(card, now).join(' · ')}</p>
+        <p className="tcard-meta">{metaParts(card, now, airports.rows).join(' · ')}</p>
       </div>
       {run === null ? <p className="tcard-state">{S.notSearchedYet}</p> : null}
       {run !== null && (active || isStopped(card)) ? (

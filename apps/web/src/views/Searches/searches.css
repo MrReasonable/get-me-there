@@ -10,7 +10,15 @@
     border-radius: 10px;
     padding: 20px var(--t-gutter) 32px;
     margin-top: 20px;
-    font: 400 15px / 1.45 var(--font-ui);
+    /* the mockup's UI face with tabular figures: the board's faces (flap lettering, the slashed zero) stay off the cards */
+    font:
+      400 15px / 1.45 ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      sans-serif;
     font-variant-numeric: tabular-nums;
     max-width: 1120px;
     overflow-wrap: anywhere;
@@ -30,6 +38,17 @@
     .trips-page {
       color-scheme: dark;
     }
+  }
+  /* the page's ground is the tokens' page colour, not the board's steel, so the panel sits on its own colour */
+  body:has(.trips-page) {
+    background-color: var(--t-bg);
+    background-image: none;
+  }
+  .trips-page [data-cost],
+  .trips-page .figure {
+    font-family: inherit;
+    font-weight: inherit;
+    letter-spacing: 0;
   }
   .trips-page a {
     color: var(--t-accent);
@@ -91,7 +110,8 @@
   .trips-page .btn-primary:disabled {
     color: var(--t-accent-ink);
     background: var(--t-accent);
-    opacity: 0.7;
+    border-style: solid;
+    cursor: progress;
   }
   .trips-page .btn-danger {
     color: var(--t-bad);
