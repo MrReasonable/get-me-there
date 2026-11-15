@@ -13,8 +13,6 @@ import { type HeaderRun, ViewHeader } from '../../components/ViewHeader.js';
 import { type BucketName, COPY } from '../../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../../format.js';
 import { useNow } from '../../now.js';
-import { datesPatch } from '../../state/datesState.js';
-import { hrefWith, navigateTo } from '../../state/urlState.js';
 
 /** Spec §3 / §6.6: the six buckets, which sum to the cell count. */
 const BUCKETS = [
@@ -305,25 +303,34 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
 }
 
 /**
- * The full search log, inside the "What was searched" fold (Ruling 19): a link that opens the coverage section beneath
- * the fold's rows (`d.coverage=open`; `?view=coverage` and the run line's link land there too). It reads
- * `GET /definitions/:id/coverage` only while open, over the latest parent run, and says the filters do not narrow it.
+ * The full search log, inside the "What was searched" fold (Ruling 19): a disclosure button that opens the coverage
+ * section beneath the fold's rows. Its open state is the page's (a `d.coverage=open` landing, `?view=coverage` or the
+ * status card's link, opens it once and is then consumed: final review I2). It reads `GET /definitions/:id/coverage`
+ * only while open, over the latest parent run, and says the filters do not narrow it.
  */
-export function CoverageSection({ definition, open }: { definition: DefinitionResponse; open: boolean }) {
+export function CoverageSection({
+  definition,
+  open,
+  onToggle,
+}: {
+  definition: DefinitionResponse;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const id = useId();
-  const toggle = datesPatch({ coverageOpen: !open });
   return (
     <section aria-labelledby={`${id}-log`} className="sfold-log">
       <p className="sfold-note">
-        <a
+        <button
+          type="button"
           id={`${id}-log`}
-          href={hrefWith(toggle)}
-          onClick={navigateTo(toggle)}
+          className="sfold-log-toggle"
+          onClick={onToggle}
           aria-expanded={open}
           aria-controls={`${id}-body`}
         >
           {open ? COPY.searchPage.folds.hideLog : COPY.searchPage.folds.fullLog}
-        </a>
+        </button>
         {open ? null : <span className="sfold-why"> {COPY.searchPage.folds.fullLogNote}</span>}
       </p>
       <div id={`${id}-body`}>

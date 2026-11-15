@@ -241,12 +241,16 @@ describe('the calendar’s anchor (Task 8 and Task 6 carried notes)', () => {
     );
   });
 
-  it('a page opened at #calendar scrolls the calendar into view once it has drawn', async () => {
+  it('a page opened at #calendar scrolls the calendar into view once it has drawn, then drops the fragment', async () => {
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const before = window.history.length;
     renderDates({ body: workedDates(), search: '?view=dates&def=def-0001#calendar' });
     await findCalendar();
     await waitFor(() => expect(scroll).toHaveBeenCalled());
     expect(scroll.mock.contexts[0]).toBe(document.getElementById('calendar'));
+    // why: final review I1: the landing is consumed once, the way `d.fold` is, so the anchor never travels on
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=def-0001', '']);
+    expect(window.history.length).toBe(before);
     scroll.mockRestore();
   });
 

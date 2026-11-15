@@ -24,7 +24,8 @@ function withStage(patch: Partial<ReturnType<typeof coverageResponse>['perStage'
 
 // What the Coverage view held, moved to the Dates view's coverage section (WP19 §4, Task 19.5): coverage.test.tsx's
 // cases, ported unchanged against the open section, then the section's own.
-const render = () => renderWithProviders(<CoverageSection definition={definition()} open />);
+const render = () =>
+  renderWithProviders(<CoverageSection definition={definition()} open onToggle={() => undefined} />);
 
 describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)', () => {
   it('lists each on-demand itinerary search below the parent run, with its own buckets and ledger calls (UI-004, ruling 15)', async () => {
@@ -428,7 +429,7 @@ describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)'
 });
 
 describe('the coverage section in the Dates view (spec §11; inside "What was searched", Ruling 19)', () => {
-  it('is not read until its "Full search log" link is followed, says the filters do not narrow it, and closes again', async () => {
+  it('is not read until its "Full search log" button is pressed, says the filters do not narrow it, and closes again', async () => {
     let asked = 0;
     server.use(
       http.get(`${API}/definitions/:id/coverage`, () => {
@@ -438,17 +439,18 @@ describe('the coverage section in the Dates view (spec §11; inside "What was se
     );
     const { user, client } = renderDates({ body: workedDates() });
     await findTrips();
-    const open = await screen.findByRole('link', { name: COPY.searchPage.folds.fullLog });
+    const open = await screen.findByRole('button', { name: COPY.searchPage.folds.fullLog });
     expect(open).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText(COPY.datesView.coverageNotFiltered)).toBeNull();
     await settled(client);
     expect(asked).toBe(0);
     await user.click(open);
-    expect(new URLSearchParams(window.location.search).get('d.coverage')).toBe('open');
     expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
     expect(screen.getByText(COPY.datesView.coverageNotFiltered)).toBeInTheDocument();
-    await user.click(screen.getByRole('link', { name: COPY.searchPage.folds.hideLog }));
-    expect(new URLSearchParams(window.location.search).get('d.coverage')).toBeNull();
+    await user.click(screen.getByRole('button', { name: COPY.searchPage.folds.hideLog }));
+    expect(screen.queryByRole('table', { name: COPY.coverageHeading })).toBeNull();
+    // final review I2: the log's open state is the page's own, never written to the URL
+    expect(new URLSearchParams(window.location.search).has('d.coverage')).toBe(false);
   });
 
   it('d.coverage=open opens it', async () => {

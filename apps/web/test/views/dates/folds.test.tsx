@@ -260,9 +260,13 @@ describe('What was searched', () => {
     const { user } = renderDates({ body: workedDates(real) });
     await findTrips();
     const d = await waitFor(() => fold(/^What was searched/));
-    await user.click(within(d).getByRole('link', { name: F.fullLog }));
-    expect(new URLSearchParams(window.location.search).get('d.coverage')).toBe('open');
+    const toggle = within(d).getByRole('button', { name: F.fullLog });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
     expect(await within(d).findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
+    expect(within(d).getByRole('button', { name: F.hideLog })).toHaveAttribute('aria-expanded', 'true');
+    // final review I2: the log's open state is the page's own, never in the URL, so it never travels to another search
+    expect(new URLSearchParams(window.location.search).has('d.coverage')).toBe(false);
   });
 });
 
@@ -285,13 +289,18 @@ describe('opening a fold from a link', () => {
     scroll.mockRestore();
   });
 
-  it('?view=coverage lands on the fold, open, with the full log shown', async () => {
+  it('?view=coverage lands on the fold, open, with the full log shown, and the landing is consumed', async () => {
     server.use(serveCards([card()]));
+    const before = window.history.length;
     renderDates({ body: workedDates(real), search: '?view=dates&def=def-0001&d.coverage=open' });
     const d = await waitFor(() => fold(/^What was searched/));
     await waitFor(() => expect(d).toHaveAttribute('open'));
     expect(await within(d).findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
     expect(d.querySelector('summary')).toHaveFocus();
+    // final review I2: asked once, like d.fold: replaced out of the URL, the log kept open
+    expect(window.location.search).toBe('?view=dates&def=def-0001');
+    expect(window.history.length).toBe(before);
+    expect(within(d).getByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
   });
 });
 
@@ -564,8 +573,10 @@ describe('the folds with the date-pairs read failing or over the bound (review I
     await waitFor(() => expect(d).toHaveAttribute('open'));
     d.removeAttribute('open');
     d.ownerDocument.body.focus();
+    // the landing was consumed, so the narrowed URL no longer asks for the log
+    expect(new URLSearchParams(window.location.search).has('d.coverage')).toBe(false);
     server.use(serveDates(workedDates(real)));
-    window.history.replaceState(null, '', '/?view=dates&def=def-0001&d.coverage=open&d.from=LHR');
+    window.history.replaceState(null, '', '/?view=dates&def=def-0001&d.from=LHR');
     window.dispatchEvent(new PopStateEvent('popstate'));
     await findTrips();
     expect(d).not.toHaveAttribute('open');

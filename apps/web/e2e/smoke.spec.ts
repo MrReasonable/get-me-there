@@ -185,8 +185,9 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
   await page.goto(`/?view=coverage&def=${defId}`);
   await expect(trips(page)).toBeVisible();
-  expect(new URL(page.url()).searchParams.get('d.coverage')).toBe('open');
-  // Ruling 19: the landing opens the What was searched fold, moves focus to its summary and shows the full log
+  // Ruling 19: the landing opens the What was searched fold, moves focus to its summary and shows the full log; the
+  // landing is then consumed, so it never travels to another search (final review I2)
+  await expect(page).toHaveURL(new RegExp(`\\?view=dates&def=${defId}$`));
   const searched = page
     .getByRole('region', { name: SMOKE.folds })
     .locator('details', { hasText: SMOKE.searchedFold })

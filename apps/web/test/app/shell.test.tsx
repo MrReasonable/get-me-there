@@ -1,13 +1,13 @@
 import { asIata } from '@gmt/core';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
 import { COPY } from '../../src/copy.js';
 import { workedDates } from '../fixtures.dates.js';
-import { API, providersResponse, resultsResponse } from '../fixtures.js';
-import { latestRun, searchCard } from '../fixtures.searches.js';
+import { API, definition, providersResponse, resultsResponse } from '../fixtures.js';
+import { latestRun, lowerOnCalendar, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
 import { serveDates } from '../msw/datesHandlers.js';
 import { serveCards } from '../msw/searchesHandlers.js';
@@ -310,10 +310,11 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
     expect(await board()).toBeInTheDocument();
   });
 
-  it('?view=coverage lands on Dates with its coverage section open', async () => {
+  it('?view=coverage lands on Dates with its coverage section open, the landing then consumed', async () => {
     renderWithProviders(<App />, { search: '?view=coverage&def=def-0001' });
-    await waitFor(() => expect(search()).toBe('?view=dates&def=def-0001&d.coverage=open'));
+    expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
     expect(await board()).toBeInTheDocument();
+    await waitFor(() => expect(search()).toBe('?view=dates&def=def-0001'));
   });
 
   it('?view=results without a date pair or row lands on Dates', async () => {
@@ -534,5 +535,107 @@ describe('"Searching: <name>" in the top bar (Ruling 10; Review Focus 2)', () =>
     expect(await screen.findByRole('region', { name: COPY.topBar.limitsLabel })).toBeInTheDocument();
     await screen.findByRole('navigation', { name: 'Main' });
     expect(screen.queryByText(/^Searching:/)).toBeNull();
+  });
+});
+
+// why: final review C2, I1 and I2 (and its recommendation of one shell-level test): an anchor (`#main`, `#calendar`) or an
+// "open once" parameter (`d.coverage=open`) in the URL never reaches a parameter and never travels to another search
+describe('what a URL lands at is used once (final review C2, I1, I2)', () => {
+  const A = 'Worked example';
+  const B = 'Second search';
+  const serveTwo = () =>
+    server.use(
+      http.get(`${API}/definitions`, () =>
+        HttpResponse.json([definition(), definition({ id: 'def-0002', name: B })]),
+      ),
+      serveCards([
+        searchCard({ id: 'def-0001', name: A, lowerOnCalendar: lowerOnCalendar({ count: 155 }) }),
+        searchCard({ id: 'def-0002', name: B, lowerOnCalendar: lowerOnCalendar({ count: 12 }) }),
+      ]),
+      serveDates(workedDates()),
+    );
+  const calendar = () => document.getElementById('calendar');
+  /** The search page that opened, by its h1, once its calendar has drawn. */
+  const opened = async (name: string) => {
+    expect(await screen.findByRole('heading', { level: 1, name })).toBeInTheDocument();
+    await screen.findByTestId('calendar-months');
+  };
+  /** The URL holds no fragment and no parameter carries one. */
+  const clean = () => {
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain('%23');
+    for (const v of new URLSearchParams(window.location.search).values()) expect(v).not.toContain('#');
+  };
+  const crumbs = () => screen.getByRole('navigation', { name: COPY.crumbsLabel });
+  const cardName = (name: string) => screen.findByRole('link', { name });
+
+  it('the skip link, a card’s counts link and "See all on the calendar", then a crumb, the nav and a card’s name', async () => {
+    serveTwo();
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const { user } = renderWithProviders(<App />, { search: '?view=searches' });
+    // a card's counts link lands on A's calendar, once: the page scrolls there and drops the fragment
+    await user.click(await screen.findByRole('link', { name: '155 dates look lower on the calendar' }));
+    await opened(A);
+    await waitFor(() => expect(scroll.mock.contexts).toContain(calendar()));
+    expect(window.location.search).toBe('?view=dates&def=def-0001');
+    clean();
+    // "See all on the calendar" puts the fragment back; the Trips crumb leaves it behind
+    await user.click(screen.getByRole('link', { name: COPY.searchPage.seeAll }));
+    expect(window.location.hash).toBe('#calendar');
+    await user.click(within(crumbs()).getByRole('link', { name: COPY.crumbs.trips }));
+    await cardName(B);
+    expect(window.location.search).toBe('?view=searches');
+    clean();
+    // B opens at its heading: nothing scrolls to its calendar
+    scroll.mockClear();
+    await user.click(await cardName(B));
+    await opened(B);
+    expect(scroll.mock.contexts).not.toContain(calendar());
+    clean();
+    // the skip link, then Edit and the crumb with B's name: the crumb opens B, its def= whole
+    await user.click(screen.getByRole('link', { name: COPY.skipToContent }));
+    expect(window.location.hash).toBe('#main');
+    await user.click(screen.getByRole('link', { name: COPY.searchesView.edit }));
+    await screen.findByRole('button', { name: COPY.editSearch.save });
+    await user.click(screen.getByRole('link', { name: COPY.skipToContent }));
+    expect(window.location.hash).toBe('#main');
+    await user.click(within(crumbs()).getByRole('link', { name: B }));
+    await opened(B);
+    expect(window.location.search).toBe('?view=dates&def=def-0002');
+    clean();
+    // the skip link, then the nav's Trips link and A's name: A opens at its heading
+    await user.click(screen.getByRole('link', { name: COPY.skipToContent }));
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Trips' }),
+    );
+    clean();
+    scroll.mockClear();
+    await user.click(await cardName(A));
+    await opened(A);
+    expect(window.location.search).toBe('?view=dates&def=def-0001');
+    expect(scroll.mock.contexts).not.toContain(calendar());
+    clean();
+    scroll.mockRestore();
+  });
+
+  it('the full search log opened on A is not where B opens', async () => {
+    serveTwo();
+    const before = window.history.length;
+    const { user } = renderWithProviders(<App />, { search: '?view=coverage&def=def-0001' });
+    await opened(A);
+    const log = await screen.findByRole('table', { name: COPY.coverageHeading });
+    expect(log.closest('details')).toHaveAttribute('open');
+    // the landing is consumed: the log stays open, and the URL no longer asks for it
+    await waitFor(() => expect(window.location.search).toBe('?view=dates&def=def-0001'));
+    expect(window.history.length).toBe(before);
+    expect(screen.getByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
+    await user.click(within(crumbs()).getByRole('link', { name: COPY.crumbs.trips }));
+    await user.click(await cardName(B));
+    await opened(B);
+    expect(new URLSearchParams(window.location.search).has('d.coverage')).toBe(false);
+    const folds = screen.getByTestId('search-folds');
+    for (const d of folds.querySelectorAll('details')) expect(d).not.toHaveAttribute('open');
+    expect(screen.queryByRole('table', { name: COPY.coverageHeading })).toBeNull();
+    expect(folds.contains(document.activeElement)).toBe(false);
   });
 });

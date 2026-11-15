@@ -17,19 +17,22 @@ const MARKS: readonly ReducedMark[] = [
 
 /**
  * Ruling 19, "What was searched": the latest run's five marks over its whole space (they sum to the total the summary
- * names), then the dates with flights read (the card's whole-space count, across every search so far), the thin-coverage line when it
- * applies, and "Full search log", which opens the coverage section beneath.
+ * names), then the dates with flights read (the card's whole-space count, across every search so far), the thin-coverage
+ * line when it applies, and "Full search log", which opens the coverage section beneath.
  */
 export function WhatWasSearched({
   definition,
   card,
-  coverageOpen,
+  logOpen,
+  onLogToggle,
   requested,
   onHandled,
 }: {
   definition: DefinitionResponse;
   card: SearchCard | null;
-  coverageOpen: boolean;
+  /** Whether the full search log is open: the page's state, opened by a landing or the log's own button. */
+  logOpen: boolean;
+  onLogToggle: () => void;
   requested: boolean;
   onHandled: () => void;
 }) {
@@ -67,7 +70,7 @@ export function WhatWasSearched({
       {marks !== null && isThinCoverage(marks['no-price-shown'], searched) ? (
         <p className="sfold-note">{F.thin}</p>
       ) : null}
-      <CoverageSection definition={definition} open={coverageOpen} />
+      <CoverageSection definition={definition} open={logOpen} onToggle={onLogToggle} />
     </Fold>
   );
 }

@@ -155,14 +155,17 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
   );
 
   // why: Ruling 19: a link that asks for a fold (the run line's, `d.fold=`) or lands on the full search log
-  // (`d.coverage=open` on arrival, `?view=coverage`) opens it once, scrolls to it and focuses it; the asking is then
-  // consumed so the same link asks again, and a later filter change never pulls the page back
+  // (`d.coverage=open`: `?view=coverage`, the status card) opens it once, scrolls to it and focuses it; the asking is then
+  // consumed (replaced out of the URL), so the same link asks again, a later filter change never pulls the page back,
+  // and the asking never travels to another search (final review I2). The log, once open, stays open as the page's own
+  // state until its button closes it.
   const urlFold = foldOf(params);
-  const [landingOnLog, setLandingOnLog] = useState(state.coverageOpen);
-  const asked = (id: FoldId) => urlFold === id || (id === 'searched' && landingOnLog);
+  const urlLog = state.coverageOpen;
+  const [logOpen, setLogOpen] = useState(urlLog);
+  if (urlLog && !logOpen) setLogOpen(true);
+  const asked = (id: FoldId) => urlFold === id || (id === 'searched' && urlLog);
   const foldHandled = useCallback(() => {
-    setLandingOnLog(false);
-    updateSearchParams({ [DATES_PARAMS.fold]: null }, 'replace');
+    updateSearchParams({ [DATES_PARAMS.fold]: null, [DATES_PARAMS.coverage]: null }, 'replace');
   }, []);
 
   const model: BoardModel | null = useMemo(
@@ -185,12 +188,15 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
     if (model !== null) performance.mark(DATES_DRAWN_MARK);
   }, [model, tripsShown, openDay]);
   // why: Task 6's carried note: a link to the calendar (a Trips card's counts) opens the page at its anchor, which is
-  // drawn only once the read answers, so the page scrolls to it then, once
+  // drawn only once the read answers, so the page scrolls to it then, once; the landing is then consumed like `d.fold`
+  // (final review I1), the URL replaced without the fragment, so the anchor never travels to another page
   const landed = useRef(false);
   useEffect(() => {
     if (landed.current || model === null) return;
     landed.current = true;
-    if (window.location.hash === `#${CALENDAR_ID}`) document.getElementById(CALENDAR_ID)?.scrollIntoView();
+    if (window.location.hash !== `#${CALENDAR_ID}`) return;
+    document.getElementById(CALENDAR_ID)?.scrollIntoView();
+    updateSearchParams({}, 'replace', '');
   }, [model]);
   const today = londonDateOf(now);
   return (
@@ -274,7 +280,8 @@ function DatesOf({ definition, clock }: { definition: DefinitionResponse; clock:
           <WhatWasSearched
             definition={definition}
             card={card}
-            coverageOpen={state.coverageOpen}
+            logOpen={logOpen}
+            onLogToggle={() => setLogOpen((o) => !o)}
             requested={asked('searched')}
             onHandled={foldHandled}
           />

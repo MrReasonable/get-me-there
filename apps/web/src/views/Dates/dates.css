@@ -264,6 +264,18 @@
     margin-top: 6px;
     min-width: 0;
   }
+  /* "Full search log" is a disclosure button worded and coloured as the fold's other links */
+  .sfold-log-toggle {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--t-accent);
+    cursor: pointer;
+  }
+  .sfold-log-toggle:hover {
+    text-decoration: underline;
+  }
   /* the full log's tables keep their own widths and scroll sideways inside their labelled region, never wrap mid-word */
   .sfold-log .data-table {
     min-width: max-content;

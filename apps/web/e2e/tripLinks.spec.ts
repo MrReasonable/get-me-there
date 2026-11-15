@@ -536,7 +536,7 @@ for (const width of WIDTHS)
       await expect(page.locator('.sfold-runs')).not.toContainText('£1 ');
       // What was searched: six rows, then the full search log inside it
       await expect(page.locator('.sfold-table tr')).toHaveCount(6);
-      await page.getByRole('link', { name: SMOKE.fullLog }).click();
+      await page.getByRole('button', { name: SMOKE.fullLog }).click();
       await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
       // Alert: both rules in words, and email not set up
       await expect(page.locator('.sfold-rules > li')).toHaveCount(2);
@@ -591,7 +591,7 @@ test('the search page fits every trip row in its box at each width from 720 to 1
   await expect(page.getByRole('region', { name: SMOKE.dayPanel }).locator(SMOKE.tripRow)).toHaveCount(1);
   // Task 10: the three folds open, with the full search log, swept with them
   await openFolds(page);
-  await page.getByRole('link', { name: SMOKE.fullLog }).click();
+  await page.getByRole('button', { name: SMOKE.fullLog }).click();
   await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
   for (const width of SWEEP) {
     await page.setViewportSize({ width, height: 900 });

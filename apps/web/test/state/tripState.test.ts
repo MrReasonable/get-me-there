@@ -101,7 +101,8 @@ describe("tripPatch and tripHref (one builder: Ruling 9's parameters)", () => {
       '/?view=dates&def=def-1&d.to=JFK&d.nights=10-14&row=old&basis=verified#top',
     );
     const url = new URL(hrefWith(tripPatch(DATES)), 'http://localhost');
-    expect(url.hash).toBe('#top');
+    // why: final review I1: a link navigates, so the page's fragment stays behind
+    expect(url.hash).toBe('');
     expect(Object.fromEntries(url.searchParams)).toEqual({
       view: 'trip',
       def: 'def-1',
