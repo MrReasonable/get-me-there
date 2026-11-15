@@ -212,8 +212,9 @@ export function SearchCard({
  * Rulings 5 and 6: under the trips, how many dates have flights read ("23 dates with flights read; these are the
  * cheapest.") and how many look lower on the calendar, from which price, with its label ("155 dates look lower on the
  * calendar, from £372 Calendar · 3h, flights not read."); with no trip, "Calendar prices for 2,146 dates, from £372
- * Calendar · 3h; no flights read yet." Each clause only when its count is not zero; the count links to the Search page's
- * calendar.
+ * Calendar · 3h; no flights read yet." (final review M2: dates read that gave no trip say "23 dates with flights read."
+ * and the calendar clause then ends plainly). Each clause only when its count is not zero; the count links to the Search
+ * page's calendar.
  */
 function CountsLine({ card, link }: { card: Card; link: Record<string, string> }) {
   const lower = card.lowerOnCalendar;
@@ -226,7 +227,7 @@ function CountsLine({ card, link }: { card: Card; link: Record<string, string> }
     <div className="tcard-lower" data-testid="card-counts">
       {card.readDates === 0 ? null : (
         <>
-          {S.datesWithFlightsRead(card.readDates)}
+          {noTrip ? S.datesWithFlightsReadNoTrip(card.readDates) : S.datesWithFlightsRead(card.readDates)}
           {lower === null ? null : ' '}
         </>
       )}
@@ -234,7 +235,8 @@ function CountsLine({ card, link }: { card: Card; link: Record<string, string> }
         <>
           <a {...to}>{noTrip ? S.calendarOnlyLink(lower.count) : S.lowerLink(lower.count)}</a>
           {S.lowerFrom} <LowerPrice lower={lower.cheapest} />
-          {noTrip ? S.calendarOnlyTail : S.lowerTail}
+          {/* why: final review M2: "no flights read yet" only when none were; dates read with no trip end plainly */}
+          {noTrip && card.readDates === 0 ? S.calendarOnlyTail : S.lowerTail}
         </>
       )}
     </div>

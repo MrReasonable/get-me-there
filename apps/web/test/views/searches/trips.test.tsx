@@ -254,6 +254,30 @@ describe('the counts line (Rulings 5 and 6)', () => {
     expect(card.querySelector('.tcard-nothing')).toBeNull();
   });
 
+  // final review M2: flights read for dates that gave no trip (all over the limit, no return listed) name no cheapest
+  it('with dates read but no trip, the count names no cheapest, and the calendar clause does not say none were read', async () => {
+    server.use(
+      serveCards([
+        searchCard({ id: 'a', name: 'Read, no trip', trips: [], readDates: 23, lowerOnCalendar: null }),
+        searchCard({
+          id: 'b',
+          name: 'Read, no trip, lower',
+          ...calendarOnly({ pricePence: 37_200, count: 155 }),
+          readDates: 23,
+          latestRun: latestRun(),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const a = within(await cardOf('Read, no trip')).getByTestId('card-counts');
+    expect(a).toHaveTextContent(/^23 dates with flights read\.$/);
+    const b = within(await cardOf('Read, no trip, lower')).getByTestId('card-counts');
+    expect(b).toHaveTextContent(
+      /^23 dates with flights read\. Calendar prices for 155 dates, from £372 Cached.*\.$/,
+    );
+    expect(b).not.toHaveTextContent(/cheapest|no flights read yet/);
+  });
+
   it('a card with neither shows no counts line', async () => {
     server.use(serveCards([searchCard({ ...noPrices })]));
     renderInShell(<SearchesView />);

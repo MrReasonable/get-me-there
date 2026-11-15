@@ -116,6 +116,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.leaveWindow': ['10 Jan – 31 Mar'],
   'searchesView.allTripsAndDatesOf': ['Birmingham → Frankfurt'],
   'searchesView.datesWithFlightsRead': [23],
+  'searchesView.datesWithFlightsReadNoTrip': [23],
   'searchesView.lowerLink': [155],
   'searchesView.calendarOnlyLink': [2146],
   'searchesView.nothingFound.stoppedBefore': [105],

@@ -491,6 +491,9 @@ export const COPY = {
     allTripsAndDatesOf: (name: string) => `All trips and dates for ${name}`,
     datesWithFlightsRead: (n: number) =>
       `${thousands(n)} ${noun(n, 'date', 'dates')} with flights read; these are the cheapest.`,
+    /** Final review M2: dates read that gave no trip (all over the limit, no return listed) name no cheapest. */
+    datesWithFlightsReadNoTrip: (n: number) =>
+      `${thousands(n)} ${noun(n, 'date', 'dates')} with flights read.`,
     lowerLink: (n: number) =>
       `${thousands(n)} ${noun(n, 'date', 'dates')} ${noun(n, 'looks', 'look')} lower on the calendar`,
     lowerFrom: ', from',
