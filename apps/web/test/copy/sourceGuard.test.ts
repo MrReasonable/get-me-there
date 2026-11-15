@@ -8,12 +8,18 @@ import { describe, expect, it } from 'vitest';
 // why: under jsdom import.meta.url is not a file: URL, so the module's directory comes from import.meta.dirname.
 const ROOT = resolve(import.meta.dirname, '../..');
 
-/** Every .ts/.tsx file under a directory of apps/web, with its path relative to apps/web. */
+/**
+ * Every .ts/.tsx file under a directory of apps/web, with its path relative to apps/web in forward slashes on every
+ * host, so the guards' path lists ('src/lib/', MONEY_FILES) match on Windows too.
+ */
 function sources(dir: 'src' | 'test'): Array<{ file: string; text: string }> {
   const base = join(ROOT, dir);
   return readdirSync(base, { recursive: true, encoding: 'utf8' })
     .filter((f) => /\.tsx?$/.test(f))
-    .map((f) => ({ file: relative(ROOT, join(base, f)), text: readFileSync(join(base, f), 'utf8') }));
+    .map((f) => ({
+      file: relative(ROOT, join(base, f)).replaceAll('\\', '/'),
+      text: readFileSync(join(base, f), 'utf8'),
+    }));
 }
 
 const LETTER = /\p{L}/u;
