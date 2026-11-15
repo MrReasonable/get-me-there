@@ -54,8 +54,8 @@ const DEFAULTED: Readonly<Record<string, string>> = {
 
 describe('docker-compose.yml app service (spec §13, §5.5)', () => {
   it('passes the build its version as the one build argument, defaulting to unknown (WP18 V0)', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the compose file's own interpolation, compared as text
-    expect(app.build).toEqual({ context: '.', args: { APP_VERSION: '${APP_VERSION:-unknown}' } });
+    // why: the compose file's own interpolation, compared as text (an escaped template, not a placeholder of ours)
+    expect(app.build).toEqual({ context: '.', args: { APP_VERSION: `\${APP_VERSION:-unknown}` } });
     expect(read('Start.command')).toContain(
       'APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"',
     );
