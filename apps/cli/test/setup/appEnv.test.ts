@@ -209,6 +209,24 @@ describe('passwordNeeded (spec §4: none while only this machine can reach the a
     ['none, ALLOW_UNAUTHENTICATED on loopback', { ALLOW_UNAUTHENTICATED: 'true' }, 'only-this-machine'],
     ['none and a public name', { ALLOWED_HOSTS: 'flights.example.com' }, 'needs-password'],
     ['none and another fault', { LOG_LEVEL: 'loud' }, 'invalid'],
+    ['the user line alone', { APP_BASIC_AUTH_USER: 'operator' }, 'invalid'],
+    ['the password line alone', { APP_BASIC_AUTH_PASS: PASS }, 'invalid'],
+    [
+      'the two lines with a short password',
+      { APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: 'short' },
+      'invalid',
+    ],
+    [
+      'the two lines and another fault',
+      { APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: PASS, LOG_LEVEL: 'loud' },
+      'invalid',
+    ],
+    ['none and ALLOW_UNAUTHENTICATED=yes', { ALLOW_UNAUTHENTICATED: 'yes' }, 'invalid'],
+    [
+      'none, ALLOW_UNAUTHENTICATED=yes and a public name',
+      { ALLOW_UNAUTHENTICATED: 'yes', ALLOWED_HOSTS: 'flights.example.com' },
+      'invalid',
+    ],
   ] as const)('signInOf: %s is %s', (_l, over, want) => {
     expect(signInOf({ ...bare, ...over })).toBe(want);
   });

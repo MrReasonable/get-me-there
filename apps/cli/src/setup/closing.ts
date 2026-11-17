@@ -25,9 +25,12 @@ export const ALLOW_UNAUTHENTICATED_TEXT =
 export const NEEDS_PASSWORD_TEXT =
   'app.env has no password, but its settings let something other than this machine reach the app, so the app refuses to start: run `pnpm gmt setup --reconfigure password`.';
 
-/** No password, and settings that fail the app's check for some other reason: the fault is not reach, so say so. */
-export const invalidSettingsText = (appEnv: string): string =>
-  `no password in ${appEnv}, and it would not pass the app’s settings check: run pnpm gmt setup to see why`;
+/**
+ * Settings that fail the app's check for some other reason than reach: the fault is not reach, so say so. `hasPassword`
+ * when the file has a password line (a half pair), which is then not called absent.
+ */
+export const invalidSettingsText = (appEnv: string, hasPassword = false): string =>
+  `${hasPassword ? `${appEnv} has a password but` : `no password in ${appEnv}, and it`} would not pass the app’s settings check: run pnpm gmt setup to see why`;
 
 /** The sentence for how the app signs people in, when it has no password. */
 export const noPasswordText = (s: Exclude<SignIn, 'password'>, appEnv: string): string =>

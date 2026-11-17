@@ -588,6 +588,24 @@ describe('password', () => {
     expect(tty.stderr).toBe(`${NEEDS_TEXT}\n`);
   });
 
+  it.each([
+    ['the user line alone', 'APP_BASIC_AUTH_USER="operator"\n', 'no password in'],
+    ['the password line alone', 'APP_BASIC_AUTH_PASS="half-pair-pass-0123"\n', 'has a password but'],
+  ])(
+    'with %s (a half pair) prints no password, names the settings fault and exits 78',
+    async (_l, line, words) => {
+      const m = await setUp();
+      m.fs.file(ENV, `${m.fs.read(ENV)}${line}`, 0o600);
+      const tty = testIo({ tty: true });
+      m.deps.io = tty;
+      expect(await runCli(['password'], m.deps)).toBe(78);
+      expect(tty.stdout).toBe('');
+      expect(tty.stderr).toContain(words);
+      expect(tty.stderr).toContain('would not pass the app’s settings check: run pnpm gmt setup to see why');
+      expect(tty.stderr).not.toContain('half-pair-pass-0123');
+    },
+  );
+
   it('with none set (spec §4) says why on stderr and how to turn sign-in on, and succeeds', async () => {
     const m = await setUp();
     const tty = testIo({ tty: true });

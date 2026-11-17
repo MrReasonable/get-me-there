@@ -211,10 +211,20 @@ export type SignIn =
   | 'needs-password'
   | 'invalid';
 export function signInOf(record: Readonly<Record<string, string>>): SignIn {
-  if (GROUP_NAMES.password.every((n) => (record[n] ?? '') !== '')) return 'password';
-  const reach = reachWithoutPassword(record);
-  if (reach !== 'beyond') return reach === 'local' ? 'only-this-machine' : 'invalid';
-  return record.ALLOW_UNAUTHENTICATED === 'true' ? 'allow-unauthenticated' : 'needs-password';
+  // why: the record as the app reads it decides first, so a half pair or an invalid ALLOW_UNAUTHENTICATED is a fault,
+  // never a passwordless state read off the record with its sign-in lines taken out
+  const r = parseConfig(record, { realpath: (p) => p });
+  if (r.ok)
+    return r.config.auth !== null
+      ? 'password'
+      : onlyThisMachine(r.config)
+        ? 'only-this-machine'
+        : 'allow-unauthenticated';
+  const anyAuthLine = GROUP_NAMES.password.some((n) => (record[n] ?? '') !== '');
+  const allow = record.ALLOW_UNAUTHENTICATED ?? '';
+  if (anyAuthLine || !['', 'true', 'false'].includes(allow)) return 'invalid';
+  // why: refused with no sign-in lines: needs-password when the reach rule is the only fault, else another fault
+  return reachWithoutPassword(record) === 'beyond' ? 'needs-password' : 'invalid';
 }
 
 /** The wizard-owned names whose values differ between the file and the plan. */

@@ -21,14 +21,16 @@ export async function passwordCommand(_f: Flags, _p: string | null, deps: Deps):
     return EXIT.badConfig;
   }
   const record = readEnvText(text);
-  const pass = record.APP_BASIC_AUTH_PASS;
-  if (pass === undefined || pass === '') {
-    // why: spec §4: no password is the install's state while only this machine can reach the app (or with
-    // ALLOW_UNAUTHENTICATED), not a fault; settings that need one are, and the words say which, by core's rule
-    const signIn = signInOf(record);
+  const pass = record.APP_BASIC_AUTH_PASS ?? '';
+  // why: spec §4: the settings as the app reads them decide; no password is the install's state while only this machine
+  // can reach the app (or with ALLOW_UNAUTHENTICATED), not a fault; settings that need one are, and so is a half pair,
+  // whose password is never printed because the app would not start with it
+  const signIn = signInOf(record);
+  if (signIn !== 'password') {
     const path = appEnvPath(deps.platform.paths);
-    // why: 'password' cannot come back for a record with no password; it reads as the settings fault if it ever does
-    deps.io.err(`${signIn === 'password' ? invalidSettingsText(path) : noPasswordText(signIn, path)}\n`);
+    deps.io.err(
+      `${signIn === 'invalid' && pass !== '' ? invalidSettingsText(path, true) : noPasswordText(signIn, path)}\n`,
+    );
     return signIn === 'only-this-machine' || signIn === 'allow-unauthenticated' ? EXIT.ok : EXIT.badConfig;
   }
   deps.io.out(`${pass}\n`);
