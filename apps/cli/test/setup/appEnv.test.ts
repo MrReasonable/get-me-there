@@ -8,6 +8,7 @@ import {
   entriesFor,
   GROUP_NAMES,
   ownedDiff,
+  passwordNeeded,
   renderAppEnv,
   replaceGroups,
 } from '../../src/setup/appEnv.js';
@@ -167,5 +168,34 @@ describe('app.env (spec §12 "Where settings live")', () => {
         expect(after.split('\n').filter((l) => /^\s*(export\s+)?PORT\s*=/.test(l))).toEqual(['PORT="3917"']);
         expect(parseEnv(after)).toMatchObject({ PORT: '3917', LOG_LEVEL: 'debug' });
       }
+  });
+});
+
+describe('passwordNeeded (spec §4: none while only this machine can reach the app)', () => {
+  const bare = Object.fromEntries(entriesFor(base, { paths: p.paths, password: null }));
+  it('the wizard’s lines with no password: none needed, and no sign-in lines written', () => {
+    expect(bare).not.toHaveProperty('APP_BASIC_AUTH_USER');
+    expect(bare).not.toHaveProperty('APP_BASIC_AUTH_PASS');
+    expect(passwordNeeded(bare)).toBe(false);
+    expect(passwordNeeded({ ...bare, ALLOWED_HOSTS: '[::1]:3000,LOCALHOST:3000,127.0.0.2' })).toBe(false);
+  });
+  it.each([
+    ['a name that is not this machine', { ALLOWED_HOSTS: 'flights.example.com' }],
+    ['a bind beyond loopback', { BIND_ADDRESS: '0.0.0.0' }],
+    ['another fault, which the settings check names', { LOG_LEVEL: 'loud' }],
+  ])('needed with %s, whatever sign-in lines the record has', (_l, over) => {
+    expect(passwordNeeded({ ...bare, ...over })).toBe(true);
+    expect(
+      passwordNeeded({ ...bare, ...over, APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: PASS }),
+    ).toBe(true);
+  });
+  it('ALLOW_UNAUTHENTICATED=true (a tailnet-only host) needs none', () => {
+    expect(
+      passwordNeeded({ ...bare, ALLOWED_HOSTS: 'laptop.tail1234.ts.net', ALLOW_UNAUTHENTICATED: 'true' }),
+    ).toBe(false);
+  });
+  it('the password group owns both sign-in lines', () => {
+    expect(GROUP_NAMES.password).toEqual(['APP_BASIC_AUTH_USER', 'APP_BASIC_AUTH_PASS']);
+    expect(GROUP_NAMES.base).not.toContain('APP_BASIC_AUTH_USER');
   });
 });

@@ -5,7 +5,7 @@
  * the class it answers and the next step for it.
  */
 import { apiContract } from '@gmt/core';
-import { type AppCreds, authHeaders, credsUrl } from '../appClient.js';
+import { type AppTarget, authHeaders, targetUrl } from '../appClient.js';
 import type { Ask } from '../ask.js';
 import type { Deps } from '../deps.js';
 
@@ -25,13 +25,13 @@ export const TEST_EMAIL_WORDS = {
 } as const;
 
 /** Posts the test email and returns the words for its outcome. */
-export async function sendTestEmail(deps: Deps, creds: AppCreds): Promise<string> {
+export async function sendTestEmail(deps: Deps, app: AppTarget): Promise<string> {
   const r = await deps.http({
     method: 'POST',
-    url: credsUrl(creds, '/api/alerts/test-email'),
+    url: targetUrl(app, '/api/alerts/test-email'),
     // why: the app's mutating-route rules (spec §4): a JSON content type and the requested-with header
     headers: {
-      ...authHeaders(creds),
+      ...authHeaders(app),
       'Content-Type': 'application/json',
       'X-Requested-With': 'get-me-there',
     },
@@ -53,15 +53,15 @@ export async function sendTestEmail(deps: Deps, creds: AppCreds): Promise<string
 }
 
 /**
- * Offers the test email once, after the closing screen: only on an interactive terminal, only with email configured and
- * credentials to reach the app. The default is no.
+ * Offers the test email once, after the closing screen: only on an interactive terminal and only with email configured;
+ * an app with no password is asked without credentials. The default is no.
  */
 export async function offerTestEmail(
   deps: Deps,
   ask: Ask,
-  o: { interactive: boolean; emailConfigured: boolean; creds: AppCreds | null },
+  o: { interactive: boolean; emailConfigured: boolean; app: AppTarget },
 ): Promise<void> {
-  if (!o.interactive || !o.emailConfigured || o.creds === null) return;
+  if (!o.interactive || !o.emailConfigured) return;
   if (!(await ask.confirm(TEST_EMAIL_QUESTION, false))) return;
-  deps.io.out(`${await sendTestEmail(deps, o.creds)}\n`);
+  deps.io.out(`${await sendTestEmail(deps, o.app)}\n`);
 }

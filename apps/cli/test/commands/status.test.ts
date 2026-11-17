@@ -405,6 +405,12 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     const http = stubHttp({});
     const m = await afterSetup(docker('running'), http);
     m.fs.file(DOT_ENV, `APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=${DOCKER_PASS}\n`, 0o600);
+    // why: sign-in on, as `--reconfigure password` leaves it (spec §4: a fresh loopback install has no password)
+    m.fs.file(
+      APP_ENV,
+      `${m.fs.read(APP_ENV) ?? ''}APP_BASIC_AUTH_USER="operator"\nAPP_BASIC_AUTH_PASS="native-pass-0123456789"\n`,
+      0o600,
+    );
     http.requests.length = 0;
     expect(await runCli(['status'], m.deps)).toBe(0);
     expect(m.io.stdout).toMatch(/docker +warn +a Docker app runs beside the native one \(two ledgers\)/);

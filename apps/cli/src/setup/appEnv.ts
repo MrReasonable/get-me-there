@@ -1,5 +1,5 @@
 import { parseEnv } from 'node:util';
-import { type Config, parseConfig } from '@gmt/core';
+import { type Config, onlyThisMachine, parseConfig } from '@gmt/core';
 import type { ReconfigureGroup } from '../args.js';
 import type { Paths } from '../platform/types.js';
 import { databasePath } from '../services/specs.js';
@@ -13,10 +13,11 @@ import { UNSAFE_VALUE } from './secrets.js';
  * operator's, kept as written.
  */
 export const GROUP_NAMES = {
-  base: ['NODE_ENV', 'DATABASE_PATH', 'BIND_ADDRESS', 'POINT_OF_SALE', 'APP_BASIC_AUTH_USER'],
+  base: ['NODE_ENV', 'DATABASE_PATH', 'BIND_ADDRESS', 'POINT_OF_SALE'],
   port: ['PORT'],
   timezone: ['SCHEDULER_TIMEZONE'],
-  password: ['APP_BASIC_AUTH_PASS'],
+  // why: spec §4: the two sign-in lines come and go together, so `--reconfigure password` can turn sign-in on
+  password: ['APP_BASIC_AUTH_USER', 'APP_BASIC_AUTH_PASS'],
   travelpayouts: ['TRAVELPAYOUTS_TOKEN'],
   searchapi: ['SEARCHAPI_KEY', 'SEARCHAPI_PLAN', 'SEARCHAPI_BILLING_DAY', 'SEARCHAPI_TRIAL_USED'],
   email: [
@@ -37,10 +38,16 @@ export const OPERATOR_USER = 'operator';
 
 export type Entries = ReadonlyArray<readonly [string, string]>;
 
-/** The wizard's lines for these answers, in file order. */
+/** The two sign-in lines for a password (spec §4). */
+export const passwordEntries = (password: string): Array<readonly [string, string]> => [
+  ['APP_BASIC_AUTH_USER', OPERATOR_USER],
+  ['APP_BASIC_AUTH_PASS', password],
+];
+
+/** The wizard's lines for these answers, in file order; no sign-in lines when there is no password (spec §4). */
 export function entriesFor(
   a: Answers,
-  x: { paths: Paths; password: string },
+  x: { paths: Paths; password: string | null },
 ): Array<readonly [string, string]> {
   const out: Array<readonly [string, string]> = [
     ['NODE_ENV', 'production'],
@@ -49,8 +56,7 @@ export function entriesFor(
     ['PORT', String(a.port)],
     ['SCHEDULER_TIMEZONE', a.timezone],
     ['POINT_OF_SALE', a.pointOfSale],
-    ['APP_BASIC_AUTH_USER', OPERATOR_USER],
-    ['APP_BASIC_AUTH_PASS', x.password],
+    ...(x.password === null ? [] : passwordEntries(x.password)),
   ];
   if (a.travelpayouts !== null) out.push(['TRAVELPAYOUTS_TOKEN', a.travelpayouts.token]);
   if (a.searchApi !== null) {
@@ -167,6 +173,21 @@ export function checkAppEnv(
       error: `app.env would not pass the app’s settings check: ${[...new Set(config.errors.map((e) => e.field))].join(', ')}`,
     };
   return { ok: true, record };
+}
+
+/**
+ * Whether settings need a password (spec §4): read without their sign-in lines, something other than this machine can
+ * reach the app (core's rule) and ALLOW_UNAUTHENTICATED is not set. Settings that fail the app's check for another
+ * reason need one too, as setup has always written one; the check then names that fault.
+ */
+export function passwordNeeded(record: Readonly<Record<string, string>>): boolean {
+  const without = Object.fromEntries(
+    Object.entries(record).filter(([k]) => !GROUP_NAMES.password.some((n) => n === k)),
+  );
+  // why: ALLOW_UNAUTHENTICATED bypasses the rule in the app, so it is forced here to read the config the rule judges
+  const r = parseConfig({ ...without, ALLOW_UNAUTHENTICATED: 'true' }, { realpath: (p) => p });
+  if (!r.ok) return true;
+  return record.ALLOW_UNAUTHENTICATED !== 'true' && !onlyThisMachine(r.config);
 }
 
 /** The wizard-owned names whose values differ between the file and the plan. */

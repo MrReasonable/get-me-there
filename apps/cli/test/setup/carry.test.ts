@@ -24,6 +24,14 @@ const COMPOSE = {
 };
 
 describe('carryOver from the Docker .env', () => {
+  it('a Docker .env with no password and a name that is not this machine still carries: ALLOWED_HOSTS is shown, never copied (spec §4)', async () => {
+    const { APP_BASIC_AUTH_USER: _u, APP_BASIC_AUTH_PASS: _p, ...noPassword } = COMPOSE;
+    const io = testIo();
+    const r = await carryOver(testWorld({ io }).deps, scriptedAsk([]), noPassword, base, false);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.answers.timezone).toBe('America/New_York');
+    expect(io.stdout).toContain('ALLOWED_HOSTS=nas.local:3000; it is not copied');
+  });
   it('non-interactively carries every group whole: answers for the wizard’s names, the rest verbatim', async () => {
     const io = testIo();
     const r = await carryOver(testWorld({ io }).deps, scriptedAsk([]), COMPOSE, base, false);
@@ -277,22 +285,34 @@ describe('the Docker app as the import sees it (survivors, PR #11)', () => {
     const { composeFacts } = await import('../../src/setup/importDocker.js');
     expect((await composeFacts(world({ code: 0, stdout: RUNNING }, port).deps)).port).toBeNull();
   });
-  it('the guard reaches the Docker app only with both its basic auth and its port; AUTO_RESUME=false is read', async () => {
+  it('the guard reaches the Docker app on its port, with its basic auth when .env has it; AUTO_RESUME=false is read', async () => {
     const { dockerGuardTarget } = await import('../../src/setup/importDocker.js');
     const auth = { APP_BASIC_AUTH_USER: 'ci', APP_BASIC_AUTH_PASS: 'compose-pass-0123' };
     expect(dockerGuardTarget({ record: auth, appRunning: true, port: 49153 })).toEqual({
       label: 'the Docker app',
       up: true,
-      creds: { user: 'ci', pass: 'compose-pass-0123', port: 49153 },
+      app: { auth: { user: 'ci', pass: 'compose-pass-0123' }, port: 49153 },
       autoResume: true,
     });
-    expect(dockerGuardTarget({ record: auth, appRunning: true, port: null }).creds).toBeNull();
-    expect(dockerGuardTarget({ record: {}, appRunning: true, port: 49153 }).creds).toBeNull();
+    expect(dockerGuardTarget({ record: auth, appRunning: true, port: null })).toMatchObject({
+      app: null,
+      cannot: 'compose did not say which host port it publishes',
+    });
+    // why: spec §4: a .env with no password (or no .env) is an app asked without credentials
+    expect(dockerGuardTarget({ record: {}, appRunning: true, port: 49153 }).app).toEqual({
+      port: 49153,
+      auth: null,
+    });
+    expect(dockerGuardTarget({ record: null, appRunning: true, port: 49153 }).app).toEqual({
+      port: 49153,
+      auth: null,
+    });
     expect(dockerGuardTarget({ record: null, appRunning: false, port: null })).toEqual({
       label: 'the Docker app',
       up: false,
-      creds: null,
+      app: null,
       autoResume: true,
+      cannot: 'compose did not say which host port it publishes',
     });
     expect(
       dockerGuardTarget({ record: { ...auth, AUTO_RESUME: 'false' }, appRunning: true, port: 1 }).autoResume,

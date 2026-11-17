@@ -1,5 +1,5 @@
 import { dirname, join, resolve } from 'node:path/posix';
-import { credsFrom } from '../appClient.js';
+import { authFrom, targetFrom } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';
 import { browserSetup } from '../camoufox/browserSetup.js';
@@ -32,6 +32,8 @@ import {
   type Entries,
   entriesFor,
   ownedDiff,
+  passwordEntries,
+  passwordNeeded,
   readSettings,
   renderAppEnv,
   replaceGroups,
@@ -158,12 +160,23 @@ async function fromFile(path: string, deps: Deps, defaults: Answers): Promise<An
 export function nativeTarget(settings: Settings | null, appFacts: ServiceFacts): GuardTarget {
   // why: CodeRabbit (PR #11): a failed (or restarting) app has no live process, so no search can be running in it
   const up = appFacts.state === 'running';
-  if (settings === null || !settings.ok) return { label: 'the app', up, creds: null, autoResume: true };
+  if (settings === null || !settings.ok)
+    return {
+      label: 'the app',
+      up,
+      app: null,
+      autoResume: true,
+      cannot: 'app.env would not pass the settings check',
+    };
   const auth = settings.config.auth;
   return {
     label: 'the app',
     up,
-    creds: auth === null ? null : { port: settings.config.port, user: auth.user, pass: auth.pass.reveal() },
+    // why: spec §4: an app with no password is asked without credentials
+    app: {
+      port: settings.config.port,
+      auth: auth === null ? null : { user: auth.user, pass: auth.pass.reveal() },
+    },
     autoResume: settings.config.autoResume,
   };
 }
@@ -199,7 +212,24 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       `cannot read ${envPath} (${code}); it was not changed. Make it yours and 0600 (chown, chmod 600), then run setup again`,
     );
   }
-  const settings = existingText === null ? null : readSettings(existingText);
+  const notes: string[] = [];
+  let settings = existingText === null ? null : readSettings(existingText);
+  // why: spec §4: a file whose only fault is the password its settings now need (an ALLOWED_HOSTS or BIND_ADDRESS that
+  // lets something other than this machine reach the app; the app refuses it, naming this command) gets one written
+  let baseText = existingText;
+  if (existingText !== null && settings !== null && !settings.ok && authFrom(settings.record) === null) {
+    const withPassword = replaceGroups(existingText, passwordEntries(generatePassword(deps.randomBytes)), [
+      'password',
+    ]);
+    const amended = readSettings(withPassword);
+    if (amended.ok) {
+      settings = amended;
+      baseText = withPassword;
+      notes.push(
+        'app.env has no password, which its settings need now; setup writes one (pnpm gmt password shows it).',
+      );
+    }
+  }
   if (settings !== null && !settings.ok)
     return refuse(
       deps,
@@ -230,7 +260,6 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     return refuse(deps, `there is no ${envPath} to reconfigure: run pnpm gmt setup first`);
   if (group === 'linger' && os !== 'linux')
     return refuse(deps, 'linger is a Linux setting; macOS runs the app while you are logged in');
-  const notes: string[] = [];
   const importDocker = group === null && flags['import-docker'] === true;
   const importDbPath =
     group === null && typeof flags['import-db'] === 'string'
@@ -341,17 +370,30 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
 
   // 3. the settings file
   const keptPass = settings?.ok === true ? settings.config.auth?.pass.reveal() : undefined;
+  // why: spec §4: a fresh install that only this machine can reach has no password, so it writes no sign-in lines;
+  // `--reconfigure password` turns sign-in on with a new one, and a re-run keeps whatever the file has
   const password =
-    group === 'password' || keptPass === undefined ? generatePassword(deps.randomBytes) : keptPass;
+    group === 'password' ||
+    (keptPass === undefined &&
+      existingText === null &&
+      passwordNeeded(Object.fromEntries([...entriesFor(answers, { paths, password: null }), ...extra])))
+      ? generatePassword(deps.randomBytes)
+      : (keptPass ?? null);
   const entries = entriesFor(answers, { paths, password });
   const intended = Object.fromEntries(entries);
   let envText: string | null = null;
   let effective: Readonly<Record<string, string>> = intended;
+  let readBack: Readonly<Record<string, string>> = { ...intended, ...Object.fromEntries(extra) };
   if (existingText === null) envText = renderAppEnv([...entries, ...extra]);
   else if (group !== null) {
-    const replaced = replaceGroups(existingText, entries, [group]);
+    const replaced = replaceGroups(baseText ?? existingText, entries, [group]);
     if (replaced !== existingText) envText = replaced;
   } else if (settings?.ok === true) {
+    // why: the file with the password its settings need (above) is written as it is, every other line kept
+    if (baseText !== null && baseText !== existingText) {
+      envText = baseText;
+      readBack = settings.record;
+    }
     const differs = ownedDiff(settings.record, intended);
     if (differs.length > 0) {
       effective = settings.record;
@@ -366,10 +408,10 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       );
   }
   if (envText !== null) {
-    const checked = checkAppEnv(envText, { ...intended, ...Object.fromEntries(extra) });
+    const checked = checkAppEnv(envText, readBack);
     if (!checked.ok) return refuse(deps, `setup cannot write ${envPath}: ${checked.error}`);
   }
-  const port = credsFrom(effective)?.port ?? answers.port;
+  const port = targetFrom(effective, answers.port).port;
 
   // 4. the plan, in phases
   const startJs = join(deps.checkout, 'apps', 'api', 'dist', 'bootstrap', 'start.js');
@@ -479,7 +521,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     offerTestEmail(deps, ask, {
       interactive: interactive && offeredFor(group),
       emailConfigured: answers.email !== null,
-      creds: credsFrom(effective),
+      app: targetFrom(effective, port),
     });
 
   // 5. reconfigure: nothing changed, or the guard, then apply
@@ -618,7 +660,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       deps,
       'the browser provider’s step failed (above); pnpm gmt setup --reconfigure browser repeats it.',
     );
-  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os }));
+  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: password !== null }));
   await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';

@@ -2,17 +2,19 @@
  * The one answer to "where is this machine's app, and how does the CLI authenticate to it" (spec §13; W1: the app in
  * Docker with the worker on this machine is a supported mode). `gmt status` reads its report through it, and any command
  * that must ask the running app something (an active-run guard) does the same. The password is read, never printed: it
- * travels only in the Authorization header of an in-process request to 127.0.0.1.
+ * travels only in the Authorization header of an in-process request to 127.0.0.1. With no password in the settings
+ * (spec §4: only this machine can reach the app) the app is asked all the same, with no Authorization header.
  *
- * - The native app: app.env's port and basic auth.
+ * - The native app: app.env's port and basic auth, if any.
  * - The app in Docker, when there is no native install: the host port compose publishes for the container's 3000
  *   (docker-compose.yml fixes the container's PORT, so a PORT line in .env is not it) and the basic auth in the
- *   checkout's .env. With no published port known nothing is read or sent: a guessed port could be another program's.
+ *   checkout's .env, if any. With no published port known nothing is read or sent: a guessed port could be another
+ *   program's.
  * - Otherwise none, with the reason.
  */
 import { isIP } from 'node:net';
 import { join } from 'node:path/posix';
-import { type AppCreds, appUrl, authHeaders, credsFrom } from './appClient.js';
+import { type AppTarget, appUrl, authHeaders, targetFrom } from './appClient.js';
 import type { Deps } from './deps.js';
 import { appEnvPath } from './services/specs.js';
 import { readEnvText } from './setup/appEnv.js';
@@ -24,23 +26,18 @@ export type AppEndpoint =
       /** `http://127.0.0.1:<port>`, with no trailing slash. */
       baseUrl: string;
       port: number;
-      creds: AppCreds | null;
-      /** The Authorization header when there are credentials, else none. */
+      target: AppTarget;
+      /** The Authorization header when the app has a password, else none. */
       headers: Record<string, string>;
     }
   | { kind: 'none'; reason: string };
 
-const ready = (
-  kind: 'native' | 'docker',
-  port: number,
-  creds: AppCreds | null,
-  host = '127.0.0.1',
-): AppEndpoint => ({
+const ready = (kind: 'native' | 'docker', target: AppTarget): AppEndpoint => ({
   kind,
-  baseUrl: appUrl(port, '', host),
-  port,
-  creds,
-  headers: creds === null ? {} : authHeaders(creds),
+  baseUrl: appUrl(target.port, '', target.host),
+  port: target.port,
+  target,
+  headers: authHeaders(target),
 });
 
 /** The native app, from app.env: its port and, when app.env has them, the credentials. */
@@ -55,11 +52,7 @@ export function nativeEndpoint(deps: Deps): AppEndpoint {
     };
   }
   if (text === null) return { kind: 'none', reason: 'there is no app.env yet: run pnpm gmt setup' };
-  const record = readEnvText(text);
-  const creds = credsFrom(record);
-  const port =
-    creds?.port ?? (record.PORT !== undefined && /^\d+$/.test(record.PORT) ? Number(record.PORT) : 3000);
-  return ready('native', port, creds);
+  return ready('native', targetFrom(readEnvText(text)));
 }
 
 /**
@@ -140,8 +133,8 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'the checkout’s .env could not be read: check that it is yours and readable (chmod 600)',
     };
   }
-  const creds = text === null ? null : credsFrom(readEnvText(text));
-  return ready('docker', port, creds === null ? null : { ...creds, port, host }, host);
+  // why: no .env (or no auth lines in it) is an app with no password, asked without an Authorization header
+  return ready('docker', { ...targetFrom(readEnvText(text ?? '')), port, host });
 }
 
 /**

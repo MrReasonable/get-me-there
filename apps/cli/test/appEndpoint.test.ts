@@ -33,7 +33,7 @@ describe('appEndpoint', () => {
       kind: 'native',
       baseUrl: 'http://127.0.0.1:3917',
       port: 3917,
-      creds: { port: 3917, user: 'operator', pass: 'pass-0123456789' },
+      target: { port: 3917, auth: { user: 'operator', pass: 'pass-0123456789' } },
       headers: { Authorization: basic('operator', 'pass-0123456789') },
     });
     // with app.env there, Docker is never asked
@@ -46,13 +46,30 @@ describe('appEndpoint', () => {
       kind: 'docker',
       baseUrl: 'http://127.0.0.1:3001',
       port: 3001,
-      creds: { port: 3001, host: '127.0.0.1', user: 'op', pass: 'docker-pass-0123' },
+      target: { port: 3001, host: '127.0.0.1', auth: { user: 'op', pass: 'docker-pass-0123' } },
       headers: { Authorization: basic('op', 'docker-pass-0123') },
     });
   });
-  it('a Docker app with auth turned off (no .env lines) is read without credentials', async () => {
+  it('a Docker app with no password (no .env lines, spec §4) is read without credentials', async () => {
     const m = machine({ extra: docker(running) });
-    expect(await appEndpoint(m.deps)).toMatchObject({ kind: 'docker', creds: null, headers: {} });
+    expect(await appEndpoint(m.deps)).toMatchObject({
+      kind: 'docker',
+      target: { port: 3000, host: '127.0.0.1', auth: null },
+      headers: {},
+    });
+    m.fs.file(DOT_ENV, 'LOG_LEVEL=info\n', 0o600);
+    expect(await appEndpoint(m.deps)).toMatchObject({ kind: 'docker', target: { auth: null }, headers: {} });
+  });
+  it('a native app with no password (spec §4): app.env’s port, no credentials', async () => {
+    const m = machine({ extra: docker(running) });
+    m.fs.file(APP_ENV, 'PORT=3917\nBIND_ADDRESS="127.0.0.1"\n', 0o600);
+    expect(await appEndpoint(m.deps)).toEqual({
+      kind: 'native',
+      baseUrl: 'http://127.0.0.1:3917',
+      port: 3917,
+      target: { port: 3917, auth: null },
+      headers: {},
+    });
   });
   it.each([
     ['no docker command', docker(null), 'there is no app.env yet: run pnpm gmt setup'],

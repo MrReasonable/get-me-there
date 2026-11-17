@@ -3,15 +3,23 @@ import type { z } from 'zod';
 import type { Deps } from './deps.js';
 
 /**
- * The CLI's reads of a running app (spec §10), always on 127.0.0.1 with basic auth from a settings file. The password
- * travels only in the Authorization header of an in-process request: never in an argv, a log line or an error.
+ * The CLI's reads of a running app (spec §10), always on 127.0.0.1, with basic auth from a settings file when the app
+ * has a password. The password travels only in the Authorization header of an in-process request: never in an argv, a
+ * log line or an error.
  */
-export interface AppCreds {
+export interface AppAuth {
+  user: string;
+  pass: string;
+}
+/**
+ * Where this machine's app answers, and how the CLI signs in to it. `auth` is null when the settings have no password
+ * (spec §4: the app runs without one while only this machine can reach it); a request then carries no Authorization.
+ */
+export interface AppTarget {
   port: number;
   /** The loopback host the app answers on, as a URL host: `127.0.0.1` (the default) or `[::1]`. */
   host?: string;
-  user: string;
-  pass: string;
+  auth: AppAuth | null;
 }
 export type ActiveExecution = NonNullable<
   z.infer<typeof apiContract.activeExecutionResponseSchema>['execution']
@@ -21,32 +29,36 @@ export type ActiveRead =
   | { kind: 'active'; execution: ActiveExecution }
   | { kind: 'failed'; reason: string };
 
-/** The credentials and port a settings record holds, or null when it has no auth lines. */
-export function credsFrom(
-  r: Readonly<Record<string, string | undefined>>,
-  portDefault = 3000,
-): AppCreds | null {
+/** The basic auth a settings record holds, or null when it has no auth lines. */
+export function authFrom(r: Readonly<Record<string, string | undefined>>): AppAuth | null {
   const user = r.APP_BASIC_AUTH_USER;
   const pass = r.APP_BASIC_AUTH_PASS;
   if (user === undefined || pass === undefined || user === '' || pass === '') return null;
-  const port = r.PORT !== undefined && /^\d+$/.test(r.PORT) ? Number(r.PORT) : portDefault;
-  return { port, user, pass };
+  return { user, pass };
 }
 
-export const authHeaders = (c: AppCreds): Record<string, string> => ({
-  Authorization: `Basic ${Buffer.from(`${c.user}:${c.pass}`).toString('base64')}`,
-});
+/** The app a settings record describes: its PORT (else `portDefault`) and its basic auth, if any. */
+export function targetFrom(r: Readonly<Record<string, string | undefined>>, portDefault = 3000): AppTarget {
+  const port = r.PORT !== undefined && /^\d+$/.test(r.PORT) ? Number(r.PORT) : portDefault;
+  return { port, auth: authFrom(r) };
+}
+
+/** The Authorization header for this app, or none when it has no password. */
+export const authHeaders = (t: AppTarget): Record<string, string> =>
+  t.auth === null
+    ? {}
+    : { Authorization: `Basic ${Buffer.from(`${t.auth.user}:${t.auth.pass}`).toString('base64')}` };
 export const appUrl = (port: number, path: string, host = '127.0.0.1'): string =>
   `http://${host}:${port}${path}`;
 
-/** A path on the app these credentials belong to: on its port and the loopback family it answers on. */
-export const credsUrl = (c: AppCreds, path: string): string => appUrl(c.port, path, c.host);
+/** A path on this app: on its port and the loopback family it answers on. */
+export const targetUrl = (t: AppTarget, path: string): string => appUrl(t.port, path, t.host);
 
 /** `GET /api/executions/active` (WP16a): none, the active execution, or why it could not be read. */
-export async function readActive(deps: Deps, c: AppCreds): Promise<ActiveRead> {
+export async function readActive(deps: Deps, c: AppTarget): Promise<ActiveRead> {
   const r = await deps.http({
     method: 'GET',
-    url: credsUrl(c, '/api/executions/active'),
+    url: targetUrl(c, '/api/executions/active'),
     headers: authHeaders(c),
     timeoutMs: 10_000,
   });

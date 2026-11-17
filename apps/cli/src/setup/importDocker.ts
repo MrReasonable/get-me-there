@@ -1,6 +1,6 @@
 import { basename, join } from 'node:path/posix';
 import { MOVED_MARKER } from '@gmt/core';
-import { credsFrom } from '../appClient.js';
+import { targetFrom } from '../appClient.js';
 import type { Ask } from '../ask.js';
 import type { GuardTarget } from '../commands/guard.js';
 import type { Deps } from '../deps.js';
@@ -40,14 +40,17 @@ export async function composeFacts(deps: Deps): Promise<ComposeFacts> {
   return { record: text === null ? null : readEnvText(text), appRunning, port };
 }
 
-/** The Docker app as the active-run guard sees it: up while its container runs, reached on its published port. */
+/**
+ * The Docker app as the active-run guard sees it: up while its container runs, reached on its published port with the
+ * .env basic auth, or none when .env has no password (spec §4); it cannot be asked when its port is unknown.
+ */
 export function dockerGuardTarget(f: ComposeFacts): GuardTarget {
-  const creds = f.record === null ? null : credsFrom(f.record);
   return {
     label: 'the Docker app',
     up: f.appRunning,
-    creds: creds === null || f.port === null ? null : { ...creds, port: f.port },
+    app: f.port === null ? null : { ...targetFrom(f.record ?? {}), port: f.port },
     autoResume: (f.record?.AUTO_RESUME ?? 'true') !== 'false',
+    ...(f.port === null ? { cannot: 'compose did not say which host port it publishes' } : {}),
   };
 }
 
@@ -143,9 +146,12 @@ export async function carryOver(
   base: Answers,
   interactive: boolean,
 ): Promise<Carried> {
+  // why: ALLOWED_HOSTS is shown, never copied, so it must not refuse the carry (spec §4: with no password a name that
+  // is not this machine's fails the check)
+  const { ALLOWED_HOSTS: _shownOnly, ...carried } = record;
   const settings = readSettings(
     Object.entries({
-      ...record,
+      ...carried,
       DATABASE_PATH: '/data/get-me-there.db',
       PORT: '3000',
       BIND_ADDRESS: '127.0.0.1',

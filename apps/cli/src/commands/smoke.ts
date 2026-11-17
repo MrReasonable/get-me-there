@@ -1,6 +1,6 @@
 import { apiContract } from '@gmt/core';
 import type { z } from 'zod';
-import { type AppCreds, authHeaders, credsFrom, credsUrl } from '../appClient.js';
+import { type AppTarget, authHeaders, targetFrom, targetUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { appEnvPath } from '../services/specs.js';
@@ -49,13 +49,13 @@ export const smokeWaitMs = (p: SmokePlan): number =>
 
 async function postSmoke(
   deps: Deps,
-  c: AppCreds,
+  c: AppTarget,
   body: Record<string, unknown>,
   timeoutMs: number,
 ): Promise<z.infer<typeof apiContract.toolRunResponseSchema> | string> {
   const r = await deps.http({
     method: 'POST',
-    url: credsUrl(c, '/api/tools/smoke'),
+    url: targetUrl(c, '/api/tools/smoke'),
     headers: { ...authHeaders(c), ...MUTATING },
     body: JSON.stringify(body),
     timeoutMs,
@@ -75,8 +75,8 @@ async function postSmoke(
  * posts a dry run (it ledgers nothing) and shows its lines, stopping on its refusal; states the credits tool runs
  * already used in this window (the dry run's `searchApiCreditsLedgered`, U7) and asks for a typed `yes` for that
  * running total (`--yes` in scripts, with `--accept-total` once earlier tool runs used credits: decision 20); then
- * posts the smoke with that total as its budget, waiting `smokeWaitMs` of the plan for it. Basic auth from app.env
- * travels in the request header only.
+ * posts the smoke with that total as its budget, waiting `smokeWaitMs` of the plan for it. Basic auth from app.env, when
+ * it has a password, travels in the request header only.
  */
 export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   // why: po-b1-013: the Definitions form's rule; lowercase is upper-cased, anything but three letters refused
@@ -89,15 +89,15 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
     return EXIT.usage;
   }
   const text = deps.files.read(appEnvPath(deps.platform.paths));
-  const creds = text === null ? null : credsFrom(readEnvText(text));
-  if (creds === null) {
+  const target = text === null ? null : targetFrom(readEnvText(text));
+  if (target === null) {
     deps.io.err('no app settings to call the app with: run pnpm gmt setup first\n');
     return EXIT.badConfig;
   }
   const r = await deps.http({
     method: 'GET',
-    url: credsUrl(creds, '/api/tools/smoke/plan'),
-    headers: authHeaders(creds),
+    url: targetUrl(target, '/api/tools/smoke/plan'),
+    headers: authHeaders(target),
     timeoutMs: 30_000,
   });
   let plan: SmokePlan | null = null;
@@ -111,7 +111,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   }
   if (plan === null) {
     deps.io.err(
-      `cannot read the smoke's plan from the app on port ${creds.port}; is it running? (pnpm gmt status)\n`,
+      `cannot read the smoke's plan from the app on port ${target.port}; is it running? (pnpm gmt status)\n`,
     );
     return EXIT.badConfig;
   }
@@ -135,7 +135,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   // why: the dry run loads no page, so it waits for the rest only
   const dry = await postSmoke(
     deps,
-    creds,
+    target,
     { origin: from, destination: to, budget: Math.max(1, credits), dryRun: true },
     SMOKE_REST_MS,
   );
@@ -178,7 +178,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   }
   const run = await postSmoke(
     deps,
-    creds,
+    target,
     { origin: from, destination: to, budget: Math.max(1, total) },
     smokeWaitMs(plan),
   );

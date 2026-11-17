@@ -16,7 +16,15 @@ const paid: Answers = {
   searchApi: { plan: '40usd', key: 'k-0123456789ab', billingDay: 1, trialUsed: null },
 };
 const closing = (a: Answers, over: Partial<Parameters<typeof closingScreen>[0]> = {}) =>
-  closingScreen({ port: 3000, answers: a, appEnv: '/h/app.env', backupOk: true, os: 'darwin', ...over });
+  closingScreen({
+    port: 3000,
+    answers: a,
+    appEnv: '/h/app.env',
+    backupOk: true,
+    os: 'darwin',
+    signIn: true,
+    ...over,
+  });
 
 describe('the source a search can use (U3)', () => {
   it('Travelpayouts or the SearchApi monthly plan; the SearchApi trial alone is none', () => {

@@ -14,8 +14,16 @@ export const nextStep = (port: number): string =>
   `Next: open http://127.0.0.1:${port} and use the new-search panel on Trips: enter From, To and the dates, review what the search will use, then press Search.`;
 
 /**
- * The closing screen (brief §6; U3, U6): never the password itself, only where it lives and how to show or replace it;
- * the next step in plain words whatever was chosen; what keeps the app running on this OS.
+ * Spec §4: the closing screen's words for an app with no password, which only this machine can reach, and how to turn
+ * sign-in on before anything else reaches it.
+ */
+export const NO_PASSWORD_TEXT =
+  'There is no password: only this machine can reach the app. Before another device or name reaches it (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.';
+
+/**
+ * The closing screen (brief §6; U3, U6): never the password itself, only where it lives and how to show or replace it
+ * (or, with none, why there is none and how to turn sign-in on); the next step in plain words whatever was chosen; what
+ * keeps the app running on this OS.
  */
 export function closingScreen(x: {
   port: number;
@@ -23,6 +31,8 @@ export function closingScreen(x: {
   appEnv: string;
   backupOk: boolean;
   os: 'darwin' | 'linux';
+  /** Whether app.env has a password (spec §4: none while only this machine can reach the app). */
+  signIn: boolean;
 }): string {
   const source = searchSource(x.answers);
   const lines = [
@@ -30,8 +40,12 @@ export function closingScreen(x: {
       ? []
       : [NO_SOURCE_TEXT, ...(x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : []), '']),
     `get-me-there is running at http://127.0.0.1:${x.port}`,
-    'User name: operator',
-    `The password is in ${x.appEnv}; show it with \`pnpm gmt password\` (if scrollback or a shared screen may have kept it, \`pnpm gmt setup --reconfigure password\` replaces it).`,
+    ...(x.signIn
+      ? [
+          'User name: operator',
+          `The password is in ${x.appEnv}; show it with \`pnpm gmt password\` (if scrollback or a shared screen may have kept it, \`pnpm gmt setup --reconfigure password\` replaces it).`,
+        ]
+      : [NO_PASSWORD_TEXT]),
     nextStep(x.port),
     NO_SCHEDULE_TEXT,
     'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
