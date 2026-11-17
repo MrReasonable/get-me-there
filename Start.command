@@ -28,5 +28,5 @@ printf '\nFlight scanner ready: http://127.0.0.1:3000\n'
 if grep -Eq '^APP_BASIC_AUTH_PASS=.' .env; then
   printf 'Login: use APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS from your local .env file.\n'
 else
-  printf 'No password: only this Mac can reach the app. Before another device or name reaches it, add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1).\n'
+  printf 'No password: .env has no APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS. Add them before another device, name, proxy or tunnel reaches the app, or if other people log in to this Mac (docs/setup.md section 1).\n'
 fi

@@ -14,7 +14,8 @@
 # DATABASE_PATH, PORT, BIND_ADDRESS and PUBLISHED_ADDRESS are fixed below because the image layout and the published
 # port depend on them. The app binds 0.0.0.0 inside the container and cannot see the host address `ports:` publishes
 # it on, so PUBLISHED_ADDRESS tells it; the two must match. To use another host port, change the left side of
-# `ports:` and keep 127.0.0.1.
+# `ports:` and keep 127.0.0.1. A docker-compose.override.yml that adds a `ports:` mapping publishes beyond loopback
+# too, so it needs the two sign-in lines; so does any proxy or tunnel in front (docs/setup.md section 3).
 #
 # One app per volume: a second app started on the same database waits up to 90 s and exits 75 while
 # this one is alive (plan decision 53). Tools and backups run inside this container as its user,

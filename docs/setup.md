@@ -53,8 +53,11 @@ Pressing Enter at every question gives a running app with no price source.
 Secrets (tokens, keys, the SMTP password) are typed hidden. Setup asks no password for the app:
 while it answers only on this machine (127.0.0.1, under this machine's own names) it needs none, so
 setup writes no sign-in lines. `pnpm gmt setup --reconfigure password` generates one and turns
-sign-in on, which the app needs before another device or name reaches it (section 3). For the
-SearchApi free trial, setup also asks how many of the trial's 100 searches are
+sign-in on, which the app needs before another device or name reaches it (section 3), and before
+any proxy or tunnel forwards to it. "This machine" means every account on it: on a machine other
+people log in to, keep a password (`pnpm gmt setup --reconfigure password`). To turn an existing
+password off, delete the two `APP_BASIC_AUTH_*` lines from `~/.config/get-me-there/app.env` and
+run `pnpm gmt restart`. For the SearchApi free trial, setup also asks how many of the trial's 100 searches are
 already used (100 minus what your SearchApi dashboard says is left). For email it asks the SMTP
 host, port, TLS, user, password, and the to and from addresses. Row 7 runs
 `loginctl enable-linger <you>` without `sudo`; if that is refused it prints the `sudo` line for
@@ -293,12 +296,21 @@ interfaces inside Docker, but compose publishes it on `127.0.0.1:3000` only and 
 (`PUBLISHED_ADDRESS` in `docker-compose.yml`), and with the default `ALLOWED_HOSTS` the app answers
 only to `localhost:3000` and `127.0.0.1:3000`. That Host check is also what stops a web page from
 reaching the app through a name of its own. So with no sign-in lines in `.env` the app starts and
-asks for no password.
+asks for no password. "This machine" means every account on it: on a machine other people log in
+to, keep a password (the two lines below).
 
 Before another device or name reaches it, add two lines to `.env`. That is the moment
 `ALLOWED_HOSTS` names anything but `localhost`, `127.x.x.x` or `[::1]` (Tailscale and a reverse
-proxy do, section 3), or the published address in `docker-compose.yml` is not `127.0.0.1`; without
-the lines the app then refuses to start. Create `.env` next to `docker-compose.yml`, readable by you
+proxy do, section 3), `TRUST_PROXY=true` says a proxy is in front, or the published address in
+`docker-compose.yml` is not `127.0.0.1`; without the lines the app then refuses to start. Anything
+that lets another device reach the app’s port needs the two lines, whatever `ALLOWED_HOSTS` says: a
+reverse proxy, `tailscale serve`, or any tunnel (`ssh -R`, `ssh -L` from another machine, `socat`).
+A proxy that rewrites the Host header to `127.0.0.1:3000`, as nginx’s plain `proxy_pass` does,
+passes the name check; while the app has no password it refuses every request that carries a
+forwarding header (`Forwarded`, `X-Forwarded-For` and the like), but a raw tunnel adds none, so set
+the password before you open one. On Linux, Docker Engine before 28.0 let other machines on the
+same local network reach a port published on `127.0.0.1` (Docker's 28.0 release notes); there,
+update Docker or keep the password. Create `.env` next to `docker-compose.yml`, readable by you
 alone, with a password nobody else has seen:
 
 ```bash
@@ -313,7 +325,8 @@ APP_BASIC_AUTH_PASS=CHANGE-ME
 
 Replace `CHANGE-ME` with that random value (the app needs at least 12 characters, so the
 placeholder itself is refused). If a value contains `$`, wrap it in single quotes, because
-compose interpolates `$` in `.env`. Set both lines or neither.
+compose interpolates `$` in `.env`. Set both lines or neither. To turn an existing password off,
+delete the two lines from `.env` and run `docker compose up -d`.
 
 These are the two lines the app asks for when it needs them. If `docker compose logs app` shows
 exit 78 naming `ALLOWED_HOSTS` (or `PUBLISHED_ADDRESS`) and ending "add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)",
@@ -410,6 +423,10 @@ the header value and the variable. The default is `localhost:3000,127.0.0.1:3000
 variable replaces the default, so list every hostname you will type in a browser, including
 the local ones if you still use them.
 
+Anything that lets another device reach the app’s port needs the two lines, whatever `ALLOWED_HOSTS` says: a
+reverse proxy, `tailscale serve`, or any tunnel (`ssh -R`, `ssh -L` from another machine, `socat`).
+Add them (section 1; natively, `pnpm gmt setup --reconfigure password`) before you put one in front.
+
 Keep the port mapping on `127.0.0.1` and put `tailscale serve` or a reverse proxy in front.
 Changing it to `3000:3000` or `0.0.0.0:3000:3000` publishes the app to every network the host
 is on, past a host firewall such as ufw (Docker writes its own packet-filter rules). If the
@@ -417,7 +434,9 @@ port is reachable, basic auth is the only barrier between a stranger and your AP
 use another host port, change only the left side: `127.0.0.1:8080:3000`. The app cannot see the
 address it is published on, so `PUBLISHED_ADDRESS` beside the `ports:` line tells it; if you ever
 change the address there, change `PUBLISHED_ADDRESS` with it. Anything but loopback there needs
-the two sign-in lines of section 1.
+the two sign-in lines of section 1, and so does a `docker-compose.override.yml` (which compose reads
+on its own) that adds a `ports:` mapping. `pnpm gmt status` fails when compose publishes the app
+beyond loopback and `.env` has no password.
 
 **Tailscale** (the app stays off the public internet):
 

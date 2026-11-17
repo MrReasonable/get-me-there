@@ -1542,32 +1542,48 @@ synchronous `better-sqlite3` transactions.
   20 per minute); covers everything except the minimal unauthenticated
   `GET /health`, which is also exempt from the Host allowlist.
 - **No password while only this machine can reach the app.** The app runs
-  without the two auth vars exactly when both hold: it is reachable only on
-  loopback (natively `BIND_ADDRESS` is loopback; in the container, which binds
-  `0.0.0.0` and cannot see the host side, `PUBLISHED_ADDRESS`, the host
+  without the two auth vars exactly when all three hold: it is reachable only
+  on loopback (natively `BIND_ADDRESS` is loopback; in the container, which
+  binds `0.0.0.0` and cannot see the host side, `PUBLISHED_ADDRESS`, the host
   address compose publishes it on, fixed beside `BIND_ADDRESS` in
-  `docker-compose.yml` and tested equal to its `ports:` line, is loopback),
-  and it answers only to this machine's names (every `ALLOWED_HOSTS` entry is
+  `docker-compose.yml` and tested equal to its `ports:` line, is loopback);
+  no proxy is declared in front of it (`TRUST_PROXY` is not true); and it
+  answers only to this machine's names (every `ALLOWED_HOSTS` entry is
   `localhost`, `127.0.0.0/8` or `[::1]`, each with an optional `:port`,
-  compared case-insensitively). The second is required: `tailscale serve` and
-  a reverse proxy forward to `127.0.0.1:3000`, so a loopback address alone
-  would leave a public proxy without a password, and the Host allowlist is
-  what stops a web page reaching a password-free app through DNS rebinding.
-  The default `ALLOWED_HOSTS` qualifies. The rule is one `core` helper
-  (`config/access.ts`), read by the config schema, `bootApp`'s re-assertion,
-  the Status `app` check (which reports "no password: only this machine can
-  reach the app" as `ok`) and `gmt setup`. Without a password otherwise, boot
-  refuses (exit 78), naming the setting that lets something else in (the bind
-  or published address, or the first `ALLOWED_HOSTS` entry that is not
-  loopback) and the fix that works in its mode: natively `pnpm gmt setup
-  --reconfigure password`, in the container and development the two auth
-  lines in `.env`. `ALLOW_UNAUTHENTICATED=true` (a Tailscale-only host)
-  bypasses both checks, with a warning in the log; compose never forwards it,
-  so §3's override file is the only way to set it in the container.
+  compared case-insensitively). The names check is required: `tailscale
+  serve` and a reverse proxy forward to `127.0.0.1:3000`, so a loopback
+  address alone would leave a public proxy without a password, and the Host
+  allowlist is what stops a web page reaching a password-free app through
+  DNS rebinding. The default `ALLOWED_HOSTS` qualifies. "This machine" is
+  every account on it, so a machine other people log in to keeps a password.
+  Anything that lets another device reach the port needs the two auth vars
+  whatever `ALLOWED_HOSTS` says (a reverse proxy, `tailscale serve`, any
+  tunnel such as `ssh -R`, `ssh -L` from elsewhere or `socat`): a proxy that
+  rewrites Host to `127.0.0.1:3000` (nginx's plain `proxy_pass`) or a raw
+  tunnel passes the names check, so while the app has no password and
+  `ALLOW_UNAUTHENTICATED` is not true the auth gate refuses, with 403
+  `proxied_without_password` naming the mode's fix, every request carrying
+  `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or
+  `X-Real-IP`, `GET /health` and the static files included (the image's
+  health check sends none). On Linux, Docker Engine before 28.0 let other
+  machines on the local network reach a port published on loopback; the docs
+  say to update Docker or keep the password there. The rule is one `core`
+  helper (`config/access.ts`), read by the config schema, `bootApp`'s
+  re-assertion, the Status `app` check (which reports "no password: only
+  this machine can reach the app" as `ok`) and `gmt setup`; the CLI's other
+  loopback tests are `core`'s too. Without a password otherwise, boot refuses
+  (exit 78), naming the setting that lets something else in (the bind or
+  published address, `TRUST_PROXY`, or the first `ALLOWED_HOSTS` entry that
+  is not loopback) and the fix that works in its mode: natively `pnpm gmt
+  setup --reconfigure password`, in the container and development the two
+  auth lines in `.env`. `ALLOW_UNAUTHENTICATED=true` (a Tailscale-only host)
+  bypasses every check, with a warning in the log; compose never forwards
+  it, so §3's override file is the only way to set it in the container.
   `docs/setup.md` §1 "Signing in" says no password is needed while the app is
-  opened on this machine and to add the two auth vars before another device
-  or name reaches it, and that basic auth over plain HTTP beyond loopback
-  needs a TLS reverse proxy or Tailscale.
+  opened on this machine, to add the two auth vars before another device,
+  name, proxy or tunnel reaches it or on a machine others log in to, how to
+  turn a password off (delete both lines, then restart), and that basic auth
+  over plain HTTP beyond loopback needs a TLS reverse proxy or Tailscale.
 - `ALLOWED_HOSTS` (default derived from `PORT`: `localhost:<port>,127.0.0.1:<port>`,
   plus the Vite dev origin `localhost:5173` under `NODE_ENV=development`);
   rejection names the header value and the variable; setup docs give
@@ -5291,7 +5307,7 @@ credentials, as every CLI read of an app with no password is); it prints the Doc
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when the address compose publishes is not loopback, and says nothing when it is. A native app keeps its `BIND_ADDRESS` check.
+app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when the address compose publishes is not loopback, and says nothing when it is; when the checkout's `.env` has no auth lines that is a `fail` naming both fixes (publish `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
 unknown: a `fail` saying so, the worker's facts, and no native fix. Every
@@ -5364,15 +5380,20 @@ or a `.fixture.db` path. Setup writes no auth lines while the settings meet
 `--reconfigure password` generates a password and writes both lines, turning
 sign-in on; a re-run keeps an existing password, and settings that fail the
 rule (a `BIND_ADDRESS` or `ALLOWED_HOSTS` the operator set) get one generated
-and written, as the app would refuse them without it. `gmt password` with
-none set says on standard error that only this machine can reach the app and
-how to turn sign-in on, and succeeds. Setup ends by printing the URL and,
-with sign-in on, the user name, where the password lives and `pnpm gmt
-password` (which prints it to the terminal only, never to a log; if
-scrollback or a shared screen may have kept it, `--reconfigure password`
-replaces it), or with none that only this machine can reach the app and that
-`--reconfigure password` turns sign-in on before another device or name
-reaches it, offers to open the browser,
+and written, as the app would refuse them without it. To turn a password
+off, the operator deletes both lines and runs `pnpm gmt restart`. With no
+password, `gmt password` and the closing screen choose their words by §4's
+rule over the settings, never by the mere absence of the lines: only this
+machine can reach the app (every account on it, so a machine others log in
+to keeps a password, and `--reconfigure password` turns sign-in on before
+another device, name, proxy or tunnel reaches it), exit 0; no password
+because `ALLOW_UNAUTHENTICATED` is set, exit 0; or settings that need one,
+so the app refuses to start, naming `--reconfigure password`, exit 78.
+Setup ends by printing the URL and, with sign-in on, the user name, where
+the password lives and `pnpm gmt password` (which prints it to the terminal
+only, never to a log; if scrollback or a shared screen may have kept it,
+`--reconfigure password` replaces it), or with none those words, offers to
+open the browser,
 always names the next step (open the app and start a search from the first
 screen with Search now), says that nothing runs on a schedule until a search
 is given one (Repeat weekly… on its page), says what
@@ -5593,8 +5614,8 @@ auth lines, which are now optional.
   schema, `bootApp`'s `assertAuthInvariants`, the Status `app` check and `gmt setup` read it and nothing else.
 - **Ruling (brief): the refusal names the setting and the fix for its mode**: the bind or published address, or the
   first `ALLOWED_HOSTS` entry that is not loopback, then `pnpm gmt setup --reconfigure password` natively and the two
-  `.env` lines in the container and development. `ALLOW_UNAUTHENTICATED=true` keeps its meaning (a tailnet-only host)
-  and bypasses both checks with the warning.
+  `.env` lines in the container and development (and, after review, `TRUST_PROXY`). `ALLOW_UNAUTHENTICATED=true` keeps
+  its meaning (a tailnet-only host) and bypasses every check with the warning.
 - **Ruling (execution): `PUBLISHED_ADDRESS` is a fixed compose line**, offered in `.env.example` only commented, as
   `IN_CONTAINER` is; a compose test asserts it equals the `ports:` line's host address.
 - **Ruling (execution): the password group owns both auth lines**, so `--reconfigure password` turns sign-in on; a
@@ -5602,7 +5623,20 @@ auth lines, which are now optional.
 - **Ruling (execution): the CLI splits an app's address from its optional basic auth**; `status`, the active-run guard,
   `smoke`, the test email, the browser step's port and the recording sessions ask an app with no password without an
   Authorization header.
-- **Ruling (execution): `gmt password` with none set exits 0**: no password is the install's state, not a fault.
+- **Ruling (execution): `gmt password` with none set exits 0** when §4's rule holds or `ALLOW_UNAUTHENTICATED` is set:
+  no password is the install's state, not a fault; settings that need one exit 78.
+- **Ruling (Ian, review): any forwarder needs the password.** A proxy that rewrites Host to loopback (nginx's plain
+  `proxy_pass`) or a raw tunnel passes the names check, so the docs say any proxy or tunnel needs the two lines;
+  `TRUST_PROXY=true` is a reason in the rule, and with no password the auth gate refuses a request carrying a forwarding
+  header (`proxied_without_password`, 403), `/health` and the static files included.
+- **Ruling (Ian, review): `gmt status` fails** when compose publishes the Docker app beyond loopback and `.env` has no
+  auth lines, naming both fixes; with the lines it stays a warning.
+- **Ruling (Ian, review): "this machine" is every account on it**; the docs, the closing screen and §4 say a machine
+  others log in to keeps a password, and say how to turn a password off.
+- **Ruling (Ian, review): Docker before 28.0 on Linux.** Its release notes record the fix that stopped neighbour hosts
+  reaching ports published on loopback; the docs say to update Docker or keep the password there.
+- **Ruling (Ian, review): every sentence about no password follows the rule**, not the absence of the lines: with
+  `ALLOW_UNAUTHENTICATED` it says so, and the CLI's own loopback test gives way to `core`'s.
 
 ### Revision 70: the Trips and Search pages, the nav and the top bar (2026-11-15)
 

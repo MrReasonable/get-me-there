@@ -160,6 +160,33 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(composeText).not.toContain('Basic auth is always on');
   });
 
+  it('any proxy or tunnel, any account on a shared machine and an old Docker on Linux need the password; how to turn it off (spec §4)', () => {
+    const flat0 = between(setup, '## 0.', '## 1.').replace(/\s+/g, ' ');
+    const flat1 = setup.slice(setup.indexOf('## 1.'), setup.indexOf('## 2.')).replace(/\s+/g, ' ');
+    const flat3 = between(setup, '## 3.', '## 4.').replace(/\s+/g, ' ');
+    const ACCOUNTS =
+      '"This machine" means every account on it: on a machine other people log in to, keep a password';
+    expect(flat0).toContain(`${ACCOUNTS} (\`pnpm gmt setup --reconfigure password\`).`);
+    expect(flat1).toContain(`${ACCOUNTS} (the two lines below).`);
+    const FORWARDERS =
+      'Anything that lets another device reach the app’s port needs the two lines, whatever `ALLOWED_HOSTS` says: a reverse proxy, `tailscale serve`, or any tunnel (`ssh -R`, `ssh -L` from another machine, `socat`).';
+    expect(flat1).toContain(FORWARDERS);
+    expect(flat3).toContain(FORWARDERS);
+    expect(flat1).toContain('nginx’s plain `proxy_pass`');
+    expect(flat1).toContain('`TRUST_PROXY=true` says a proxy is in front');
+    expect(flat1).toContain(
+      'On Linux, Docker Engine before 28.0 let other machines on the same local network reach a port published on `127.0.0.1`',
+    );
+    expect(flat0).toContain(
+      'To turn an existing password off, delete the two `APP_BASIC_AUTH_*` lines from `~/.config/get-me-there/app.env` and run `pnpm gmt restart`.',
+    );
+    expect(flat1).toContain(
+      'To turn an existing password off, delete the two lines from `.env` and run `docker compose up -d`.',
+    );
+    expect(flat3).toContain('`docker-compose.override.yml`');
+    expect(composeText).toContain('docker-compose.override.yml');
+  });
+
   it('section 3’s Tailscale and Caddy examples say to add the two auth lines, which their ALLOWED_HOSTS needs', () => {
     const section3 = between(setup, '## 3.', '## 4.').replace(/\s+/g, ' ');
     expect(section3).toContain(
