@@ -456,6 +456,41 @@ describe('signing in (spec §4: no password while only this machine can reach th
     expect(m.io.stdout).not.toContain(GEN);
   });
 
+  it.each([
+    [
+      'a kept BIND_ADDRESS beyond loopback',
+      (t: string) => t.replace('BIND_ADDRESS="127.0.0.1"', 'BIND_ADDRESS="0.0.0.0"'),
+      { BIND_ADDRESS: '0.0.0.0' },
+    ],
+    [
+      'a non-loopback ALLOWED_HOSTS',
+      (t: string) => `${t}ALLOWED_HOSTS=flights.example.com\n`,
+      { ALLOWED_HOSTS: 'flights.example.com' },
+    ],
+    ['TRUST_PROXY=true', (t: string) => `${t}TRUST_PROXY=true\n`, { TRUST_PROXY: 'true' }],
+  ] as const)(
+    '--reconfigure password repairs a file with %s and no password, keeping it (the fix the app’s refusal names)',
+    async (_l, edit, kept) => {
+      const m = await setUp();
+      m.fs.file(ENV, edit(m.fs.read(ENV) ?? ''), 0o600);
+      const before = parseEnv(m.fs.read(ENV) ?? '');
+      const io = testIo({ tty: true });
+      m.deps.io = io;
+      m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+      expect(await runCli(['setup', '--reconfigure', 'password'], m.deps)).toBe(0);
+      expect(parseEnv(m.fs.read(ENV) ?? '')).toEqual({
+        ...before,
+        ...kept,
+        APP_BASIC_AUTH_USER: 'operator',
+        APP_BASIC_AUTH_PASS: GEN,
+      });
+      expect(io.stdout).toContain(
+        'setup --reconfigure password: APP_BASIC_AUTH_USER, APP_BASIC_AUTH_PASS written; the app restarted',
+      );
+      expect(io.stdout + io.stderr).not.toContain(GEN);
+    },
+  );
+
   it('--reconfigure password repairs the same file (the fix the app’s refusal names)', async () => {
     const m = await setUp();
     m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\n`, 0o600);

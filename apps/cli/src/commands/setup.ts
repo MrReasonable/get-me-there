@@ -31,6 +31,7 @@ import {
   checkAppEnv,
   type Entries,
   entriesFor,
+  GROUP_NAMES,
   ownedDiff,
   passwordEntries,
   passwordNeeded,
@@ -227,9 +228,11 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     if (amended.ok) {
       settings = amended;
       baseText = withPassword;
-      notes.push(
-        'app.env has no password, which its settings need now; setup writes one (pnpm gmt password shows it).',
-      );
+      // why: --reconfigure password is the request to write one, so it needs no note
+      if (group !== 'password')
+        notes.push(
+          'app.env has no password, which its settings need now; setup writes one (pnpm gmt password shows it).',
+        );
     }
   }
   if (settings !== null && !settings.ok)
@@ -390,6 +393,15 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   else if (group !== null) {
     const replaced = replaceGroups(baseText ?? existingText, entries, [group]);
     if (replaced !== existingText) envText = replaced;
+    // why: only the group's lines change, so the read-back expects the group's new values and every other name as the
+    // file keeps it (a BIND_ADDRESS the operator widened stays), or --reconfigure password could not repair such a file
+    const names = new Set<string>(GROUP_NAMES[group]);
+    readBack = {
+      ...Object.fromEntries(
+        Object.entries(readEnvText(baseText ?? existingText)).filter(([n]) => !names.has(n)),
+      ),
+      ...Object.fromEntries(entries.filter(([n]) => names.has(n))),
+    };
   } else if (settings?.ok === true) {
     // why: the file with the password its settings need (above) is written as it is, every other line kept
     if (baseText !== null && baseText !== existingText) {
@@ -545,7 +557,8 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       notes: [],
     });
     if (r.failed !== null) return failed(deps, describeResult(command, r));
-    const changed = ownedDiff(settings?.ok === true ? settings.record : {}, intended).join(', ');
+    // why: against the file as it was read, so a password the repair above added is named as written
+    const changed = ownedDiff(readEnvText(existingText ?? ''), readBack).join(', ');
     deps.io.out(
       group === 'linger'
         ? `${command}: done\n`
