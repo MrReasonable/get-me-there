@@ -7,6 +7,7 @@ import {
   apiContract,
   type Config,
   FIXTURE_OPT_IN_PHRASE,
+  fixedClock,
   Secret,
   systemClock,
 } from '@gmt/core';
@@ -21,7 +22,7 @@ import { loadConfigFromEnv } from '../../src/wiring.js';
 import { errorOf } from '../helpers/contract.js';
 import { cleanEnv, SENTINEL_AUTH, SENTINEL_SA, silentLog } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
-import { basic, captureLines } from '../helpers/harness.js';
+import { basic, captureLines, T0 } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 function envFor(overrides: Record<string, string>): Record<string, string> {
@@ -176,10 +177,12 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
       ...over,
     });
     const container = { inContainer: true, bindAddress: '0.0.0.0', publishedAddress: '127.0.0.1' };
+    // why: a fresh fixed clock on every boot, so locking, migrations and the engine's boot never read wall-clock time
     const boot = (config: Config, lines: string[] = []) =>
       bootApp({
         config,
         log: createLogger({ logLevel: 'warn' }, { destination: captureLines(lines) }),
+        clock: fixedClock(T0),
         listen: false,
         assets: assetPaths(),
       });
