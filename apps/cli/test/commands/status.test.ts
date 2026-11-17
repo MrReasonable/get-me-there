@@ -205,7 +205,11 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       state: 'running' | 'exited' | null,
       published: string | null = '127.0.0.1:3000',
       ps?: { code: number; stdout: string },
-      config?: Array<unknown> | { stdout: string } | 'fail',
+      config?:
+        | Array<unknown>
+        | { stdout: string }
+        | { ports: Array<unknown>; environment: Record<string, unknown> }
+        | 'fail',
     ): RunHandler =>
     (a) => {
       if (a[0] !== 'docker') return undefined;
@@ -220,17 +224,27 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
         );
       if (a.includes('config')) {
         if (config === 'fail') return { code: 1, stderr: 'no config' };
-        if (config !== undefined && !Array.isArray(config)) return { code: 0, stdout: config.stdout };
+        if (config !== undefined && !Array.isArray(config) && 'stdout' in config)
+          return { code: 0, stdout: config.stdout };
         // why: by default the configuration publishes what `compose port` names, so the two sources agree
         const m = published === null ? null : /^\[?(.+?)\]?:(\d+)$/.exec(published);
-        const ports = config ?? (m === null ? [] : [{ host_ip: m[1], target: 3000, published: m[2] }]);
+        const ports =
+          config === undefined
+            ? m === null
+              ? []
+              : [{ host_ip: m[1], target: 3000, published: m[2] }]
+            : Array.isArray(config)
+              ? config
+              : config.ports;
+        const environment = {
+          APP_BASIC_AUTH_PASS: CONFIG_SECRET,
+          ...(config !== undefined && !Array.isArray(config) ? config.environment : {}),
+        };
         return {
           code: 0,
-          // why: the real output carries the interpolated environment; status must read ports only, print nothing
-          stdout: JSON.stringify({
-            name: 'get-me-there',
-            services: { app: { ports, environment: { APP_BASIC_AUTH_PASS: CONFIG_SECRET } } },
-          }),
+          // why: the real output carries the interpolated environment; status must read only ports and
+          // ALLOW_UNAUTHENTICATED from it, and print nothing of it
+          stdout: JSON.stringify({ name: 'get-me-there', services: { app: { ports, environment } } }),
         };
       }
       if (a.includes('port') && a.includes('app') && a.includes('3000'))
@@ -248,7 +262,11 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     }),
     published?: string | null,
     ps?: { code: number; stdout: string },
-    config?: Array<unknown> | { stdout: string } | 'fail',
+    config?:
+      | Array<unknown>
+      | { stdout: string }
+      | { ports: Array<unknown>; environment: Record<string, unknown> }
+      | 'fail',
   ) {
     const http = stubHttp({ 'GET /api/status': status });
     const m = machine({ http, extra: docker(state, published, ps, config) });
@@ -440,6 +458,30 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
         expect(m.io.stdout).toContain('fix: docker compose config --quiet');
         expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
         expect(m.io.stdout).not.toContain('not json');
+      },
+    );
+    it('ALLOW_UNAUTHENTICATED=true in the compose environment (the tailscale-only override) warns, not fails', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, {
+        ports: OVERRIDE,
+        environment: { ALLOW_UNAUTHENTICATED: 'true', SEARCHAPI_KEY: 'env-searchapi-secret-0123456789' },
+      });
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(/bind address +warn +0\.0\.0\.0: published beyond loopback: plain HTTP/);
+      expect(m.io.stdout).not.toMatch(/bind address +fail/);
+      expect(m.io.stdout + m.io.stderr).not.toContain('env-searchapi-secret-0123456789');
+      expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+    });
+    it.each([['false'], [''], [null], [true]])(
+      'ALLOW_UNAUTHENTICATED=%j in the compose environment is not the exception: still a fail',
+      async (value) => {
+        const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, {
+          ports: OVERRIDE,
+          environment: { ALLOW_UNAUTHENTICATED: value },
+        });
+        m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+        expect(await runCli(['status'], m.deps)).toBe(1);
+        expect(m.io.stdout).toMatch(/bind address +fail +0\.0\.0\.0/);
       },
     );
     it('loopback only, in both IPv4 and IPv6, says nothing', async () => {

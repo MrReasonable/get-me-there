@@ -91,7 +91,7 @@ function ipAddress(text: string): string | null {
 /**
  * The host address and port compose publishes for the running container's 3000 (`docker compose port app 3000`), or
  * null when compose does not say. It prints one mapping only, even when the app has two (Docker Compose 5.5, checked
- * 2026-11-17), so it says where to ask the app, never everywhere it is published: composeConfigPublications says that.
+ * 2026-11-17), so it says where to ask the app, never everywhere it is published: composeConfigFacts says that.
  * Addresses have no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0.
  */
 export async function dockerPublications(deps: Deps): Promise<{ address: string; port: number }[] | null> {
@@ -107,9 +107,18 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   return out.length === 0 ? null : out;
 }
 
-/** The part of `docker compose config --format json` read here: the app's `ports`, nothing else, each entry read alone. */
-const configPortsSchema = z.looseObject({
-  services: z.looseObject({ app: z.looseObject({ ports: z.array(z.unknown()).optional() }) }),
+/**
+ * The part of `docker compose config --format json` read here: the app's `ports`, each entry read alone, and its
+ * environment's ALLOW_UNAUTHENTICATED alone. `z.object` strips every other key, so nothing else of the environment is
+ * kept; an environment that is not an object reads as none.
+ */
+const configSchema = z.object({
+  services: z.object({
+    app: z.object({
+      ports: z.array(z.unknown()).optional(),
+      environment: z.object({ ALLOW_UNAUTHENTICATED: z.string().nullish() }).optional().catch(undefined),
+    }),
+  }),
 });
 /** One `ports` entry (long syntax): its host address and published port; a null host address is every interface. */
 const configPortSchema = z.looseObject({
@@ -120,17 +129,23 @@ const configPortSchema = z.looseObject({
 /** How status names a `ports` entry it could not read; never any of the config's own text. */
 export const UNREADABLE_PORTS_ENTRY = 'an unreadable ports entry';
 
+/** What status reads of compose's effective configuration: where the app is published, and the one exception. */
+export interface ComposeConfigFacts {
+  ports: { address: string; port: number }[];
+  /** `services.app.environment.ALLOW_UNAUTHENTICATED` is `true` (the documented tailscale-only override sets it). */
+  allowUnauthenticated: boolean;
+}
+
 /**
  * Every host address the app is published on by compose's effective configuration, every compose file and override
- * included (spec §4: the app trusts PUBLISHED_ADDRESS, which an extra `ports:` mapping leaves behind), or null when
- * the configuration cannot be read. The JSON holds the interpolated environment, secrets included, so it is parsed
- * here, in process, and only `ports` is taken; it is never printed, logged or written. A mapping with no host address
- * (missing, empty or null) publishes on every interface (0.0.0.0). Each entry is read alone: one that cannot be read is
- * kept as UNREADABLE_PORTS_ENTRY, which is no loopback address, so it is judged beyond loopback (fail-safe).
+ * included (spec §4: the app trusts PUBLISHED_ADDRESS, which an extra `ports:` mapping leaves behind), and whether its
+ * environment sets ALLOW_UNAUTHENTICATED=true; null when the configuration cannot be read. The JSON holds the
+ * interpolated environment, secrets included, so it is parsed here, in process, and only `ports` and that one key are
+ * taken; it is never printed, logged or written. A mapping with no host address (missing, empty or null) publishes on
+ * every interface (0.0.0.0). Each entry is read alone: one that cannot be read is kept as UNREADABLE_PORTS_ENTRY, which
+ * is no loopback address, so it is judged beyond loopback (fail-safe).
  */
-export async function composeConfigPublications(
-  deps: Deps,
-): Promise<{ address: string; port: number }[] | null> {
+export async function composeConfigFacts(deps: Deps): Promise<ComposeConfigFacts | null> {
   const r = await deps.run(compose('config', '--format', 'json'), { cwd: deps.checkout, timeoutMs: 20_000 });
   if (r.code !== 0) return null;
   let json: unknown;
@@ -139,22 +154,23 @@ export async function composeConfigPublications(
   } catch {
     return null;
   }
-  const parsed = configPortsSchema.safeParse(json);
+  const parsed = configSchema.safeParse(json);
   if (!parsed.success) return null;
-  const out: { address: string; port: number }[] = [];
-  for (const entry of parsed.data.services.app.ports ?? []) {
+  const app = parsed.data.services.app;
+  const ports: { address: string; port: number }[] = [];
+  for (const entry of app.ports ?? []) {
     const p = configPortSchema.safeParse(entry);
     if (!p.success) {
-      out.push({ address: UNREADABLE_PORTS_ENTRY, port: 0 });
+      ports.push({ address: UNREADABLE_PORTS_ENTRY, port: 0 });
       continue;
     }
     const hostIp = p.data.host_ip ?? '';
     const address = hostIp === '' ? '0.0.0.0' : ipAddress(hostIp);
     // why: a host address that is no IP (a name) is not loopback, so it is judged as written; a range's port is NaN,
     // which only labels the mapping
-    out.push({ address: address ?? hostIp, port: Number(p.data.published ?? 0) });
+    ports.push({ address: address ?? hostIp, port: Number(p.data.published ?? 0) });
   }
-  return out;
+  return { ports, allowUnauthenticated: app.environment?.ALLOW_UNAUTHENTICATED === 'true' };
 }
 
 /** Where the Docker app may be asked on this machine, from what compose publishes, or why it may not be. */

@@ -2,7 +2,7 @@ import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, isLoopbackHost, START_REFUSAL_TEXT } from '@gmt/core';
 import { authFrom } from '../appClient.js';
 import {
-  composeConfigPublications,
+  composeConfigFacts,
   type DockerAppState,
   dockerAppState,
   dockerEndpoint,
@@ -204,15 +204,16 @@ function appEnvChecks(deps: Deps): Check[] {
  * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host addresses compose
  * publishes, read from the effective configuration (every compose file and override, `docker compose config`) and from
  * the running container (`docker compose port`, which names one mapping only). Beyond loopback is the same warning as
- * a native BIND_ADDRESS beyond loopback, and a fail when the checkout's .env has no password and no
- * ALLOW_UNAUTHENTICATED=true (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an override
+ * a native BIND_ADDRESS beyond loopback, and a fail when the checkout's .env has no password and neither .env nor
+ * compose's environment sets ALLOW_UNAUTHENTICATED=true (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an override
  * file leaves behind, so this is the one place the drift shows); loopback says nothing. When the configuration cannot
  * be read, a warning says only the running mapping was checked.
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
   const running = await dockerPublications(deps);
-  const configured = await composeConfigPublications(deps);
+  const config = await composeConfigFacts(deps);
+  const configured = config?.ports ?? null;
   // why: an unread address is not a loopback one: error must not look empty
   if (running === null && configured === null)
     return [
@@ -226,8 +227,10 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
   let noPassword: boolean;
   try {
     const env = readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '');
-    // why: ALLOW_UNAUTHENTICATED=true is the operator's explicit tailnet-only exception, so it keeps the warning
-    noPassword = authFrom(env) === null && env.ALLOW_UNAUTHENTICATED !== 'true';
+    // why: ALLOW_UNAUTHENTICATED=true is the operator's explicit tailnet-only exception, so it keeps the warning, from
+    // .env or from compose's environment (the documented tailscale-only override sets it there)
+    noPassword =
+      authFrom(env) === null && env.ALLOW_UNAUTHENTICATED !== 'true' && config?.allowUnauthenticated !== true;
   } catch {
     // why: an unreadable .env is the endpoint's own reason; the warning below still stands
     noPassword = false;
