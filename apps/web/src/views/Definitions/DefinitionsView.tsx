@@ -1,4 +1,5 @@
 import { useDefinitions, useProviders } from '../../api/queries.js';
+import { Crumbs, searchCrumb, tripsCrumb } from '../../components/Crumbs.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
@@ -24,17 +25,23 @@ export function DefinitionsView() {
   if (providers.data === undefined || definitions.data === undefined) return <Loading />;
   if (editing === 'new')
     return (
-      <div className="space-y-5 pt-6">
-        <h2 className="h-view">{COPY.searchesView.sideHeading}</h2>
-        <NewSearchForm providers={providers.data} />
+      <div className="token-page edit-page">
+        <h1 className="token-page-title">{COPY.searchesView.sideHeading}</h1>
+        <div className="token-form">
+          <NewSearchForm providers={providers.data} />
+        </div>
       </div>
     );
   const existing = definitions.data.find((d) => d.id === editing && d.deletedAt === null) ?? null;
+  // why: Task 7 fix round 1 — the Edit page is the panel's form, so it sits on the same tokens and face (light and dark)
   return (
-    <div className="space-y-5 pt-6">
-      <h2 className="h-view">
+    <div className="token-page edit-page">
+      {existing === null ? null : (
+        <Crumbs items={[tripsCrumb(), searchCrumb(existing), { label: COPY.crumbs.edit }]} />
+      )}
+      <h1 className="token-page-title">
         {existing === null ? PLAN_COPY.viewHeading : COPY.editSearch.heading(existing.name)}
-      </h2>
+      </h1>
       {/* why: an old link to a deleted or unknown search must not look like a fresh form (a duplicate waiting to happen) */}
       {existing === null ? (
         <p role="alert" className="plate notice font-semibold text-bad">

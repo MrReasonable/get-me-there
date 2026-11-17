@@ -1,5 +1,6 @@
 // The date-pair core of the Dates view (WP19): the space arithmetic, the figure precedence, the board's rank, the
-// folded stay bands, the detail link, the route's codec, (WP20) the main path's five marks and (WP21) the pairing figure.
+// folded stay bands, the detail link, the route's codec, (WP20) the main path's five marks, (WP21) the pairing figure,
+// (Ruling 3) which figures are trips, flights read or lower on the calendar, and (Ruling 18) a calendar day's mark.
 // Re-exported through the package barrel.
 export { foldNights, MAX_NIGHT_BANDS, type NightsBand } from './bands.js';
 export {
@@ -14,6 +15,7 @@ export {
   type Standings,
   uncheckedCheaper,
 } from './confirm.js';
+export { dayMark } from './day.js';
 export { decodeDatePairs } from './decode.js';
 export { DETAIL_LINK_PARAMS, detailLinkQuery } from './detailLink.js';
 export {
@@ -38,6 +40,8 @@ export {
 export {
   datePairBuckets,
   datePairSearched,
+  markCounts,
+  REDUCED_MARKS,
   type ReducedMark,
   reducedMark,
   searchedDatePairCount,
@@ -74,3 +78,13 @@ export {
   datePairIndexer,
   stayCount,
 } from './space.js';
+export {
+  cheapestTrips,
+  flightsRead,
+  isTrip,
+  lowerOnCalendar,
+  overLimitCount,
+  type RankFacts,
+  type ReadFacts,
+  type TripFacts,
+} from './views.js';

@@ -1,22 +1,13 @@
-import {
-  formatAgo,
-  hoursSince,
-  IN_FLIGHT_STATUSES,
-  type IsoDateTime,
-  NO_STOP_CAUSE_TEXT,
-  STOPPED_STATUSES,
-} from '@gmt/core';
+import { formatAgo, hoursSince, IN_FLIGHT_STATUSES, type IsoDateTime, STOPPED_STATUSES } from '@gmt/core';
 import type { SearchCard } from '../../api/types.js';
-import type { StopWords } from '../../components/StopWords.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatIsoDateShort } from '../../format.js';
-import { readingCount } from '../../lib/flightsReading.js';
-import { leftWords } from '../../lib/leftWords.js';
+import { type AirportRow, shortAirportName } from '../Definitions/airports.js';
 import { parseSchedule } from '../Definitions/schedule.js';
 
-// Spec rev 55 §11 "Searches", the words of a card (WP20 Task 20.3): pure functions from the served card and the page's
-// clock, composed from COPY's templates, so the catalogue and rendered-sweep tests cover every sentence and a card
-// never prints a status word of its own. Dates are formatted from their strings, never through a Date.
+// Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 5 and 8: the words of a card, pure functions from the served
+// card and the page's clock, composed from COPY's templates, so the catalogue and rendered-sweep tests cover every
+// sentence and a card never prints a status word of its own. Dates are formatted from their strings, never through a Date.
 
 const S = COPY.searchesView;
 
@@ -32,14 +23,6 @@ export function windowText(w: SearchCard['window']): string {
   return S.windowSpan(format(w.departureFrom), format(w.departureTo));
 }
 
-/** A trip's dates as "12 → 23 Jan" in one month, "28 Nov → 3 Dec" across two (the year is left to the search's window). */
-export function tripText(departure: string, back: string): string {
-  const from = formatIsoDateShort(departure);
-  const to = formatIsoDateShort(back);
-  const [fromDay = '', fromMonth = ''] = from.split(' ');
-  return S.trip(to.endsWith(` ${fromMonth}`) ? fromDay : from, to);
-}
-
 /** "repeats Mondays 05:00": only a scheduled search has one (the card's `schedule` is null otherwise). */
 export function scheduleText(schedule: NonNullable<SearchCard['schedule']>): string {
   const s = parseSchedule(schedule.cron);
@@ -53,66 +36,124 @@ export function scheduleText(schedule: NonNullable<SearchCard['schedule']>): str
   }
 }
 
-const ACTIVE: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 const STOPPED: ReadonlySet<string> = new Set(STOPPED_STATUSES);
 
-/** A card is pending or running: its state line reads "Searching", it polls and Remove asks "Cancel and remove". */
+/** A card is pending or running: its run shows progress and Cancel, it polls and Remove asks "Cancel and remove". */
 export function isActive(card: SearchCard): boolean {
-  return card.latestRun !== null && ACTIVE.has(card.latestRun.status);
+  return card.latestRun !== null && IN_FLIGHT.has(card.latestRun.status);
+}
+
+/** The latest run stopped or was skipped (`STOPPED_STATUSES`): `RunProgress` words its stop. */
+export function isStopped(card: SearchCard): boolean {
+  return card.latestRun !== null && STOPPED.has(card.latestRun.status);
+}
+
+/** A run that settled by itself: completed (the one status that is neither in flight, nor stopped). */
+const isFinished = (run: NonNullable<SearchCard['latestRun']>): boolean =>
+  !IN_FLIGHT.has(run.status) && !STOPPED.has(run.status);
+
+/**
+ * An airport named as the mockup does ("Heathrow", "JFK", "Newark"): the table's own short name without its city's name
+ * in front ("London Heathrow" reads "Heathrow"), the code when the table does not know the airport (yet) or the name
+ * is only its city.
+ */
+export function airportLabel(code: string, row: AirportRow | undefined): string {
+  if (row === undefined) return code;
+  const short = shortAirportName(row.name);
+  const rest = short.startsWith(`${row.city} `) ? short.slice(row.city.length + 1).trim() : short;
+  return rest === '' ? code : rest;
 }
 
 /**
- * What a card's state line says: plain words or a stop (the sentence as-is, with its fix), and the `kind` of state, which
- * the card's screen-reader line announces (the counts change every poll and are not announced).
+ * The card's one meta line (mockup 01): the route's codes, the window, the stay, and when a finished run is on record
+ * "searched 3h ago". Only a finished run is "searched"; a running, stopped or never-run search says nothing of when.
  */
-export type StateLine =
-  | { kind: 'searching' | 'flights' | 'changed' | 'searched' | 'never'; words: string }
-  | { kind: 'stopped'; stop: StopWords };
+export function metaParts(
+  card: SearchCard,
+  now: IsoDateTime,
+  airports: ReadonlyMap<string, AirportRow>,
+): string[] {
+  const run = card.latestRun;
+  const at = run !== null && isFinished(run) ? (run.finishedAt ?? run.startedAt) : null;
+  return [
+    S.codes(
+      card.origins.map((c) => airportLabel(c, airports.get(c))).join(', '),
+      card.destinations.map((c) => airportLabel(c, airports.get(c))).join(', '),
+    ),
+    card.window.kind === 'relative' ? windowText(card.window) : S.leaveWindow(windowText(card.window)),
+    COPY.datesView.scopeNights(card.minNights, card.maxNights),
+    ...(at === null ? [] : [S.searchedMeta(formatAgo(hoursSince(at, now)))]),
+  ];
+}
+
+/** What the card's trips list is called: "Cheapest trips, <name>", or the previous search's while one runs. */
+export function tripsLabel(card: SearchCard): string {
+  return isActive(card) && card.trips.length > 0 && card.trips.every((t) => t.figure.fromEarlierSearch)
+    ? S.previousRun
+    : S.tripsLabel(card.name);
+}
+
+/** The reasons of Ruling 8, in the order the first that applies is chosen. */
+export type NothingFound =
+  | { kind: 'stopped-before'; dates: number }
+  | { kind: 'browser-unavailable'; dates: number }
+  | { kind: 'couldnt-read'; dates: number }
+  | { kind: 'browser-off' }
+  | { kind: 'no-price-shown' }
+  | { kind: 'none-fit' }
+  | { kind: 'nothing' };
 
 /**
- * The card's state line (spec rev 55 §11): "Searching · 120 of 405 date pairs · about 1h 40m left" while pending or
- * running (no "left" clause without `estimatedFinishAt`), "Reading flights · 3 of 10" once flights are planned and read
- * below planned, the stop's sentence as-is with its fix when the latest run stopped (`NO_STOP_CAUSE_TEXT` when the read
- * carried none), "Dates changed since this was last searched" for a completed run of an earlier space (ruling R-changed:
- * the card has no count over the current space, so none is stated), "Searched 2h ago", and "Not searched yet" for a
- * search with no run (or a finished one with no recorded time).
+ * Ruling 8: why a card whose latest run finished, with no trip and no lower-on-calendar figure, shows nothing; the first
+ * that applies, or null when the card is not in that state. A run that was cancelled or stopped gives its own stop
+ * sentence (`RunProgress` words it), so none is chosen here. The marks cover the run's own dates, so once the search's
+ * dates changed (`spaceChangedSince`) none that counts them is chosen: the card says the dates changed instead.
+ *
+ * - dates not searched, or not reached for a reason other than the browser: "The search stopped before N dates."
+ * - the browser was unavailable for N dates
+ * - N dates couldn't be read
+ * - the browser is off for this search (its sources found nothing)
+ * - every date showed no price
+ * - prices were found, but none fit the filters
  */
-export function stateLine(card: SearchCard, now: IsoDateTime): StateLine {
+export function nothingFound(card: SearchCard): NothingFound | null {
   const run = card.latestRun;
-  if (run === null) return { kind: 'never', words: S.notSearchedYet };
-  if (ACTIVE.has(run.status)) {
-    // why: ruling R-reading — the page's rule (`readingCount`): lists in hand, read now or reused
-    const reading = readingCount(run.flights);
-    if (run.status === 'running' && run.flights !== null && reading !== null)
-      // why: design 2026-11-08 §5.5 — confirm mode has no planned total to name: dates checked, trips with flights read
-      return {
-        kind: 'flights',
-        words:
-          run.flights.confirm?.mode === 'confirm'
-            ? S.readingFlightsConfirm(reading, run.flights.confirm.confirmed)
-            : S.readingFlights(reading, run.flights.planned),
-      };
-    return {
-      kind: 'searching',
-      words: S.searching(run.datePairsSearched, run.datePairs, leftWords(run.estimatedFinishAt, now)),
-    };
+  if (run === null || !isFinished(run)) return null;
+  if (card.trips.length > 0 || card.lowerOnCalendar !== null) return null;
+  const counted = !card.spaceChangedSince;
+  if (counted) {
+    const m = run.marks;
+    const before = m['not-searched'] + m['not-reached'] - run.browserUnavailable;
+    if (before > 0) return { kind: 'stopped-before', dates: before };
+    if (run.browserUnavailable > 0) return { kind: 'browser-unavailable', dates: run.browserUnavailable };
+    if (m['couldnt-read'] > 0) return { kind: 'couldnt-read', dates: m['couldnt-read'] };
   }
-  if (STOPPED.has(run.status)) return { kind: 'stopped', stop: run.stop ?? NO_STOP_CAUSE_TEXT };
-  if (card.spaceChangedSince) return { kind: 'changed', words: S.datesChanged };
-  const at = run.finishedAt ?? run.startedAt;
-  if (at === null) return { kind: 'never', words: S.notSearchedYet };
-  return { kind: 'searched', words: S.searchedAgo(formatAgo(hoursSince(at, now))) };
+  if (!card.discovery.includes('camoufox')) return { kind: 'browser-off' };
+  if (!counted) return { kind: 'nothing' };
+  if (run.datePairs > 0 && run.marks['no-price-shown'] === run.datePairs) return { kind: 'no-price-shown' };
+  if (run.marks.priced > 0) return { kind: 'none-fit' };
+  return { kind: 'nothing' };
 }
 
-/** "85 of 405 date pairs never searched" whenever that count is not zero, else null. */
-export function neverSearchedText(card: SearchCard): string | null {
-  const run = card.latestRun;
-  return run === null || run.datePairsNeverSearched === 0
-    ? null
-    : S.neverSearched(run.datePairsNeverSearched, run.datePairs);
-}
+const N = S.nothingFound;
 
-/** What the card's hidden live line says: the kind of state, or a stop's sentence (counts are never announced). */
-export function announcement(line: StateLine): string {
-  return line.kind === 'stopped' ? line.stop.sentence : S.stateKind[line.kind];
+/** A reason in words. */
+export function nothingFoundText(r: NothingFound): string {
+  switch (r.kind) {
+    case 'stopped-before':
+      return N.stoppedBefore(r.dates);
+    case 'browser-unavailable':
+      return N.browserUnavailable(r.dates);
+    case 'couldnt-read':
+      return N.couldntRead(r.dates);
+    case 'browser-off':
+      return N.browserOff;
+    case 'no-price-shown':
+      return N.noPriceShown;
+    case 'none-fit':
+      return N.noneFit;
+    case 'nothing':
+      return N.nothing;
+  }
 }

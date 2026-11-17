@@ -18,10 +18,11 @@ import {
 import type { Page } from '@playwright/test';
 
 /**
- * The performance test's world (spec §9 item 6, WP19 Task 19.9): a synthetic search and the responses the Dates view
+ * The performance test's world (spec §9 item 6, WP19 Task 19.9): a synthetic search and the responses a search's page
  * reads, every one parsed through `@gmt/core`'s contract schemas so the test serves only bodies the api could send.
  * The date-pairs bodies are built by core's `encodeDatePairs` from a decoded read, so they are the codec's own output.
- * Every price is the fixture provider's, `sourceKind: 'synthetic'` (spec §5.5).
+ * Every calendar price is the fixture provider's, `sourceKind: 'synthetic'` (spec §5.5); one date in thirteen is a trip
+ * with flights read, priced from the browser's flight list.
  */
 
 /** The instant the page's clock is installed at; every age and run time is relative to it. */
@@ -44,10 +45,11 @@ export interface PerfCase {
   /** Every date pair priced (true), or every seventh left unpriced with a mixture of the other buckets. */
   everyPriced: boolean;
   /**
-   * Every fifth priced date pair with one airport pair not searched yet, so the overview draws the "partly not
-   * searched" stripes (the marks test; the performance cases leave it out). Needs at least two airport pairs.
+   * Every second day of the window without a price on any of its stays, each such day one unpriced bucket in turn (no
+   * fares, no cached data, an error, skipped, not run), so the calendar draws every kind of day (the marks test; the
+   * performance cases leave it out).
    */
-  partly?: boolean;
+  unpricedDays?: boolean;
 }
 
 /**
@@ -93,7 +95,51 @@ const PROVENANCE = provenanceSchema.parse({
   cabin: 'economy',
 });
 
-/** A price for date pair `i`; `seed` changes the whole order, so a second read re-ranks every row. */
+/** The browser's flight-list provenance of the read trips (a real source, its own page, GBP, UK point of sale). */
+const FLIGHT_LIST = provenanceSchema.parse({
+  providerId: 'camoufox',
+  sourceKind: 'scraped-self',
+  fetchedAt: FETCHED,
+  maxAgeHours: 0,
+  fx: { converted: false },
+  pointOfSale: 'GB',
+  cabin: 'economy',
+});
+
+/**
+ * Whether date pair `i` is a trip with flights read (design 2026-11-08 Ruling 4): one in thirteen, so Cheapest trips
+ * has thousands of rows to page through ("Show 10 more") and Lower on the calendar its calendar prices below them.
+ */
+const isReadTrip = (i: number): boolean => i % 13 === 5;
+
+/** A read trip's pairing group (spec rev 56 §10): a seller's offer for both legs, as the api decodes it. */
+function pairingOf(pence: number): NonNullable<DatePairFigure['pairing']> {
+  return {
+    pricePence: pence,
+    fromPence: pence,
+    isFrom: false,
+    seller: 'QQ Travel',
+    fare: null,
+    offersRead: 3,
+    complete: true,
+    which: 'cheapest',
+    departOut: '07:15',
+    arriveOut: '18:05',
+    departBack: '14:20',
+    arriveBack: '06:25',
+    legs: {
+      out: { durationMinutes: 650, stops: 1, carriers: ['Aer Lingus'], arrivesDayOffset: 0 },
+      back: { durationMinutes: 725, stops: 0, carriers: ['Virgin Atlantic'], arrivesDayOffset: 1 },
+    },
+    mismatch: false,
+    provenance: FLIGHT_LIST,
+    stale: false,
+    ageHours: 1,
+    bookingUrl: null,
+  };
+}
+
+/** A price for date pair `i`; `seed` changes the whole order. */
 function priceOf(i: number, seed: number): number {
   // why: a multiplicative hash over £300–£799 in whole pounds; another seed moves every date pair's rank
   return 30_000 + ((i * 7_919 + seed * 104_729) % 500) * 100;
@@ -117,48 +163,53 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
   const { origins, destinations } = airports(c);
   const pairsOfAirports = sortedAirportPairs(origins, destinations);
   const airportPairs = pairsOfAirports.length;
+  const stays = c.maxNights - c.minNights + 1;
   const pairs: DatePair[] = Array.from({ length: datePairCount(space) }, (_x, i) => {
     const at = datePairAt(space, i);
-    const unpriced = !c.everyPriced && i % 7 === 3;
+    const day = Math.floor(i / stays);
+    const unpricedDay = c.unpricedDays === true && day % 2 === 1;
+    const unpriced = unpricedDay || (!c.everyPriced && i % 7 === 3);
     const which = i % airportPairs;
     const ap = pairsOfAirports[which] ?? pairsOfAirports[0];
+    const pence = priceOf(i, seed);
+    const read = isReadTrip(i);
     const figure: DatePairFigure | null =
       unpriced || ap === undefined
         ? null
         : {
             price: {
-              pricePence: priceOf(i, seed),
-              provenance: PROVENANCE,
+              // why: a read trip's price is its pairing's (£100 above the calendar price it replaced)
+              pricePence: read ? pence + 10_000 : pence,
+              provenance: read ? FLIGHT_LIST : PROVENANCE,
               stale: false,
               ageHours: 1,
               truncated: false,
             },
-            basis: 'calendar',
+            basis: read ? 'pairing' : 'calendar',
             origin: ap.origin,
             destination: ap.destination,
             airportPair: which,
             superseded: false,
             notSeenInLatest: null,
-            journeyMinutes: null,
+            journeyMinutes: read ? 650 + 725 : null,
             departOut: null,
             arriveOut: null,
             departBack: null,
             arriveBack: null,
             fromEarlierSearch: false,
             cheaperCached: null,
-            gridPrice: null,
-            pairing: null,
-            pairingRead: 'not-read',
+            gridPrice: read
+              ? { pricePence: pence, provenance: PROVENANCE, stale: false, truncated: false }
+              : null,
+            pairing: read ? pairingOf(pence + 10_000) : null,
+            pairingRead: read ? 'within' : 'not-read',
             listReason: null,
             hasBookingOptions: false,
           };
-    // why: an unpriced date pair carries each unpriced bucket in turn, so the overview draws every mark
-    const partly = c.partly === true && !unpriced && airportPairs > 1 && i % 5 === 0;
+    // why: an unpriced date pair (or day) carries each unpriced bucket in turn, so the calendar draws every mark
     const buckets: Buckets = unpriced
-      ? { ...NONE, ...unpricedBuckets(i, airportPairs) }
-      : partly
-        ? { ...NONE, priced: airportPairs - 1, not_run: 1 }
-        : { ...NONE, priced: airportPairs };
+      ? { ...NONE, ...unpricedBuckets(unpricedDay ? Math.floor(day / 2) : Math.floor(i / 7), airportPairs) }
+      : { ...NONE, priced: airportPairs };
     return {
       index: i,
       departureDate: at.departureDate,
@@ -182,6 +233,7 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
     discoveryProviders: ['fixture'],
     verificationProviderConfigured: false,
     staleAfterHours: 192,
+    pointOfSale: 'GB',
     space,
     scope: {
       origins,
@@ -207,12 +259,14 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
       reused: 0,
     },
     pairs,
+    // why: every figure here is a calendar price, so no verified figure has details (Ruling 2)
+    verifiedDetails: [],
   };
 }
 
-function unpricedBuckets(i: number, airportPairs: number): Partial<Buckets> {
+function unpricedBuckets(turn: number, airportPairs: number): Partial<Buckets> {
   const kinds = ['empty', 'no_data', 'error', 'skipped', 'not_run'] as const;
-  const k = kinds[Math.floor(i / 7) % kinds.length] ?? 'no_data';
+  const k = kinds[turn % kinds.length] ?? 'no_data';
   return { [k]: airportPairs };
 }
 
@@ -363,12 +417,10 @@ export function resultsBody(c: PerfCase): string {
   );
 }
 
-/** The running parent run; `tick` changes its progress, which the Dates view re-reads on (spec §11 Run landing). */
-export function executionBody(c: PerfCase, tick: number): string {
+/** The running parent run, ten cells from done: the page polls it as it would a real one. */
+export function executionBody(c: PerfCase): string {
   const total = c.days * (c.maxNights - c.minNights + 1) * c.origins.length * c.destinations.length;
-  // why: the run still has ten cells to search, and each tick searches one more, so every tick is a progress change
-  // the Dates view's re-read sees (spec §11 Run landing), whatever the case's figures
-  const priced = total - 10 + Math.min(10, tick);
+  const priced = total - 10;
   return JSON.stringify(
     apiContract.executionResponseSchema.parse({
       id: PERF_EXECUTION_ID,
@@ -392,15 +444,15 @@ export function executionBody(c: PerfCase, tick: number): string {
           total,
         },
       ],
-      budget: [usage('execution-calls', 1 + tick, 2000), usage('execution-free-calls', 1 + tick, 2000)],
+      budget: [usage('execution-calls', 1, 2000), usage('execution-free-calls', 1, 2000)],
       estimate: estimate(total),
       ledger: {
-        calls: 1 + tick,
+        calls: 1,
         costMicroGbp: 0,
         costPence: 0,
-        tiles: 1 + tick,
+        tiles: 1,
         cacheHits: 0,
-        perProvider: [{ providerId: 'fixture', stage: 'discovery', calls: 1 + tick, costMicroGbp: 0 }],
+        perProvider: [{ providerId: 'fixture', stage: 'discovery', calls: 1, costMicroGbp: 0 }],
       },
       parityBreak: false,
       overrun: false,
@@ -414,12 +466,10 @@ export function executionBody(c: PerfCase, tick: number): string {
 
 /**
  * Serves a case's bodies through the browser's route interception: the definition, providers, results, the running
- * execution (its progress from `state.tick`) and the date pairs (`state.datePairs`, which a test may swap for a
- * re-read). Any other api path answers 404 and is recorded in `state.unknown`.
+ * execution and the date pairs (`state.datePairs`). Any other api path answers 404 and is recorded in `state.unknown`.
  */
 export async function servePerfCase(page: Page, c: PerfCase) {
-  const bodies = { first: datePairsBody(c, 0), second: datePairsBody(c, 1) };
-  const state = { datePairs: bodies.first, tick: 0, unknown: new Set<string>() };
+  const state = { datePairs: datePairsBody(c, 0), unknown: new Set<string>() };
   const json = (body: string) => ({ status: 200, contentType: 'application/json', body });
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -428,8 +478,7 @@ export async function servePerfCase(page: Page, c: PerfCase) {
     if (path === `/api/definitions/${PERF_DEFINITION_ID}/date-pairs`)
       return route.fulfill(json(state.datePairs));
     if (path === `/api/definitions/${PERF_DEFINITION_ID}/results`) return route.fulfill(json(resultsBody(c)));
-    if (path === `/api/executions/${PERF_EXECUTION_ID}`)
-      return route.fulfill(json(executionBody(c, state.tick)));
+    if (path === `/api/executions/${PERF_EXECUTION_ID}`) return route.fulfill(json(executionBody(c)));
     state.unknown.add(path);
     return route.fulfill({
       status: 404,
@@ -437,5 +486,5 @@ export async function servePerfCase(page: Page, c: PerfCase) {
       body: JSON.stringify({ error: { code: 'not_found', message: 'not served by the performance test' } }),
     });
   });
-  return { bodies, state };
+  return { state };
 }

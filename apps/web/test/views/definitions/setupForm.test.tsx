@@ -7,18 +7,12 @@ import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { BudgetFitPanel } from '../../../src/views/Definitions/EstimatePanel.js';
-import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
 import { API, definition, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
 const D = SETUP_COPY.definitions;
 const S = SETUP_COPY.schedule;
-
-function zeroCallPresets() {
-  const base = providersResponse();
-  return { ...base, presets: { ...base.presets, budget: { ...base.presets.budget, maxCalls: 0 } } };
-}
 
 // why: these tests are about the fields, not the estimate's debounce, so it is injected as 0 (searches/form.test.tsx
 // steps the real one on the fake clock); the Edit page holds every field the new-search form has, and the schedule
@@ -42,10 +36,21 @@ async function openAdvanced(user: ReturnType<typeof renderForm>['user']) {
   await user.click(screen.getByText(PLAN_COPY.moreOptions));
 }
 
+/** Edit's Limits and checks fold (design 2026-11-08 Ruling 13): the constraints, checking fares and the run budget. */
+async function openLimits(user: ReturnType<typeof renderForm>['user']) {
+  await user.click(screen.getByText(COPY.newSearch.limitsHeading));
+}
+
+/** Repeat's Other (Ruling 14): the schedule picker, under More options. */
+async function openPicker(user: ReturnType<typeof renderForm>['user']) {
+  await openAdvanced(user);
+  await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'other');
+}
+
 describe('plain labels, each with a short hint (critique heuristic 2)', () => {
   it('names the policy fields in plain words and keeps the spec terms in their hints', async () => {
     const { user } = renderForm();
-    await openAdvanced(user);
+    await openLimits(user);
     expect(screen.getByRole('group', { name: D.policyHeading })).toBeInTheDocument();
     expect(screen.getByText(D.policyIntro)).toBeInTheDocument();
     for (const [label, hint] of [
@@ -65,8 +70,9 @@ describe('plain labels, each with a short hint (critique heuristic 2)', () => {
     // no jargon label is left on the form
     for (const old of ['Max cells per run', 'Top N by discovery price', 'Outbounds expanded per cell'])
       expect(screen.queryByText(old)).toBeNull();
-    expect(screen.getByText(D.discoveryProviders)).toBeInTheDocument();
-    expect(screen.getByText(D.verificationProviders)).toBeInTheDocument();
+    // which sources a search uses is Where to look's (Ruling 13), never a tick per stage here
+    expect(screen.getByRole('group', { name: COPY.newSearch.whereToLook })).toBeInTheDocument();
+    expect(document.querySelector('[id^="p-d-"], [id^="p-v-"]')).toBeNull();
   });
 
   it('the Name field does not stretch the full width', () => {
@@ -77,8 +83,9 @@ describe('plain labels, each with a short hint (critique heuristic 2)', () => {
 
 describe('Max billed calls per run 0 explains itself where it appears', () => {
   it('beside the field: why SearchApi does not run, and how to raise it', async () => {
-    const { user } = renderWithProviders(<NewSearchForm providers={zeroCallPresets()} debounceMs={0} />);
-    await openAdvanced(user);
+    const zero = definition({ budget: { ...definition().budget, maxCalls: 0 } });
+    const { user } = renderForm(zero);
+    await openLimits(user);
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveValue('0');
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveAccessibleDescription(D.maxCallsZero);
     await user.clear(screen.getByLabelText(COPY.maxCalls));
@@ -123,14 +130,10 @@ describe('journey time in hours and minutes', () => {
   });
 });
 
-describe('the schedule picker', () => {
-  it('a search with no schedule shows none; Weekly starts on Mondays at 05:00, in words', async () => {
+describe('the schedule picker (Repeat’s Other, Ruling 14)', () => {
+  it('Other on a search with no schedule opens the picker on Mondays at 05:00, in words (fix round 2)', async () => {
     const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
-    await openAdvanced(user);
-    // why: spec rev 55 §8.2: a new search has no schedule
-    expect(screen.getByLabelText(S.repeat)).toHaveValue('none');
-    expect(screen.getByText(S.none)).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
+    await openPicker(user);
     expect(screen.getByLabelText(S.repeat)).toHaveValue('weekly');
     expect(screen.getByRole('checkbox', { name: 'Mon' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Thu' })).not.toBeChecked();
@@ -141,7 +144,7 @@ describe('the schedule picker', () => {
   it('weekly days, daily, none and custom each send their cron', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
-    await openAdvanced(user);
+    await openPicker(user);
     // why: each change asks for the estimate itself; the last body asked for carries the picked cron
     const sent = (cron: string | null) =>
       waitFor(() => expect(bodies.at(-1)).toMatchObject({ scheduleCron: cron }));
@@ -161,14 +164,16 @@ describe('the schedule picker', () => {
     expect(screen.getByText('On the cron schedule "*/30 6 1 * *" (Europe/London)')).toBeInTheDocument();
     await sent('*/30 6 1 * *');
 
+    // "No schedule" in the picker stops repeating: Repeat reads Never under it
     await user.selectOptions(screen.getByLabelText(S.repeat), 'none');
     expect(screen.getByText(S.none)).toBeInTheDocument();
+    expect(screen.getByLabelText(COPY.newSearch.repeat)).toHaveValue('never');
     await sent(null);
   });
 
   it('a weekly schedule with every day unticked says so and holds both presses, with the reason', async () => {
     const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
-    await openAdvanced(user);
+    await openPicker(user);
     await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     await user.click(screen.getByRole('checkbox', { name: 'Mon' }));
     expect(screen.getByText(S.noDays)).toBeInTheDocument();
@@ -184,6 +189,10 @@ describe('the schedule picker', () => {
   it('a saved custom cron is kept as it is until the operator changes it', async () => {
     const { user } = renderForm(definition({ scheduleCron: '0 5 1,15 * *' }));
     await openAdvanced(user);
+    expect(
+      screen.getByText('Other: On the cron schedule "0 5 1,15 * *" (Europe/London)'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: COPY.newSearch.repeatChangeName }));
     expect(screen.getByLabelText(S.repeat)).toHaveValue('custom');
     expect(screen.getByLabelText(S.cron)).toHaveValue('0 5 1,15 * *');
   });

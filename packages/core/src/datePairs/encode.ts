@@ -1,13 +1,13 @@
 import type { z } from 'zod';
 import type { CoverageSummary, ExecutionSummary, priceCellSchema } from '../api-contract/common.js';
-import type { DatePairsResponse } from '../api-contract/datePairs.js';
+import type { DatePairsResponse, VerifiedDetail } from '../api-contract/datePairs.js';
 import type { StopDetail } from '../api-contract/stopCause.js';
 import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
-import type { Provenance, ProviderId } from '../types/provenance.js';
+import type { PointOfSale, Provenance, ProviderId } from '../types/provenance.js';
 import type { GridPrice } from './figure.js';
-import { type FigureBasis, PAIRING_READ, type PairingRead } from './pairing.js';
+import { type FigureBasis, type LegFacts, PAIRING_READ, type PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
 
 /**
@@ -32,6 +32,8 @@ export interface DatePairPairing {
   arriveOut: string;
   departBack: string;
   arriveBack: string;
+  /** each way's journey time, changes and airlines, as the list page states them */
+  legs: { out: LegFacts; back: LegFacts };
   mismatch: boolean;
   provenance: Provenance;
   stale: StaleMark;
@@ -119,11 +121,15 @@ export interface DecodedDatePairs {
   discoveryProviders: ProviderId[];
   verificationProviderConfigured: boolean;
   staleAfterHours: number;
+  /** the install's POINT_OF_SALE: the market of the search link a trip without a booking falls back to */
+  pointOfSale: PointOfSale;
   space: DatePairSpace;
   scope: DatePairsResponse['scope'];
   summary: CoverageSummary;
   /** every date pair, index order */
   pairs: DatePair[];
+  /** Ruling 2: each current verified figure's legs and booking, in index order, from its own result row */
+  verifiedDetails: VerifiedDetail[];
 }
 
 /** A canonical string of a JSON-like value: every key at every depth, sorted. */
@@ -155,7 +161,7 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
  * times, booking options, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed
  * by the figure's position (spec rev 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an
- * absent one written `not-read`).
+ * absent one written `not-read`); each current verified figure's details as they are (Ruling 2).
  * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
@@ -225,6 +231,14 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     arriveOut: [],
     departBack: [],
     arriveBack: [],
+    outMinutes: [],
+    outStops: [],
+    outCarriers: [],
+    outArrivesDayOffset: [],
+    backMinutes: [],
+    backStops: [],
+    backCarriers: [],
+    backArrivesDayOffset: [],
     mismatch: [],
     provenance: [],
     stale: [],
@@ -331,6 +345,14 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairing.arriveOut.push(q.arriveOut);
       pairing.departBack.push(q.departBack);
       pairing.arriveBack.push(q.arriveBack);
+      pairing.outMinutes.push(q.legs.out.durationMinutes);
+      pairing.outStops.push(q.legs.out.stops);
+      pairing.outCarriers.push(q.legs.out.carriers);
+      pairing.outArrivesDayOffset.push(q.legs.out.arrivesDayOffset);
+      pairing.backMinutes.push(q.legs.back.durationMinutes);
+      pairing.backStops.push(q.legs.back.stops);
+      pairing.backCarriers.push(q.legs.back.carriers);
+      pairing.backArrivesDayOffset.push(q.legs.back.arrivesDayOffset);
       pairing.mismatch.push(q.mismatch);
       pairing.provenance.push(entry(q.provenance));
       pairing.stale.push(q.stale);
@@ -345,6 +367,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     discoveryProviders: d.discoveryProviders,
     verificationProviderConfigured: d.verificationProviderConfigured,
     staleAfterHours: d.staleAfterHours,
+    pointOfSale: d.pointOfSale,
     // why: copied field by field, so a caller passing a whole ResolvedSpace never puts its airports on the wire
     space: {
       departureFrom: space.departureFrom,
@@ -370,5 +393,6 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     pairing,
     pairingRead,
     listReason,
+    verifiedDetails: d.verifiedDetails,
   };
 }

@@ -24,10 +24,10 @@ export const sourceKindSchema = z.enum([
   'synthetic',
 ]);
 export const cabinSchema = z.enum(['economy', 'premium_economy', 'business', 'first']);
-export const pointOfSaleSchema = z
-  .string()
-  .regex(/^[A-Z]{2}$/)
-  .or(z.literal('unknown'));
+/** A market: a two-letter country code, or `unknown`; a missing one is refused in words, never "Invalid input". */
+export const pointOfSaleSchema = z.union([z.string().regex(/^[A-Z]{2}$/), z.literal('unknown')], {
+  error: 'a point of sale is a two-letter country code or unknown',
+});
 
 /** Spec §3 "Provenance". `rateNano` = GBP per 1 native unit × 1e9 (spec §6.3). */
 export type FxInfo =

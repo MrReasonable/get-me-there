@@ -12,7 +12,6 @@ export type ExecutionResponse = z.output<typeof apiContract.executionResponseSch
 export type ResultsResponse = z.output<typeof apiContract.resultsResponseSchema>;
 export type ExecutionSummary = z.output<typeof apiContract.executionSummarySchema>;
 export type CoverageResponse = z.output<typeof apiContract.coverageResponseSchema>;
-export type CalendarGapResponse = z.output<typeof apiContract.calendarGapResponseSchema>;
 export type AirportsResponse = z.output<typeof apiContract.airportsResponseSchema>;
 export type PriceCellData = z.output<typeof apiContract.priceCellSchema>;
 export type UsageRow = z.output<typeof apiContract.usageSchema>;
@@ -61,3 +60,6 @@ export type TripQuery = z.input<typeof apiContract.tripQuerySchema>;
 
 /** Design 2026-11-08 §6.1: one trip's dates in one call (`GET /definitions/:id/trip`). */
 export type TripResponse = z.output<typeof apiContract.tripResponseSchema>;
+
+/** `GET /budget`: every scope's usage and the month's cap. */
+export type BudgetResponse = z.output<typeof apiContract.budgetResponseSchema>;

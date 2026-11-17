@@ -1,45 +1,57 @@
 import { COPY } from '../src/copy.js';
 
-const D = COPY.datesView;
-const OVERVIEW = '[data-testid="dates-overview"]';
+const P = COPY.searchPage;
+const C = COPY.calendar;
+const MONTHS = '[data-testid="calendar-months"]';
 
 /**
- * What the Playwright smoke looks for on the Dates view, the Trip page and the nav, shared with the jsdom test
- * that proves each one matches the markup (test/e2e/selectors.test.tsx; review arch2-001, ui-r2-002): the smoke needs
- * a running api, so it cannot run in `pnpm test`, but its selectors can never drift from the components (WP19 Task
+ * What the Playwright smoke looks for on a search's page, the Trip page and the nav, shared with the jsdom test that
+ * proves each one matches the markup (test/e2e/selectors.test.tsx; review arch2-001, ui-r2-002): the smoke needs a
+ * running api, so it cannot run in `pnpm test`, but its selectors can never drift from the components (WP19 Task
  * 19.9).
  */
 export const SMOKE = {
-  /** The board: a table captioned "Best dates" (its caption goes on with the order note and the shown count). */
-  boardTable: /^Best dates/,
-  /** A board row: each carries its date pair's index. */
-  boardRow: 'tr[data-pair]',
-  /** A board row's link to its Trip page ("Open 14 Mar 2027 to 28 Mar 2027"). */
-  rowLink: /^Open \d{1,2} [A-Z][a-z]{2} \d{4} to \d{1,2} [A-Z][a-z]{2} \d{4}$/,
-  /** The overview's one tab stop (roving tabindex). */
-  overviewTabStop: `${OVERVIEW} [data-cell][tabindex="0"]`,
-  /** Every overview cell. */
-  overviewCell: `${OVERVIEW} [data-cell]`,
-  /** A cell ringed because its date pair is a shown board row (spec §11 Rings). */
-  ringedCell: `${OVERVIEW} [data-cell][data-ringed]`,
-  /** The cell lit from the board, or lit itself. */
-  litCell: `${OVERVIEW} [data-cell][data-lit]`,
-  /** A cell's glyphs: one per mark it carries. */
-  cellGlyphs: '[data-testid="cell-glyphs"]',
-  legend: '[data-testid="dates-legend"]',
-  /** Each mark of the legend, with its glyph in `legendGlyph`. */
-  legendMark: '[data-testid="dates-legend"] [data-mark]',
-  legendGlyph: '[data-testid="legend-glyph"]',
-  readout: '[data-testid="dates-readout"]',
-  openThese: D.overview.openThese,
-  /** A board row as a stacked card below 900 px. */
-  phoneCard: '[data-testid="board-card"]',
-  previousMonth: D.overview.previousMonth,
-  nextMonth: D.overview.nextMonth,
-  coverageToggle: D.coverageToggle,
-  /** The nav, labelled "Views", with its two tiers as lists labelled by their names. */
+  /** Design 2026-11-08 §5.2: the two sections, each a region named by its heading. */
+  cheapestTrips: P.cheapestHeading,
+  lowerOnCalendar: P.lowerHeading,
+  /** The shared rows (Ruling 20): a trip, and a calendar price. */
+  tripRow: '[data-testid="trip-row"]',
+  calendarRow: '[data-testid="calendar-row"]',
+  /** A trip row's › to its Trip page ("Details for Sun 14 Mar → Wed 24 Mar", a pair before the dates when several). */
+  detailsLink: /^Details for /,
+  /** The run line under the header ("Searched today 16:40–17:02 · calendar prices for … · what was searched"). */
+  runLine: '[data-testid="dates-run"]',
+  /** The one filter row (Ruling 16), a group named "Filter". */
+  filterRow: P.filterLabel,
+  /** Lower on the calendar's link down to the calendar, and the calendar's anchor. */
+  seeAll: P.seeAll,
+  calendar: '#calendar',
+  /** The calendar's one tab stop (roving tabindex), a day's button (Ruling 18). */
+  calendarTabStop: `${MONTHS} button[data-day][tabindex="0"]`,
+  /** Every day of the window, each a button named by its date and what it shows. */
+  calendarDay: `${MONTHS} button[data-day]`,
+  /** A day that prints a price (inside a PriceCell), and one that prints the trip's dot. */
+  pricedDay: `${MONTHS} button[data-day][data-heat]`,
+  tripDay: `${MONTHS} button[data-day][data-trip]`,
+  /** The key: a list named "Key" with its five items. */
+  calendarKey: C.key.label,
+  /** The day panel: a region named "Sun 14 Mar: 3 stays", its Close and its "Show N more stays". */
+  dayPanel: /^\w{3} \d{1,2} \w{3}: \d+ stays?$/,
+  dayClose: C.close,
+  showMoreStays: /^Show \d+ more stays?$/,
+  previousMonth: C.previousMonth,
+  nextMonth: C.nextMonth,
+  /** The three folds under the calendar (Ruling 19): one group, a row for each, named by its summary's first words. */
+  folds: COPY.searchPage.folds.groupLabel,
+  priceFold: COPY.searchPage.folds.priceOverTime,
+  searchedFold: COPY.searchPage.folds.searched,
+  alertFold: COPY.searchPage.folds.alert,
+  fullLog: COPY.searchPage.folds.fullLog,
+  /** The nav, labelled "Main", with its two links: Trips and Settings (design 2026-11-08 Ruling 9). */
   nav: COPY.navLabel,
-  navTiers: [COPY.navTier.decide, COPY.navTier.setup],
+  navItems: [COPY.nav.trips, COPY.nav.settings],
+  /** The breadcrumb: a nav named "Breadcrumb" holding an ordered list (Ruling 12). */
+  crumbs: COPY.crumbsLabel,
   navCurrent: '[aria-current="page"]',
   /** The Trip page (design 2026-11-08 §6.1): its answer card, named; its breadcrumb back to the search; its folds. */
   tripPage: '[data-testid="trip-page"]',
@@ -48,24 +60,18 @@ export const SMOKE = {
   priceLabel: '[data-testid="price-label"] > summary',
   aboutPrice: '[data-testid="about-price"] > summary',
   searchLog: '[data-testid="search-log"] > summary',
-  /** The new-search form (WP20): the form that holds the From picker; at 900 px and narrower it is first in the DOM. */
+  /** The new-search form (WP20): the form that holds the From picker, inside the panel after the cards (Ruling 13). */
   newSearchForm: 'form:has(#origins-input)',
-  /** The press that starts a search: the new-search form's, a card's and the page's (Search again) share the verb. */
-  searchNow: /^Search now/,
+  /** The new-search panel: the region named by its "New search" heading, holding the form. */
+  newSearchPanel: '[aria-labelledby="new-search-heading"]',
+  /** The panel's press: "Search", or "Search · <cost>" on a run that costs (Ruling 13). */
+  searchNow: /^Search( · .+)?$/,
   /** The search page's state line, read by a screen reader as a status named "Search state". */
   stateLine: COPY.searchPage.stateLabel,
   /** One search's card on the Searches view. */
   searchCard: '[data-card]',
   /** A card's actions: its links and buttons. */
   cardAction: '[data-card] [data-testid="card-actions"] :is(a, button)',
-  /** The flights block of a date pair on a search's page (absent where flight lists cannot be read). */
-  flightsBlock: '[data-testid="flights-block"]',
-  /**
-   * The pairing section of a read list: the Back line, the other returns and the seller's price (WP21 Task 21.8). The
-   * fixture-only smoke cannot show one (the fixture provider has no flight lists), so no e2e run uses it; the jsdom
-   * test pins that it matches a rendered block with returns.
-   */
-  pairing: '[data-testid="flights-pairing"]',
-  /** The one line under the board when flight lists cannot be read here. */
+  /** The one line under Lower on the calendar when flight lists cannot be read here (no row offers a read). */
   flightsUnavailable: '[data-testid="flights-unavailable"]',
 } as const;

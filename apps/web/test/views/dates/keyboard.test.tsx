@@ -1,225 +1,220 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { asIsoDate } from '@gmt/core';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { CELL_FOCUS } from '../../../src/views/Dates/OverviewMonth.js';
 import { at, DATES_SPACE, type DatesOptions, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
+import { definition } from '../../fixtures.js';
 import { flightPair } from '../../fixtures.searches.js';
 import { serveFlightLists } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
-import { findBoard, renderDates } from './render.js';
+import { dayButton, findCalendar, findDayPanel, renderDates } from './render.js';
 
-// Spec §11 Overview "Keyboard" and Accessibility: the overview is one tab stop with a roving tabindex, the arrow,
-// page and home/end keys move through it, Enter opens the detail (or a closed band), focus is always visible, and Tab
-// reaches the view's controls in their reading order.
+// Ruling 18 (Task 9) and spec §11 Accessibility: the calendar is one tab stop with a roving tabindex; the arrow, page
+// and home/end keys move between days; Enter opens the day panel with focus on its heading and Escape returns it to the
+// day; focus is always visible; Tab reaches the page's controls in their reading order.
 
-const focused = () => document.activeElement?.getAttribute('data-cell') ?? null;
-const url = () => new URLSearchParams(window.location.search);
+const focused = () => document.activeElement?.getAttribute('data-day') ?? null;
 const stops = () =>
-  [...document.querySelectorAll('[data-cell]')].filter((c) => c.getAttribute('tabindex') === '0');
+  [...document.querySelectorAll('button[data-day]')].filter((c) => c.getAttribute('tabindex') === '0');
 
-async function focusOverview(o: DatesOptions = workedDates()) {
+async function focusCalendar(o: DatesOptions = workedDates()) {
   const r = renderDates({ body: o });
-  await findBoard();
+  await findCalendar();
   const first = stops()[0];
   if (!(first instanceof HTMLElement)) throw new Error('no tab stop');
   first.focus();
   return r;
 }
 
-describe('the overview’s keyboard (spec §11)', () => {
-  it('is one tab stop, the first cell until another is focused, then that one', async () => {
-    const { user } = await focusOverview();
+describe('the calendar’s keyboard (Ruling 18)', () => {
+  it('is one tab stop, the first day until another is focused, then that one', async () => {
+    const { user } = await focusCalendar();
     expect(stops()).toHaveLength(1);
-    expect(focused()).toBe('2027-03-14|10');
+    expect(focused()).toBe('2027-03-14');
     await user.keyboard('{ArrowRight}');
-    expect(stops().map((s) => s.getAttribute('data-cell'))).toEqual(['2027-03-14|11']);
+    expect(stops().map((s) => s.getAttribute('data-day'))).toEqual(['2027-03-15']);
+    expect(focused()).toBe('2027-03-15');
   });
 
-  it('Left and Right go by reading order: the day’s stays, then the next day, across a month end', async () => {
-    const { user } = await focusOverview();
-    await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}');
-    expect(focused()).toBe('2027-03-15|10');
+  it('Left and Right go a day, across a month end; the window’s ends hold focus', async () => {
+    const { user } = await focusCalendar();
     await user.keyboard('{ArrowLeft}');
-    expect(focused()).toBe('2027-03-14|12');
-    document.querySelector<HTMLElement>('[data-cell="2027-03-31|12"]')?.focus();
+    expect(focused()).toBe('2027-03-14'); // 13 Mar is before the window
+    dayButton('2027-03-31').focus();
     await user.keyboard('{ArrowRight}');
-    expect(focused()).toBe('2027-04-01|10');
+    expect(focused()).toBe('2027-04-01');
+    dayButton('2027-04-13').focus();
+    await user.keyboard('{ArrowRight}');
+    expect(focused()).toBe('2027-04-13');
   });
 
-  it('Up and Down move a week at the same stay; Home and End go to the day’s ends', async () => {
-    const { user } = await focusOverview();
-    await user.keyboard('{ArrowRight}{ArrowDown}');
-    expect(focused()).toBe('2027-03-21|11');
+  it('Up and Down move a week; Home and End go to the week’s ends inside the window', async () => {
+    const { user } = await focusCalendar();
+    await user.keyboard('{ArrowDown}');
+    expect(focused()).toBe('2027-03-21');
     await user.keyboard('{ArrowUp}');
-    expect(focused()).toBe('2027-03-14|11');
+    expect(focused()).toBe('2027-03-14');
+    dayButton('2027-03-17').focus();
     await user.keyboard('{End}');
-    expect(focused()).toBe('2027-03-14|12');
+    expect(focused()).toBe('2027-03-21'); // Sunday ends the week (Monday first)
     await user.keyboard('{Home}');
-    expect(focused()).toBe('2027-03-14|10');
+    expect(focused()).toBe('2027-03-15');
   });
 
-  it('PageUp and PageDown move a month at the same stay, clamped, and focus stays put outside the window', async () => {
-    const { user } = await focusOverview({
+  it('PageUp and PageDown move a month, clamped, and focus stays put outside the window', async () => {
+    const { user } = await focusCalendar({
       space: { ...DATES_SPACE, departureTo: asIsoDate('2027-05-20') },
       pairs: { [at('2027-03-14', 10)]: pricedPair(priced(30_000)) },
     });
     await user.keyboard('{PageUp}');
-    expect(focused()).toBe('2027-03-14|10'); // 14 Feb is before the window
-    document.querySelector<HTMLElement>('[data-cell="2027-03-31|11"]')?.focus();
+    expect(focused()).toBe('2027-03-14'); // 14 Feb is before the window
+    dayButton('2027-03-31').focus();
     await user.keyboard('{PageDown}');
-    expect(focused()).toBe('2027-04-30|11');
+    expect(focused()).toBe('2027-04-30');
     await user.keyboard('{PageDown}');
-    expect(focused()).toBe('2027-04-30|11'); // 30 May is after the window
+    expect(focused()).toBe('2027-04-30'); // 30 May is after the window
     await user.keyboard('{PageUp}');
-    expect(focused()).toBe('2027-03-30|11');
+    expect(focused()).toBe('2027-03-30');
   });
 
   // ported from the Calendar's grid test (review ui M7, WP19 Task 19.8): on a phone one month is drawn, so a key that
-  // leaves it turns the overview to the month it lands in, and focus follows
+  // leaves it turns the calendar to the month it lands in, and focus follows
   it('at phone width a key that leaves the drawn month shows the month it lands in', async () => {
     setViewportWidth(375);
     const { user } = renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
+    await findCalendar();
     const months = () => [
       ...new Set(
-        [...document.querySelectorAll<HTMLElement>('[data-cell]')].map((c) => c.dataset.date?.slice(0, 7)),
+        [...document.querySelectorAll<HTMLElement>('button[data-day]')].map((c) =>
+          c.dataset.day?.slice(0, 7),
+        ),
       ),
     ];
     expect(months()).toEqual(['2027-03']);
-    const last = document.querySelector<HTMLElement>('[data-cell="2027-03-31|12"]');
-    if (last === null) throw new Error('no cell');
-    last.focus();
+    dayButton('2027-03-31').focus();
     await user.keyboard('{ArrowRight}');
     expect(months()).toEqual(['2027-04']);
-    expect(focused()).toBe('2027-04-01|10');
+    expect(focused()).toBe('2027-04-01');
+    await user.keyboard('{ArrowLeft}');
+    expect(months()).toEqual(['2027-03']);
+    expect(focused()).toBe('2027-03-31');
   });
 
-  it('Enter on a cell opens the Trip page with the date pair in the URL', async () => {
-    const { user } = await focusOverview();
+  it('Enter opens the day panel with focus on its heading; Escape returns focus to the day', async () => {
+    const { user } = await focusCalendar();
     await user.keyboard('{ArrowRight}{Enter}');
-    expect([url().get('view'), url().get('depart'), url().get('return')]).toEqual([
-      'trip',
-      '2027-03-14',
-      '2027-03-25',
-    ]);
+    const panel = await findDayPanel('Mon 15 Mar: 3 stays');
+    expect(within(panel).getByRole('heading')).toHaveFocus();
+    // the URL stays on the search's page: a day opens its panel, never the Trip page
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('dates');
+    await user.keyboard('{Escape}');
+    expect(focused()).toBe('2027-03-15');
+    expect(stops().map((s) => s.getAttribute('data-day'))).toEqual(['2027-03-15']);
   });
 
-  it('Enter on a closed band opens the band; the arrows then walk its stays', async () => {
-    const wide: DatesOptions = {
-      space: { ...DATES_SPACE, maxNights: 22 },
-      pairs: { [at('2027-03-14', 13)]: pricedPair(priced(30_000)) },
-    };
-    const { user } = await focusOverview(wide);
-    await user.keyboard('{ArrowRight}{Enter}');
-    expect(url().get('view')).toBe('dates');
-    expect(document.querySelector('[data-cell="2027-03-14|13"]')).not.toBeNull();
-    expect(focused()).toBe('2027-03-14|12');
-    await user.keyboard('{ArrowRight}');
-    expect(focused()).toBe('2027-03-14|13');
+  it('Space opens it too (a day is a real button)', async () => {
+    const { user } = await focusCalendar();
+    await user.keyboard(' ');
+    expect(await findDayPanel('Sun 14 Mar: 3 stays')).toBeInTheDocument();
   });
 
-  it('focus is always visible: every cell carries a solid outline on focus', async () => {
-    await focusOverview();
-    expect(CELL_FOCUS).toContain('focus-visible:outline-solid');
-    expect(CELL_FOCUS).toContain('focus-visible:outline-2');
-    for (const c of document.querySelectorAll('[data-cell]')) expect(c.className).toContain(CELL_FOCUS);
+  // why: jsdom computes no focus ring; the rule that draws it is the calendar's stylesheet's
+  it('focus is always visible: the stylesheet draws a solid ring on a focused day', () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/views/Dates/dates.css'), 'utf8');
+    expect(css).toMatch(/\.cal-day:focus-visible\s*\{[^}]*outline: 2px solid var\(--t-focus\)/);
   });
 });
 
-describe('Tab order across the view (spec §11 Accessibility)', () => {
-  it('the header’s line and its actions, the filters, the board’s sort buttons, each row’s link, Show 10 more, the overview’s one stop, then the coverage toggle', async () => {
-    const { user } = renderDates({ body: workedDates() });
-    await findBoard();
+describe('Tab order across the page (spec §11 Accessibility; mockup 02)', () => {
+  it("the crumbs, the actions, the run line's link, the filter row, the trips, the lower dates, the calendar's one stop, then the first fold's summary", async () => {
+    const { user } = renderDates({
+      body: {
+        ...workedDates(),
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(priced(41_200, { basis: 'verified' })),
+          [at('2027-03-15', 10)]: pricedPair(priced(30_000)),
+        },
+      },
+    });
+    await findCalendar();
     await screen.findByTestId('dates-run');
     const seen: string[] = [];
     document.body.focus();
-    // why: each of the ten rows has its link and its price label (a disclosure) in the tab order
     for (let i = 0; i < 60; i += 1) {
       await user.tab();
       const el = document.activeElement;
       if (el === null || el === document.body) break;
+      const labelled = el instanceof HTMLInputElement ? (el.labels?.[0]?.textContent ?? null) : null;
       seen.push(
-        el.getAttribute('data-cell') !== null
-          ? 'overview'
-          : (el.getAttribute('aria-label') ?? el.textContent ?? ''),
+        el.getAttribute('data-day') !== null
+          ? 'calendar'
+          : (el.getAttribute('aria-label') ?? labelled ?? el.textContent ?? ''),
       );
-      if (el.textContent === 'Coverage of the latest run') break;
+      if (el.matches('.sfold > summary')) break;
     }
     const index = (label: string | RegExp) =>
       seen.findIndex((s) => (typeof label === 'string' ? s === label : label.test(s)));
     const order = [
-      index(/^Searched today /),
+      index('Trips'),
       index('Search again'),
       index('Edit'),
-      index('Clear filters'),
-      index('Depart'),
-      index('Journey time'),
-      index(/^Open 14 Mar 2027/),
-      index('Show 1 more'),
-      index('overview'),
-      index('Coverage of the latest run'),
+      index('what was searched'),
+      index('Shortest stay'),
+      index('One per week'),
+      // the synthetic trip's price is no link (spec §5.5): its label is the row's first stop
+      index(/^Google price · /),
+      index(/^Details for /),
+      index(/^Calendar · /),
+      index('See all on the calendar'),
+      index('calendar'),
+      // why: Ruling 19: the folds are closed, so the tab stop after the calendar is the first fold's summary (jsdom
+      // keeps a closed row's links in the order; the browsers skip them, which the layout checks measure)
+      index(/^Price over time/),
     ];
     expect(
       order.every((i) => i >= 0),
       JSON.stringify(seen),
     ).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(seen.filter((s) => s === 'overview')).toHaveLength(1);
-    expect(screen.getAllByRole('link', { name: /^Open \d/ })).toHaveLength(10);
+    expect(seen.filter((s) => s === 'calendar')).toHaveLength(1);
   });
 });
 
-// Design 2026-11-08 §5.3: a row's flights open with a keyboard-operable button.
-describe('a row’s flights button (design 2026-11-08 §5.3)', () => {
+// Ruling 20: a calendar row's "Read flights" is a real button, in the tab order after its label.
+describe('a calendar row’s Read flights button', () => {
   async function renderOne() {
     server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
     const r = renderDates({
+      def: definition({ origins: ['LHR'], destinations: ['JFK'] }),
       body: {
+        origins: ['LHR'],
+        destinations: ['JFK'],
         discoveryProviders: ['travelpayouts', 'camoufox'],
-        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(90_000)) },
+        pairs: { [at('2027-03-14', 10)]: pricedPair(priced(90_000), {}, 1) },
       },
     });
-    await findBoard();
-    const button = await screen.findByRole('button', { name: /^Show flights/ });
+    await findCalendar();
+    const button = await screen.findByRole('button', { name: /^Read flights for/ });
     return { ...r, button };
   }
 
-  it('is a real button in the tab order, after the row’s link', async () => {
+  it('is a real button in the tab order, after the row’s label', async () => {
     const { user, button } = await renderOne();
-    const link = screen.getByRole('link', { name: /^Open 14 Mar 2027/ });
-    link.focus();
-    // why: the row's price label (a disclosure) sits between its link and its flights button
-    await user.tab();
-    expect(screen.getByTestId('price-label').querySelector('summary')).toHaveFocus();
+    const label = screen.getByTestId('price-label').querySelector('summary');
+    if (!(label instanceof HTMLElement)) throw new Error('the row has its label');
+    label.focus();
     await user.tab();
     expect(button).toHaveFocus();
     expect(button.tagName).toBe('BUTTON');
     expect(button).not.toHaveAttribute('tabindex', '-1');
   });
 
-  it.each([
-    ['Enter', '{Enter}'],
-    ['Space', ' '],
-  ])('opens with %s and closes with it again, keeping focus', async (_name, key) => {
-    const { user, button } = await renderOne();
-    button.focus();
-    expect(document.querySelector('[data-flights-for]')).toBeNull();
-    await user.keyboard(key);
-    expect(button).toHaveAttribute('aria-expanded', 'true');
-    expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull();
-    expect(button).toHaveFocus();
-    await user.keyboard(key);
-    expect(button).toHaveAttribute('aria-expanded', 'false');
-    expect(document.querySelector('[data-flights-for]')).toBeNull();
-  });
-
-  // why: jsdom computes no focus ring; the rule that draws it is the stylesheet's, on every focusable element
-  it('carries no rule that hides its focus ring: the page-wide :focus-visible outline is the one that draws it', async () => {
-    const css = readFileSync(resolve(__dirname, '../../../src/styles/world.css'), 'utf8');
-    expect(css).toMatch(/:focus-visible\s*\{[^}]*outline/);
+  // why: jsdom computes no focus ring; the rule that draws it is the rows' stylesheet's
+  it('carries a visible focus ring: the rows draw it on :focus-visible', async () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/components/rows/rows.css'), 'utf8');
+    expect(css).toMatch(/\.trip-row :is\(a, button\):focus-visible\s*\{[^}]*outline: 2px solid/);
     const { button } = await renderOne();
     expect(button.className).not.toMatch(/outline-none|focus:outline-0/);
   });

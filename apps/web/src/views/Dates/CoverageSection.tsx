@@ -13,8 +13,6 @@ import { type HeaderRun, ViewHeader } from '../../components/ViewHeader.js';
 import { type BucketName, COPY } from '../../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../../format.js';
 import { useNow } from '../../now.js';
-import { datesPatch } from '../../state/datesState.js';
-import { updateSearchParams } from '../../state/urlState.js';
 
 /** Spec §3 / §6.6: the six buckets, which sum to the cell count. */
 const BUCKETS = [
@@ -158,7 +156,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                 <th scope="col" className="text-right">
                   {COPY.coverageCells}
                 </th>
-                <th scope="col" className="border-l border-line-strong text-right">
+                <th scope="col" className="text-right">
                   {COPY.coverageSearched}
                 </th>
                 <th scope="col" className="text-right">
@@ -185,7 +183,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                       </td>
                     ))}
                     <td className="text-right tabular-nums">{s.total}</td>
-                    <td className="border-l border-line-strong text-right tabular-nums">{searched}</td>
+                    <td className="text-right tabular-nums">{searched}</td>
                     <td className="text-right tabular-nums">
                       {COPY.withPriceValue(s.buckets.priced, s.total)}
                     </td>
@@ -305,29 +303,43 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
 }
 
 /**
- * Spec §11 Dates "Coverage section": folded by default; the header line's coverage link, `d.coverage=open` and
- * `?view=coverage` (Task 19.7) open it. It reads `GET /definitions/:id/coverage` only while open, over the latest
- * parent run, and says the filters do not narrow it.
+ * The full search log, inside the "What was searched" fold (Ruling 19): a disclosure button that opens the coverage
+ * section beneath the fold's rows. Its open state is the page's (a `d.coverage=open` landing, `?view=coverage` or the
+ * status card's link, opens it once and is then consumed: final review I2). It reads `GET /definitions/:id/coverage`
+ * only while open, over the latest parent run, and says the filters do not narrow it.
  */
-export function CoverageSection({ definition, open }: { definition: DefinitionResponse; open: boolean }) {
+export function CoverageSection({
+  definition,
+  open,
+  onToggle,
+}: {
+  definition: DefinitionResponse;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const id = useId();
   return (
-    <section aria-labelledby={`${id}-toggle`} className="plate coverage-plate">
-      <h3>
+    <section aria-labelledby={`${id}-log`} className="sfold-log">
+      <p className="sfold-note">
         <button
-          id={`${id}-toggle`}
           type="button"
+          id={`${id}-log`}
+          className="sfold-log-toggle"
+          onClick={onToggle}
           aria-expanded={open}
           aria-controls={`${id}-body`}
-          className="coverage-toggle min-h-11"
-          onClick={() => updateSearchParams(datesPatch({ coverageOpen: !open }), 'replace')}
         >
-          {COPY.datesView.coverageToggle}
+          {open ? COPY.searchPage.folds.hideLog : COPY.searchPage.folds.fullLog}
         </button>
-      </h3>
-      <p className="px-[18px] pb-3 text-sm text-fg-2">{COPY.datesView.coverageNotFiltered}</p>
-      <div id={`${id}-body`} className="coverage-body">
-        {open ? <CoverageBody definition={definition} /> : null}
+        {open ? null : <span className="sfold-why"> {COPY.searchPage.folds.fullLogNote}</span>}
+      </p>
+      <div id={`${id}-body`}>
+        {open ? (
+          <>
+            <p className="sfold-note">{COPY.datesView.coverageNotFiltered}</p>
+            <CoverageBody definition={definition} />
+          </>
+        ) : null}
       </div>
     </section>
   );

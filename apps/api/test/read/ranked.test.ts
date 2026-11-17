@@ -2,7 +2,7 @@
 // core's `rankDatePairs`), departed date pairs left out, the journey limit applied.
 import { asIsoDateTime, rankDatePairs } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rankedPairsFor } from '../../src/read/ranked.js';
+import { pairedAt, rankedPairsFor } from '../../src/read/ranked.js';
 import { currentSpace } from '../../src/read/space.js';
 import { datesOf, seedDatesWorld } from '../helpers/dates.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR, SMALL_WINDOW } from '../helpers/examples.js';
@@ -97,5 +97,17 @@ describe('rankedPairsFor (revision 55 §8.1, §10)', () => {
     expect(
       rankedPairsFor(x.ports, { ...q, definitionId: 'no-such-definition', maxJourneyMinutes: null }),
     ).toEqual([]);
+  });
+});
+
+// Task 2 minor: a figure without its row, or a row without its figure, is a broken read, said at once, never skipped
+describe('pairedAt: a date pair’s figure and its row', () => {
+  it('gives both, none for a date pair with neither, and throws a RangeError when only one is there', () => {
+    const figure = { basis: 'calendar' } as const;
+    const row = { id: 'row' } as const;
+    expect(pairedAt(new Map([[3, figure]]), new Map([[3, row]]), 3)).toEqual({ figure, row });
+    expect(pairedAt(new Map([[3, figure]]), new Map([[3, row]]), 4)).toBeNull();
+    expect(() => pairedAt(new Map([[3, figure]]), new Map(), 3)).toThrow(RangeError);
+    expect(() => pairedAt(new Map(), new Map([[3, row]]), 3)).toThrow(/date pair 3/);
   });
 });

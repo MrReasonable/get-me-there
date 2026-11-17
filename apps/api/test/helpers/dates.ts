@@ -5,6 +5,7 @@ import {
   type CellKey,
   type DecodedDatePairs,
   decodeDatePairs,
+  type ProviderId,
   type SearchDefinition,
   TRUNCATED_NOTE,
 } from '@gmt/core';
@@ -125,9 +126,17 @@ export function seedDatesWorld(x: Harness, def: SearchDefinition, keep: (c: Cell
   return s;
 }
 
-/** A verification outcome that found no fares for `c` in `executionId` (spec §7 atomic unit, no itineraries). */
-export function emptyVerification(x: Harness, executionId: string, c: CellKey): void {
-  x.ports.repos.cells.writeVerifiedCell(executionId, 'fixture', {
+/**
+ * A verification outcome that found no fares for `c` in `executionId` (spec §7 atomic unit, no itineraries), by
+ * `provider` (the seeded verification provider).
+ */
+export function emptyVerification(
+  x: Harness,
+  executionId: string,
+  c: CellKey,
+  provider: ProviderId = 'fixture',
+): void {
+  x.ports.repos.cells.writeVerifiedCell(executionId, provider, {
     cell: c,
     itineraries: [],
     outcome: {
@@ -139,7 +148,8 @@ export function emptyVerification(x: Harness, executionId: string, c: CellKey): 
       minPence: null,
       cabin: 'economy',
       pointOfSale: 'GB',
-      sourceKind: 'synthetic',
+      // why: the store holds the fixture provider to synthetic and every other to its own kind
+      sourceKind: provider === 'fixture' ? 'synthetic' : 'scraped-search',
     },
   });
 }

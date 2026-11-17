@@ -121,6 +121,20 @@ export function candidateOf(
       departBack: ret.departsLocal,
       arriveBack: ret.arrivesLocal,
     },
+    legs: {
+      out: {
+        durationMinutes: outbound.durationMinutes,
+        stops: outbound.stops,
+        carriers: outbound.carriers,
+        arrivesDayOffset: outbound.arrivesDayOffset,
+      },
+      back: {
+        durationMinutes: ret.durationMinutes,
+        stops: ret.stops,
+        carriers: ret.carriers,
+        arrivesDayOffset: ret.arrivesDayOffset,
+      },
+    },
     // why: final whole-branch review I2: the trip's own journey time, as a verified figure's is its two legs' sum, so
     // the board's Journey column shows it rather than "not known" (the calendar row beneath states none)
     journeyMinutes: outbound.durationMinutes + ret.durationMinutes,
@@ -164,6 +178,7 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
     complete: kind === 'seller',
     which: c.which,
     ...c.times,
+    legs: c.legs,
     mismatch: kind === 'seller' && c.mismatch,
     provenance: c.provenance,
     stale: c.stale,

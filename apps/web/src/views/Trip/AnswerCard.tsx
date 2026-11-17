@@ -5,20 +5,17 @@ import type { DefinitionResponse, TripResponse } from '../../api/types.js';
 import { BookLink } from '../../components/BookLink.js';
 import { PriceLabel } from '../../components/PriceLabel.js';
 import { VerifyCellButton } from '../../components/VerifyCellButton.js';
-import { listText } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
+import { type ListsState, refusalWords } from '../../lib/flightReads.js';
+import { limitsText } from '../../lib/limitsWords.js';
+import { readStateWords } from '../../lib/readStateWords.js';
 import { useNow } from '../../now.js';
-import { BACK_TO_DATES } from '../../state/resultsState.js';
-import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { FlightRead } from '../Dates/BoardCard.js';
-import type { ListsState } from '../Dates/board.js';
-import { refusalWords } from '../Dates/Flights.js';
-import { hoursText } from '../Dates/flightLines.js';
 import { readAt } from '../Dates/stateLines.js';
 import { Amount } from './Amount.js';
-import type { Card, CardState, LimitName } from './cardState.js';
+import type { Card, CardState } from './cardState.js';
 import { Legs } from './Legs.js';
 import { cheapestOutbound, figurePriceOf, readMinutes, type ShownTrip } from './model.js';
 
@@ -49,17 +46,6 @@ const READ_STATES: ReadonlySet<CardState['kind']> = new Set<CardState['kind']>([
 /** "3h ago", or "at a time not known" when the read's age is not known. */
 function agoText(hours: number | 'unknown'): string {
   return hours === 'unknown' ? T.agoUnknown : COPY.agoOf(hours);
-}
-
-/** The limits no flight read met, in words ("your 25h limit each way and your 1-change limit"), else "your limits". */
-function limitsText(failing: readonly LimitName[], limits: TripResponse['limits']): string {
-  const words = failing.flatMap((n): string[] => {
-    if (n === 'journey')
-      return limits.maxJourneyMinutes === null ? [] : [T.limitJourney(hoursText(limits.maxJourneyMinutes))];
-    if (n === 'stops') return limits.maxStops === null ? [] : [T.limitStops(limits.maxStops)];
-    return [n === 'departure' ? T.limitDeparture : T.limitArrival];
-  });
-  return words.length === 0 ? T.limitAny : listText(words);
 }
 
 /** The read by hand (design §6.1): free, about N minutes; shown only when it would go, else the one reason it can't. */
@@ -133,8 +119,8 @@ function Actions({
           departureDate: r.departureDate,
           returnDate: r.returnDate,
         };
-  // final review M3: a calendar price is checked where it stands too (the search page's calendar-gap links open its
-  // Trip page on its own airports for this), as is a read trip or a verified price
+  // final review M3: a calendar price is checked where it stands too, on its own airports, as is a read trip or a
+  // verified price
   const check =
     (state.kind === 'trip' || state.kind === 'verified' || f?.basis === 'calendar') &&
     r.verificationConfigured &&
@@ -249,7 +235,10 @@ function stateSentence(r: TripResponse, state: CardState, listAgo: string): Reac
     case 'no-return':
       return T.noReturn(listAgo);
     case 'calendar-only':
-      return T.calendarOnly;
+      // why: Ruling 5: the card and the Search page's row say the same of one read (`readStateWords`)
+      return r.figure?.pairingRead === 'list-failed'
+        ? T.calendarFailed(readStateWords(r.figure))
+        : T.calendarOnly;
     case 'gone':
       return T.gone;
     case 'calendar-with-trip':
@@ -313,12 +302,7 @@ export function AnswerCard({ r, card, trip, definition, onRetry }: AnswerCardPro
   if (state.kind === 'outside-window')
     return (
       <section className="trip-card trip-card-state" aria-label={T.cardLabel} data-state={state.kind}>
-        <p>
-          {T.outsideWindow}{' '}
-          <a className="trip-link" href={hrefWith(BACK_TO_DATES)} onClick={navigateTo(BACK_TO_DATES)}>
-            {T.backToSearch(definition.name)}
-          </a>
-        </p>
+        <p>{T.outsideWindow}</p>
       </section>
     );
   if (state.kind === 'reading') {

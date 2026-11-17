@@ -1,10 +1,18 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  BANNED_WORD_ALLOWLIST,
+  findBannedWords,
+  PAIRING_READ,
+  searchLinkFor,
+} from '@gmt/core';
 import { SYNTHETIC_BOOKING_URL } from '@gmt/core/testing';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { TripResponse } from '../../../src/api/types.js';
 import { COPY } from '../../../src/copy.js';
+import { readStateWords } from '../../../src/lib/readStateWords.js';
 import type { TripUiState } from '../../../src/state/tripState.js';
 import { type CardState, cardOf } from '../../../src/views/Trip/cardState.js';
 import { TripView } from '../../../src/views/Trip/TripView.js';
@@ -43,6 +51,23 @@ import { jargonIn, mainPathWords } from '../dates/jargon.js';
 // only (London → New York); the booking address is the one made-up address every test shares.
 
 const T = COPY.trip;
+
+/**
+ * The Google Flights search the board's row links for these dates from `origin` to JFK (core's `searchLinkFor`), in the
+ * market the trip read carries (the install's configured point of sale; Task 2 minor: named, never a default).
+ */
+const boardSearch = (origin: string, pointOfSale = trip().pointOfSale) =>
+  searchLinkFor(
+    'camoufox',
+    {
+      origin: asIata(origin),
+      destination: asIata('JFK'),
+      departureDate: asIsoDate('2026-11-11'),
+      returnDate: asIsoDate('2026-11-28'),
+    },
+    'economy',
+    pointOfSale,
+  )?.url;
 const DEF = definition({ name: 'London → New York' });
 const STATE: TripUiState = {
   departureDate: STATE_FIXTURES.trip.departureDate,
@@ -139,9 +164,9 @@ describe('a read trip: the answer card (design §6.1)', () => {
   it('the heading names the dates and nights, under Trips › the search › the dates', async () => {
     renderTrip(readTrip());
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Wed 11 Nov → Sat 28 Nov · 17 nights' }),
+      await screen.findByRole('heading', { level: 1, name: 'Wed 11 Nov → Sat 28 Nov · 17 nights' }),
     ).toBeInTheDocument();
-    const crumbs = screen.getByRole('navigation', { name: T.crumbsLabel });
+    const crumbs = screen.getByRole('navigation', { name: COPY.crumbsLabel });
     expect(crumbs).toHaveTextContent('Trips › London → New York › Wed 11 Nov → Sat 28 Nov');
     const back = within(crumbs).getByRole('link', { name: 'London → New York' });
     // why: the search page's filters (`d.*`) travel back with the breadcrumb
@@ -159,9 +184,18 @@ describe('a read trip: the answer card (design §6.1)', () => {
     const c = await card();
     const link = within(c).getByRole('link');
     expect(link).toHaveTextContent('£412 · Find on Google Flights ↗');
-    expect(link).toHaveAttribute('href', SEARCH_LINK.url);
+    // why: Ruling 2: the figure's own trip links what its board row links, the search for its own airports and dates
+    expect(link).toHaveAttribute('href', boardSearch('LHR'));
     expect(c).not.toHaveTextContent(/Book/);
     expect(c).not.toHaveTextContent(T.bookingPageLine);
+  });
+
+  // Task 2 minor: the search a trip falls back to is in the install's market, as the trip read carries it
+  it('the search a trip falls back to is in the market the trip read carries', async () => {
+    renderTrip(readTrip({ figure: pairingFigure(readPairing({ bookingUrl: null })), pointOfSale: 'US' }));
+    const link = within(await card()).getByRole('link');
+    expect(link).toHaveAttribute('href', boardSearch('LHR', 'US'));
+    expect(boardSearch('LHR', 'US')).not.toBe(boardSearch('LHR'));
   });
 
   it('a verified figure with a GET booking says "Book on <host> ↗"', async () => {
@@ -179,7 +213,6 @@ describe('a read trip: the answer card (design §6.1)', () => {
 
   // final review I2: a stale verified price on LGW → JFK whose flights were read on LHR → JFK, the board's calendar cell
   it("a verified price links to its own airports' search and checks its own airports; a read names the list's", async () => {
-    const own = { ...SEARCH_LINK, url: SEARCH_LINK.url.replace('LHR', 'LGW') };
     const { user } = renderTrip(
       trip({
         figure: datePairFigure({
@@ -188,7 +221,6 @@ describe('a read trip: the answer card (design §6.1)', () => {
         }),
         booking: { kind: 'none' },
         searchLink: SEARCH_LINK,
-        figureSearchLink: own,
       }),
     );
     const verifies: unknown[] = [];
@@ -201,7 +233,9 @@ describe('a read trip: the answer card (design §6.1)', () => {
     const c = await card();
     const link = within(c).getByRole('link');
     expect(link).toHaveTextContent('£412 · Find on Google Flights ↗');
-    expect(link).toHaveAttribute('href', own.url);
+    // why: Ruling 2: the verified price links what its board row links, the search for its own airports (LGW), never
+    // the list cell's (LHR)
+    expect(link).toHaveAttribute('href', boardSearch('LGW'));
     await user.click(within(c).getByRole('button', { name: /Check with SearchApi/ }));
     await waitFor(() => expect(verifies).toHaveLength(1));
     expect(verifies[0]).toMatchObject({ cell: { origin: 'LGW', destination: 'JFK' } });
@@ -273,6 +307,74 @@ const isKind = (k: string): k is CardState['kind'] => Object.hasOwn(EXPECT, k);
 /** Every state of the card, from the table above (a `Record` over the union, so none is left out). */
 const KINDS = Object.keys(EXPECT).filter(isKind);
 
+/**
+ * CodeRabbit CR35: what the card says, affirmatively, for each read whose flights were read: its state and the sentence
+ * that says the flights were read (so a card that leaves the read out fails).
+ */
+const READ_CARD: Partial<Record<(typeof PAIRING_READ)[number], readonly [CardState['kind'], RegExp]>> = {
+  within: ['trip', /Cheapest trip read/],
+  'over-limit': ['none-within', /Flights were read \S+ ago: none within your limits\./],
+  'within-other-limits': [
+    'other-limits',
+    /Flights were read \S+ ago under different limits from yours now\./,
+  ],
+  'within-older': ['calendar-with-trip', /The trip below was read \S+ ago/],
+  'sellers-not-read': ['calendar-with-trip', /The trip below was read \S+ ago/],
+  'offers-incomplete': ['calendar-with-trip', /The trip below was read \S+ ago/],
+};
+
+/** Ruling 5: where the card and a calendar row describe the same read, they use the same words (`readStateWords`). */
+describe('the card and the calendar row agree on every flight read', () => {
+  it.each(PAIRING_READ)('%s', async (read) => {
+    const withPairing =
+      read !== 'not-read' && read !== 'list-failed' && read !== 'outbound-only' && read !== 'no-pairing-read';
+    // why: the contract gives a read beneath a figure its pairing (`within` is a pairing figure's own)
+    const fig =
+      read === 'within'
+        ? pairingFigure()
+        : calendarFigure({
+            pairingRead: read,
+            listReason: read === 'list-failed' ? 'network' : null,
+            ...(withPairing
+              ? {
+                  pairing:
+                    read === 'over-limit'
+                      ? overPairing()
+                      : readPairing(read === 'within-older' ? { stale: 'refresh', ageHours: 50 } : {}),
+                }
+              : {}),
+          });
+    renderTrip(trip({ figure: fig }));
+    const text = shownText(await card());
+    const row = readStateWords(fig);
+    switch (read) {
+      case 'not-read':
+      case 'list-failed':
+        // the two states with no flights to show say the row's own words
+        expect(text).toContain(row);
+        break;
+      case 'outbound-only':
+        expect(text).toMatch(/return/i);
+        expect(row).toMatch(/return/i);
+        break;
+      case 'no-pairing-read':
+        expect(text).toMatch(/no return/i);
+        expect(row).toMatch(/no return/i);
+        break;
+      default: {
+        // a read with flights: neither says the flights were not read, and the card says they were
+        expect(text).not.toMatch(/flights not read/i);
+        expect(row).toMatch(/^Flights read/);
+        const said = READ_CARD[read];
+        if (said === undefined) throw new Error(`no card words listed for ${read}`);
+        expect((await card()).dataset.state).toBe(said[0]);
+        expect(text).toMatch(said[1]);
+      }
+    }
+    if (read === 'list-failed') expect(text).not.toContain('not read yet');
+  });
+});
+
 describe('every state of the card says its sentence, with exactly its own actions (design §6.1)', () => {
   it.each(KINDS)('%s', async (kind) => {
     const r = STATE_FIXTURES[kind];
@@ -305,10 +407,17 @@ describe('every state of the card says its sentence, with exactly its own action
     expect(c).not.toHaveTextContent('£412');
   });
 
-  it('outside the window links back to the search', async () => {
+  it('outside the window says so and has no back link of its own: the breadcrumb is the way back', async () => {
     renderTrip(STATE_FIXTURES['outside-window']);
-    const link = within(await card()).getByRole('link', { name: T.backToSearch('London → New York') });
-    expect(link.getAttribute('href')).toContain('view=dates');
+    const c = await card();
+    expect(within(c).queryByRole('link')).toBeNull();
+    expect(
+      within(screen.getByRole('navigation', { name: COPY.crumbsLabel }))
+        .getByRole('link', {
+          name: 'London → New York',
+        })
+        .getAttribute('href'),
+    ).toContain('view=dates');
     expect(screen.queryByRole('heading', { name: T.otherHeading })).toBeNull();
     expect(screen.queryByTestId('about-price')).toBeNull();
   });
@@ -393,7 +502,7 @@ describe('a price whose provenance is not one is withheld alone (spec §5.5)', (
     expect(c).not.toHaveTextContent('£388');
     expect(c).toHaveTextContent(T.calendarOnly);
     expect(within(c).getByRole('button', { name: T.readFlights(false, 2) })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: /Wed 11 Nov → Sat 28 Nov/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /Wed 11 Nov → Sat 28 Nov/ })).toBeInTheDocument();
     expect(screen.getByTestId('about-price')).toBeInTheDocument();
     expect(screen.getByTestId('search-log')).toBeInTheDocument();
   });

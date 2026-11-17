@@ -1,11 +1,12 @@
-import { CONFIRM_TARGET, type ConfirmSummary, stopDetailClause } from '@gmt/core';
+import { CONFIRM_PATIENCE, CONFIRM_TARGET, type ConfirmSummary, stopDetailClause } from '@gmt/core';
 import type { ExecutionResponse } from '../../api/types.js';
 import type { PageCopy } from './stateLines.js';
 
-// Design 2026-11-08 §5.5: the one line under the board that says how checking flights ended, as a pure function of the
-// run's flight counts (the stored `ConfirmSummary`, `ended`, the reason the api reports, whether the step is still going
-// and how many dates it checked). Every word is a COPY template (`datesView.confirm`), passed in so the catalogue sweeps
-// them. The operator reads "trips with flights read", never "confirmed"; `confirm` is the code's term.
+// Design 2026-11-08 §5.5, Ruling 22: the stopping sentence under "Cheapest trips" that says how reading flights ended, as
+// a pure function of the run's flight counts (the stored `ConfirmSummary`, `ended`, the reason the api reports, whether
+// the step is still going and how many dates it checked) and of what the section shows. Every word is a COPY template
+// (`datesView.confirm`), passed in so the catalogue sweeps them. The operator reads "trips with flights read", never
+// "confirmed"; `confirm` is the code's term.
 
 type Flights = NonNullable<ExecutionResponse['flights']>;
 
@@ -21,6 +22,11 @@ export interface ConfirmLineInput {
   running: boolean;
   /** The dates checked: `flights.planned`, the pairs whose read started plus those reused (design §7). */
   planned: number;
+  /**
+   * Ruling 22: the section shows the run's five cheapest trips themselves (five rows, no filter applied), so a patient
+   * stop says "these five"; otherwise it names "the five cheapest", which a filter may have left out of view.
+   */
+  theseFive: boolean;
 }
 
 /** "Because …" for a reason the run reports: an ending page's stop detail in its existing words, else the cause's kind. */
@@ -52,7 +58,7 @@ export function confirmStepGoing(f: Flights | null): boolean {
   return f !== null && f.confirm?.mode === 'confirm' && f.ended === null && f.confirm.stop === null;
 }
 
-/** Design §5.5: the line's words, or null when the run has no summary. */
+/** Design §5.5, Ruling 22: the sentence's words, or null when the run has no summary. */
 export function confirmLineText(i: ConfirmLineInput, c: PageCopy): string | null {
   const k = i.confirm;
   if (k === null) return null;
@@ -75,6 +81,10 @@ export function confirmLineText(i: ConfirmLineInput, c: PageCopy): string | null
   }
   if (k.stop === 'queue-empty') return `${D.checkedEvery(unread)}; ${trips}.`;
   const head = `${D.checked(dates, unread)}; ${trips}`;
-  if (left === 0) return `${head}.`;
-  return few ? `${head}: ${D.fewTrips}. ${D.unchecked(left)}` : `${head}. ${D.cheaperUnchecked(left)}`;
+  if (few) return left === 0 ? `${head}.` : `${head}: ${D.fewTrips}. ${D.unchecked(left)}`;
+  // why: Ruling 22 (mockup 02): with no early end and the queue not empty the step's own patience ended it (the one
+  // stop left), said in words once the five cheapest stood
+  const which = i.theseFive ? D.theseTrips(CONFIRM_TARGET) : D.cheapestTrips(CONFIRM_TARGET);
+  const rule = `${head}. ${D.patience(CONFIRM_PATIENCE, which)}`;
+  return left === 0 ? rule : `${rule} ${D.cheaperUnchecked(left)}`;
 }

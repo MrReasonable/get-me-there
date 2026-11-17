@@ -1,31 +1,35 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { asIsoDate } from '@gmt/core';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import {
   at,
   bucketsOf,
+  calendarFig,
   DATES_SPACE,
   type DatesOptions,
+  pairingFig,
   priced,
   pricedPair,
   workedDates,
 } from '../../fixtures.dates.js';
 import { poundsOutsidePrices } from '../../guards.js';
+import { serveDates } from '../../msw/datesHandlers.js';
+import { server } from '../../msw/server.js';
 import { setViewportWidth } from '../../viewport.js';
-import { boardRows, findBoard, renderDates } from './render.js';
+import { dayButton, findCalendar, findLower, renderDates } from './render.js';
 
-// Spec §11 Dates "Overview": months, strips, the one scale, the numeric legend, the readout, rings both ways, folded
-// bands, touch and the phone layout.
+// Trips and Search plan, Ruling 18 (Task 9; mockup 02's Calendar): the window's months, each day a button printing its
+// one price on the heat ramp (a dot on a trip's), or why it prints none; its name; the five-item key; the phone's one
+// month with its buttons and swipe; the anchor "See all on the calendar" and the Trips cards land on.
 
-const overview = () => screen.getByTestId('dates-overview');
-const cell = (date: string, from: number) => {
-  const el = overview().querySelector<HTMLButtonElement>(`[data-cell="${date}|${from}"]`);
-  if (el === null) throw new Error(`no cell ${date}|${from}`);
-  return el;
-};
-const readout = () => screen.getByTestId('dates-readout');
-const url = () => new URLSearchParams(window.location.search);
+const C = COPY.calendar;
+const months = () => screen.getByTestId('calendar-months');
+const days = () => [...months().querySelectorAll<HTMLButtonElement>('button[data-day]')];
 
-/** Twelve current calendar figures (£300–£410, so the scale is banded), one superseded, the rest no cached data. */
+/** Twelve current calendar prices (£300–£410, banded) on 14–25 Mar, one superseded day, the rest no cached data. */
 const twelve: DatesOptions = {
   rest: { no_data: 4 },
   pairs: {
@@ -38,286 +42,267 @@ const twelve: DatesOptions = {
     [at('2027-03-31', 11)]: pricedPair(priced(10_000, { superseded: true })),
   },
 };
-/** The worked window with 13 stays (10–22 nights): seven bands of two nights and the last of one. */
-const WIDE = { ...DATES_SPACE, maxNights: 22 };
 
-describe('the overview (spec §11 Overview)', () => {
-  it('draws the window’s months in order, each a table captioned by its name, with a strip of stay cells per day', async () => {
+describe('the calendar’s months (Ruling 18)', () => {
+  it('draws the window’s months in order, each a table captioned by its name, a button for each day of the window', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
-    const tables = within(overview()).getAllByRole('table');
+    await findCalendar();
+    const tables = within(months()).getAllByRole('table');
     expect(tables.map((t) => t.querySelector('caption')?.textContent)).toEqual(['Mar 2027', 'Apr 2027']);
-    expect(overview().querySelectorAll('[data-cell]')).toHaveLength(93);
-    expect(
-      [...(cell('2027-03-14', 10).parentElement?.children ?? [])].map((c) => c.getAttribute('data-from')),
-    ).toEqual(['10', '11', '12']);
+    // 14 Mar to 13 Apr: 31 days, each one button; the month's other days are drawn but inert
+    expect(days()).toHaveLength(31);
+    expect(days()[0]?.dataset.day).toBe('2027-03-14');
+    expect(days().at(-1)?.dataset.day).toBe('2027-04-13');
+    const before = within(tables[0] ?? document.body).getByText('13', { selector: '.cal-out' });
+    expect(before.closest('button')).toBeNull();
+    expect(before).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('no cell prints an amount', async () => {
-    renderDates({ body: twelve });
-    await findBoard();
-    for (const c of overview().querySelectorAll('[data-cell]')) expect(c.textContent).not.toMatch(/£|\d/);
+  it('heads the section "Calendar", says what a day shows over the stays in view, and holds the anchor', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    const region = screen.getByRole('region', { name: C.heading });
+    expect(region).toHaveTextContent(C.lead(10, 12));
+    expect(C.lead(10, 12)).toBe(
+      'Each day shows its cheapest trip with flights read, or else its lowest calendar price, for any stay from 10 to 12 nights. Pick a day to see its stays.',
+    );
+    expect(C.lead(10, 10)).toContain('for a stay of 10 nights.');
+    expect(document.getElementById('calendar')).toContainElement(months());
+  });
+
+  it('each day prints one price inside a PriceCell, and its name gives the date, price and label (Ruling 18)', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    expect(dayButton('2027-03-15')).toHaveAccessibleName('Mon 15 Mar, £305, Calendar · 2h');
+    expect(within(dayButton('2027-03-15')).getByTestId('price-cell')).toHaveTextContent('£305');
+    // a trip with flights read (the current verified £412) prints over the cheaper calendar £300, with the dot
+    expect(dayButton('2027-03-14')).toHaveAccessibleName(
+      'Sun 14 Mar, £412, Google price · 2h, trip with flights read',
+    );
+    expect(within(dayButton('2027-03-14')).getByTestId('price-cell')).toHaveTextContent('£412');
+    expect(dayButton('2027-03-14')).toHaveAttribute('data-trip');
+    expect(within(dayButton('2027-03-14')).getByText(C.tripGlyph)).toHaveAttribute('aria-hidden', 'true');
+    expect(dayButton('2027-03-15')).not.toHaveAttribute('data-trip');
     expect(poundsOutsidePrices()).toEqual([]);
   });
 
-  it('shades current figures on one scale by rank quintile; the legend prints each band’s range', async () => {
-    renderDates({ body: twelve });
-    await findBoard();
-    expect(cell('2027-03-14', 10)).toHaveAttribute('data-shade', '0');
-    expect(cell('2027-03-25', 10)).toHaveAttribute('data-shade', '4');
-    const legend = screen.getByTestId('dates-legend');
-    expect(legend).toHaveTextContent(
-      'Shade: 12 current prices in view, in five bands by rank; brighter is cheaper',
+  it('a stale price shows the label’s amber and says so in its name', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    expect(dayButton('2027-03-25')).toHaveAccessibleName(
+      "Thu 25 Mar, £340, Calendar · 2h, older than this search's refresh",
     );
-    expect(legend).toHaveTextContent('band 1: £300–£320 (3 date pairs)');
-    expect(legend).toHaveTextContent('band 5: £400–£410 (2 date pairs)');
+    expect(dayButton('2027-03-25')).toHaveAttribute('data-stale');
+    expect(dayButton('2027-03-15')).not.toHaveAttribute('data-stale');
+    // why: jsdom computes no colour; the amber is the stylesheet's, on the price chip of a stale day
+    const css = readFileSync(resolve(__dirname, '../../../src/views/Dates/dates.css'), 'utf8');
+    expect(css).toMatch(/\.cal-day\[data-stale\] \.cal-dp\s*\{[^}]*color: var\(--t-warn\)/);
   });
 
-  it('a superseded figure is off the scale: no shade, its mark, counted in the legend', async () => {
+  it('a day without a price says why, in its name and on the day: no price, couldn’t read, not searched, not seen again', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    expect(dayButton('2027-03-17')).toHaveAccessibleName('Wed 17 Mar, no price');
+    expect(dayButton('2027-03-17')).toHaveTextContent(C.noPrice);
+    expect(dayButton('2027-03-18')).toHaveAccessibleName("Thu 18 Mar, couldn't read");
+    expect(dayButton('2027-03-18')).toHaveTextContent(C.couldntReadGlyph);
+    expect(dayButton('2027-03-21')).toHaveAccessibleName('Sun 21 Mar, not searched');
+    expect(dayButton('2027-03-21')).toHaveAttribute('data-mark', 'not-searched');
+    // a superseded calendar price and a verified one the latest search did not see: no price, "not seen again"
+    expect(dayButton('2027-03-16')).toHaveAccessibleName('Tue 16 Mar, not seen again');
+    expect(dayButton('2027-03-20')).toHaveAccessibleName('Sat 20 Mar, not seen again');
+    expect(within(dayButton('2027-03-16')).queryByTestId('price-cell')).toBeNull();
+  });
+
+  it('shades the printed prices on the heat ramp, lower to higher, current prices only', async () => {
     renderDates({ body: twelve });
-    await findBoard();
-    expect(cell('2027-03-31', 11)).toHaveAttribute('data-shade', 'none');
-    expect(cell('2027-03-31', 11).getAttribute('data-marks')).toContain('superseded');
-    expect(screen.getByTestId('dates-legend')).toHaveTextContent('superseded by a later search: 1');
+    await findCalendar();
+    expect(dayButton('2027-03-14')).toHaveAttribute('data-heat', '1');
+    expect(dayButton('2027-03-19')).toHaveAttribute('data-heat', '3');
+    expect(dayButton('2027-03-25')).toHaveAttribute('data-heat', '5');
+    // the superseded £100 is off the scale: its day prints nothing and takes no step
+    expect(dayButton('2027-03-31')).not.toHaveAttribute('data-heat');
+    expect(dayButton('2027-03-26')).not.toHaveAttribute('data-heat');
   });
 
-  it('fewer than ten figures give the flat shade, and the legend says so', async () => {
+  it('fewer than ten prices take the one flat step', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
-    expect(cell('2027-03-14', 10)).toHaveAttribute('data-shade', 'flat');
-    expect(screen.getByTestId('dates-legend')).toHaveTextContent(
-      'One shade for 9 current prices: fewer than 10 are too few for price bands',
-    );
+    await findCalendar();
+    expect(dayButton('2027-03-15')).toHaveAttribute('data-heat', 'flat');
   });
 
-  it('the stay filter applies first: only the stays in view are drawn, and the shading is over them', async () => {
-    renderDates({ body: twelve, search: '?view=dates&def=def-0001&d.nights=11-12' });
-    await findBoard();
-    expect(overview().querySelectorAll('[data-cell]')).toHaveLength(62);
-    expect(overview().querySelector('[data-from="10"]')).toBeNull();
-    expect(screen.getByTestId('dates-legend')).toHaveTextContent('No current price in view to shade');
-  });
-
-  it('a calendar figure carries the "not checked" glyph', async () => {
-    renderDates({ body: twelve });
-    await findBoard();
-    expect(cell('2027-03-14', 10).getAttribute('data-marks')).toBe('notChecked');
-    expect(within(cell('2027-03-14', 10)).getByTestId('cell-glyphs')).toHaveTextContent('◫');
-  });
-});
-
-describe('the readout and the cell’s names (spec §11 Overview)', () => {
-  it('pointing at a cell shows its date pair beside the legend: dates, nights, the figure through PriceCell with point of sale, how far checked, airports', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    expect(readout()).toHaveTextContent('Point at or focus a dot to read its date pair here.');
-    fireEvent.pointerOver(cell('2027-03-22', 11));
-    const r = readout();
-    expect(r).toHaveTextContent('22 Mar 2027–2 Apr 2027 (11n)');
-    expect(within(r).getByTestId('price-cell')).toHaveTextContent('£330');
-    expect(within(r).getByTestId('point-of-sale')).toHaveTextContent('market not stated');
-    expect(r).toHaveTextContent('cheapest of the rows read');
-    expect(r).toHaveTextContent('read was cut short');
-    expect(r).toHaveTextContent('LGW → JFK');
-  });
-
-  it('a cell without a figure reads its marks with their counts by bucket', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    fireEvent.pointerOver(cell('2027-03-18', 10));
-    expect(readout()).toHaveTextContent('error');
-    expect(readout()).toHaveTextContent('3 no cached data · 1 error');
-    expect(within(readout()).queryByTestId('price-cell')).toBeNull();
-  });
-
-  it('a cell’s accessible name gives its dates, nights and rank or mark in words, and its description is the readout', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    // why: design 2026-11-08 §5.1: the fresh verified figure (14 → 25 Mar) is rank 1, the cheaper calendar price rank 2
-    expect(cell('2027-03-14', 11)).toHaveAccessibleName('14 Mar 2027–25 Mar 2027, 11 nights: rank 1');
-    expect(cell('2027-03-14', 10)).toHaveAccessibleName('14 Mar 2027–24 Mar 2027, 10 nights: rank 2');
-    expect(cell('2027-03-17', 10)).toHaveAccessibleName('17 Mar 2027–27 Mar 2027, 10 nights: no price shown');
-    const described = cell('2027-03-14', 10).getAttribute('aria-describedby');
-    expect(described).toBe(readout().id);
-    fireEvent.focus(cell('2027-03-14', 10));
-    expect(within(readout()).getByTestId('price-cell')).toBeInTheDocument();
-  });
-});
-
-describe('rings both ways (spec §11 Rings; design 2026-11-08 §5.2)', () => {
-  /** Ten board rows: seven calendar prices and three trips with flights read (fresh verified figures). */
-  const readTrips = new Set([16, 18, 20]);
-  const mixed: DatesOptions = {
-    rest: { no_data: 4 },
-    pairs: Object.fromEntries(
-      Array.from({ length: 10 }, (_x, i) => {
-        const day = 14 + i;
-        return [
-          at(`2027-03-${day}`, 10),
-          pricedPair(priced(30_000 + i * 1_000, readTrips.has(day) ? { basis: 'verified' } : {})),
-        ];
-      }),
-    ),
-  };
-  // why: design 2026-11-08 §5.2: the overview outlines only the board's trips with flights read, not every shown row
-  it('with 3 trips with flights read among 10 board rows, only those 3 are outlined, and the legend says so', async () => {
-    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
-    renderDates({ body: mixed });
-    const table = await findBoard();
-    expect(boardRows(table)).toHaveLength(10);
-    const ringed = [...overview().querySelectorAll('[data-ringed]')];
-    expect(ringed.map((c) => c.getAttribute('data-cell'))).toEqual([
-      '2027-03-16|10',
-      '2027-03-18|10',
-      '2027-03-20|10',
-    ]);
-    expect(ringed[0]?.className).toContain('shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]');
-    // a calendar price on the board is not outlined
-    expect(cell('2027-03-14', 10)).not.toHaveAttribute('data-ringed');
-    expect(screen.getByTestId('dates-legend')).toHaveTextContent('outlined: trips with flights read');
-    // hovering a row lights its cell and a ringed cell lights its row; nothing scrolls
-    fireEvent.pointerEnter(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-16', 10)).toHaveAttribute('data-lit');
-    fireEvent.pointerLeave(boardRows(table)[0] ?? table);
-    expect(cell('2027-03-16', 10)).not.toHaveAttribute('data-lit');
-    fireEvent.pointerOver(cell('2027-03-18', 10));
-    expect(boardRows(table)[1]).toHaveAttribute('data-lit');
-    expect(scroll).not.toHaveBeenCalled();
-  });
-  it('a board of calendar prices alone outlines nothing', async () => {
-    renderDates({ body: twelve });
-    await findBoard();
-    expect(overview().querySelectorAll('[data-ringed]')).toHaveLength(0);
-  });
-});
-
-describe('folded bands (spec §11 Folded bands)', () => {
-  const wide: DatesOptions = {
-    space: WIDE,
-    rest: { no_data: 4 },
-    pairs: {
-      [at('2027-03-14', 13)]: pricedPair(priced(30_000)),
-      [at('2027-03-15', 20)]: { buckets: bucketsOf({ no_data: 3 }) },
-    },
-  };
-
-  it('a stay range of 13 folds into seven bands, each named by its range; a band shows its cheapest figure’s shade and the stripes when any date pair in it has a cell not searched', async () => {
-    renderDates({ body: wide });
-    await findBoard();
-    expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(7);
-    expect(cell('2027-03-14', 12)).toHaveAttribute('data-band', '12-13');
-    expect(cell('2027-03-14', 12)).toHaveAttribute('data-shade', 'flat');
-    // spec rev 55 §6.6: a band with a date pair partly not searched and no figure reads not searched, with the stripes
-    expect(cell('2027-03-15', 20).getAttribute('data-marks')).toBe('not-searched partly');
-    expect(cell('2027-03-14', 12)).toHaveAccessibleName(
-      'departing 14 Mar 2027, 12–13 nights: rank 1, opens its stay lengths',
-    );
-  });
-
-  it('a click opens the band into its stays for that month; the band’s header button and Escape close it', async () => {
-    const { user } = renderDates({ body: wide });
-    await findBoard();
-    await user.click(cell('2027-03-14', 12));
-    expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(8);
-    expect(cell('2027-03-14', 13)).toHaveAccessibleName('14 Mar 2027–27 Mar 2027, 13 nights: rank 1');
-    // April stays folded
-    expect(cell('2027-04-01', 12).parentElement?.children).toHaveLength(7);
-    expect(url().get('view')).toBe('dates');
-    await user.click(screen.getByRole('button', { name: 'Close 12–13 nights in Mar 2027' }));
-    expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(7);
-    await user.click(cell('2027-03-14', 12));
-    cell('2027-03-14', 13).focus();
-    await user.keyboard('{Escape}');
-    expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(7);
-    expect(document.activeElement).toBe(cell('2027-03-14', 12));
-  });
-
-  it('a band cell without a figure reads its marks and its buckets summed', async () => {
-    renderDates({ body: wide });
-    await findBoard();
-    fireEvent.pointerOver(cell('2027-03-15', 20));
-    expect(readout()).toHaveTextContent('departing 15 Mar 2027, 20–21 nights');
-    expect(readout()).toHaveTextContent('partly not searched');
-    expect(readout()).toHaveTextContent('by airport pair: 7 no cached data, 1 not searched');
-  });
-
-  it('a ring on a date pair inside a closed band rings the band', async () => {
-    // why: design 2026-11-08 §5.2: only a trip with flights read is outlined, so the date pair in the band is one
+  it('the stay filter applies first: each day prints the cheapest of its stays in view', async () => {
     renderDates({
       body: {
-        ...wide,
-        pairs: { ...wide.pairs, [at('2027-03-14', 13)]: pricedPair(priced(30_000, { basis: 'verified' })) },
+        rest: { no_data: 4 },
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(priced(30_000)),
+          [at('2027-03-14', 12)]: pricedPair(priced(45_000)),
+        },
+      },
+      search: '?view=dates&def=def-0001&d.nights=11-12',
+    });
+    await findCalendar();
+    expect(dayButton('2027-03-14')).toHaveAccessibleName('Sun 14 Mar, £450, Calendar · 2h');
+  });
+
+  it('a day before today is blank and inert; today is a button', async () => {
+    // why: the web tests' clock is 14 Oct 2026
+    renderDates({
+      body: {
+        space: {
+          departureFrom: asIsoDate('2026-10-10'),
+          departureTo: asIsoDate('2026-10-20'),
+          minNights: 10,
+          maxNights: 10,
+        },
+        rest: { no_data: 4 },
+        pairs: {
+          [at('2026-10-12', 10)]: pricedPair(priced(30_000)),
+          [at('2026-10-14', 10)]: pricedPair(priced(31_000)),
+        },
       },
     });
-    await findBoard();
-    expect(cell('2027-03-14', 12)).toHaveAttribute('data-ringed');
+    await findCalendar();
+    expect(days().map((b) => b.dataset.day)[0]).toBe('2026-10-14');
+    expect(document.querySelector('button[data-day="2026-10-12"]')).toBeNull();
+    expect(within(months()).getByText('12', { selector: '.cal-out' })).not.toHaveTextContent('£');
   });
 });
 
-describe('opening the detail', () => {
-  it('a click on a cell opens the Trip page with the date pair in the URL', async () => {
-    const { user } = renderDates({ body: workedDates() });
-    await findBoard();
-    await user.click(cell('2027-03-17', 10));
-    expect([url().get('view'), url().get('depart'), url().get('return')]).toEqual([
-      'trip',
-      '2027-03-17',
-      '2027-03-27',
+describe('the key (Ruling 18): five items', () => {
+  it('the heat scale, the dot, the cross, no price and the hatching, in words', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    const key = screen.getByRole('list', { name: C.key.label });
+    const items = within(key).getAllByRole('listitem');
+    expect(items.map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Shade by price: lower higher',
+      '● a trip with flights read; other prices are calendar prices, not fares',
+      "× couldn't read",
+      "no price (not 'no flights')",
+      'hatched: not searched or not reached',
     ]);
-  });
-
-  it('touch: a first tap shows the readout, a second tap on the same cell opens the detail', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    const c = cell('2027-03-15', 10);
-    fireEvent.pointerDown(c, { pointerType: 'touch' });
-    fireEvent.click(c);
-    expect(url().get('view')).toBe('dates');
-    expect(readout()).toHaveTextContent('15 Mar 2027–25 Mar 2027 (10n)');
-    fireEvent.pointerDown(c, { pointerType: 'touch' });
-    fireEvent.click(c);
-    expect(url().get('depart')).toBe('2027-03-15');
-  });
-
-  it('the readout’s "Open these dates" link opens the detail', async () => {
-    renderDates({ body: workedDates() });
-    await findBoard();
-    fireEvent.pointerDown(cell('2027-03-15', 10), { pointerType: 'touch' });
-    fireEvent.click(cell('2027-03-15', 10));
-    const link = screen.getByRole('link', { name: 'Open these dates' });
-    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('depart')).toBe(
-      '2027-03-15',
-    );
+    // the five steps of the ramp, lowest first, are drawn and hidden from assistive technology
+    expect(items[0]?.querySelectorAll('[data-heat]')).toHaveLength(5);
+    expect(
+      [...(items[0]?.querySelectorAll<HTMLElement>('[data-heat]') ?? [])].map((s) => s.dataset.heat),
+    ).toEqual(['1', '2', '3', '4', '5']);
+    expect(items[1]?.querySelector('[aria-hidden="true"]')).toHaveTextContent('●');
   });
 });
 
-describe('the phone overview (spec §11 Phone)', () => {
-  it('one month at a time with Previous and Next, each day a row with its strip; the legend and readout present', async () => {
+describe('the phone calendar (Ruling 18: month buttons beside swipe at 375 px)', () => {
+  it('one month at a time with Previous and Next month', async () => {
     setViewportWidth(375);
     const { user } = renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
-    expect(within(overview()).getByRole('region', { name: 'Mar 2027' })).toBeInTheDocument();
-    expect(within(overview()).queryByRole('region', { name: 'Apr 2027' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Next month' }));
-    expect(within(overview()).getByRole('region', { name: 'Apr 2027' })).toBeInTheDocument();
-    expect(within(overview()).getAllByRole('listitem')).toHaveLength(13);
-    expect(screen.getByTestId('dates-legend')).toBeInTheDocument();
-    expect(readout()).toBeInTheDocument();
+    await findCalendar();
+    expect(within(months()).getAllByRole('table')).toHaveLength(1);
+    expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: C.previousMonth })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: C.nextMonth }));
+    expect(within(months()).getByRole('table', { name: 'Apr 2027' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: C.nextMonth })).toBeDisabled();
+    expect(days()).toHaveLength(13);
   });
 
-  it('a swipe turns the month; the readout stays while it does', async () => {
+  it('a swipe left shows the next month, a swipe right the one before; a short drag turns nothing', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
-    await screen.findAllByTestId('board-card');
-    fireEvent.pointerDown(cell('2027-03-14', 10), { pointerType: 'touch' });
-    fireEvent.click(cell('2027-03-14', 10));
-    expect(readout()).toHaveTextContent('14 Mar 2027');
-    fireEvent.pointerDown(overview().firstElementChild ?? overview(), { pointerType: 'touch', clientX: 300 });
-    fireEvent.pointerUp(overview().firstElementChild ?? overview(), { pointerType: 'touch', clientX: 100 });
+    await findCalendar();
+    fireEvent.pointerDown(months(), { pointerType: 'touch', clientX: 300 });
+    fireEvent.pointerUp(months(), { pointerType: 'touch', clientX: 280 });
+    expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
+    fireEvent.pointerDown(months(), { pointerType: 'touch', clientX: 300 });
+    fireEvent.pointerUp(months(), { pointerType: 'touch', clientX: 100 });
     await waitFor(() =>
-      expect(within(overview()).getByRole('region', { name: 'Apr 2027' })).toBeInTheDocument(),
+      expect(within(months()).getByRole('table', { name: 'Apr 2027' })).toBeInTheDocument(),
     );
-    expect(readout()).toHaveTextContent('14 Mar 2027');
+    fireEvent.pointerDown(months(), { pointerType: 'touch', clientX: 100 });
+    fireEvent.pointerUp(months(), { pointerType: 'touch', clientX: 300 });
+    await waitFor(() =>
+      expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument(),
+    );
+  });
+
+  // why: CodeRabbit CR8: a re-read whose window holds fewer months than the one shown keeps a month on screen, and
+  // the month buttons work from it at once
+  it('a re-read with fewer months shows its last month, with working month buttons', async () => {
+    setViewportWidth(375);
+    const { user, client } = renderDates({ body: workedDates() });
+    await findCalendar();
+    await user.click(screen.getByRole('button', { name: C.nextMonth }));
+    expect(within(months()).getByRole('table', { name: 'Apr 2027' })).toBeInTheDocument();
+    server.use(serveDates(workedDates({ space: { ...DATES_SPACE, departureTo: asIsoDate('2027-03-31') } })));
+    await act(() => client.refetchQueries({ queryKey: ['date-pairs'] }));
+    await waitFor(() =>
+      expect(within(months()).getByRole('table', { name: 'Mar 2027' })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: C.nextMonth })).toBeDisabled();
+    expect(screen.getByRole('button', { name: C.previousMonth })).toBeDisabled();
+  });
+
+  it('a desktop draws every month and no month buttons', async () => {
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    expect(within(months()).getAllByRole('table')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: C.nextMonth })).toBeNull();
+  });
+});
+
+describe('the calendar’s anchor (Task 8 and Task 6 carried notes)', () => {
+  it('"See all on the calendar" links to it', async () => {
+    renderDates({ body: workedDates() });
+    const lower = await findLower();
+    expect(within(lower).getByRole('link', { name: COPY.searchPage.seeAll })).toHaveAttribute(
+      'href',
+      '#calendar',
+    );
+  });
+
+  it('a page opened at #calendar scrolls the calendar into view once it has drawn, then drops the fragment', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const before = window.history.length;
+    renderDates({ body: workedDates(), search: '?view=dates&def=def-0001#calendar' });
+    await findCalendar();
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    expect(scroll.mock.contexts[0]).toBe(document.getElementById('calendar'));
+    // why: final review I1: the landing is consumed once, the way `d.fold` is, so the anchor never travels on
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=def-0001', '']);
+    expect(window.history.length).toBe(before);
+    scroll.mockRestore();
+  });
+
+  it('a page opened without it does not scroll', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    renderDates({ body: workedDates() });
+    await findCalendar();
+    expect(scroll).not.toHaveBeenCalled();
+    scroll.mockRestore();
+  });
+});
+
+describe('the calendar is a pair of dates’ prices, never fares (Ruling 18)', () => {
+  it('a trip’s day on a search with a read pairing names the seller’s label', async () => {
+    renderDates({
+      body: {
+        rest: { no_data: 4 },
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(calendarFig()),
+          [at('2027-03-14', 11)]: pricedPair(pairingFig()),
+          [at('2027-03-15', 10)]: { buckets: bucketsOf({ error: 4 }) },
+        },
+      },
+    });
+    await findCalendar();
+    expect(dayButton('2027-03-14')).toHaveAccessibleName(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read',
+    );
+  });
+
+  it('the window is the search’s: a day after it is inert', async () => {
+    renderDates({ body: { ...workedDates(), space: DATES_SPACE } });
+    await findCalendar();
+    expect(document.querySelector('button[data-day="2027-04-14"]')).toBeNull();
   });
 });

@@ -37,28 +37,29 @@ export const OPERATOR_KINDS: readonly OperatorMessageKind[] = keysOf(SUBJECTS);
 
 const GUIDANCE: Readonly<Record<OperatorMessageKind, string>> = {
   paused_budget:
-    'Raise the cap, or wait for the automatic resume if the line above names one; Resume is on the status bar.',
-  paused_error: 'Check the provider, then resume from the status bar once the cause is fixed.',
+    "Raise the cap, or wait for the automatic resume if the line above names one; Resume is on the search's card and page.",
+  paused_error: "Check the provider, then resume from the search's card or page once the cause is fixed.",
   skipped_budget: 'Lower maxCells, run less often, or raise the cap.',
-  skipped_confirm: 'Open the definition and confirm the new estimate.',
-  skipped_window: 'Edit the window, then enable the definition again.',
+  skipped_confirm: "Open the search's Edit page and confirm the new estimate.",
+  skipped_window: "Change the dates in the search's Edit page, then set it to repeat again.",
   skipped_missed: 'The next scheduled run goes ahead as normal; start one now if you need newer prices.',
   interrupted:
-    'With AUTO_RESUME on it resumes on the next start unless it has restarted too often without progress, or is older than its discovery refresh allows (then it is cancelled and the next run starts with fresh prices); otherwise resume it from the status bar.',
+    "With AUTO_RESUME on it resumes on the next start unless it has restarted too often without progress, or is older than its discovery refresh allows (then it is cancelled and the next run starts with fresh prices); otherwise resume it from the search's card or page.",
   provider_disabled: 'The other providers carried on; a manual resume retries this one.',
   provider_capped:
     'Its cells stay skipped (budget) in this run: resume the run by hand once the cap window reopens or the cap is raised, or the next scheduled run searches them.',
   browser_window:
     "The line above says which run fetches the browser provider's cells and whether the other providers carried on. CAMOUFOX_BROWSER_WINDOW=any lets a resumed run keep loading browser pages.",
-  crash_loop: 'Check the logs for the cause, then resume it manually from the status bar.',
-  parity_break: 'The plan and the ledger disagree; Coverage shows both counts.',
+  crash_loop: "Check the logs for the cause, then resume it from the search's card or page.",
+  parity_break: "The plan and the ledger disagree; the search's full search log shows both counts.",
   alerts_calendar_only:
     'Cells skipped for budget had no itinerary search, so verified-basis rules could not judge them; calendar-basis rules ran, constraints not checked.',
 };
 /** A scheduled run no configured provider can run is a configuration problem, not a spend one (po-003). */
 const NO_RUNNABLE_PROVIDER = {
   subject: 'scheduled run skipped: no configured provider can run it',
-  guidance: 'Configure a provider for this definition, or move it to a plan that allows scheduled runs.',
+  guidance:
+    'Set up a price source for this search in its Edit page, or move to a plan that allows scheduled runs.',
 } as const;
 
 /**

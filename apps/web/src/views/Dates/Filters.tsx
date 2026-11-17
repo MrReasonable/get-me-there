@@ -1,235 +1,193 @@
-import { apiContract, type Iata } from '@gmt/core';
-import { type FormEvent, useId, useState } from 'react';
+import type { Iata } from '@gmt/core';
+import { useId, useState } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { Flaps } from '../../flaps/Flaps.js';
-import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
-import { CLEARED_FILTERS, type DatesUiState, datesPatch, journeyInBounds } from '../../state/datesState.js';
+import { hoursText } from '../../lib/flightLines.js';
+import { type DatesUiState, datesPatch } from '../../state/datesState.js';
 import { nightsRange } from '../../state/parse.js';
 import { updateSearchParams } from '../../state/urlState.js';
+import { type AirportDetails, useAirportDetails } from '../Definitions/airports.js';
+import { airportLabel } from '../Searches/cardWords.js';
 
-const D = COPY.datesView;
-const JOURNEY_BOUNDS = D.journeyBounds(
-  apiContract.MIN_JOURNEY_LIMIT_MINUTES,
-  apiContract.MAX_JOURNEY_LIMIT_MINUTES,
-);
-const FIELD = 'input min-h-11 w-24';
+const P = COPY.searchPage;
 
 /** A filter edit replaces the URL (spec §11: the filters are in the URL; an edit is not a navigation). */
 const apply = (s: Partial<DatesUiState>) => updateSearchParams(datesPatch(s), 'replace');
 
 /**
- * Spec §11 Dates "Filters", above the board, in the URL, applying to the header line, the board and the overview
- * together: the stay range (in the browser), the origins and destinations (sent to the route; subsets of the
- * definition's), the journey limit (sent to the route), the week switch (revision 50) and "Clear filters". Each
- * control is labelled and keyboard-operable; the component stays mounted while a new read loads, so focus stays on
- * the control that changed.
+ * Design 2026-11-08 Ruling 16 (mockup 02): the Search page's one filter row, in the URL, applying to the run line, both
+ * sections and the calendar together: the stay (min–max nights, in the browser), From and To (all, or one airport; sent
+ * to the route, so they change the date pairs read), and One per week. A journey limit applied from elsewhere (`d.journey`:
+ * a Trip page's breadcrumb back, an old bookmark) shows as a removable chip, so nothing hides trips unseen; the search's
+ * own limit is the header's. Each control is labelled and keyboard-operable; the row stays mounted while a new read
+ * loads, so focus stays on the control that changed.
  */
 export function Filters({ definition, state }: { definition: DefinitionResponse; state: DatesUiState }) {
   const id = useId();
-  const phone = useMediaQuery(PHONE_QUERY);
+  const airports = useAirportDetails([...definition.origins, ...definition.destinations]);
+  // why: fix round 1 (A): with no stay filter the fields show the search's own range, as mockup 02's "10 – 21"; a range
+  // equal to it is no filter, so nothing goes in the URL
+  const own = { min: definition.minNights, max: definition.maxNights };
+  const shown = state.nights ?? own;
   // why: typed text is held here until it is a value the URL can carry; a half-typed "1" of "14" never filters
-  const [stay, setStay] = useState({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
-  const [journey, setJourney] = useState(textOf(state.journey ?? undefined));
-  // why: the form stays mounted for the view's life, so a URL change made outside it ("Clear filters" on the empty
-  // state, back and forward, a link) must reach the typed text, or the fields disagree with the filter applied. The
-  // text is replaced only when it doesn't already say the URL's value, so the operator's own edit (which wrote the
-  // URL) is never rewritten mid-typing; half-typed text the filter couldn't apply is replaced like any other.
-  // React's "adjust state while rendering" pattern: no effect, so no frame shows the stale text.
-  const urlStay = stayKey(state.nights?.min, state.nights?.max);
+  const [stay, setStay] = useState({ min: textOf(shown.min), max: textOf(shown.max) });
+  // why: the row stays mounted for the page's life, so a URL change made outside it (back and forward, a link, the empty
+  // state's Clear filters) must reach the typed text, or the fields disagree with the filter applied. The text is
+  // replaced only when it doesn't already say the URL's value, so the operator's own edit (which wrote the URL) is never
+  // rewritten mid-typing. React's "adjust state while rendering" pattern: no effect, so no frame shows the stale text.
+  const urlStay = stayKey(shown.min, shown.max);
   const [seenStay, setSeenStay] = useState(urlStay);
   if (seenStay !== urlStay) {
     setSeenStay(urlStay);
-    if (typedStayKey(stay.min, stay.max) !== urlStay)
-      setStay({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
-  }
-  const [seenJourney, setSeenJourney] = useState(state.journey);
-  if (seenJourney !== state.journey) {
-    setSeenJourney(state.journey);
-    if (typedJourney(journey) !== state.journey) setJourney(textOf(state.journey ?? undefined));
+    if (typedStayKey(stay.min, stay.max, own) !== urlStay)
+      setStay({ min: textOf(shown.min), max: textOf(shown.max) });
   }
   const stayError = stayProblem(stay.min, stay.max);
-  const journeyError = journey.trim() !== '' && typedJourney(journey) === undefined;
-
   const editStay = (next: { min: string; max: string }) => {
     setStay(next);
-    if (next.min.trim() === '' && next.max.trim() === '') apply({ nights: null });
-    else if (stayProblem(next.min, next.max) === false)
-      apply({ nights: nightsRange(`${next.min.trim()}-${next.max.trim()}`) });
+    if (stayProblem(next.min, next.max)) return;
+    const range =
+      next.min.trim() === '' && next.max.trim() === ''
+        ? null
+        : nightsRange(`${next.min.trim()}-${next.max.trim()}`);
+    apply({ nights: range === null || isOwnStay(range, own) ? null : range });
   };
-  // why: the limit is sent to the route, so it applies on Enter or when the field is left, never on every key, and a
-  // value outside the route's bounds is explained beside the field and never sent (the route would refuse it)
-  const commitJourney = () => {
-    const limit = typedJourney(journey);
-    if (limit !== undefined) apply({ journey: limit });
-  };
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    commitJourney();
-  };
-  const toggle = (list: readonly Iata[], all: readonly Iata[], code: Iata): Iata[] => {
-    const shown = list.length === 0 ? [...all] : [...list];
-    const next = shown.includes(code) ? shown.filter((c) => c !== code) : [...shown, code];
-    // why: every airport ticked is the unfiltered scope, written as no parameter
-    return next.length === all.length ? [] : all.filter((c) => next.includes(c));
-  };
-
-  const form = (
-    <form aria-label={D.filtersLabel} onSubmit={onSubmit} className="dates-filters">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="filter-field">
-          <span className="label-caps">{D.stayMin}</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            className={FIELD}
-            value={stay.min}
-            aria-describedby={stayError ? `${id}-stay` : undefined}
-            onChange={(e) => editStay({ ...stay, min: e.target.value })}
-          />
-        </label>
-        <label className="filter-field">
-          <span className="label-caps">{D.stayMax}</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            className={FIELD}
-            value={stay.max}
-            aria-describedby={stayError ? `${id}-stay` : undefined}
-            onChange={(e) => editStay({ ...stay, max: e.target.value })}
-          />
-        </label>
-        {stayError ? (
-          <span id={`${id}-stay`} className="bad-text">
-            {D.stayInvalid}
-          </span>
-        ) : null}
-      </div>
-      <AirportPicker
-        legend={D.origins}
-        all={definition.origins}
-        chosen={state.from}
-        onToggle={(c) => apply({ from: toggle(state.from, definition.origins, c) })}
-      />
-      <AirportPicker
-        legend={D.destinations}
-        all={definition.destinations}
-        chosen={state.to}
-        onToggle={(c) => apply({ to: toggle(state.to, definition.destinations, c) })}
-      />
-      <div className="filter-field">
-        <label htmlFor={`${id}-journey`} className="label-caps">
-          {D.journeyLimit}
-        </label>
+  const journey = state.journey === null ? null : hoursText(state.journey);
+  return (
+    <fieldset className="search-filters" data-testid="dates-filters">
+      <legend className="sr-only">{P.filterLabel}</legend>
+      <span className="search-filter">
+        <span aria-hidden="true">{P.stay}</span>
         <input
-          id={`${id}-journey`}
           type="text"
           inputMode="numeric"
-          className={FIELD}
-          value={journey}
-          aria-invalid={journeyError ? true : undefined}
-          aria-describedby={`${id}-journey-bounds`}
-          onChange={(e) => setJourney(e.target.value)}
-          onBlur={commitJourney}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              commitJourney();
-            }
-          }}
+          className="search-filter-nights"
+          aria-label={P.stayShortest}
+          value={stay.min}
+          aria-describedby={stayError ? `${id}-stay` : undefined}
+          aria-invalid={stayError ? true : undefined}
+          onChange={(e) => editStay({ ...stay, min: e.target.value })}
         />
-        <span id={`${id}-journey-bounds`} className={journeyError ? 'bad-text text-xs' : 'text-xs text-fg-2'}>
-          {JOURNEY_BOUNDS}
+        <span aria-hidden="true">–</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          className="search-filter-nights"
+          aria-label={P.stayLongest}
+          value={stay.max}
+          aria-describedby={stayError ? `${id}-stay` : undefined}
+          aria-invalid={stayError ? true : undefined}
+          onChange={(e) => editStay({ ...stay, max: e.target.value })}
+        />
+        <span aria-hidden="true">{P.nights}</span>
+      </span>
+      {stayError ? (
+        <span id={`${id}-stay`} className="search-filter-error">
+          {P.stayInvalid}
         </span>
-      </div>
-      <label className="week-switch min-h-11">
+      ) : null}
+      {definition.origins.length > 1 ? (
+        <AirportSelect
+          label={P.from}
+          all={definition.origins}
+          chosen={state.from}
+          airports={airports.rows}
+          onChange={(from) => apply({ from })}
+        />
+      ) : null}
+      {definition.destinations.length > 1 ? (
+        <AirportSelect
+          label={P.to}
+          all={definition.destinations}
+          chosen={state.to}
+          airports={airports.rows}
+          onChange={(to) => apply({ to })}
+        />
+      ) : null}
+      <label className="search-filter">
         <input
           type="checkbox"
           checked={state.bestPerWeek}
           onChange={(e) => apply({ bestPerWeek: e.target.checked })}
         />
-        <span className="font-semibold">{D.weekSwitch}</span>
-        <span aria-hidden="true" className="flap-strip switch-flap">
-          <Flaps text={state.bestPerWeek ? D.switchFlap.on : D.switchFlap.off} cells={3} />
-        </span>
+        {P.onePerWeek}
       </label>
-      <button
-        type="button"
-        className="btn-text min-h-11 font-semibold"
-        onClick={() => {
-          setStay({ min: '', max: '' });
-          setJourney('');
-          apply(CLEARED_FILTERS);
-        }}
-      >
-        {COPY.clearFilters}
-      </button>
-    </form>
-  );
-  // why: on a phone the filters fold to one line, so the board starts in the first screen (Ian, 2026-10-27); the
-  // fold opens on a tap and the form inside is the same form
-  return phone ? (
-    <details className="fold filters-fold">
-      <summary className="min-h-11">{D.filtersLabel}</summary>
-      {form}
-    </details>
-  ) : (
-    form
-  );
-}
-
-/** One checkbox per airport of the definition; an empty choice means every airport, so all are then ticked. */
-function AirportPicker({
-  legend,
-  all,
-  chosen,
-  onToggle,
-}: {
-  legend: string;
-  all: readonly Iata[];
-  chosen: readonly Iata[];
-  onToggle: (c: Iata) => void;
-}) {
-  const ticked = chosen.length === 0 ? all : chosen;
-  return (
-    <fieldset className="airport-pick">
-      <legend className="label-caps">{legend}</legend>
-      {all.map((c) => {
-        const on = ticked.includes(c);
-        return (
-          <label key={c} className="airport-check min-h-11">
-            <input
-              type="checkbox"
-              checked={on}
-              // why: the last ticked airport stays: a scope with no airport would be an empty search, not a filter
-              disabled={on && ticked.length === 1}
-              onChange={() => onToggle(c)}
-            />
-            {c}
-          </label>
-        );
-      })}
+      {journey === null ? null : (
+        <button
+          type="button"
+          className="search-chip"
+          aria-label={P.journeyChipRemove(journey)}
+          onClick={() => apply({ journey: null })}
+        >
+          {P.journeyChip(journey)} <span aria-hidden="true">×</span>
+        </button>
+      )}
     </fieldset>
   );
 }
 
-const textOf = (n: number | undefined): string => (n === undefined ? '' : String(n));
-
-/** A stay range as one comparable string: `-` for no range. */
-const stayKey = (min: number | undefined, max: number | undefined): string => `${min ?? ''}-${max ?? ''}`;
-
-/** The typed stay range's key when the filter can apply it, else null (it then matches no URL value). */
-function typedStayKey(min: string, max: string): string | null {
-  if (min.trim() === '' && max.trim() === '') return stayKey(undefined, undefined);
-  const r = nightsRange(`${min.trim()}-${max.trim()}`);
-  return r === null ? null : stayKey(r.min, r.max);
+/**
+ * From or To as one select (Ruling 16): every airport of the search (no parameter), or one of them. A narrower set than
+ * every airport that is more than one (an old link's) is an option of its own while it is the URL's, so the select
+ * always says what is applied; every airport named one by one reads as every airport.
+ */
+function AirportSelect({
+  label,
+  all,
+  chosen,
+  airports,
+  onChange,
+}: {
+  label: string;
+  all: readonly Iata[];
+  chosen: readonly Iata[];
+  airports: AirportDetails['rows'];
+  onChange: (codes: Iata[]) => void;
+}) {
+  const name = (codes: readonly Iata[]) => codes.map((c) => airportLabel(c, airports.get(c))).join(', ');
+  // why: every airport named one by one (an old link) is every airport, the first option, never a second copy of it
+  const several = chosen.length > 1 && chosen.length < all.length ? chosen.join(',') : null;
+  const value = chosen.length === 1 ? (chosen[0] ?? '') : (several ?? '');
+  return (
+    <label className="search-filter">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === '' ? [] : all.filter((c) => v.split(',').includes(c)));
+        }}
+      >
+        <option value="">{name(all)}</option>
+        {several !== null ? <option value={several}>{name(chosen)}</option> : null}
+        {all.map((c) => (
+          <option key={c} value={c}>
+            {name([c])}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
-/** The typed journey limit as the URL carries it: null for blank, the minutes when in bounds, else undefined. */
-function typedJourney(text: string): number | null | undefined {
-  const t = text.trim();
-  if (t === '') return null;
-  return /^\d+$/.test(t) && journeyInBounds(Number(t)) ? Number(t) : undefined;
+const textOf = (n: number): string => String(n);
+
+/** A stay range as one comparable string. */
+const stayKey = (min: number, max: number): string => `${min}-${max}`;
+
+/** A range that is the search's own: no filter (fix round 1, A). */
+export function isOwnStay(r: { min: number; max: number }, own: { min: number; max: number }): boolean {
+  return r.min === own.min && r.max === own.max;
+}
+
+/**
+ * The typed stay range's key when the filter can apply it (blank on both sides is the search's own range), else null
+ * (it then matches no URL value).
+ */
+function typedStayKey(min: string, max: string, own: { min: number; max: number }): string | null {
+  if (min.trim() === '' && max.trim() === '') return stayKey(own.min, own.max);
+  const r = nightsRange(`${min.trim()}-${max.trim()}`);
+  return r === null ? null : stayKey(r.min, r.max);
 }
 
 /** True when the typed stay range is not one the filter can apply (blank on both sides is "no range", not an error). */

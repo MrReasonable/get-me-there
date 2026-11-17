@@ -114,7 +114,8 @@ const paid = () =>
   });
 
 describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
-  it('a new search starts with empty airports and dates and the presets; no schedule, no arrival window', async () => {
+  it('a new search starts with empty airports and dates and the presets, SearchApi unticked; no schedule, no arrival window', async () => {
+    const bodies = estimateBodies();
     const { user } = renderNew();
     expect(chipCodes('From')).toEqual([]);
     expect(chipCodes('To')).toEqual([]);
@@ -124,23 +125,35 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
     expect(fieldValue('Longest stay')).toBe('21');
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     expect(fieldValue('Cabin')).toBe('economy');
+    // Task 7 minor: the options read in sentence case, as mockup 01's do
+    expect(
+      within(screen.getByLabelText('Cabin'))
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Economy', 'Premium economy', 'Business', 'First']);
     // 1500 minutes, entered and shown as 25 hours 0 minutes
     const D = SETUP_COPY.definitions;
     expect(fieldValue(D.journeyPart(PLAN_COPY.journey, D.journeyHours))).toBe('25');
     expect(fieldValue(D.journeyPart(PLAN_COPY.journey, D.journeyMinutes))).toBe('0');
-    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('');
-    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('');
-    expect(fieldValue(D.maxCells)).toBe('10');
-    expect(fieldValue(D.topN)).toBe('10');
-    expect(fieldValue(D.expandTop)).toBe('2');
-    expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeDisabled();
-    expect(fieldValue('Max billed calls per run')).toBe('2000');
-    expect(fieldValue('Max cost per run in £')).toBe('0');
-    expect(fieldValue('How often to ask the Aviasales cache again (hours)')).toBe('168');
-    // spec rev 55 §8.2: a new search has no schedule; repeating is added from its page
-    expect(screen.queryByLabelText(SETUP_COPY.schedule.repeat)).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).toBeNull();
+    // Ruling 14: a new search may repeat, and starts at Never
+    expect(fieldValue(COPY.newSearch.repeat)).toBe('never');
+    // the rest of the presets travel in the draft, with no field for them on the panel (Edit's Limits and checks)
+    expect(screen.queryByText(COPY.newSearch.limitsHeading)).toBeNull();
+    await complete(user);
+    await waitFor(() => expect(bodies.length).toBeGreaterThan(0));
+    expect(bodies.at(-1)).toMatchObject({
+      verification: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true },
+      budget: { maxCalls: 2000, maxCostMicroGbp: 0 },
+      // design §8 question 2: SearchApi is ticked per search, so the preset's is left off a new one
+      providers: {
+        discovery: ['travelpayouts'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168 },
+      },
+      scheduleCron: null,
+      enabled: false,
+    });
+    expect(bodies.at(-1)).not.toMatchObject({ constraints: { arrivalWindowLocal: expect.anything() } });
   });
 
   it('defaultDraft and draftToRequest carry the spec values; the request never carries a confirmation', () => {
@@ -161,13 +174,12 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
 
   it('every money field takes pounds and sends integer pence (review po-012)', async () => {
     const bodies = estimateBodies();
-    const { user } = renderNew();
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    const { user } = renderEdit();
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
     await user.type(screen.getByLabelText(`${CONSTRAINT_LABELS.maxPricePence} (£)`), '480');
     await user.type(screen.getByLabelText('Price ceiling in £ (optional)'), '500.50');
     await user.clear(screen.getByLabelText('Max cost per run in £'));
     await user.type(screen.getByLabelText('Max cost per run in £'), '2');
-    await complete(user);
     await waitFor(() =>
       expect(bodies.at(-1)).toMatchObject({
         constraints: { maxPricePence: 48000 },
@@ -179,12 +191,11 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
 
   it('airline constraints parse like the carriers filter: codes kept, other entries shown as ignored (review arch-r2-009)', async () => {
     const bodies = estimateBodies();
-    const { user } = renderNew();
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    const { user } = renderEdit();
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
     await user.type(screen.getByLabelText(CONSTRAINT_LABELS.includeAirlines), 'zz, British');
     await user.tab();
     expect(screen.getByText('ignored, not two-character carrier codes: BRITISH')).toBeInTheDocument();
-    await complete(user);
     await waitFor(() => expect(bodies.at(-1)).toMatchObject({ constraints: { includeAirlines: ['ZZ'] } }));
   });
 
@@ -370,12 +381,33 @@ describe("the API's field errors (422 details.fields) land under the field they 
       .join(' ');
     expect(linked).toContain(message);
     // the press waits, and says why in words
-    expect(screen.getByRole('button', { name: /^Search now/ })).toHaveAccessibleDescription(
+    expect(screen.getByRole('button', { name: /^Search( · .+)?$/ })).toHaveAccessibleDescription(
       COPY.newSearch.reasons.fields,
     );
   });
 
   it('an API error on a field inside More options opens it and moves focus to the summary (UI-11)', async () => {
+    estimateBodies(() =>
+      HttpResponse.json(
+        {
+          error: {
+            code: 'validation',
+            message: 'x',
+            details: { fields: [{ field: 'cabin', message: 'not offered' }] },
+          },
+        },
+        { status: 422 },
+      ),
+    );
+    const { user } = renderNew();
+    await complete(user);
+    const summary = (await screen.findByText('Fix these before saving:')).parentElement;
+    expect(summary).toHaveTextContent('cabin: not offered');
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).toHaveAttribute('open');
+  });
+
+  it('on Edit, an API error on a field inside Limits and checks opens that fold, not More options (Ruling 13)', async () => {
     estimateBodies(() =>
       HttpResponse.json(
         {
@@ -388,12 +420,12 @@ describe("the API's field errors (422 details.fields) land under the field they 
         { status: 422 },
       ),
     );
-    const { user } = renderNew();
-    await complete(user);
+    renderEdit();
     const summary = (await screen.findByText('Fix these before saving:')).parentElement;
     expect(summary).toHaveTextContent('constraints.maxStops: too many');
     await waitFor(() => expect(summary).toHaveFocus());
-    expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).toHaveAttribute('open');
+    expect(screen.getByText(COPY.newSearch.limitsHeading).closest('details')).toHaveAttribute('open');
+    expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
   });
 
   it('a failed estimate that names no field says so in words beside the press', async () => {
@@ -402,7 +434,7 @@ describe("the API's field errors (422 details.fields) land under the field they 
     );
     const { user } = renderNew();
     await complete(user);
-    const press = screen.getByRole('button', { name: /^Search now/ });
+    const press = screen.getByRole('button', { name: /^Search( · .+)?$/ });
     await waitFor(() =>
       expect(press).toHaveAccessibleDescription("Couldn't work out the estimate: database is locked"),
     );
@@ -419,7 +451,7 @@ describe('blocking and required fields (fix round 1, UI-10)', () => {
     const before = bodies.length;
     await user.clear(screen.getByLabelText('Shortest stay'));
     expect(screen.getByLabelText('Shortest stay')).toBeInvalid();
-    expect(screen.getByRole('button', { name: /^Search now/ })).toHaveAccessibleDescription(
+    expect(screen.getByRole('button', { name: /^Search( · .+)?$/ })).toHaveAccessibleDescription(
       COPY.newSearch.reasons.stay,
     );
     await settled(client);
@@ -430,18 +462,18 @@ describe('blocking and required fields (fix round 1, UI-10)', () => {
 
   it('a half-filled time window shows "both ends needed", blocks the estimate, and filling the other end clears it', async () => {
     const bodies = estimateBodies();
-    const { user, client } = renderNew();
-    await complete(user);
+    const { user, client } = renderEdit();
     await waitFor(() => expect(bodies.length).toBeGreaterThan(0));
     const before = bodies.length;
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
-    const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
+    // the time windows are Edit's, under Limits and checks (Ruling 13)
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
+    const from = `${CONSTRAINT_LABELS.departureWindowLocal} from`;
+    const to = `${CONSTRAINT_LABELS.departureWindowLocal} to`;
     expect(screen.queryByText('both ends needed')).toBeNull();
     fireEvent.change(screen.getByLabelText(from), { target: { value: '06:00' } });
     expect(screen.getByText('both ends needed')).toBeInTheDocument();
     expect(screen.getByLabelText(to)).toBeInvalid();
-    expect(screen.getByRole('button', { name: /^Search now/ })).toHaveAccessibleDescription(
+    expect(screen.getByRole('button', { name: /^Save and search again/ })).toHaveAccessibleDescription(
       COPY.blockedByTimeWindow,
     );
     await settled(client);
@@ -450,14 +482,14 @@ describe('blocking and required fields (fix round 1, UI-10)', () => {
     expect(screen.queryByText('both ends needed')).toBeNull();
     await waitFor(() =>
       expect(bodies.at(-1)).toMatchObject({
-        constraints: { arrivalWindowLocal: { from: '06:00', to: '22:00' } },
+        constraints: { departureWindowLocal: { from: '06:00', to: '22:00' } },
       }),
     );
   });
 
   it('a pounds box with text that is not an amount says so instead of silently keeping the old value (UI-8)', async () => {
     const { user } = renderEdit();
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
     const box = screen.getByLabelText(/^Onward cost to JFK in £/);
     await user.type(box, '12.5.0');
     expect(box).toBeInvalid();
@@ -516,7 +548,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     renderEdit(definition({ scheduleCron: null, enabled: false }));
     expect(
       await screen.findByText(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest when you search again.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `${E.saveAndSearch} · about £1.20` })).toBeInTheDocument();
@@ -527,7 +559,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
   it('on a scheduled search the sentence’s "the rest" clause follows its schedule', async () => {
     serveEdit();
     renderEdit(definition());
-    expect(await screen.findByText(/, the rest next Monday$/)).toBeInTheDocument();
+    expect(await screen.findByText(/, the rest next Monday\.$/)).toBeInTheDocument();
   });
 
   it('"Save and search again" PUTs, then starts that search with the sentence’s figures, then opens its page', async () => {
@@ -700,7 +732,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
   it('note and onward cost per destination reach the estimate, the cost in pence', async () => {
     const bodies = estimateBodies();
     const { user } = renderEdit(definition({ destinations: ['JFK'] }));
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
     await user.type(screen.getByLabelText('Note for JFK (shown on every row)'), 'onward leg not included');
     await user.type(
       screen.getByLabelText('Onward cost to JFK in £ (optional, shown as a separate adjusted column)'),
@@ -726,18 +758,23 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     expect(chipCodes('To')).toEqual(['JFK', 'EWR']);
     expect(fieldValue('Shortest stay')).toBe('10');
     expect(fieldValue('Longest stay')).toBe('21');
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    await user.click(screen.getByText(COPY.newSearch.limitsHeading));
     // why: the time-window boxes follow the draft (review arch-r3-004)
     expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('06:00');
     expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('23:00');
   });
 
-  it('keeps the schedule fields, worded without Run now (20.1 concern 4)', async () => {
-    estimateBodies();
+  it('Repeat stands for the schedule fields, worded without Run now (Ruling 14; 20.1 concern 4)', async () => {
+    const bodies = estimateBodies();
     const { user } = renderEdit(definition({ scheduleCron: null, enabled: false }));
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    expect(fieldValue(SETUP_COPY.schedule.repeat)).toBe('none');
-    expect(screen.getByText(SETUP_COPY.schedule.none)).toBeInTheDocument();
+    expect(fieldValue(COPY.newSearch.repeat)).toBe('never');
+    expect(screen.queryByLabelText(SETUP_COPY.schedule.repeat)).toBeNull();
     expect(document.body.textContent).not.toMatch(/Run now/);
+    // Weekly turns repeating on with the default schedule; Never turns it off again
+    await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'weekly');
+    await waitFor(() => expect(bodies.at(-1)).toMatchObject({ scheduleCron: '0 5 * * 1', enabled: true }));
+    await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'never');
+    await waitFor(() => expect(bodies.at(-1)).toMatchObject({ scheduleCron: null, enabled: false }));
   });
 });

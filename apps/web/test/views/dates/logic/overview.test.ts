@@ -1,46 +1,55 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import {
-  asIsoDate,
-  asIsoMonth,
-  type Buckets,
-  type DatePair,
-  datePairSearched,
-  decodeDatePairs,
-  reducedMark,
-} from '@gmt/core';
+import { asIsoDate, asIsoMonth, type DatePair, type DatePairSpace } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
-  type BucketName,
-  bandsOf,
-  bucketOf,
-  CELL_MARKS,
-  cellModel,
-  columnsFor,
-  KEY_MARKS,
-  keyCounts,
-  MARK_ORDER,
-  markCounts,
+  type DayModel,
+  dayModel,
+  dayName,
+  dayScale,
+  heatOf,
   monthsOf,
-  noPriceParts,
-  pairsAt,
+  panelOrder,
+  stayMark,
+  staysByDay,
   weeksOf,
 } from '../../../../src/views/Dates/overview.js';
-import { shadeScale } from '../../../../src/views/Dates/shade.js';
+import { buildScale } from '../../../../src/views/Dates/shade.js';
 import {
   bucketsOf,
   calendarFig,
   DATES_SPACE,
-  datePairOf,
-  datesResponse,
+  decodedDates,
+  figurePairing,
+  type PairOver,
   pairingFig,
   priced,
-  verifiedFig,
+  pricedPair,
+  provCached,
 } from '../../../fixtures.dates.js';
 
-// Spec §11 Overview and §6.6: the months, each day's strip, the cell's shade or marks. Pure; Stryker runs it.
+// Trips and Search plan, Ruling 18 (Task 9): the calendar's months, a day's mark and price, its name, the heat scale and
+// the day panel's order. Pure; Stryker runs it.
 
 const d = asIsoDate;
+const DAY = d('2027-03-14');
+/** The web tests' clock is 14 Oct 2026, so a March 2027 day has not departed. */
+const TODAY = d('2026-10-14');
+
+/** One day's stays (10, 11 and 12 nights), each as given by its nights, the rest with no cached data. */
+function stays(over: Record<number, PairOver>, date: string = DAY): DatePair[] {
+  const space: DatePairSpace = {
+    departureFrom: d(date),
+    departureTo: d(date),
+    minNights: 10,
+    maxNights: 12,
+  };
+  return decodedDates({
+    space,
+    pairs: (_i, at) => over[at.nights] ?? { buckets: bucketsOf({ no_data: 4 }) },
+  }).pairs;
+}
+
+const model = (over: Record<number, PairOver>, date: string = DAY, today = TODAY): DayModel =>
+  dayModel({ date: d(date), today }, stays(over, date));
 
 describe('weeksOf (moved from the Calendar view; gridLogic.test.ts ported)', () => {
   it('weeks are Monday-first with null padding', () => {
@@ -66,319 +75,370 @@ describe('monthsOf: the months the window touches', () => {
       '2028-02',
     ]);
     expect(monthsOf({ departureFrom: d('2027-03-14'), departureTo: d('2027-03-14') })).toEqual(['2027-03']);
+    // a window from a month's last day to the next month's first, and across February in a leap year
+    expect(monthsOf({ departureFrom: d('2027-01-31'), departureTo: d('2027-02-01') })).toEqual([
+      '2027-01',
+      '2027-02',
+    ]);
+    expect(monthsOf({ departureFrom: d('2028-01-31'), departureTo: d('2028-04-01') })).toEqual([
+      '2028-01',
+      '2028-02',
+      '2028-03',
+      '2028-04',
+    ]);
   });
   it('none for an expired window', () => {
     expect(monthsOf({ departureFrom: d('2027-03-15'), departureTo: d('2027-03-14') })).toEqual([]);
   });
 });
 
-/** §6.6's table, written out from the spec's rows over a list of airport-pair statuses (the independent enumeration). */
-function enumerated(statuses: readonly BucketName[]): BucketName | null {
-  if (statuses.length === 0) return null;
-  const any = (s: BucketName) => statuses.includes(s);
-  if (any('priced')) return 'priced'; // row 1
-  if (any('not_run')) return 'not_run'; // row 2
-  if (any('error')) return 'error'; // row 3
-  if (any('empty') && statuses.every((s) => s === 'empty' || s === 'no_data' || s === 'skipped'))
-    return 'empty'; // row 4
-  if (any('no_data')) return 'no_data'; // row 5
-  return statuses.every((s) => s === 'skipped') ? 'skipped' : null; // row 6
-}
-
-describe('bucketOf: §6.6’s precedence over a date pair’s airport pairs', () => {
-  it('agrees with the table for every mix of up to two airport pairs in each bucket', () => {
-    const names: BucketName[] = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'];
-    let cases = 0;
-    for (let code = 0; code < 3 ** 6; code += 1) {
-      const counts = names.map((_n, i) => Math.floor(code / 3 ** i) % 3);
-      const statuses = names.flatMap((n, i) => Array.from({ length: counts[i] ?? 0 }, () => n));
-      const b: Buckets = {
-        priced: counts[0] ?? 0,
-        empty: counts[1] ?? 0,
-        no_data: counts[2] ?? 0,
-        error: counts[3] ?? 0,
-        skipped: counts[4] ?? 0,
-        not_run: counts[5] ?? 0,
-        reused: 0,
-      };
-      expect(bucketOf(b), statuses.join(',')).toBe(enumerated(statuses));
-      cases += 1;
-    }
-    expect(cases).toBe(729);
+describe('staysByDay: each departure day’s stays in view', () => {
+  it('groups the date pairs by departure date, each day’s stays in index order', () => {
+    const pairs = decodedDates().pairs;
+    const days = staysByDay(pairs);
+    expect(days.size).toBe(31);
+    expect(days.get(d('2027-03-14'))?.map((p) => p.nights)).toEqual([10, 11, 12]);
+    expect(days.get(d('2027-04-13'))?.map((p) => p.index)).toEqual([90, 91, 92]);
+    expect([...days.keys()][0]).toBe('2027-03-14');
   });
-});
-
-describe('columnsFor and bandsOf: the day’s strip', () => {
-  it('twelve stays or fewer are one column each; more fold into bands', () => {
-    expect(columnsFor(bandsOf({ min: 10, max: 12 }), null)).toEqual([
-      { from: 10, to: 10 },
-      { from: 11, to: 11 },
-      { from: 12, to: 12 },
-    ]);
-    expect(columnsFor(bandsOf({ min: 10, max: 22 }), null)).toHaveLength(7);
-    expect(bandsOf(null)).toEqual([]);
-  });
-  it('an open band opens into its stays, in place; the others stay folded', () => {
-    const bands = bandsOf({ min: 10, max: 22 });
-    expect(columnsFor(bands, 12)).toEqual([
-      { from: 10, to: 11 },
-      { from: 12, to: 12 },
-      { from: 13, to: 13 },
-      { from: 14, to: 15 },
-      { from: 16, to: 17 },
-      { from: 18, to: 19 },
-      { from: 20, to: 21 },
-      { from: 22, to: 22 },
-    ]);
-    // a one-night band (the last) has nothing to open
-    expect(columnsFor(bands, 22)).toEqual(columnsFor(bands, null));
-    expect(columnsFor(bands, 99)).toEqual(columnsFor(bands, null));
-  });
-});
-
-describe('pairsAt: a cell’s date pairs', () => {
-  const pairs = decodeDatePairs(datesResponse({})).pairs;
-  it('a single stay, and a band’s stays in order', () => {
-    expect(pairsAt(pairs, DATES_SPACE, d('2027-03-14'), { from: 11, to: 11 }).map((p) => p.nights)).toEqual([
-      11,
-    ]);
+  it('a stay filter leaves each day only the stays in view', () => {
+    const pairs = decodedDates().pairs.filter((p) => p.nights === 11);
     expect(
-      pairsAt(pairs, DATES_SPACE, d('2027-03-15'), { from: 10, to: 12 }).map((p) => [
-        p.departureDate,
-        p.nights,
-      ]),
-    ).toEqual([
-      ['2027-03-15', 10],
-      ['2027-03-15', 11],
-      ['2027-03-15', 12],
-    ]);
-  });
-  it('nothing outside the space', () => {
-    expect(pairsAt(pairs, DATES_SPACE, d('2027-03-13'), { from: 10, to: 10 })).toEqual([]);
-    expect(pairsAt(pairs, DATES_SPACE, d('2027-03-14'), { from: 13, to: 14 })).toEqual([]);
+      staysByDay(pairs)
+        .get(d('2027-03-20'))
+        ?.map((p) => p.nights),
+    ).toEqual([11]);
   });
 });
 
-/** A date pair with these counts (four airport pairs). */
-const p = (over: Partial<DatePair>): DatePair => ({
-  ...datePairOf({ departureDate: '2027-03-14', nights: 10, basis: null }),
-  buckets: bucketsOf({}),
-  ...over,
-});
-const ranks = (...xs: DatePair[]) => new Map(xs.map((x, i) => [x.index, i + 1]));
-/** Ten current figures from £300 to £390, so the scale is banded. */
-const tenPrices = Array.from({ length: 10 }, (_x, i) =>
-  p({ index: 100 + i, figure: priced(30_000 + i * 1_000) }),
-);
-const banded = shadeScale(tenPrices);
-
-describe('cellModel: marks never read as no flights (spec §11, §9)', () => {
-  it('each unpriced bucket alone is its own one of the five marks, never shaded', () => {
-    const cases = [
-      ['empty', 'no-price-shown'],
-      ['no_data', 'no-price-shown'],
-      ['error', 'couldnt-read'],
-      ['skipped', 'not-reached'],
-    ] as const;
-    for (const [b, mark] of cases) {
-      const m = cellModel([p({ buckets: bucketsOf({ [b]: 4 }) })], new Map(), banded);
-      expect(m.marks, b).toEqual([mark]);
-      expect(m.mark, b).toBe(mark);
-      expect(m.shade, b).toBeNull();
-    }
+// Review Focus 4: the calendar days, table-driven
+describe('dayModel (Ruling 18, Review Focus 4)', () => {
+  it.each<[string, Record<number, PairOver>, Partial<DayModel> & { pence: number | null }]>([
+    [
+      'priced plus couldn’t read: the priced stay’s calendar price',
+      {
+        10: pricedPair(priced(37_200)),
+        11: { buckets: bucketsOf({ error: 4 }) },
+      },
+      { mark: 'priced', pence: 37_200, notSeenOnly: false },
+    ],
+    [
+      'only no price',
+      { 10: { buckets: bucketsOf({ empty: 4 }) }, 11: { buckets: bucketsOf({ empty: 4 }) } },
+      { mark: 'no-price-shown', pence: null, notSeenOnly: false },
+    ],
+    [
+      'only couldn’t read',
+      {
+        10: { buckets: bucketsOf({ error: 4 }) },
+        11: { buckets: bucketsOf({ error: 4 }) },
+        12: { buckets: bucketsOf({ error: 1, empty: 3 }) },
+      },
+      { mark: 'couldnt-read', pence: null, notSeenOnly: false },
+    ],
+    [
+      'all not run',
+      {
+        10: { buckets: bucketsOf({}) },
+        11: { buckets: bucketsOf({}) },
+        12: { buckets: bucketsOf({}) },
+      },
+      { mark: 'not-searched', pence: null, notSeenOnly: false },
+    ],
+    [
+      'one empty and three not run: not searched, never no price',
+      {
+        10: { buckets: bucketsOf({ empty: 1 }) },
+        11: { buckets: bucketsOf({ empty: 4 }) },
+        12: { buckets: bucketsOf({ empty: 4 }) },
+      },
+      { mark: 'not-searched', pence: null, notSeenOnly: false },
+    ],
+    [
+      'superseded only: no price, "not seen again"',
+      {
+        10: pricedPair(priced(31_000, { superseded: true })),
+        11: pricedPair(priced(30_000, { basis: 'verified', notSeenInLatest: { ageHours: 30 } })),
+      },
+      { mark: 'priced', pence: null, notSeenOnly: true },
+    ],
+    [
+      'a superseded price beside a current one: the current one, even when dearer',
+      {
+        10: pricedPair(priced(31_000, { superseded: true })),
+        11: pricedPair(priced(39_000)),
+      },
+      { mark: 'priced', pence: 39_000, notSeenOnly: false },
+    ],
+    [
+      'stale: the stale price, its mark kept',
+      { 10: pricedPair(priced(34_000, { price: { ...calendarFig().price, stale: 'refresh' } })) },
+      { mark: 'priced', pence: 34_000, notSeenOnly: false },
+    ],
+    [
+      'trip and lower calendar: the trip’s £480, with the dot, over the calendar’s £372',
+      {
+        10: pricedPair(priced(37_200)),
+        11: pricedPair(
+          pairingFig({
+            pairing: figurePairing({ pricePence: 48_000, fromPence: 48_000 }),
+            price: { ...pairingFig().price, pricePence: 48_000 },
+          }),
+        ),
+      },
+      { mark: 'priced', pence: 48_000, notSeenOnly: false },
+    ],
+    [
+      'the cheapest of two trips; a read trip whose calendar price was superseded is still a trip',
+      {
+        10: pricedPair(priced(52_000, { basis: 'verified' })),
+        12: pricedPair(
+          pairingFig({
+            superseded: true,
+            pairing: figurePairing({ pricePence: 50_000, fromPence: 50_000 }),
+            price: { ...pairingFig().price, pricePence: 50_000 },
+          }),
+        ),
+      },
+      { mark: 'priced', pence: 50_000, notSeenOnly: false },
+    ],
+    [
+      'the lowest of several calendar prices, the first stay on a tie',
+      {
+        10: pricedPair(priced(40_000)),
+        11: pricedPair(priced(38_000, { price: { ...calendarFig().price, provenance: provCached() } })),
+        12: pricedPair(priced(38_000)),
+      },
+      { mark: 'priced', pence: 38_000, notSeenOnly: false },
+    ],
+  ])('%s', (_name, over, want) => {
+    const m = model(over);
+    expect(m.mark).toBe(want.mark);
+    expect(m.price?.cell.pricePence ?? null).toBe(want.pence);
+    expect(m.notSeenOnly).toBe(want.notSeenOnly);
+    expect(m.stays.map((p) => p.nights)).toEqual([10, 11, 12]);
   });
-  it('a date pair whose every airport pair is not searched is "not searched", never shaded', () => {
-    expect(cellModel([p({ buckets: bucketsOf({}) })], new Map(), banded)).toMatchObject({
-      marks: ['not-searched'],
-      mark: 'not-searched',
-      shade: null,
+
+  it('a trip prints with the dot and its own label; a calendar price without it, labelled by its source', () => {
+    const trip = model({
+      10: pricedPair(priced(37_200)),
+      11: pricedPair(pairingFig()),
+    }).price;
+    expect([trip?.trip, trip?.kind]).toEqual([true, 'seller']);
+    const cached = model({
+      11: pricedPair(priced(38_000, { price: { ...calendarFig().price, provenance: provCached() } })),
+    }).price;
+    expect([cached?.trip, cached?.kind]).toEqual([false, 'cached']);
+    // a tie on price: the first stay's (the cached price of 11 nights, not the 12 nights' calendar price)
+    const tie = model({
+      10: pricedPair(priced(40_000)),
+      11: pricedPair(priced(38_000, { price: { ...calendarFig().price, provenance: provCached() } })),
+      12: pricedPair(priced(38_000)),
+    }).price;
+    expect([tie?.cell.pricePence, tie?.kind]).toEqual([38_000, 'cached']);
+    const tripTie = model({
+      10: pricedPair(priced(50_000, { basis: 'verified', hasBookingOptions: true })),
+      11: pricedPair(priced(50_000, { basis: 'verified' })),
+    }).price;
+    expect(tripTie?.kind).toBe('seller');
+    const stale = model({
+      10: pricedPair(priced(34_000, { price: { ...calendarFig().price, stale: 'refresh', ageHours: 300 } })),
+    }).price;
+    expect([stale?.cell.stale, stale?.cell.ageHours, stale?.kind]).toEqual(['refresh', 300, 'calendar']);
+  });
+
+  it('a departed day is blank and inert: out, with no stays, whatever it holds', () => {
+    const over = { 10: pricedPair(priced(37_200)) };
+    expect(model(over, '2026-10-13', d('2026-10-14'))).toEqual({
+      mark: 'out',
+      price: null,
+      notSeenOnly: false,
+      stays: [],
+    });
+    // the day itself has not departed
+    expect(model(over, '2026-10-14', d('2026-10-14')).mark).toBe('priced');
+  });
+
+  it('an out day is never a button; its words, were it named, are a mark’s', () => {
+    const out = dayModel({ date: DAY, today: d('2027-03-15') }, stays({}));
+    expect(out.mark).toBe('out');
+    expect(dayName(DAY, out)).toBe('Sun 14 Mar, not searched');
+  });
+
+  it('a day outside the window (no stays) is out', () => {
+    expect(dayModel({ date: DAY, today: TODAY }, [])).toEqual({
+      mark: 'out',
+      price: null,
+      notSeenOnly: false,
+      stays: [],
     });
   });
-  it('one empty and three not searched is not searched with the stripes, never "no price shown" (§6.6)', () => {
-    expect(cellModel([p({ buckets: bucketsOf({ empty: 1 }) })], new Map(), banded)).toMatchObject({
-      marks: ['not-searched', 'partly'],
-      mark: 'not-searched',
+});
+
+describe('dayName: each day is a button named by its date and what it shows (Ruling 18)', () => {
+  it('a calendar price: "Sun 14 Mar, £372, Calendar · 2h"', () => {
+    expect(dayName(DAY, model({ 10: pricedPair(priced(37_200)) }))).toBe('Sun 14 Mar, £372, Calendar · 2h');
+  });
+  // fix round 1 (review I1): a price an earlier search found on a day the latest run has not reached keeps its price,
+  // and the day's name still says what the latest run did there
+  it('a price on a day the latest run did not reach or search: the price, then the day’s mark', () => {
+    const earlier = (b: Parameters<typeof bucketsOf>[0]) => ({
+      10: { buckets: bucketsOf(b), figure: pairingFig({ fromEarlierSearch: true }) },
+      11: { buckets: bucketsOf(b) },
+      12: { buckets: bucketsOf(b) },
     });
-    expect(cellModel([p({ buckets: bucketsOf({ no_data: 3 }) })], new Map(), banded).marks).toEqual([
-      'not-searched',
-      'partly',
-    ]);
+    const reached = model(earlier({ skipped: 4 }));
+    expect([reached.mark, reached.price?.cell.pricePence]).toEqual(['not-reached', 118_000]);
+    expect(dayName(DAY, reached)).toBe(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read, not reached',
+    );
+    expect(dayName(DAY, model(earlier({})))).toBe(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read, not searched',
+    );
   });
-  it('mixed buckets take §6.6’s precedence, and the stripes when some are not searched', () => {
-    expect(
-      cellModel([p({ buckets: bucketsOf({ error: 1, empty: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['couldnt-read']);
-    expect(
-      cellModel([p({ buckets: bucketsOf({ empty: 1, no_data: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['no-price-shown']);
-    expect(
-      cellModel([p({ buckets: bucketsOf({ skipped: 1, no_data: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['no-price-shown']);
+  it('a trip: "…, £1,180, Seller · 4h, trip with flights read"', () => {
+    expect(dayName(DAY, model({ 11: pricedPair(pairingFig()) }))).toBe(
+      'Sun 14 Mar, £1,180, Seller · 4h, trip with flights read',
+    );
   });
-  it('a price found but none that can be the figure (partially verified, unconfirmed) says so, never a shade', () => {
+  it('a stale price says its stale words after its label', () => {
     expect(
-      cellModel(
-        [p({ buckets: bucketsOf({ priced: 1, no_data: 3 }), partiallyVerified: 1 })],
-        new Map(),
-        banded,
+      dayName(
+        DAY,
+        model({ 10: pricedPair(priced(34_000, { price: { ...calendarFig().price, stale: 'refresh' } })) }),
       ),
-    ).toMatchObject({
-      marks: ['unshown'],
-      mark: 'priced',
-      shade: null,
-    });
+    ).toBe("Sun 14 Mar, £340, Calendar · 2h, older than this search's refresh");
   });
-  it('every price left out for a known journey time: "none within", with its marks, never "no fares"', () => {
-    expect(
-      cellModel([p({ buckets: bucketsOf({ priced: 1, no_data: 3 }), journeyLeftOut: 1 })], new Map(), banded)
-        .marks,
-    ).toEqual(['noneWithin']);
-    expect(
-      cellModel([p({ buckets: bucketsOf({ priced: 1, not_run: 3 }), journeyLeftOut: 1 })], new Map(), banded)
-        .marks,
-    ).toEqual(['noneWithin', 'partly']);
-  });
-  it('no airport pair in scope: no mark', () => {
-    expect(cellModel([p({ buckets: bucketsOf({}, 0) })], new Map(), banded)).toMatchObject({
-      marks: [],
-      mark: null,
-    });
-  });
-});
-
-describe('the five marks are core’s reducedMark, imported and not re-implemented (spec rev 55 §6.6, ruling A8)', () => {
-  it('a cell’s mark is reducedMark of its buckets for every mix of up to two airport pairs in each bucket', () => {
-    const names: BucketName[] = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'];
-    for (let code = 1; code < 3 ** 6; code += 1) {
-      const counts = names.map((_n, i) => Math.floor(code / 3 ** i) % 3);
-      const b: Buckets = {
-        priced: counts[0] ?? 0,
-        empty: counts[1] ?? 0,
-        no_data: counts[2] ?? 0,
-        error: counts[3] ?? 0,
-        skipped: counts[4] ?? 0,
-        not_run: counts[5] ?? 0,
-        reused: 0,
-      };
-      expect(cellModel([p({ buckets: b })], new Map(), banded).mark, JSON.stringify(b)).toBe(reducedMark(b));
-    }
-  });
-  it('overview.ts imports reducedMark from core and spells no precedence of its own for the marks', () => {
-    const source = readFileSync(join(import.meta.dirname, '../../../../src/views/Dates/overview.ts'), 'utf8');
-    expect(source).toMatch(/import \{[^}]*\breducedMark\b[^}]*\} from '@gmt\/core'/s);
-    expect(source).not.toMatch(/function reducedMark/);
+  it.each<[string, Record<number, PairOver>, string]>([
+    ['not searched', { 10: { buckets: bucketsOf({}) } }, 'Sun 14 Mar, not searched'],
+    [
+      'no price',
+      {
+        10: { buckets: bucketsOf({ empty: 4 }) },
+      },
+      'Sun 14 Mar, no price',
+    ],
+    ['couldn’t read', { 10: { buckets: bucketsOf({ error: 4 }) } }, "Sun 14 Mar, couldn't read"],
+    [
+      'not reached',
+      {
+        10: { buckets: bucketsOf({ skipped: 4 }) },
+        11: { buckets: bucketsOf({ skipped: 4 }) },
+        12: { buckets: bucketsOf({ skipped: 4 }) },
+      },
+      'Sun 14 Mar, not reached',
+    ],
+    [
+      'not seen again',
+      { 10: pricedPair(priced(31_000, { superseded: true })) },
+      'Sun 14 Mar, not seen again',
+    ],
+    [
+      'priced with no price that can be shown',
+      { 10: { buckets: bucketsOf({ priced: 1, no_data: 3 }), journeyLeftOut: 1 } },
+      'Sun 14 Mar, no price to show',
+    ],
+  ])('%s', (_name, over, name) => {
+    expect(dayName(DAY, model(over))).toBe(name);
   });
 });
 
-describe('cellModel: shading (spec §11, revision 50)', () => {
-  it('spec rev 56 §11: a pairing figure is shaded on the one scale and carries "not checked"', () => {
-    const pair = p({ index: 100, figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) });
-    expect(cellModel([pair], ranks(pair), banded)).toMatchObject({ marks: ['notChecked'] });
-    expect(cellModel([pair], ranks(pair), banded).shade).not.toBeNull();
+describe('dayScale and heatOf: the heat ramp over the printed prices, current only (Ruling 18)', () => {
+  const days = (prices: Array<number | null>): DayModel[] =>
+    prices.map((p) =>
+      model(
+        p === null ? { 10: pricedPair(priced(10_000, { superseded: true })) } : { 10: pricedPair(priced(p)) },
+      ),
+    );
+
+  it('is the quintile scale of the days’ printed prices, not-seen days left off', () => {
+    const prices = [30_000, 31_000, 32_000, 33_000, 34_000, 35_000, 36_000, 37_000, 38_000, 39_000];
+    const scale = dayScale([...days(prices), ...days([null, null])]);
+    expect(scale.count).toBe(10);
+    expect([scale.minPence, scale.maxPence]).toEqual([30_000, 39_000]);
+    expect(scale.mode).toBe(buildScale(prices).mode);
   });
-  it('a current calendar figure is shaded and carries "not checked"; a verified one does not', () => {
-    const cal = p({ index: 100, figure: priced(30_000), buckets: bucketsOf({ priced: 4 }) });
-    expect(cellModel([cal], ranks(cal), banded)).toMatchObject({ shade: 0, marks: ['notChecked'] });
-    const ver = p({
-      index: 109,
-      figure: priced(39_000, { basis: 'verified' }),
-      buckets: bucketsOf({ priced: 4 }),
-    });
-    expect(cellModel([ver], ranks(ver), banded)).toMatchObject({ shade: 4, marks: [] });
+
+  it('lower prices take the first steps of the ramp, higher the last', () => {
+    const prices = [30_000, 31_000, 32_000, 33_000, 34_000, 35_000, 36_000, 37_000, 38_000, 39_000];
+    const scale = dayScale(days(prices));
+    expect(prices.map((p) => heatOf(scale, p))).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
   });
-  it('a figure with an airport pair not searched is shaded and striped', () => {
-    const x = p({
-      index: 100,
-      figure: verifiedFig({ fromEarlierSearch: true }),
-      buckets: bucketsOf({ priced: 1, no_data: 2 }),
-    });
-    expect(cellModel([x], ranks(x), shadeScale([x]))).toMatchObject({ shade: 'flat', marks: ['partly'] });
-  });
-  it('superseded and not-seen figures are off the scale: no shade, their mark', () => {
-    const sup = p({ figure: calendarFig({ superseded: true }), buckets: bucketsOf({ priced: 4 }) });
-    expect(cellModel([sup], ranks(sup), banded)).toMatchObject({
-      shade: null,
-      marks: ['superseded', 'notChecked'],
-    });
-    const unseen = p({
-      figure: verifiedFig({ notSeenInLatest: { ageHours: 3 } }),
-      buckets: bucketsOf({ priced: 4 }),
-    });
-    expect(cellModel([unseen], ranks(unseen), banded)).toMatchObject({ shade: null, marks: ['notSeen'] });
-  });
-  it('a band cell shows its best-ranked figure’s shade, and the stripes when any date pair in it has a cell not searched', () => {
-    const a = p({ index: 1, nights: 10, figure: priced(39_000), buckets: bucketsOf({ priced: 4 }) });
-    const b = p({ index: 2, nights: 11, figure: priced(30_000), buckets: bucketsOf({ priced: 4 }) });
-    const c = p({ index: 3, nights: 12, buckets: bucketsOf({ no_data: 3 }) });
-    const m = cellModel([a, b, c], ranks(b, a), banded);
-    expect(m.lead).toBe(b);
-    expect(m.shade).toBe(0);
-    expect(m.marks).toEqual(['notChecked', 'partly']);
-    expect(m.pairs).toEqual([a, b, c]);
-    expect(m.buckets).toMatchObject({ priced: 8, no_data: 3, not_run: 1 });
-  });
-  it('an unranked figure (outside the stay filter’s rank) sorts after a ranked one in a band', () => {
-    const a = p({ index: 1, figure: priced(30_000) });
-    const b = p({ index: 2, figure: priced(31_000) });
-    expect(cellModel([a, b], new Map([[2, 1]]), banded).lead).toBe(b);
-    expect(cellModel([a, b], new Map([[1, 1]]), banded).lead).toBe(a);
+
+  it('too few prices, or too narrow a spread, take the one flat step', () => {
+    expect(heatOf(dayScale(days([30_000, 40_000])), 30_000)).toBe('flat');
+    const narrow = Array.from({ length: 12 }, (_x, i) => 40_000 + i * 100);
+    expect(heatOf(dayScale(days(narrow)), 40_000)).toBe('flat');
   });
 });
 
-describe('the key’s counts (spec rev 55 §11 Overview legend)', () => {
-  const inView = [
-    p({ index: 1, buckets: bucketsOf({}) }),
-    p({ index: 2, buckets: bucketsOf({ empty: 1 }) }),
-    p({ index: 3, buckets: bucketsOf({ empty: 4 }) }),
-    p({ index: 4, buckets: bucketsOf({ empty: 2, no_data: 2 }) }),
-    p({ index: 5, buckets: bucketsOf({ no_data: 2, skipped: 2 }) }),
-    p({ index: 6, buckets: bucketsOf({ error: 1, empty: 3 }) }),
-    p({ index: 7, buckets: bucketsOf({ skipped: 4 }) }),
-    p({ index: 8, buckets: bucketsOf({ priced: 1, empty: 3 }), figure: priced(30_000) }),
-    p({ index: 9, buckets: bucketsOf({ priced: 1, not_run: 3 }), figure: priced(31_000) }),
-  ];
-  it('the five marks, each date pair once by reducedMark, the same counts the header and the card read', () => {
-    expect(keyCounts(inView)).toEqual({
-      priced: 2,
-      'no-price-shown': 3,
-      'couldnt-read': 1,
-      'not-reached': 1,
-      'not-searched': 2,
-    });
-    // the searched count of the cards and the header line is the priced and no-price-shown marks together
-    expect(inView.filter((x) => datePairSearched(x.buckets))).toHaveLength(5);
-  });
-  it('"no price shown" names its parts by the precedence bucket: no fares before no cached data', () => {
-    expect(noPriceParts(inView)).toEqual({ empty: 2, no_data: 1 });
-    // a date pair not searched is never one of its parts, even with an empty airport pair
-    expect(noPriceParts([p({ buckets: bucketsOf({ empty: 1 }) })])).toEqual({ empty: 0, no_data: 0 });
-  });
-  it('markCounts counts the cell marks besides, each date pair once', () => {
-    const counts = markCounts(inView, new Map(), banded);
-    expect(counts).toMatchObject({
-      'not-searched': 2,
-      'no-price-shown': 3,
-      partly: 2,
-      notChecked: 2,
-    });
-    expect(Object.keys(counts).sort()).toEqual([...CELL_MARKS].sort());
-  });
-  it('the key lists the five marks first, priced first; then the cell marks besides, every glyph mark once', () => {
-    expect(KEY_MARKS).toEqual(['priced', 'no-price-shown', 'couldnt-read', 'not-reached', 'not-searched']);
-    expect(MARK_ORDER.slice(0, 5)).toEqual(KEY_MARKS);
-    expect(MARK_ORDER.slice(5)).toEqual([
-      'partly',
-      'notChecked',
-      'superseded',
-      'notSeen',
-      'noneWithin',
+describe('stayMark: a stay with no price to show (the day panel’s rows)', () => {
+  it.each<[string, PairOver, ReturnType<typeof stayMark>]>([
+    ['no price', { buckets: bucketsOf({ empty: 4 }) }, 'no-price-shown'],
+    ['no cached data', { buckets: bucketsOf({ no_data: 4 }) }, 'no-price-shown'],
+    ['couldn’t read', { buckets: bucketsOf({ error: 1, empty: 3 }) }, 'couldnt-read'],
+    ['not reached', { buckets: bucketsOf({ skipped: 4 }) }, 'not-reached'],
+    ['not searched', { buckets: bucketsOf({ empty: 1 }) }, 'not-searched'],
+    [
+      'every price over the journey limit',
+      { buckets: bucketsOf({ priced: 1, empty: 3 }), journeyLeftOut: 1 },
+      'over-limit',
+    ],
+    ['a price that can’t be shown', { buckets: bucketsOf({ priced: 1, empty: 3 }) }, 'unshown'],
+    // why: CodeRabbit CR11: a price over the limit on one airport pair never hides what happened on another
+    [
+      'one airport pair over the limit, another couldn’t read',
+      { buckets: bucketsOf({ priced: 1, error: 1, empty: 2 }), journeyLeftOut: 1 },
+      'couldnt-read',
+    ],
+    [
+      'one airport pair over the limit, another priced but not shown',
+      { buckets: bucketsOf({ priced: 2, empty: 2 }), journeyLeftOut: 1 },
       'unshown',
-    ]);
-    expect(CELL_MARKS).toEqual(MARK_ORDER.slice(1));
-    expect(new Set(MARK_ORDER).size).toBe(11);
+    ],
+    [
+      'one airport pair over the limit, the others not searched',
+      { buckets: bucketsOf({ priced: 1, empty: 1 }), journeyLeftOut: 1 },
+      'not-searched',
+    ],
+    [
+      'one airport pair over the limit, another not reached',
+      { buckets: bucketsOf({ priced: 1, skipped: 1, empty: 2 }), journeyLeftOut: 1 },
+      'not-reached',
+    ],
+    [
+      'an earlier price over the limit, the latest run found none',
+      { buckets: bucketsOf({ empty: 4 }), journeyLeftOut: 1 },
+      'over-limit',
+    ],
+    [
+      'two airport pairs over the limit, the others no price',
+      { buckets: bucketsOf({ priced: 2, empty: 1, no_data: 1 }), journeyLeftOut: 2 },
+      'over-limit',
+    ],
+  ])('%s', (_name, over, mark) => {
+    const [p] = stays({ 10: over });
+    if (p === undefined) throw new Error('no stay');
+    expect(stayMark(p)).toBe(mark);
   });
-  it('no mark is named for the old six buckets', () => {
-    for (const old of ['empty', 'no_data', 'error', 'skipped', 'not_run'])
-      expect(MARK_ORDER, old).not.toContain(old);
+});
+
+describe('panelOrder: the day panel lists trips, then the other prices, then the stays without one', () => {
+  it('trips by price, then calendar and not-seen prices by price, then the rest in stay order', () => {
+    const space: DatePairSpace = { departureFrom: DAY, departureTo: DAY, minNights: 10, maxNights: 16 };
+    const by: Record<number, PairOver> = {
+      10: { buckets: bucketsOf({ empty: 4 }) },
+      11: pricedPair(priced(39_000)),
+      12: pricedPair(priced(52_000, { basis: 'verified' })),
+      13: { buckets: bucketsOf({ error: 4 }) },
+      14: pricedPair(priced(36_000, { superseded: true })),
+      15: pricedPair(pairingFig()),
+      16: pricedPair(priced(37_000)),
+    };
+    const pairs = decodedDates({
+      space,
+      pairs: (_i, at) => by[at.nights] ?? {},
+    }).pairs;
+    expect(panelOrder(pairs).map((p) => p.nights)).toEqual([12, 15, 14, 16, 11, 10, 13]);
   });
 });

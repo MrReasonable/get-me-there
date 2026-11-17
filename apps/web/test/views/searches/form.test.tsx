@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe('the new-search form: what it shows (spec rev 55 §11)', () => {
-  it('shows From, To, Leave between as two date fields, Stay and Search now; nothing else outside More options', () => {
+  it('shows From, To, Leave from and Leave by as two date fields, Stay and Search; the journey limit, cabin and name are under More options', () => {
     renderForm();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.to })).toBeInTheDocument();
@@ -57,36 +57,41 @@ describe('the new-search form: what it shows (spec rev 55 §11)', () => {
       expect(more?.contains(screen.getByLabelText(label))).toBe(true);
   });
 
-  it('More options holds the presets: 25 h each way, economy, the rolling switch, every free source ticked, the name, the budget', async () => {
+  it('More options holds the presets: 25 h each way, economy, Repeat never, the rolling switch and the name; Where to look ticks every free source', async () => {
     const { user } = renderForm();
+    // Ruling 13: the sources are in view, by the panel's words, each free one the install has set up ticked
+    expect(screen.getByRole('checkbox', { name: /^Aviasales cache · / })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Google Flights, in your browser · / })).toBeChecked();
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     expect(
       field(SETUP_COPY.definitions.journeyPart(PLAN_COPY.journey, SETUP_COPY.definitions.journeyHours)).value,
     ).toBe('25');
     expect(screen.getByLabelText(COPY.cabin)).toHaveValue('economy');
+    expect(screen.getByLabelText(N.repeat)).toHaveValue('never');
     const rolling = screen.getByRole('checkbox', { name: PLAN_COPY.rollingSwitch });
     expect(rolling).not.toBeChecked();
     await user.click(rolling);
     expect(field(COPY.startOffsetDays).value).toBe('7');
     expect(field(COPY.lengthDays).value).toBe('182');
     expect(screen.getByText(PLAN_COPY.rollingLine(7, 182), { exact: false })).toBeInTheDocument();
-    // every free source the install has configured and enabled, ticked from the presets, the browser worker included
-    // spec rev 55 §3: the sources by their main-path names
-    expect(screen.getByRole('checkbox', { name: 'The Aviasales cache' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'The browser worker' })).toBeChecked();
-    expect(field(COPY.maxCalls).value).toBe('2000');
-    // each set-up term with its one-line explanation (ui-011)
-    expect(screen.getByLabelText(COPY.maxCalls)).toHaveAccessibleDescription(/^Calls to paid sources/);
+    // the run budget is Edit's (Limits and checks), not the panel's
+    expect(screen.queryByLabelText(COPY.maxCalls)).toBeNull();
   });
 
-  it('no arrival or departure window is filled in: the time fields are empty, "only if you set one"', async () => {
+  it('no arrival or departure window is filled in: the estimate carries none, and the panel has no time fields', async () => {
+    const held = holdEstimates();
     const { user } = renderForm();
+    await fill(user);
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(held.bodies).toHaveLength(1));
+    const body = held.bodies[0];
+    const constraints =
+      typeof body === 'object' && body !== null && 'constraints' in body ? body.constraints : null;
+    expect(constraints).not.toHaveProperty('arrivalWindowLocal');
+    expect(constraints).not.toHaveProperty('departureWindowLocal');
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    for (const name of [CONSTRAINT_LABELS.arrivalWindowLocal, CONSTRAINT_LABELS.departureWindowLocal]) {
-      expect(field(`${name} ${COPY.timeFrom}`).value).toBe('');
-      expect(field(`${name} ${COPY.timeTo}`).value).toBe('');
-      expect(field(`${name} ${COPY.timeFrom}`)).toHaveAccessibleDescription(PLAN_COPY.onlyIfSet);
-    }
+    for (const name of [CONSTRAINT_LABELS.arrivalWindowLocal, CONSTRAINT_LABELS.departureWindowLocal])
+      expect(screen.queryByLabelText(`${name} ${COPY.timeFrom}`)).toBeNull();
   });
 
   it('the name is suggested from the airports', async () => {
@@ -148,14 +153,14 @@ describe('the estimate: asked for automatically, 400 ms after the last change (s
     await user.click(searchNow());
     held.release();
     const region = await screen.findByRole('status', { name: N.estimateRegion });
-    await vi.waitFor(() => expect(region).toHaveTextContent('free · asks about all 126 date pairs'));
+    await vi.waitFor(() => expect(region).toHaveTextContent('About 10 min, free'));
     expect(searchNow()).not.toHaveAttribute('aria-disabled');
     // a change makes the shown estimate an old form's: the button waits again and the old sentence goes
     await user.clear(field(PLAN_COPY.longest));
     await user.type(field(PLAN_COPY.longest), '14');
     expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
     expect(searchNow()).toHaveAccessibleDescription(N.working);
-    expect(region).not.toHaveTextContent('asks about');
+    expect(region).not.toHaveTextContent('About');
     await user.click(searchNow());
     expect(creates).toEqual([]);
   });
@@ -196,19 +201,17 @@ describe('the estimate: asked for automatically, 400 ms after the last change (s
     const region = await screen.findByRole('status', { name: N.estimateRegion });
     await vi.waitFor(() =>
       expect(region).toHaveTextContent(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest when you search again.',
       ),
     );
     expect(region).toHaveAttribute('aria-live', 'polite');
     expect(region).toHaveTextContent(
-      'This costs about £1.20, above your £1.00 check; pressing Search now confirms it',
+      'This costs about £1.20, above your £1.00 check; pressing Search confirms it',
     );
-    expect(screen.getByRole('button', { name: 'Search now · about £1.20' })).toBeInTheDocument();
-    // the budget-fit table moves under More options
+    expect(screen.getByRole('button', { name: 'Search · about £1.20' })).toBeInTheDocument();
+    // the budget-fit table is Edit's (Limits and checks), not the panel's
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    expect(
-      screen.getByText('Google Flights via SearchApi this month: about 616, limit 10000'),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Google Flights via SearchApi this month: about 616, limit 10000')).toBeNull();
   });
 });
 
@@ -329,10 +332,8 @@ function queueEstimates() {
       const maxNights =
         typeof body === 'object' && body !== null && 'maxNights' in body ? body.maxNights : null;
       await new Promise<void>((resolve) => waiting.push({ maxNights, answer: resolve }));
-      // why: each body's answer differs in the date pairs it asks, so the sentence shows whose answer it is
-      return HttpResponse.json(
-        estimateResponse({ datePairs: Number(maxNights) * 10, datePairsCovered: Number(maxNights) * 10 }),
-      );
+      // why: each body's answer differs in how long it takes (a minute a night), so the sentence shows whose answer it is
+      return HttpResponse.json(estimateResponse({ estimate: estimate({ seconds: Number(maxNights) * 60 }) }));
     }),
   );
   return waiting;
@@ -355,13 +356,13 @@ describe('the sentence is only ever the current form’s (fix round 1, findings 
     // the 21-night answer lands now, for a form that is no longer on screen
     waiting[0]?.answer();
     await step(0);
-    expect(region()).not.toHaveTextContent('asks about');
+    expect(region()).not.toHaveTextContent('About');
     expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
     await step(ESTIMATE_DEBOUNCE_MS);
     await vi.waitFor(() => expect(waiting).toHaveLength(2));
     expect(waiting[1]?.maxNights).toBe(14);
     waiting[1]?.answer();
-    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 140 date pairs'));
+    await vi.waitFor(() => expect(region()).toHaveTextContent('About 14 min, free'));
   });
 
   it('going back to a form asked before shows nothing until its answer is read again (A → B → A)', async () => {
@@ -371,19 +372,19 @@ describe('the sentence is only ever the current form’s (fix round 1, findings 
     await step(ESTIMATE_DEBOUNCE_MS);
     await vi.waitFor(() => expect(waiting).toHaveLength(1));
     waiting[0]?.answer();
-    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 210 date pairs'));
+    await vi.waitFor(() => expect(region()).toHaveTextContent('About 21 min, free'));
     await longest(user, '14');
     await step(ESTIMATE_DEBOUNCE_MS);
     await vi.waitFor(() => expect(waiting).toHaveLength(2));
     waiting[1]?.answer();
-    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 140 date pairs'));
+    await vi.waitFor(() => expect(region()).toHaveTextContent('About 14 min, free'));
     await longest(user, '21');
     await step(ESTIMATE_DEBOUNCE_MS);
     await vi.waitFor(() => expect(waiting).toHaveLength(3));
     // the 21-night answer is cached, but it is being read again: the press waits for the new one
-    expect(region()).not.toHaveTextContent('asks about');
+    expect(region()).not.toHaveTextContent('About');
     expect(searchNow()).toHaveAccessibleDescription(N.working);
     waiting[2]?.answer();
-    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 210 date pairs'));
+    await vi.waitFor(() => expect(region()).toHaveTextContent('About 21 min, free'));
   });
 });

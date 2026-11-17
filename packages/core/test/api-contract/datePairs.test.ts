@@ -7,9 +7,11 @@ import {
   datePairsResponseSchema,
   MAX_DATE_PAIRS,
 } from '../../src/api-contract/datePairs.js';
+import { decodeDatePairs } from '../../src/datePairs/decode.js';
 import { type DatePairFigure, type DatePairPairing, encodeDatePairs } from '../../src/datePairs/encode.js';
 import { PAIRING_READ } from '../../src/datePairs/pairing.js';
-import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
+import { SYNTHETIC_SELLER_BOOKING } from '../../src/testing/booking.js';
+import { asIata, asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
 import {
   calendarFigure,
   decoded,
@@ -112,7 +114,8 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     const [a = 0, b = 0] = r.figures.pair;
     r.figures.pair[0] = b;
     r.figures.pair[1] = a;
-    expect(issuePaths(r)).toEqual(['figures.pair.1']);
+    // why: Ruling 2: the swap moves verified figure 0 to another date pair, so its details no longer name it
+    expect(issuePaths(r)).toEqual(['figures.pair.1', 'verifiedDetails.0']);
     const s = body();
     s.figures.pair[1] = s.figures.pair[0] ?? 0;
     expect(issuePaths(s)).toEqual(['figures.pair.1']);
@@ -241,11 +244,13 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
   it('rejects unsorted or repeated scope airports', () => {
     const r = body();
     r.scope.origins.reverse();
-    expect(issuePaths(r)).toEqual(['scope.origins']);
+    // why: Ruling 2: the reversal renames verified figure 0's origin, so its details no longer name it
+    expect(issuePaths(r)).toEqual(['scope.origins', 'verifiedDetails.0']);
     const s = body();
     const [first] = s.scope.destinations;
     if (first !== undefined) s.scope.destinations[1] = first;
-    expect(issuePaths(s)).toEqual(['scope.destinations']);
+    // why: Ruling 2: the repeat renames verified figure 0's destination, so its details no longer name it
+    expect(issuePaths(s)).toEqual(['scope.destinations', 'verifiedDetails.0']);
   });
   it('rejects airportPairs other than origins × destinations', () => {
     const r = body();
@@ -315,7 +320,12 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
   it('final review I1: accepts booking options on a verified figure and refuses them on any other', () => {
     const r = body();
     r.bookingOptions.figure = [0, 2];
+    // why: Ruling 2: a current verified figure with booking options carries its seller's booking in its details
+    const [first] = r.verifiedDetails;
+    if (first === undefined) throw new Error('the worked example lacks a current verified figure');
+    first.booking = SYNTHETIC_SELLER_BOOKING;
     expect(issuePaths(r)).toEqual([]);
+    first.booking = { kind: 'none' };
     r.bookingOptions.figure = [1];
     expect(issuePaths(r)).toEqual(['bookingOptions.figure.0']);
     r.bookingOptions.figure = [2, 2];
@@ -403,6 +413,144 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     );
     expect(expired.pairs.priced).toEqual([]);
     expect(issuePaths(expired)).toEqual([]);
+  });
+});
+
+describe("datePairsResponseSchema: the install's point of sale (fix round 1)", () => {
+  it('is required: two capitals, or unknown', () => {
+    expect(issuePaths({ ...body(), pointOfSale: 'US' })).toEqual([]);
+    expect(issuePaths({ ...body(), pointOfSale: 'unknown' })).toEqual([]);
+    for (const bad of ['us', 'xUS', 'USx', 'U'])
+      expect(issuePaths({ ...body(), pointOfSale: bad }), bad).toEqual(['pointOfSale']);
+    const { pointOfSale: _p, ...without } = body();
+    expect(issuePaths(without)).toEqual(['pointOfSale']);
+  });
+  it('round-trips through the codec', () => {
+    const x = { ...decoded(), pointOfSale: 'US' };
+    expect(decodeDatePairs(encodeDatePairs(x)).pointOfSale).toBe('US');
+  });
+});
+
+describe("datePairsResponseSchema: a verified figure's details (Ruling 2)", () => {
+  /** The worked example's details: verified figures 0 and 4 are current, figure 2 was not seen again. */
+  const details = () => body().verifiedDetails;
+  const detail = (k: number) => {
+    const d = details()[k];
+    if (d === undefined) throw new Error(`no detail ${k}`);
+    return d;
+  };
+  /** Figure 2's dates and airports: a verified figure the latest search did not see again. */
+  const notSeen = () => {
+    const d = decodeDatePairs(body()).pairs.find((p) => p.figure?.notSeenInLatest != null);
+    if (d?.figure == null) throw new Error('the worked example lacks a verified figure not seen again');
+    return {
+      ...detail(0),
+      departureDate: d.departureDate,
+      returnDate: d.returnDate,
+      origin: d.figure.origin,
+      destination: d.figure.destination,
+    };
+  };
+  const withDetails = (verifiedDetails: DatePairsResponse['verifiedDetails']) => ({
+    ...body(),
+    verifiedDetails,
+  });
+
+  it('the worked example carries one for each current verified figure, by its dates and airports', () => {
+    expect(details().map((d) => [d.departureDate, d.returnDate, d.origin, d.destination])).toEqual([
+      ['2027-03-14', '2027-03-25', 'LHR', 'JFK'],
+      ['2027-03-16', '2027-03-26', 'LHR', 'JFK'],
+    ]);
+    expect(issuePaths(body())).toEqual([]);
+  });
+  it('refuses a body without them, a missing one, an extra one and one out of order', () => {
+    const { verifiedDetails: _v, ...without } = body();
+    expect(issuePaths(without)).toEqual(['verifiedDetails']);
+    expect(issuePaths(withDetails([detail(0)]))).toEqual(['verifiedDetails']);
+    expect(issuePaths(withDetails([]))).toEqual(['verifiedDetails']);
+    expect(issuePaths(withDetails([detail(0), detail(1), detail(1)]))).toEqual(['verifiedDetails']);
+    expect(issuePaths(withDetails([detail(1), detail(0)]))).toEqual(['verifiedDetails.0']);
+  });
+  it('refuses details for a verified figure the latest search did not see again', () => {
+    expect(issuePaths(withDetails([detail(0), notSeen(), detail(1)]))).toEqual([
+      'verifiedDetails.1',
+      'verifiedDetails',
+    ]);
+  });
+  it.each([
+    ['another departure', { departureDate: asIsoDate('2027-03-15') }],
+    ['another return', { returnDate: asIsoDate('2027-03-24') }],
+    [
+      'dates outside the space',
+      { departureDate: asIsoDate('2027-04-14'), returnDate: asIsoDate('2027-04-25') },
+    ],
+    ['another origin', { origin: asIata('LGW') }],
+    ['another destination', { destination: asIata('EWR') }],
+  ])('refuses one naming %s', (_name, over) => {
+    expect(issuePaths(withDetails([{ ...detail(0), ...over }, detail(1)]))).toEqual(['verifiedDetails.0']);
+  });
+  it("a seller's booking exactly when the figure has booking options", () => {
+    const seller = { ...detail(0), booking: SYNTHETIC_SELLER_BOOKING };
+    expect(issuePaths(withDetails([seller, detail(1)]))).toEqual(['verifiedDetails.0.booking']);
+    const r = withDetails([seller, detail(1)]);
+    r.bookingOptions.figure = [0];
+    expect(issuePaths(r)).toEqual([]);
+    r.verifiedDetails = details();
+    expect(issuePaths(r)).toEqual(['verifiedDetails.0.booking']);
+    const post = {
+      kind: 'post',
+      url: SYNTHETIC_SELLER_BOOKING.url,
+      postData: 'a=1',
+      host: 'www.google.com',
+    } as const;
+    r.verifiedDetails = [{ ...detail(0), booking: post }, detail(1)];
+    expect(issuePaths(r)).toEqual([]);
+  });
+  it('holds each entry to its shape: legs as the result row states them, a re-validated booking, no other key', () => {
+    const legs = { out: { durationMinutes: 640, stops: 1 }, back: { durationMinutes: 415, stops: 0 } };
+    expect(issuePaths(withDetails([{ ...detail(0), legs }, detail(1)]))).toEqual([]);
+    expect(
+      issuePaths(
+        withDetails([{ ...detail(0), legs: { ...legs, out: { durationMinutes: -1, stops: 1 } } }, detail(1)]),
+      ),
+    ).toEqual(['verifiedDetails.0.legs.out.durationMinutes']);
+    // Task 2 minor: a leg's journey time is positive; an unknown one is null, never 0
+    expect(
+      issuePaths(
+        withDetails([{ ...detail(0), legs: { ...legs, back: { durationMinutes: 0, stops: 0 } } }, detail(1)]),
+      ),
+    ).toEqual(['verifiedDetails.0.legs.back.durationMinutes']);
+    expect(
+      issuePaths(
+        withDetails([
+          { ...detail(0), legs: { ...legs, back: { durationMinutes: null, stops: null } } },
+          detail(1),
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      issuePaths(
+        withDetails([
+          { ...detail(0), legs: { ...legs, back: { durationMinutes: 415, stops: 0.5 } } },
+          detail(1),
+        ]),
+      ),
+    ).toEqual(['verifiedDetails.0.legs.back.stops']);
+    const offList = { kind: 'get', url: 'https://example.com/book', host: 'example.com' } as const;
+    expect(issuePaths(withDetails([{ ...detail(0), booking: offList }, detail(1)]))).toContain(
+      'verifiedDetails.0.booking.url',
+    );
+    const extra = { ...detail(0), extra: 1 };
+    expect(issuePaths({ ...body(), verifiedDetails: [extra, detail(1)] })).toEqual(['verifiedDetails.0']);
+  });
+  it('round-trips through the codec', () => {
+    const x = decoded({
+      pair: (i) => (i === 4 ? { figure: verifiedFigure({ hasBookingOptions: true }) } : {}),
+    });
+    expect(x.verifiedDetails).toHaveLength(1);
+    const wire = encodeDatePairs(x);
+    expect(issuePaths(wire)).toEqual([]);
+    expect(decodeDatePairs(wire).verifiedDetails).toEqual(x.verifiedDetails);
   });
 });
 
@@ -601,6 +749,54 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const raggedPairing = withPairing();
     groupOf(raggedPairing, 'pairing').mismatch = [];
     expect(issuePaths(raggedPairing)).toEqual(['pairing.mismatch']);
+  });
+  it("Ruling 1: each way's legs are columns of the pairing group, held to their rules", () => {
+    expect(groupOf(withPairing(), 'pairing').outMinutes).toEqual([640, 640]);
+    const short = withPairing();
+    groupOf(short, 'pairing').backCarriers = [['Virgin Atlantic']];
+    expect(issuePaths(short)).toEqual(['pairing.backCarriers']);
+    const seven = Array.from({ length: 7 }, () => 'Aer Lingus');
+    // why: a bad name is reported at the name inside the carriers entry, so its path is one longer
+    const bad = [
+      ['outMinutes', -1],
+      ['outMinutes', 0],
+      // the list's own cap (ListedFlight, 6000 minutes): the leg is the list's
+      ['outMinutes', 6001],
+      ['backMinutes', 6001],
+      ['backMinutes', 90.5],
+      ['outStops', 1.5],
+      ['outStops', -1],
+      ['backStops', 6],
+      ['outCarriers', []],
+      ['outCarriers', seven],
+      ['backCarriers', ['Aer\nLingus']],
+      ['outArrivesDayOffset', -1],
+      ['outArrivesDayOffset', 4],
+      ['outArrivesDayOffset', 0.5],
+      ['backArrivesDayOffset', -2],
+      ['backArrivesDayOffset', 4],
+      ['backArrivesDayOffset', 1.5],
+    ] as const;
+    for (const [column, value] of bad) {
+      const r = withPairing();
+      const g = groupOf(r, 'pairing');
+      const col: unknown[] = g[column];
+      col[0] = value;
+      expect(issuePaths(r), `${column}: ${JSON.stringify(value)}`).toEqual([
+        `pairing.${column}.0${column === 'backCarriers' ? '.0' : ''}`,
+      ]);
+    }
+    const edge = withPairing();
+    const g = groupOf(edge, 'pairing');
+    g.outStops[0] = 5;
+    g.backStops[0] = 0;
+    g.outMinutes[0] = 1;
+    g.backMinutes[0] = 6000;
+    g.outCarriers[0] = Array.from({ length: 6 }, () => 'Aer Lingus');
+    // the return's offset runs from −1 (a date-line return), the outbound's from 0; both to 3
+    g.outArrivesDayOffset[0] = 3;
+    g.backArrivesDayOffset[0] = -1;
+    expect(issuePaths(edge)).toEqual([]);
   });
   it('pairing: the pairing figure has an entry (an offer\'s or a "from" price); none on a verified figure', () => {
     expect(issuePaths(withPairing({ pairing: null }))).toEqual(['pairing.figure']);

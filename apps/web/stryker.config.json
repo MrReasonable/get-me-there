@@ -11,7 +11,6 @@
     "src/state/parse.ts",
     "src/state/datesState.ts",
     "src/views/Dates/board.ts",
-    "src/views/Dates/howFar.ts",
     "src/views/Dates/stayScope.ts",
     "src/views/Dates/refresh.ts",
     "src/views/Dates/shade.ts",
@@ -20,7 +19,7 @@
     "src/state/landing.ts",
     "src/views/Searches/estimateLine.ts",
     "src/views/Dates/stateLines.ts",
-    "src/views/Dates/pairing.ts",
+    "src/lib/pairing.ts",
     "src/views/Dates/confirmWords.ts"
   ],
   "thresholds": {

@@ -1,13 +1,12 @@
 import type { ConfirmSummary } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { ExecutionResponse } from '../../src/api/types.js';
+import { runProgressOf } from '../../src/components/RunProgress.js';
 import { COPY } from '../../src/copy.js';
 import { readingCount } from '../../src/lib/flightsReading.js';
-import { stateLine as pageLine } from '../../src/views/Dates/stateLines.js';
-import { stateLine as cardLine } from '../../src/views/Searches/cardWords.js';
+import { stateLine as pageLine, runProgressFor } from '../../src/views/Dates/stateLines.js';
 import { execution } from '../fixtures.js';
 import { latestRun, searchCard } from '../fixtures.searches.js';
-import { NOW as NOW_ISO } from '../render.js';
 
 // Ruling R-reading (WP20 Task 20.6 review): one rule for the card and a search's page: a run is reading flights while
 // its flight step has not ended and has lists still to get; "Reading flights · N of M" counts the lists in hand, read
@@ -74,44 +73,35 @@ describe('readingCount', () => {
 });
 
 describe('the card and the page say the same', () => {
-  const card = (f: Flights | null) =>
-    cardLine(
-      searchCard({ latestRun: latestRun({ status: 'running', finishedAt: null, flights: f }) }),
-      NOW_ISO,
-    );
-  const page = (f: Flights | null) =>
-    pageLine({
-      latest: execution({ status: 'running', stage: 'discovery', flights: f }),
-      pairs: [],
-      whole: { searched: 0, total: 0 },
-      providers: [],
-      reused: 0,
-      spaceChanged: false,
-      noSource: false,
-      now: NOW_ISO,
-      c: COPY,
-    });
+  // why: the card's run is `RunProgress` over `runProgressOf` (Ruling 11): its flights count is `readingCount`, as the page's
+  const card = (f: Flights | null) => {
+    const run = searchCard({
+      latestRun: latestRun({ status: 'running', finishedAt: null, flights: f }),
+    }).latestRun;
+    if (run === null) throw new Error('the card has a run');
+    return runProgressOf(run).flightsRead;
+  };
+  // why: Ruling 11: the page's run is `RunProgress` too, over `runProgressFor`, and its state names the kind
+  const run = (f: Flights | null) => execution({ status: 'running', stage: 'discovery', flights: f });
+  const page = (f: Flights | null) => ({
+    kind: pageLine({ latest: run(f), spaceChanged: false, noSource: false, c: COPY }).kind,
+    read: runProgressFor(run(f), { searched: 0, total: 0 }, null).flightsRead,
+  });
   it('read and reused together, on both', () => {
-    expect(card(plan())).toEqual({ kind: 'flights', words: 'Reading flights · 5 of 10' });
-    expect(page(plan())).toEqual({ kind: 'reading', text: 'Reading flights · 5 of 10 date pairs' });
+    expect(card(plan())).toBe(5);
+    expect(page(plan())).toEqual({ kind: 'reading', read: 5 });
   });
-  it('in confirm mode: dates checked and trips read, with no denominator, on both', () => {
-    expect(card(confirming())).toEqual({
-      kind: 'flights',
-      words: 'Reading flights · 9 dates checked, 3 trips with flights read',
-    });
-    expect(page(confirming())).toEqual({
-      kind: 'reading',
-      text: 'Checking flights: 9 dates so far; 3 trips with flights read.',
-    });
+  it('in confirm mode: the dates checked, with no denominator, on both', () => {
+    expect(card(confirming())).toBe(9);
+    expect(page(confirming())).toEqual({ kind: 'reading', read: 9 });
   });
-  it('in confirm mode a step that has stopped of its own accord reads as searching on both', () => {
-    expect(card(confirming({}, 'patience')).kind).toBe('searching');
+  it('in confirm mode a step that has stopped of its own accord is still on the calendar, on both', () => {
+    expect(card(confirming({}, 'patience'))).toBeNull();
     expect(page(confirming({}, 'patience')).kind).toBe('searching');
   });
-  it('a step that ended reads as searching on both', () => {
+  it('a step that ended is still on the calendar, on both', () => {
     for (const ended of ['window', 'monthly-cap'] as const) {
-      expect(card(plan({ ended })).kind, ended).toBe('searching');
+      expect(card(plan({ ended })), ended).toBeNull();
       expect(page(plan({ ended })).kind, ended).toBe('searching');
     }
   });

@@ -6,7 +6,7 @@ import { PriceLabel } from '../../components/PriceLabel.js';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { labelDetail } from '../../lib/figureLabel.js';
-import { carriersText } from '../Dates/flightLines.js';
+import { carriersText } from '../../lib/flightLines.js';
 import { Amount } from './Amount.js';
 import { type OtherGroup, type OtherRow, otherFlightsOf } from './model.js';
 

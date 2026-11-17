@@ -1,25 +1,31 @@
 import { apiContract, type Iata } from '@gmt/core';
-import { oneOf } from './oneOf.js';
-import { int, nightsRange, type SortDir, sortToken, uniqueIataList } from './parse.js';
+import { int, nightsRange, uniqueIataList } from './parse.js';
 
 /**
- * The Dates view's URL parameters (spec §11 URLs and Filters): the one place their names live. The filters, the sort,
- * the week switch and the coverage section are in the URL and travel with every nav link (Task 19.7); how many board
- * rows are shown is component state, not a parameter (WP19 §5).
+ * The Search page's URL parameters (spec §11 URLs and Filters): the one place their names live. The filters, the week
+ * switch and the coverage section are in the URL and travel with every nav link (Task 19.7); how many rows a section
+ * shows is component state, not a parameter (WP19 §5). The board's sort went with the board (design 2026-11-08
+ * Ruling 21): an old `d.sort` is read as nothing.
  */
 export const DATES_PARAMS = {
   nights: 'd.nights',
   from: 'd.from',
   to: 'd.to',
   journey: 'd.journey',
-  sort: 'd.sort',
   week: 'd.week',
   coverage: 'd.coverage',
+  /** A link that opens one of the three folds under the calendar (Ruling 19); consumed once the fold has opened. */
+  fold: 'd.fold',
 } as const;
 
-export type DatesSortKey = 'price' | 'departure' | 'nights' | 'journey';
-export const DATES_SORT_KEYS: readonly DatesSortKey[] = ['price', 'departure', 'nights', 'journey'];
-const isDatesSortKey = oneOf(DATES_SORT_KEYS);
+/** The three folds under the calendar, by the value `d.fold` names them with. */
+const FOLD_IDS = ['price', 'searched', 'alert'] as const;
+export type FoldId = (typeof FOLD_IDS)[number];
+
+/** The fold a URL asks to open, or null (a value that names none is ignored, never an error). */
+export function foldOf(p: URLSearchParams): FoldId | null {
+  return FOLD_IDS.find((f) => f === p.get(DATES_PARAMS.fold)) ?? null;
+}
 
 export interface DatesUiState {
   /** The stay filter, applied in the browser to the decoded date pairs before ranking and shading. */
@@ -27,16 +33,12 @@ export interface DatesUiState {
   /** Origins and destinations in scope, subsets of the definition's; empty means all. Sent to the route. */
   from: Iata[];
   to: Iata[];
-  /** The journey limit in minutes, sent to the route; null means none. */
+  /** The journey limit in minutes, sent to the route; null means none (Ruling 16: a removable chip, not a control). */
   journey: number | null;
-  sort: { key: DatesSortKey; dir: SortDir };
   /** Revision 50 (Ian ruled 2026-10-26): the first-ranked date pair of each departure week. */
   bestPerWeek: boolean;
   coverageOpen: boolean;
 }
-
-/** The board's default order: the price rank (spec §11 Board). */
-export const DEFAULT_DATES_SORT: DatesUiState['sort'] = { key: 'price', dir: 'asc' };
 
 /**
  * Strict parse against the definition: a malformed token is ignored, an airport outside the definition is dropped
@@ -53,7 +55,6 @@ export function parseDatesState(
     from: uniqueIataList(p.get(DATES_PARAMS.from)).filter((c) => def.origins.includes(c)),
     to: uniqueIataList(p.get(DATES_PARAMS.to)).filter((c) => def.destinations.includes(c)),
     journey: journey !== undefined && journeyInBounds(journey) ? journey : null,
-    sort: sortToken(p.get(DATES_PARAMS.sort), isDatesSortKey) ?? DEFAULT_DATES_SORT,
     bestPerWeek: p.get(DATES_PARAMS.week) === 'best',
     coverageOpen: p.get(DATES_PARAMS.coverage) === 'open',
   };
@@ -69,8 +70,6 @@ export function journeyInBounds(minutes: number): boolean {
 }
 
 const joined = (xs: readonly string[]): string | null => (xs.length > 0 ? xs.join(',') : null);
-const isDefaultSort = (s: DatesUiState['sort']) =>
-  s.key === DEFAULT_DATES_SORT.key && s.dir === DEFAULT_DATES_SORT.dir;
 
 /** The URL patch for the keys given (null removes a parameter at its default); `parseDatesState` reads it back. */
 export function datesPatch(s: Partial<DatesUiState>): Record<string, string | null> {
@@ -80,14 +79,12 @@ export function datesPatch(s: Partial<DatesUiState>): Record<string, string | nu
   if (s.from !== undefined) out[DATES_PARAMS.from] = joined(s.from);
   if (s.to !== undefined) out[DATES_PARAMS.to] = joined(s.to);
   if (s.journey !== undefined) out[DATES_PARAMS.journey] = s.journey === null ? null : String(s.journey);
-  if (s.sort !== undefined)
-    out[DATES_PARAMS.sort] = isDefaultSort(s.sort) ? null : `${s.sort.key}.${s.sort.dir}`;
   if (s.bestPerWeek !== undefined) out[DATES_PARAMS.week] = s.bestPerWeek ? 'best' : null;
   if (s.coverageOpen !== undefined) out[DATES_PARAMS.coverage] = s.coverageOpen ? 'open' : null;
   return out;
 }
 
-/** "Clear filters" (spec §11): the stay range, the airports, the journey limit and the week switch; the sort stays. */
+/** "Clear filters" (the empty state's, spec §11): the stay range, the airports, the journey limit and the week switch. */
 export const CLEARED_FILTERS = {
   nights: null,
   from: [],
@@ -96,7 +93,7 @@ export const CLEARED_FILTERS = {
   bestPerWeek: false,
 } as const satisfies Partial<DatesUiState>;
 
-/** True when the operator set a filter (the sort and the coverage section are not filters). */
+/** True when the operator set a filter (the coverage section is not one). */
 export function filtersActive(s: DatesUiState): boolean {
   return s.nights !== null || s.from.length > 0 || s.to.length > 0 || s.journey !== null || s.bestPerWeek;
 }

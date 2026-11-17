@@ -8,18 +8,19 @@ import { POLL_MS } from '../../../src/api/queries.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
-import { API, definition as definitionFixture } from '../../fixtures.js';
+import { API, definition as definitionFixture, provSynthetic } from '../../fixtures.js';
 import {
-  calendarCheapest,
-  cheapest,
-  flightListProvenance,
+  calendarOnly,
+  cardTrip,
   latestRun,
+  lowerOnCalendar,
+  noPrices,
   searchCard,
 } from '../../fixtures.searches.js';
 import { type CardRequests, serveCards, serveCardsBy } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
 import { controllableViewport } from '../../viewport.js';
-import { airportRows, renderInShell } from './support.js';
+import { renderInShell } from './support.js';
 
 // Spec rev 55 §11 "Searches" (WP20 Task 20.3): the cards in the served order, their words, the cheapest through
 // PriceCell's compact face, the actions, the side column and the poll.
@@ -29,7 +30,7 @@ afterEach(() => vi.useRealTimers());
 const S = COPY.searchesView;
 const list = () => screen.findByRole('list', { name: S.listLabel });
 const cardOf = async (name: string) => {
-  const heading = await screen.findByRole('heading', { level: 3, name });
+  const heading = await screen.findByRole('heading', { level: 2, name });
   const card = heading.closest('li');
   if (card === null) throw new Error(`no card around ${name}`);
   return card;
@@ -41,11 +42,11 @@ describe('the cards list (spec rev 55 §11)', () => {
       serveCards([
         searchCard({ id: 'd2', name: 'Second' }),
         searchCard({ id: 'd1', name: 'First' }),
-        searchCard({ id: 'd3', name: 'Third', latestRun: null, cheapest: null }),
+        searchCard({ id: 'd3', name: 'Third', latestRun: null, ...noPrices }),
       ]),
     );
     renderInShell(<SearchesView />);
-    const cards = within(await list()).getAllByRole('heading', { level: 3 });
+    const cards = within(await list()).getAllByRole('heading', { level: 2 });
     expect(cards.map((h) => h.textContent)).toEqual(['Second', 'First', 'Third']);
   });
 
@@ -69,7 +70,7 @@ describe('the cards list (spec rev 55 §11)', () => {
     const { user, client } = renderInShell(<SearchesView />);
     const names0 = () =>
       within(screen.getByRole('list', { name: S.listLabel }))
-        .getAllByRole('heading', { level: 3 })
+        .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent);
     await list();
     await waitFor(() => expect(names0()).toEqual(['Alpha', 'Bravo']));
@@ -95,373 +96,82 @@ describe('the cards list (spec rev 55 §11)', () => {
   });
 });
 
-describe('what a card shows', () => {
-  it('the route from the airports’ cities with the codes beside it, the window, the stay and the schedule', async () => {
-    server.use(serveCards([searchCard()]), airportRows());
+describe('the synthetic banner (Ruling 7)', () => {
+  it('shows the red synthetic banner when any card’s trip is the fixture provider’s', async () => {
+    server.use(serveCards([searchCard({ id: 'a', name: 'Fake', trips: [cardTrip({}, provSynthetic)] })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    await waitFor(() =>
-      expect(card.querySelector('.search-card-route')).toHaveTextContent(
-        'Birmingham → Frankfurt (BHX → FRA)',
-      ),
-    );
-    expect(card).toHaveTextContent('10 Jan – 31 Mar · 10–14 nights · repeats Mondays 05:00');
+    await cardOf('Fake');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
-  it('shows the codes alone until the cities are known, never a blank route', async () => {
-    server.use(serveCards([searchCard({ name: 'Mine' })]));
-    renderInShell(<SearchesView />);
-    const card = await cardOf('Mine');
-    expect(card.querySelector('.search-card-route')).toHaveTextContent('BHX → FRA (BHX → FRA)');
-  });
-
-  it('a window that crosses a year names both years; a rolling window reads as its offsets', async () => {
-    server.use(
-      serveCards([
-        searchCard({
-          id: 'x',
-          name: 'Crossing',
-          window: {
-            kind: 'absolute',
-            departureFrom: '2026-12-10',
-            departureTo: '2027-03-31',
-            startOffsetDays: null,
-            lengthDays: null,
-          },
-        }),
-        searchCard({
-          id: 'y',
-          name: 'Rolling',
-          window: {
-            kind: 'relative',
-            departureFrom: '2026-10-21',
-            departureTo: '2027-04-21',
-            startOffsetDays: 7,
-            lengthDays: 182,
-          },
-          minNights: 14,
-          maxNights: 14,
-          schedule: null,
-        }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(await cardOf('Crossing')).toHaveTextContent('10 Dec 2026 – 31 Mar 2027');
-    const rolling = await cardOf('Rolling');
-    expect(rolling).toHaveTextContent('rolling: 182 days from 7 days ahead · 14 nights');
-    // "repeats …" only with a schedule
-    expect(rolling).not.toHaveTextContent('repeats');
-  });
-
-  it.each<[string, Parameters<typeof searchCard>[0], string]>([
-    [
-      'searching, with the time left',
-      {
-        latestRun: latestRun({
-          status: 'running',
-          finishedAt: null,
-          datePairsSearched: 120,
-          estimatedFinishAt: '2026-10-14T16:40:00.000Z',
-          stop: null,
-        }),
-      },
-      'Searching · 120 of 405 date pairs · about 1h 40m left',
-    ],
-    [
-      'searching, with no estimate: no "left" clause',
-      {
-        latestRun: latestRun({
-          status: 'running',
-          finishedAt: null,
-          datePairsSearched: 120,
-          estimatedFinishAt: null,
-        }),
-      },
-      'Searching · 120 of 405 date pairs',
-    ],
-    [
-      'reading flights',
-      {
-        latestRun: latestRun({
-          status: 'running',
-          finishedAt: null,
-          flights: {
-            planned: 10,
-            read: 3,
-            reused: 0,
-            failed: 0,
-            ended: null,
-            confirm: null,
-            stopCause: null,
-          },
-          estimatedFinishAt: '2026-10-14T15:08:00.000Z',
-        }),
-      },
-      'Reading flights · 3 of 10',
-    ],
-    ['searched', {}, 'Searched 2h ago'],
-    [
-      // ruling R-changed: the card has no count over the current space, so the line states none
-      'dates changed',
-      {
-        spaceChangedSince: true,
-        latestRun: latestRun({ datePairsSearched: 381, datePairsNeverSearched: 0 }),
-      },
-      'Dates changed since this was last searched',
-    ],
-    ['not searched yet', { latestRun: null, cheapest: null }, 'Not searched yet'],
-  ])('the state line, %s', async (_name, over, line) => {
-    server.use(serveCards([searchCard(over)]));
-    renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    expect(within(card).getByTestId('card-state')).toHaveTextContent(line);
-  });
-
-  it('a stopped search prints its stop’s sentence as-is with its fix, and a row with no cause reads NO_STOP_CAUSE_TEXT', async () => {
+  // why: Ruling 7 (a page's synthetic check covers every price it carries): the lower-on-calendar price counts too
+  it('shows the banner when a card’s lower-on-calendar price is synthetic, beside a real trip', async () => {
     server.use(
       serveCards([
         searchCard({
           id: 'a',
-          name: 'Stopped',
-          latestRun: latestRun({
-            status: 'paused_budget',
-            finishedAt: null,
-            stop: {
-              sentence: 'Stopped at 14 Oct 15:00: its spending limit of £5 was reached.',
-              fix: { text: 'Raise the limit in Edit, then Resume', command: null },
-            },
-          }),
-        }),
-        searchCard({
-          id: 'b',
-          name: 'Old',
-          latestRun: latestRun({ status: 'paused_error', finishedAt: null, stop: null }),
+          name: 'Fake below',
+          lowerOnCalendar: lowerOnCalendar({ pricePence: 5000 }, provSynthetic),
         }),
       ]),
     );
     renderInShell(<SearchesView />);
-    const stopped = within(await cardOf('Stopped')).getByTestId('card-state');
-    expect(stopped).toHaveTextContent(
-      'Stopped at 14 Oct 15:00: its spending limit of £5 was reached.Raise the limit in Edit, then Resume',
-    );
-    expect(within(stopped).getByTestId('stop-sentence')).toHaveTextContent(/^Stopped at 14 Oct 15:00/);
-    const old = within(await cardOf('Old')).getByTestId('card-state');
-    expect(old).toHaveTextContent('No reason was recorded for this run.');
-    expect(old.textContent).not.toContain('paused: error');
+    await cardOf('Fake below');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
-  it('"85 of 405 date pairs never searched" whenever that count is not zero', async () => {
-    server.use(
-      serveCards([
-        searchCard({ id: 'a', name: 'Some' }),
-        searchCard({
-          id: 'b',
-          name: 'None',
-          latestRun: latestRun({ datePairsSearched: 405, datePairsNeverSearched: 0 }),
-        }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(await cardOf('Some')).toHaveTextContent('85 of 405 date pairs never searched');
-    expect(await cardOf('None')).not.toHaveTextContent('never searched');
-  });
-});
-
-describe('the cheapest, always through PriceCell’s compact face', () => {
-  it('shows "£86 · 12 → 23 Jan" with its source mark and short age; nothing when there is none', async () => {
-    server.use(
-      serveCards([
-        searchCard({ id: 'a', name: 'Priced' }),
-        searchCard({ id: 'b', name: 'Bare', cheapest: null }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    const priced = await cardOf('Priced');
-    const cell = within(priced).getByTestId('price-cell');
-    expect(cell).toHaveTextContent('£86');
-    expect(within(cell).getByText(COPY.providerShort.searchapi)).toBeInTheDocument();
-    expect(within(cell).getByTestId('face-age')).toHaveTextContent('fetched 5h ago');
-    expect(priced.querySelector('.search-card-cheapest')).toHaveTextContent('£86');
-    expect(priced.querySelector('.search-card-cheapest')).toHaveTextContent('12 → 23 Jan');
-    expect(priced).not.toHaveTextContent(S.cheapestSoFar);
-    expect(within(await cardOf('Bare')).queryByTestId('price-cell')).toBeNull();
-  });
-
-  it('a calendar price says "not checked"; a stale one carries the stale mark', async () => {
-    server.use(
-      serveCards([
-        searchCard({ id: 'a', name: 'Calendar', cheapest: calendarCheapest() }),
-        searchCard({ id: 'b', name: 'Old', cheapest: cheapest({ stale: 'setting' }) }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(
-      within(within(await cardOf('Calendar')).getByTestId('price-cell')).getByTestId('face-age'),
-    ).toHaveTextContent(COPY.notChecked);
-    // the stale mark's words (spec rev 55 §3): a price on the verified basis
-    expect(within(await cardOf('Old')).getByText('older than your stale setting')).toBeInTheDocument();
-  });
-
-  // why: decision 36 — a cheapest read from a truncated tile is a partial minimum, and the card says so as the board does
-  it('a calendar cheapest from a truncated tile carries the truncated note; a complete one does not', async () => {
-    server.use(
-      serveCards([
-        searchCard({ id: 'a', name: 'Cut short', cheapest: calendarCheapest({ truncated: true }) }),
-        searchCard({ id: 'b', name: 'Whole', cheapest: calendarCheapest() }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(within(await cardOf('Cut short')).getByTestId('price-cell')).toHaveTextContent(COPY.truncatedNote);
-    expect(within(await cardOf('Whole')).getByTestId('price-cell')).not.toHaveTextContent(COPY.truncatedNote);
-  });
-
-  it('says "cheapest so far" beside a calendar figure while the search is running', async () => {
+  it('shows the banner when only a later trip is synthetic', async () => {
     server.use(
       serveCards([
         searchCard({
-          latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: calendarCheapest(),
+          id: 'a',
+          name: 'Fake second',
+          trips: [cardTrip(), cardTrip({ pricePence: 9000, departureDate: '2027-01-13' }, provSynthetic)],
         }),
       ]),
     );
     renderInShell(<SearchesView />);
-    expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent(S.cheapestSoFar);
+    await cardOf('Fake second');
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
-  it('words a pairing or verified figure "top trip with flights read so far" while running, never "cheapest so far"', async () => {
-    server.use(
-      serveCards([
-        searchCard({
-          name: 'London → New York',
-          origins: ['LHR', 'LGW'],
-          destinations: ['JFK', 'EWR'],
-          latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
-        }),
-      ]),
-    );
+  it('shows the banner on a card with no trip whose lower-on-calendar price is synthetic', async () => {
+    server.use(serveCards([searchCard({ id: 'a', name: 'Fake only', ...calendarOnly({}, provSynthetic) })]));
     renderInShell(<SearchesView />);
-    const card = await cardOf('London → New York');
-    expect(card).toHaveTextContent(S.topTripSoFar);
-    expect(card).not.toHaveTextContent(/cheapest so far/);
-  });
-
-  it('words a verified figure "top trip with flights read so far" while running', async () => {
-    server.use(
-      serveCards([
-        searchCard({
-          name: 'London → New York',
-          origins: ['LHR', 'LGW'],
-          destinations: ['JFK', 'EWR'],
-          latestRun: latestRun({ status: 'running', finishedAt: null, estimatedFinishAt: null }),
-          cheapest: cheapest({ origin: 'LHR', destination: 'JFK' }),
-        }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    const card = await cardOf('London → New York');
-    expect(card).toHaveTextContent(S.topTripSoFar);
-    expect(card).not.toHaveTextContent(/cheapest so far/);
-  });
-
-  it('says nothing of "so far" on a settled card, whatever its figure', async () => {
-    server.use(
-      serveCards([
-        searchCard({
-          name: 'London → New York',
-          origins: ['LHR', 'LGW'],
-          destinations: ['JFK', 'EWR'],
-          cheapest: cheapest(
-            { basis: 'pairing', priceKind: 'seller', pricePence: 120_400, origin: 'LHR', destination: 'JFK' },
-            flightListProvenance('2026-10-14T10:44:00.000Z'),
-          ),
-        }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(await cardOf('London → New York')).not.toHaveTextContent(/so far/);
-  });
-
-  it('shows the red synthetic banner when any card’s cheapest is the fixture provider’s', async () => {
-    const synthetic = cheapest(
-      {},
-      {
-        providerId: 'fixture',
-        sourceKind: 'synthetic',
-        fetchedAt: '2026-10-14T13:00:00.000Z',
-        maxAgeHours: 0,
-        fx: { converted: false },
-        pointOfSale: 'unknown',
-        cabin: 'economy',
-      },
-    );
-    server.use(serveCards([searchCard({ id: 'a', name: 'Fake', cheapest: synthetic })]));
-    renderInShell(<SearchesView />);
-    await cardOf('Fake');
+    await cardOf('Fake only');
     expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
   it('shows no banner for real prices', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
   });
 });
 
-describe('the actions', () => {
-  it('See dates opens the search’s page and remembers it; Edit opens the Edit page; Search again and Remove are there', async () => {
-    server.use(serveCards([searchCard()]));
-    const { user } = renderInShell(<SearchesView />, { search: '?view=searches' });
-    const card = await cardOf('Birmingham → Frankfurt');
-    const see = within(card).getByRole('link', { name: 'See dates for Birmingham → Frankfurt' });
-    expect(see).toHaveAttribute('href', '/?view=dates&def=def-0001');
-    expect(within(card).getByRole('link', { name: 'Edit Birmingham → Frankfurt' })).toHaveAttribute(
-      'href',
-      '/?view=definitions&edit=def-0001',
-    );
-    expect(within(card).getByRole('button', { name: /^Search again/ })).toBeInTheDocument();
-    expect(within(card).getByRole('button', { name: /^Remove / })).toBeInTheDocument();
-    await user.click(see);
-    expect(window.localStorage.getItem('gmt.lastSearch')).toBe('def-0001');
-    expect(window.location.search).toBe('?view=dates&def=def-0001');
-  });
-
-  it('Remove sits apart from Search again, in its own group at the far end', async () => {
-    server.use(serveCards([searchCard()]));
-    renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    const again = within(card).getByRole('button', { name: /^Search again/ });
-    const remove = within(card).getByRole('button', { name: /^Remove / });
-    expect(again.closest('.search-card-main-actions')).not.toBeNull();
-    expect(remove.closest('.search-card-main-actions')).toBeNull();
-    expect(remove.closest('.search-remove')).not.toBeNull();
-  });
-});
-
-describe('the side column (ruling A18)', () => {
-  it('mounts the new-search form, with Search now, first in the DOM, as a phone shows it (ruling A18)', async () => {
+describe('the side column (Ruling 13, withdrawing ruling A18)', () => {
+  it('mounts the new-search panel, headed "New search", with its Search, after the cards in the DOM at every width', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
     const side = await screen.findByRole('region', { name: S.sideHeading });
     const main = screen.getByRole('region', { name: S.listLabel });
-    expect(await within(side).findByRole('button', { name: COPY.searchAgain.searchNow })).toBeInTheDocument();
+    expect(within(side).getByRole('heading', { level: 2, name: S.sideHeading })).toBeInTheDocument();
+    expect(await within(side).findByRole('button', { name: COPY.newSearch.search })).toBeInTheDocument();
     expect(within(side).queryByRole('button', { name: 'Show estimate' })).toBeNull();
-    // why: DOM order follows the phone's visual order (WCAG 2.4.3): the form first; CSS grid puts it on the right
-    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // no link out to the Edit page's form: the form is here (ruling A18)
+    // why: Ruling 13 — the cards first, then the panel, as a phone shows them (WCAG 2.4.3); CSS grid puts the panel on
+    // the right from 900 px
+    expect(main.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // no link out to the Edit page's form: the form is here
     expect(within(side).queryByRole('link', { name: /New search/ })).toBeNull();
   });
 
-  it('the stylesheet places the form in the right column from 900 px and in the single column below, with one DOM order', () => {
+  it('the stylesheet places the panel in the right column from 900 px, sticky, and in the single column below, with one DOM order', () => {
     const css = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../../../src/views/Searches/searches.css'),
       'utf8',
     );
-    expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;/);
+    expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;[^}]*position: sticky;/);
     expect(css).toMatch(/\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: 1;/);
     expect(css).toMatch(
       /@media \(max-width: 899px\)[\s\S]*\.searches-side,\s*\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: auto;/,
@@ -504,7 +214,7 @@ describe('the poll', () => {
       ),
     );
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     expect(requests).toHaveLength(1);
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS - 1));
     expect(requests).toHaveLength(1);
@@ -517,7 +227,7 @@ describe('the poll', () => {
     const requests: CardRequests = [];
     server.use(serveCards([searchCard()], requests));
     renderInShell(<SearchesView />);
-    await cardOf('Birmingham → Frankfurt');
+    await cardOf('London → New York');
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 3));
     expect(requests).toHaveLength(1);
   });
@@ -537,105 +247,6 @@ describe('the schedule in words', () => {
   ])('%s', async (_name, cron, words) => {
     server.use(serveCards([searchCard({ schedule: { cron, tz: 'Europe/London' } })]));
     renderInShell(<SearchesView />);
-    expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent(words);
-  });
-
-  it('a trip across two months names both', async () => {
-    server.use(
-      serveCards([
-        searchCard({ cheapest: cheapest({ departureDate: '2027-01-28', returnDate: '2027-02-08' }) }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(await cardOf('Birmingham → Frankfurt')).toHaveTextContent('28 Jan → 8 Feb');
-  });
-
-  it('a finished run with no recorded time reads "Not searched yet", never "Searched"', async () => {
-    server.use(serveCards([searchCard({ latestRun: latestRun({ finishedAt: null, startedAt: null }) })]));
-    renderInShell(<SearchesView />);
-    expect(within(await cardOf('Birmingham → Frankfurt')).getByRole('status')).toHaveTextContent(
-      'Not searched yet',
-    );
-  });
-});
-
-describe('what a card announces (review finding 16)', () => {
-  const live = (card: HTMLElement) => within(card).getByRole('status');
-
-  it('the polite line carries the kind of state, not the counts, so a poll that moves a count announces nothing', async () => {
-    let searched = 120;
-    server.use(
-      serveCardsBy(() => [
-        searchCard({
-          latestRun: latestRun({
-            status: 'running',
-            finishedAt: null,
-            datePairsSearched: searched,
-            estimatedFinishAt: null,
-          }),
-        }),
-      ]),
-    );
-    const { client } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    expect(live(card)).toHaveTextContent(/^Searching$/);
-    expect(live(card)).toHaveClass('sr-only');
-    expect(within(card).getByTestId('card-state')).toHaveTextContent('120 of 405');
-    const spoken = live(card).firstChild;
-    searched = 200;
-    await act(() => client.refetchQueries({ queryKey: ['cards'] }));
-    await waitFor(() => expect(within(card).getByTestId('card-state')).toHaveTextContent('200 of 405'));
-    // the same text node: nothing changed in the live region
-    expect(live(card).firstChild).toBe(spoken);
-    expect(live(card)).toHaveTextContent(/^Searching$/);
-    // the visible line is not itself a live region
-    expect(within(card).getByTestId('card-state').closest('[role="status"], [aria-live]')).toBeNull();
-  });
-
-  it('a change of kind is announced: running becomes searched', async () => {
-    let status: 'running' | 'completed' = 'running';
-    server.use(
-      serveCardsBy(() => [
-        searchCard({
-          latestRun: latestRun({
-            status,
-            finishedAt: status === 'running' ? null : '2026-10-14T14:00:00.000Z',
-          }),
-        }),
-      ]),
-    );
-    const { client } = renderInShell(<SearchesView />);
-    const card = await cardOf('Birmingham → Frankfurt');
-    expect(live(card)).toHaveTextContent(/^Searching$/);
-    status = 'completed';
-    await act(() => client.refetchQueries({ queryKey: ['cards'] }));
-    await waitFor(() => expect(live(card)).toHaveTextContent(/^Searched$/));
-  });
-
-  it('a stop is announced as its sentence', async () => {
-    server.use(
-      serveCards([
-        searchCard({
-          latestRun: latestRun({
-            status: 'paused_error',
-            finishedAt: null,
-            stop: { sentence: 'The source asked the app to slow down.', fix: null },
-          }),
-        }),
-      ]),
-    );
-    renderInShell(<SearchesView />);
-    expect(live(await cardOf('Birmingham → Frankfurt'))).toHaveTextContent(
-      'The source asked the app to slow down.',
-    );
-  });
-});
-
-describe('the cheapest names its airport (review finding 9)', () => {
-  it('the compact face carries the destination code the card serves', async () => {
-    server.use(serveCards([searchCard({ cheapest: cheapest({ destination: 'FRA' }) })]));
-    renderInShell(<SearchesView />);
-    const cell = within(await cardOf('Birmingham → Frankfurt')).getByTestId('price-cell');
-    expect(cell).toHaveTextContent('FRA');
+    expect(await cardOf('London → New York')).toHaveTextContent(words);
   });
 });

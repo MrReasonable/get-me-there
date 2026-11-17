@@ -70,16 +70,17 @@ ends; enabling a schedule whose provider month does not fit is refused.
 
 - **Stop a schedule:** untick "enabled" on the definition (or `PUT /api/definitions/:id` with
   `"enabled": false`). The job is removed at once; turning it back on re-registers it.
-- **Cancel a run in progress:** the Cancel button on the status bar. Cells not yet fetched go
+- **Cancel a run in progress:** the Cancel button on the search's card on Trips or on its page. Cells not yet fetched go
   back to "not searched"; Resume continues from there later.
 - **Paused by the app:** a run stops itself as `paused_budget` (a cap was reached) or
   `paused_error` (every provider failed, or the rate limiter's queue deadline passed). The
-  status bar shows the reason. A pause on a provider or global cap resumes by itself when the
+  card and the page show the reason. A pause on a provider or global cap resumes by itself when the
   cap window reopens; a pause on the run's own cap resumes only when you press Resume; an
   error pause with a known retry time resumes at that time; otherwise use Resume after fixing
   the cause.
 - While any run is active or paused, the next scheduled firing does not start a second run;
-  the status bar shows "schedule blocked since <date>". A paused run older than
+  the schedule check says "schedule blocked since <date>": the health line at the top of every view
+  names it and links to Settings › System, where it is worded. A paused run older than
   `discoveryRefreshHours` is cancelled at the next firing and a fresh run starts.
 
 ## Missed firings

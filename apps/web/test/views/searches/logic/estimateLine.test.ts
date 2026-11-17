@@ -1,4 +1,4 @@
-import type { ProviderId, Stage } from '@gmt/core';
+import { CONFIRM_TARGET, type ProviderId, type Stage } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { EstimateResponse } from '../../../../src/api/types.js';
 import { ESTIMATE_COPY } from '../../../../src/copy/estimate.js';
@@ -80,17 +80,32 @@ const sentence = (e: EstimateResponse, cron: string | null = null) =>
 const paid = { providerId: 'searchapi', costMicroGbp: 1_200_000, calls: 300 } satisfies Line;
 
 describe('estimateSentence: the line', () => {
-  it('a free run asking every date pair: "About 2½ hours · free · asks about all 405 date pairs"', () => {
+  it('a free run asking every date: "About 2½ hours, free."', () => {
     const s = sentence(resp({ seconds: 9000 }));
-    expect(s.line).toBe('About 2½ hours · free · asks about all 405 date pairs');
+    expect(s.line).toBe('About 2½ hours, free.');
     expect(s.button).toBe('Search now');
     expect(s.notes).toEqual([]);
+  });
+
+  it('a free run reading flights out and back is mockup 01’s sentence, its figure core’s CONFIRM_TARGET (Ruling 13)', () => {
+    const e = resp({
+      seconds: 1500,
+      flightLists: { pairs: 15, pages: 23, seconds: 100, pagesMax: 580, secondsMax: 1825, returns: true },
+    });
+    const s = estimateSentence(e, null, ESTIMATE_COPY, money, COPY.newSearch.search);
+    expect(s.line).toBe(
+      'About 25 min, free. Then flights are read for the cheapest dates until the 5 cheapest stop changing.',
+    );
+    expect(CONFIRM_TARGET).toBe(5);
+    expect(s.button).toBe('Search');
+    // the notes stay below it
+    expect(s.notes).toEqual(['usually about 15 dates, at most 290']);
   });
 
   it('a paid run asking part of the space now, unscheduled: the rest when you search again (po-011)', () => {
     const s = sentence(resp({ seconds: 10_800, lines: [paid], covered: 300 }));
     expect(s.line).toBe(
-      'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',
+      'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest when you search again.',
     );
     expect(s.button).toBe('Search now · about £1.20');
   });
@@ -98,33 +113,33 @@ describe('estimateSentence: the line', () => {
   it('the same on a search repeating on Mondays: the rest next Monday', () => {
     const s = sentence(resp({ seconds: 10_800, lines: [paid], covered: 300 }), '0 5 * * 1');
     expect(s.line).toBe(
-      'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest next Monday',
+      'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest next Monday.',
     );
   });
 
   it('a schedule of several days, every day or a custom cron: the rest at the next scheduled run', () => {
     for (const cron of ['0 5 * * 1,4', '0 5 * * *', '*/5 * * * *'])
-      expect(sentence(resp({ covered: 300 }), cron).line).toMatch(/, the rest at the next scheduled run$/);
+      expect(sentence(resp({ covered: 300 }), cron).line).toMatch(/, the rest at the next scheduled run\.$/);
   });
 
-  it('date pairs asked on some airports only are counted as asked and said so', () => {
+  it('dates asked on some airports only are counted as asked and said so', () => {
     expect(sentence(resp({ covered: 300, partly: 20 })).line).toBe(
-      'About 2½ hours · free · asks about 320 of 405 date pairs this run (20 on some airports only), the rest when you search again',
+      'About 2½ hours, free, asks about 320 of 405 dates this run (20 on some airports only), the rest when you search again.',
     );
   });
 
-  it('reused date pairs are worded beside the ones still asked, honestly (20.4 minor 7)', () => {
+  it('dates kept from earlier searches are worded beside the ones still asked, honestly (20.4 minor 7)', () => {
     expect(sentence(resp({ covered: 300, reused: 105 })).line).toBe(
-      'About 2½ hours · free · asks about 300 of 405 date pairs (105 reused from earlier runs)',
+      'About 2½ hours, free, asks about 300 of 405 dates (105 kept from earlier searches).',
     );
     expect(sentence(resp({ covered: 200, reused: 105 })).line).toBe(
-      'About 2½ hours · free · asks about 200 of 405 date pairs this run (105 reused from earlier runs), the rest when you search again',
+      'About 2½ hours, free, asks about 200 of 405 dates this run (105 kept from earlier searches), the rest when you search again.',
     );
   });
 
-  it('nothing asked and everything reused: "Nothing new to ask: 405 date pairs reused from earlier runs"', () => {
+  it('nothing asked and everything kept: "Nothing new to ask: 405 dates kept from earlier searches."', () => {
     expect(sentence(resp({ covered: 0, reused: 405 })).line).toBe(
-      'Nothing new to ask: 405 date pairs reused from earlier runs',
+      'Nothing new to ask: 405 dates kept from earlier searches.',
     );
   });
 
@@ -138,7 +153,7 @@ describe('estimateSentence: the line', () => {
       }),
     );
     expect(s.line).toBe(
-      'Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · about £1.20 · uses about 100 of the 9,880 SearchApi searches left this month',
+      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, about £1.20, uses about 100 of the 9,880 SearchApi calls left this month.',
     );
     expect(s.button).toBe('Search now · about £1.20');
     const calls = sentence(
@@ -150,7 +165,7 @@ describe('estimateSentence: the line', () => {
       }),
     );
     expect(calls.line).toBe(
-      'Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · uses about 100 SearchApi searches',
+      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, uses about 100 SearchApi calls.',
     );
     // a cost alone, with no billed-plan calls named, is spending too
     expect(
@@ -161,16 +176,16 @@ describe('estimateSentence: the line', () => {
           lines: [{ providerId: 'searchapi', stage: 'verification', calls: 100, costMicroGbp: 1_200_000 }],
         }),
       ).line,
-    ).toBe('Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · about £1.20');
+    ).toBe('Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, about £1.20.');
   });
 
   it('nothing asked and nothing reused says nothing can be asked this run', () => {
-    expect(sentence(resp({ covered: 0, reused: 0 })).line).toBe('Nothing can be asked this run');
+    expect(sentence(resp({ covered: 0, reused: 0 })).line).toBe('Nothing can be asked this run.');
   });
 
   it('the Aviasales cache as the only source used ends the line with the cached-prices caveat (prov-int-014)', () => {
     expect(sentence(resp({ lines: [{ providerId: 'travelpayouts' }] })).line).toBe(
-      'About 2½ hours · free · asks about all 405 date pairs · cached prices only where travellers searched recently',
+      'About 2½ hours, free, cached prices only where travellers searched recently.',
     );
     // a second source that also reaches the date pairs lifts the caveat; a blocked one does not
     expect(
@@ -182,7 +197,7 @@ describe('estimateSentence: the line', () => {
           lines: [{ providerId: 'travelpayouts' }, { providerId: 'camoufox', blocked: 'provider-execution' }],
         }),
       ).line,
-    ).toMatch(/cached prices only where travellers searched recently$/);
+    ).toMatch(/cached prices only where travellers searched recently\.$/);
   });
 
   it('capped calls on a billable plan are named, and the run is never "free" (cost-003)', () => {
@@ -192,11 +207,9 @@ describe('estimateSentence: the line', () => {
         billed: [{ providerId: 'searchapi', calls: 120, left: 9880, window: 'month' }],
       }),
     );
-    expect(s.line).toBe(
-      'About 2½ hours · asks about all 405 date pairs · uses about 120 of the 9,880 SearchApi searches left this month',
-    );
+    expect(s.line).toBe('About 2½ hours, uses about 120 of the 9,880 SearchApi calls left this month.');
     expect(s.line).not.toMatch(/free/);
-    expect(s.button).toBe('Search now · 120 SearchApi searches');
+    expect(s.button).toBe('Search now · 120 SearchApi calls');
   });
 
   it('on the trial, whose balance is one-off, the calls left are the trial’s', () => {
@@ -207,7 +220,7 @@ describe('estimateSentence: the line', () => {
           billed: [{ providerId: 'searchapi', calls: 12, left: 91, window: 'lifetime' }],
         }),
       ).line,
-    ).toMatch(/· uses about 12 of the 91 SearchApi searches left on your trial$/);
+    ).toMatch(/, uses about 12 of the 91 SearchApi calls left on your trial\.$/);
   });
 
   it('a billable plan without a cap names the calls alone; a paid run’s button carries the money, not the calls', () => {
@@ -217,19 +230,19 @@ describe('estimateSentence: the line', () => {
         billed: [{ providerId: 'searchapi', calls: 300, left: null, window: 'month' }],
       }),
     );
-    expect(s.line).toMatch(/· about £1\.20 · .* · uses about 300 SearchApi searches$/);
+    expect(s.line).toBe('About 2½ hours, about £1.20, uses about 300 SearchApi calls.');
     expect(s.button).toBe('Search now · about £1.20');
   });
 
   it('the duration is capitalised at the start of the line, and a blocked line costs nothing in it', () => {
-    expect(sentence(resp({ seconds: 720 })).line).toMatch(/^About 12 minutes · /);
-    expect(sentence(resp({ seconds: 30 })).line).toMatch(/^Under a minute · /);
+    expect(sentence(resp({ seconds: 720 })).line).toMatch(/^About 12 min, /);
+    expect(sentence(resp({ seconds: 30 })).line).toMatch(/^Under a minute, /);
     const s = sentence(
       resp({
         lines: [{ providerId: 'camoufox' }, { ...paid, blocked: 'provider-month' }],
       }),
     );
-    expect(s.line).toMatch(/· free ·/);
+    expect(s.line).toMatch(/, free\./);
     expect(s.button).toBe('Search now');
   });
 
@@ -240,8 +253,9 @@ describe('estimateSentence: the line', () => {
       sentence(resp({ covered: 0, reused: 405 })).line,
       sentence(resp({ lines: [{ providerId: 'travelpayouts' }] })).line,
     ];
+    // why: the main path's words (Trips plan constraints): never "date pair" or "reused"
     for (const l of lines)
-      for (const banned of ['priced', 'prices for', 'all combinations', 'will find'])
+      for (const banned of ['priced', 'prices for', 'all combinations', 'will find', 'date pair', 'reused'])
         expect(l).not.toContain(banned);
   });
 
@@ -268,12 +282,12 @@ describe('estimateSentence: the edges of each clause', () => {
     expect(
       estimateSentence(resp({ covered: 300 }), { cron: null, tz: 'Europe/London' }, ESTIMATE_COPY, money)
         .line,
-    ).toMatch(/, the rest when you search again$/);
+    ).toMatch(/, the rest when you search again\.$/);
   });
 
-  it('date pairs asked on some airports alone are still asked: the line keeps its duration and cost', () => {
+  it('dates asked on some airports alone are still asked: the line keeps its duration and cost', () => {
     expect(sentence(resp({ covered: 20, partly: 20 })).line).toBe(
-      'About 2½ hours · free · asks about 40 of 405 date pairs this run (20 on some airports only), the rest when you search again',
+      'About 2½ hours, free, asks about 40 of 405 dates this run (20 on some airports only), the rest when you search again.',
     );
   });
 
@@ -281,7 +295,7 @@ describe('estimateSentence: the edges of each clause', () => {
     const s = sentence(
       resp({ billed: [{ providerId: 'searchapi', calls: 0, left: 9880, window: 'month' }] }),
     );
-    expect(s.line).toBe('About 2½ hours · free · asks about all 405 date pairs');
+    expect(s.line).toBe('About 2½ hours, free.');
     expect(s.button).toBe('Search now');
   });
 
@@ -292,36 +306,29 @@ describe('estimateSentence: the edges of each clause', () => {
           lines: [{ providerId: 'travelpayouts' }, { providerId: 'searchapi', stage: 'verification' }],
         }),
       ).line,
-    ).toMatch(/· cached prices only where travellers searched recently$/);
+    ).toMatch(/, cached prices only where travellers searched recently\.$/);
   });
 });
 
 describe('estimateSentence: the notes under it', () => {
   // why: ruling 20.5 concern 2 (Task 20.9): the flight-list step's pages, worded from Estimate.flightLists
-  it('the browser worker reading flights adds "+ flights for up to 10 date pairs, about 12 minutes"', () => {
+  it('the browser reading flights outbound only adds "Then flights are read for up to 10 dates, about 12 min."', () => {
     const line = sentence(resp({ flightLists: { pages: 10, seconds: 700 } })).line;
-    expect(line).toBe(
-      'About 2½ hours · free · asks about all 405 date pairs · + flights for up to 10 date pairs, about 12 minutes',
-    );
+    expect(line).toBe('About 2½ hours, free. Then flights are read for up to 10 dates, about 12 min.');
     expect(sentence(resp({ flightLists: { pages: 1, seconds: 30 } })).line).toContain(
-      '+ flights for up to 1 date pair, under a minute',
+      'Then flights are read for up to 1 date, under a minute.',
     );
   });
 
   // why: design 2026-11-08 §6: out and back the step reads until more reading stops finding cheaper trips, so the
   // sentence gives the time and the note the dates read, typical and at most (the at-most reads are pagesMax / 2)
-  it('out and back: "then about 2 minutes checking flights, longer if prices are close together"', () => {
+  it('out and back: "Then flights are read for the cheapest dates until the 5 cheapest stop changing."', () => {
     const e = resp({
       flightLists: { pairs: 15, pages: 23, seconds: 100, pagesMax: 580, secondsMax: 1825, returns: true },
     });
     expect(sentence(e).line).toBe(
-      'About 2½ hours · free · asks about all 405 date pairs · then about 2 minutes checking flights, longer if prices are close together',
+      'About 2½ hours, free. Then flights are read for the cheapest dates until the 5 cheapest stop changing.',
     );
-    // the singular minute
-    const one = resp({
-      flightLists: { pairs: 1, pages: 2, seconds: 60, pagesMax: 2, secondsMax: 60, returns: true },
-    });
-    expect(sentence(one).line).toContain('then about 1 minute checking flights, longer if');
   });
   it('out and back: the note reads "usually about 15 dates, at most 290" for the 300-pair case', () => {
     const e = resp({
@@ -340,23 +347,23 @@ describe('estimateSentence: the notes under it', () => {
     const cut = resp({
       flightLists: { pairs: 1, pages: 1, seconds: 70, pagesMax: 1, secondsMax: 70, returns: false },
     });
-    expect(sentence(cut).line).toContain('+ flights for up to 1 date pair, about 1 minute');
-    expect(sentence(cut).line).not.toContain('out and back');
+    expect(sentence(cut).line).toContain('Then flights are read for up to 1 date, about 1 min.');
+    expect(sentence(cut).line).not.toContain('cheapest stop changing');
   });
-  it('outbound only: "+ flights for up to 10 date pairs, about 12 minutes", the pairs from pairs, never the pages', () => {
-    const e = resp({ flightLists: { pairs: 10, pages: 10, seconds: 700, returns: false } });
-    expect(sentence(e).line).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+  it('outbound only: "Then flights are read for up to 10 dates, about 12 min", the pairs from pairs, never the pages', () => {
+    const e = resp({ flightLists: { pairs: 10, pages: 20, seconds: 700, returns: false } });
+    expect(sentence(e).line).toContain('Then flights are read for up to 10 dates, about 12 min.');
   });
   it('out and back with no bound stated (an older line) states the typical reads as the most', () => {
     const e = resp({ flightLists: { pairs: 4, pages: 6, seconds: 980, returns: true } });
-    expect(sentence(e).line).toContain('then about 16 minutes checking flights');
+    expect(sentence(e).line).toContain('until the 5 cheapest stop changing.');
     expect(sentence(e).notes).toEqual(['usually about 4 dates, at most 4']);
   });
 
   it('nothing new to ask keeps the flights clause: the browser worker still reads them (20.9 review finding 7)', () => {
     const e = resp({ covered: 0, reused: 405, flightLists: { pages: 10, seconds: 700 } });
     expect(sentence(e).line).toBe(
-      'Nothing new to ask: 405 date pairs reused from earlier runs · + flights for up to 10 date pairs, about 12 minutes',
+      'Nothing new to ask: 405 dates kept from earlier searches. Then flights are read for up to 10 dates, about 12 min.',
     );
   });
 
@@ -435,7 +442,7 @@ describe('estimateSentence: the notes under it', () => {
         }),
       ).notes,
     ).toEqual([
-      "This uses more than a fifth of this month's SearchApi searches; pressing Search now confirms it",
+      "This uses more than a fifth of this month's SearchApi calls; pressing Search now confirms it",
     ]);
     expect(
       sentence(
@@ -449,9 +456,7 @@ describe('estimateSentence: the notes under it', () => {
           },
         }),
       ).notes,
-    ).toEqual([
-      'This uses more than a fifth of your SearchApi trial searches; pressing Search now confirms it',
-    ]);
+    ).toEqual(['This uses more than a fifth of your SearchApi trial calls; pressing Search now confirms it']);
   });
 });
 
@@ -482,9 +487,9 @@ describe('aboutDuration (lower case; the sentence capitalises its first letter)'
     [0, 'under a minute'],
     [30, 'under a minute'],
     [59, 'under a minute'],
-    [60, 'about 1 minute'],
-    [720, 'about 12 minutes'],
-    [3569, 'about 59 minutes'],
+    [60, 'about 1 min'],
+    [720, 'about 12 min'],
+    [3569, 'about 59 min'],
     [3570, 'about 1 hour'],
     [4000, 'about 1 hour'],
     [5400, 'about 1½ hours'],
@@ -499,9 +504,9 @@ describe('aboutDuration (lower case; the sentence capitalises its first letter)'
 describe('plainDuration: a length without "about", by aboutDuration\'s rounding (spec rev 56 §8.1 R-estimate)', () => {
   it('under a minute below 60 s; whole minutes under an hour; the nearest half hour from an hour', () => {
     expect(plainDuration(59)).toBe('under a minute');
-    expect(plainDuration(60)).toBe('1 minute');
-    expect(plainDuration(2450)).toBe('41 minutes');
-    expect(plainDuration(3569)).toBe('59 minutes');
+    expect(plainDuration(60)).toBe('1 min');
+    expect(plainDuration(2450)).toBe('41 min');
+    expect(plainDuration(3569)).toBe('59 min');
     expect(plainDuration(3570)).toBe('1 hour');
     expect(plainDuration(5400)).toBe('1½ hours');
     expect(plainDuration(9000)).toBe('2½ hours');

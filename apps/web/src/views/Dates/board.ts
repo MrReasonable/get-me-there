@@ -1,208 +1,91 @@
 import {
-  type BookingTarget,
   bestPerWeek,
-  bookingTargetOf,
+  cheapestTrips,
   type DatePair,
   type DatePairFigure,
   type DatePairPairing,
-  type DecodedDatePairs,
-  daysBetween,
-  type FigureBasis,
-  type IsoDate,
+  flightsRead,
   type IsoDateTime,
-  isoDateSchema,
-  type PairingKind,
+  lowerOnCalendar,
+  overLimitCount,
   type PairingRead,
-  pairingKindOf,
   rankDatePairs,
-  resultBasisOf,
   type StopDetail,
-  searchLinkFor,
 } from '@gmt/core';
-import type { DefinitionResponse } from '../../api/types.js';
 import type { COPY } from '../../copy.js';
+import type { ListsState } from '../../lib/flightReads.js';
 import type { DatesUiState } from '../../state/datesState.js';
 import { inStay } from './stayScope.js';
 
-// The board's model (spec §11 Board): the stay filter first, then core's rank over the date pairs in view, then the
-// week switch, then the sort, which changes the order and never the rank. Pure: the clock is a parameter.
+// The Search page's model (design 2026-11-08 §5.2, Rulings 3–6): the stay filter first, then core's rank over the date
+// pairs in view, then core's shared rules split it into the two sections, Cheapest trips and Lower on the calendar, each
+// one per departure week when the switch is on. Pure: the clock is a parameter.
 
-/** Spec §11: the first 10 rows, then "Show 10 more" (the later clarify step may change the number). */
+/** Ruling 4: Cheapest trips shows five, then "Show 10 more" adds ten per press. */
+export const FIRST_PAGE = 5;
 export const PAGE_SIZE = 10;
+/** Ruling 5: Lower on the calendar shows three, with the count of them all. */
+export const LOWER_SHOWN = 3;
 
 export interface BoardOptions {
   nights: DatesUiState['nights'];
   bestPerWeek: boolean;
-  sort: DatesUiState['sort'];
 }
 
+/** A date pair with its figure (every row of a section has one). */
+export type FigurePair = DatePair & { figure: DatePairFigure };
+
 export interface BoardModel {
-  /** The date pairs in the stay range, with or without a figure: the header, the overview and the shading read these. */
+  /** The date pairs in the stay range, with or without a figure: the run line, the calendar and its shading read these. */
   inView: readonly DatePair[];
   /** The date pairs in view with a figure, best first (core's `rankDatePairs`). */
   ranked: readonly DatePair[];
-  /** A date pair's price rank, 1 for the best, by index; only date pairs with a figure have one. */
-  rankOf: ReadonlyMap<number, number>;
-  /** The board's rows: ranked, then one per departure week when switched on, then sorted. */
-  rows: readonly DatePair[];
-  /** With the week switch on, the departure weeks shown; else null. */
-  weeks: number | null;
+  /** Ruling 4: the trips (core's `cheapestTrips`), in rank order; one per departure week with the switch on. */
+  trips: readonly FigurePair[];
+  /** Ruling 5: the calendar prices below the cheapest trip (core's `lowerOnCalendar`), by price; one per week likewise. */
+  lower: readonly FigurePair[];
+  /** Ruling 4: the dates in view whose read trips were all outside the search's limits (core's `overLimitCount`). */
+  overLimit: number;
+  /** Ruling 6: the dates in view whose flights were read (core's `flightsRead`), over every search so far. */
+  readDates: number;
 }
 
-/** The board's whole model for one read, one set of filters and one instant. */
+/**
+ * Revision 50 (Ian ruled): the first of each departure week in the order given (core's `bestPerWeek`), keeping the
+ * list's own type.
+ */
+function perWeek<P extends DatePair>(rows: readonly P[]): P[] {
+  const kept = new Set(bestPerWeek(rows).map((p) => p.index));
+  return rows.filter((p) => kept.has(p.index));
+}
+
+/** The page's whole model for one read, one set of filters and one instant. */
 export function boardModel(pairs: readonly DatePair[], o: BoardOptions, now: IsoDateTime): BoardModel {
   const inView = inStay(pairs, o.nights);
   const ranked = rankDatePairs(inView, now);
-  const rankOf = new Map(ranked.map((p, i) => [p.index, i + 1]));
-  // why: revision 50 (Ian ruled): the week switch applies after ranking, so each week's row is its best by the rank.
-  const weekly = o.bestPerWeek ? bestPerWeek(ranked) : ranked;
+  const trips = cheapestTrips(ranked);
+  const lower = lowerOnCalendar(ranked);
+  let readDates = 0;
+  for (const p of inView) if (p.figure !== null && flightsRead(p.figure)) readDates += 1;
   return {
     inView,
     ranked,
-    rankOf,
-    rows: sortBoard(weekly, o.sort, rankOf),
-    weeks: o.bestPerWeek ? weekly.length : null,
+    // why: revision 50: the week switch applies after ranking, so each week's row is its best by the section's order
+    trips: o.bestPerWeek ? perWeek(trips) : trips,
+    lower: o.bestPerWeek ? perWeek(lower) : lower,
+    overLimit: overLimitCount(inView),
+    readDates,
   };
 }
 
-/** The sort's key of a date pair; a null key (an unknown journey time) sorts last in either direction. */
-function keyOf(p: DatePair, key: DatesUiState['sort']['key'], rank: number): number | null {
-  switch (key) {
-    case 'price':
-      return rank;
-    case 'departure':
-      // why: the index orders by departure, then nights (core's date-pair order)
-      return p.index;
-    case 'nights':
-      return p.nights;
-    case 'journey':
-      return p.figure?.journeyMinutes ?? null;
-  }
+/** How many rows a section with `total` rows shows after `presses` of "Show 10 more": five, then ten more each. */
+export function shownCount(total: number, presses: number): number {
+  return Math.min(total, FIRST_PAGE + presses * PAGE_SIZE);
 }
 
-/** Rows in the chosen order; ties fall to the price rank, so the order is total. Returns a new array. */
-export function sortBoard(
-  rows: readonly DatePair[],
-  sort: DatesUiState['sort'],
-  rankOf: ReadonlyMap<number, number>,
-): DatePair[] {
-  const sign = sort.dir === 'asc' ? 1 : -1;
-  const keyed = rows.map((p) => {
-    const rank = rankOf.get(p.index) ?? Number.MAX_SAFE_INTEGER;
-    return { p, rank, key: keyOf(p, sort.key, rank) };
-  });
-  keyed.sort((a, b) => {
-    if (a.key === null || b.key === null) {
-      // why: spec §11: an unknown journey time sorts last either way
-      if (a.key !== b.key) return a.key === null ? 1 : -1;
-      return a.rank - b.rank;
-    }
-    return sign * (a.key - b.key) || a.rank - b.rank;
-  });
-  return keyed.map((k) => k.p);
-}
-
-export interface Arrival {
-  /** "HH:MM", as the source states it (the airport's local time) */
-  time: string;
-  date: IsoDate;
-  /** Days after the direction's departure date; 0 when the same day, earlier, or the departure is not known. */
-  dayOffset: number;
-}
-
-const LOCAL = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):([0-5]\d)$/;
-
-/** A `YYYY-MM-DDTHH:MM` local time's date and time, or null when it is not one (a real date, hours 00–23). */
-function localParts(v: string | null): { date: IsoDate; time: string } | null {
-  const m = v === null ? null : LOCAL.exec(v);
-  const date = isoDateSchema.safeParse(m?.[1]);
-  return m === null || !date.success ? null : { date: date.data, time: `${m[2]}:${m[3]}` };
-}
-
-/**
- * "arrives HH:MM" for one direction (spec §11 Board, revision 50): only from a well-formed local time the figure's own
- * segments state, never invented; the day offset when the arrival's date is later than the direction's departure date
- * ("arrives 06:40 +1"). Both are calendar dates as the source states them, so no time zone enters.
- */
-export function arrival(depart: string | null, arrive: string | null): Arrival | null {
-  const a = localParts(arrive);
-  if (a === null) return null;
-  const d = localParts(depart);
-  const offset = d === null ? 0 : daysBetween(d.date, a.date);
-  return { time: a.time, date: a.date, dayOffset: Math.max(0, offset) };
-}
-
-/** A provenance that names the fixture provider or a synthetic source (spec §5.5). */
-const synthetic = (p: { providerId: string; sourceKind: string }) =>
-  p.providerId === 'fixture' || p.sourceKind === 'synthetic';
-
-/**
- * Where a board row's price links (design 2026-11-08 §5.3, Rulings 6 and 10), by core's one rule (`bookingTargetOf`): a
- * pairing row's booking page where its read recorded one ("Book on Google Flights"), else the Google Flights search for
- * the figure's own airports and dates. A verified row always takes that search: the pairing it carries is the one read in
- * the date pair's best calendar cell, another trip (final review C1). The board reads no seller booking, so the "Book on
- * <seller>" tier is absent. A calendar price is not a trip to book, and a synthetic one is never linked out: both give
- * `none`. `cabin` is the search's, for the search link.
- */
-export function rowBookingTarget(
-  pair: Pick<DatePair, 'departureDate' | 'returnDate'>,
-  figure: DatePairFigure,
-  cabin: DefinitionResponse['cabin'],
-): BookingTarget {
-  // why: a calendar price is not a trip to book (design §5.3): nothing is linked out until flights are read
-  if (figure.basis === 'calendar') return { kind: 'none' };
-  const q = figure.pairing;
-  const link = searchLinkFor(
-    'camoufox',
-    {
-      origin: figure.origin,
-      destination: figure.destination,
-      departureDate: pair.departureDate,
-      returnDate: pair.returnDate,
-    },
-    cabin,
-  );
-  return bookingTargetOf({
-    synthetic: synthetic(figure.price.provenance) || (q !== null && synthetic(q.provenance)),
-    booking: null,
-    // why: final review C1: only a pairing figure's pairing is its own trip; a stale verified figure's is another's
-    bookingUrl: figure.basis === 'pairing' ? (q?.bookingUrl ?? null) : null,
-    searchLink: link === null ? null : { url: link.url, host: link.host },
-  });
-}
-
-/**
- * Spec §11 Dates, revision 50: the red synthetic banner shows when any provenance in the read (figures and
- * cheaper-cached prices alike), the discovery providers or any execution read (the shown run's progress) names the
- * fixture provider or a synthetic source; judged on the whole decoded read, never the rows the board shows, and
- * whatever `/providers` says. Revision 56 (R-synthetic, prov-r3-008): every price group in the read, a pairing
- * figure's grid price and every pairing (leading or beneath) included.
- */
-export function isSyntheticRead(
-  d: Pick<DecodedDatePairs, 'pairs' | 'discoveryProviders'>,
-  run: { progress: ReadonlyArray<{ providerId: string }> } | undefined,
-): boolean {
-  if (d.discoveryProviders.includes('fixture')) return true;
-  if (run?.progress.some((p) => p.providerId === 'fixture') === true) return true;
-  return d.pairs.some((p) => {
-    const f = p.figure;
-    if (f === null) return false;
-    return (
-      synthetic(f.price.provenance) ||
-      (f.cheaperCached !== null && synthetic(f.cheaperCached.provenance)) ||
-      (f.gridPrice !== null && synthetic(f.gridPrice.provenance)) ||
-      (f.pairing !== null && synthetic(f.pairing.provenance))
-    );
-  });
-}
-
-/**
- * Whether a figure of this basis is calendar-styled (spec rev 56 §6.9, §11): a calendar price, and a pairing figure,
- * which is never checked with the airline (the dashed outline, "not checked"); core's exhaustive `resultBasisOf`
- * decides, so a new basis fails to compile there before it reaches a face here.
- */
-export function calendarStyled(basis: FigureBasis): boolean {
-  return resultBasisOf(basis) === 'calendar';
+/** What the next "Show N more" adds: up to ten, never more than are left; 0 when every row is shown. */
+export function nextPage(total: number, shown: number): number {
+  return Math.max(0, Math.min(PAGE_SIZE, total - shown));
 }
 
 /**
@@ -253,13 +136,6 @@ function leadOf(
 }
 
 /**
- * What the board knows of its flight-lists request (21.7 prov-004): `loading` while it is pending, `failed` when it
- * failed, `available` when it answered that flight lists are read for this search, `unavailable` when it answered they
- * are not (or nothing was asked).
- */
-export type ListsState = 'loading' | 'failed' | 'available' | 'unavailable';
-
-/**
  * Spec rev 56 §6.9, §11 Board (R-heads): a calendar figure's flight read in words, with the pairing that does not lead
  * shown beneath it; a stale verified figure's likewise (ruling 21.2); nothing for a pairing figure (its seller, times
  * and grid price are its own lines) or a fresh verified one. Where no flight list exists the row says "flights not
@@ -301,60 +177,4 @@ export function flightReadLine(
 export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
   if (q.seller === null) throw new RangeError('sellerOf: an offer names its seller (spec rev 56 §10)');
   return q.seller;
-}
-
-export { type PairingKind, pairingKindOf };
-
-/**
- * The board head's seller-price count (21.7 persona coverage): of the date pairs shown, how many carry a seller's price
- * (a pairing figure, or a pairing beneath whose price is an offer's); null when no pairing figure is shown, so a search
- * with no seller price read says nothing.
- */
-export function sellerCoverage(
-  rows: ReadonlyArray<{ figure: DatePairFigure | null }>,
-): { read: number; shown: number } | null {
-  if (!rows.some((p) => p.figure?.basis === 'pairing')) return null;
-  // why: design 2026-11-08 §4.1: only complete offers count; an incomplete one is shown as Google's price
-  const read = rows.filter((p) => {
-    const q = p.figure?.pairing ?? null;
-    return q !== null && !q.isFrom && q.complete;
-  }).length;
-  return { read, shown: rows.length };
-}
-
-/**
- * Whether a search sets any airline or layover setting (spec rev 56 §11 Board): a pairing figure then says "airline
- * settings not applied to flights read", since a flight read applies only the journey, stops and window limits.
- */
-export function setsAirlineOrLayover(
-  c: Pick<
-    DefinitionResponse['constraints'],
-    'includeAirlines' | 'excludeAirlines' | 'minLayoverMinutes' | 'maxLayoverMinutes' | 'noOvernightLayover'
-  >,
-): boolean {
-  return (
-    (c.includeAirlines?.length ?? 0) > 0 ||
-    (c.excludeAirlines?.length ?? 0) > 0 ||
-    c.minLayoverMinutes !== undefined ||
-    c.maxLayoverMinutes !== undefined ||
-    c.noOvernightLayover === true
-  );
-}
-
-/**
- * Spec rev 63 §6.9: the read time of the grid price an older pairing is weighed against: a pairing figure's grid price,
- * a calendar figure's own price; null for a verified figure or none (an older pairing never displaces a checked fare,
- * and there is no grid price to compare). The search page's block reads `pairingLeads` with it, as the board's figure
- * does, so the block emphasises a seller's price exactly when the board leads with it.
- */
-export function gridFetchedAtOf(f: DatePairFigure | null): IsoDateTime | null {
-  if (f === null) return null;
-  switch (f.basis) {
-    case 'pairing':
-      return f.gridPrice?.provenance.fetchedAt ?? null;
-    case 'calendar':
-      return f.price.provenance.fetchedAt;
-    case 'verified':
-      return null;
-  }
 }

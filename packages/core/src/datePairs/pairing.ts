@@ -205,6 +205,13 @@ export function pairingPrice(c: {
 }
 
 /**
+ * What one way of a read trip says about itself, as the list page states it: its journey time, how many changes, the
+ * airlines' names (not codes) and the days from the leg's own date to its arrival (`arrivesDayOffset`: 0 to 3 out; the
+ * return's runs from −1, a date-line return). `operatedBy` is not carried; the Trip page shows it.
+ */
+export type LegFacts = Pick<ListedFlight, 'durationMinutes' | 'stops' | 'carriers' | 'arrivesDayOffset'>;
+
+/**
  * What the api attaches per cell for the pairing figure (spec rev 56 §6.9, §10): the return's "from" price, the
  * cheapest offer of the booking read that names the pairing (`cheapestOffer`; null when none kept offers), how many
  * offers were read, whether they are complete (`offersComplete`), which outbound the pairing used (`cheapest`: the first
@@ -219,6 +226,8 @@ export interface PairingCandidate {
   complete: boolean;
   which: 'cheapest' | 'next-cheapest' | 'over-limit';
   times: { departOut: string; arriveOut: string; departBack: string; arriveBack: string };
+  /** each way's journey time, changes and airlines, from the outbound and the return the pairing chose (Ruling 1) */
+  legs: { out: LegFacts; back: LegFacts };
   /**
    * The trip's journey time: its outbound's and its return's durations as the list states them, summed as a verified
    * figure's two legs are (final whole-branch review I2), so a pairing figure's Journey column and its sort read it

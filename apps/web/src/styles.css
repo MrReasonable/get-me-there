@@ -12,8 +12,10 @@
 @import "@fontsource/atkinson-hyperlegible-next/700.css";
 @import "@fontsource/atkinson-hyperlegible-mono/400.css";
 
+@import "./styles/theme.css";
 @import "./styles/world.css";
 @import "./styles/board.css";
+@import "./styles/page.css";
 
 /* The world's context colours as utilities (text-fg, text-fg-2, border-line, text-bad, text-warn, bg-board …). They
    read the context variables, so one class reads right on steel, on an enamel plate and on a black board. */

@@ -1,0 +1,330 @@
+/* =====================================================================================================================
+   The shared tokens (design 2026-11-08 §5.1, Task 4), light and dark: the page colours, the label-kind tints (seller,
+   google, calendar, cached, not seen), the heat ramp and its ink, the stale amber and the focus ring. Every page that
+   shows a price label, a heat cell or a crumb reads them, so a label reads the same colours on the Trips page, the
+   Search page and the Trip page. Every text pair's WCAG ratio is written beside it and asserted by
+   test/views/trip/contrast.test.ts, which reads this file. Spec §4's CSP blocks inline styles: nothing is set from markup.
+   ===================================================================================================================== */
+
+:root {
+  --t-bg: #f5f4f0;
+  --t-surface: #ffffff;
+  --t-sunk: #f0eee9;
+  --t-ink: #17191c; /* 17.0:1 on surface */
+  --t-muted: #5c636c; /* 6.1:1 on surface, 5.5:1 on bg */
+  --t-line: #e2dfd8;
+  --t-accent: #0a58ca; /* 6.4:1 on surface, 5.9:1 on bg */
+  --t-accent-hover: #0847a3;
+  --t-accent-ink: #ffffff; /* 6.4:1 on accent */
+  --t-focus: #0a58ca; /* the focus ring: 6.4:1 on surface, 5.9:1 on bg (3:1 is the bar) */
+  --t-seller-bg: #e2f1e7;
+  --t-seller-ink: #17643a; /* 6.2:1 */
+  --t-google-bg: #e5edf8;
+  --t-google-ink: #1f4a82; /* 7.5:1 */
+  --t-cal-bg: #fbeed2;
+  --t-cal-ink: #74500a; /* 6.3:1 */
+  --t-cache-bg: #ebe9e4;
+  --t-cache-ink: #4a5057; /* 6.7:1 */
+  --t-old-ink: #5c636c; /* "not seen again": 6.1:1 on surface */
+  --t-old-line: #858c95; /* its dashed edge: 3.4:1 on surface */
+  --t-warn: #8f5200; /* the stale age: 5.1:1 or more on every label's ground and on surface */
+  --t-bad: #b3261e; /* 6.5:1 on surface */
+  --t-ok: #17643a; /* 6.2:1 on surface */
+  /* The heat ramp, cheapest first, and the two inks a cell takes by its ground */
+  --t-heat-1: #0f6b4f;
+  --t-heat-2: #3f8f6f;
+  --t-heat-3: #86b9a2;
+  --t-heat-4: #c9dfd3;
+  --t-heat-5: #ecf2ee;
+  --t-heat-ink-dark: #ffffff;
+  --t-heat-ink-light: #17191c;
+  --t-gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --t-bg: #121416;
+    --t-surface: #1b1e21;
+    --t-sunk: #16191b;
+    --t-ink: #eceef0; /* 14.9:1 on surface */
+    --t-muted: #a5acb5; /* 7.3:1 on surface, 8.1:1 on bg */
+    --t-line: #2c3035;
+    --t-accent: #6aa6ff; /* 6.8:1 on surface */
+    --t-accent-hover: #8dbaff;
+    --t-accent-ink: #0b1220; /* 7.6:1 on accent */
+    --t-focus: #6aa6ff;
+    --t-seller-bg: #173526;
+    --t-seller-ink: #8fd6aa; /* 7.9:1 */
+    --t-google-bg: #1a2a40;
+    --t-google-ink: #9cc0f0; /* 7.7:1 */
+    --t-cal-bg: #3a2c10;
+    --t-cal-ink: #f0c873; /* 8.5:1 */
+    --t-cache-bg: #2a2d31;
+    --t-cache-ink: #c3c8ce; /* 8.2:1 */
+    --t-old-ink: #a5acb5; /* 7.3:1 on surface */
+    --t-old-line: #7d848d; /* 4.2:1 on surface */
+    --t-warn: #f0b860; /* 7.4:1 or more on every label's ground and on surface */
+    --t-bad: #ff8a80; /* 7.3:1 on surface */
+    --t-ok: #8fd6aa; /* 7.9:1 on surface */
+    --t-heat-1: #2fae83;
+    --t-heat-2: #1d7053;
+    --t-heat-3: #1d5a45;
+    --t-heat-4: #1a3b30;
+    --t-heat-5: #1a2622;
+    --t-heat-ink-dark: #0b1210;
+    --t-heat-ink-light: #dfe5e2;
+  }
+}
+
+/* Breadcrumbs (Ruling 12): one ordered list in a nav named "Breadcrumb"; its colours follow the page it sits on (the
+   ground's context ink, light and dark, or a token page's own through --crumb-ink and --crumb-link). */
+.crumbs {
+  font-size: 13px;
+  color: var(--crumb-ink, var(--fg-2));
+  margin-bottom: 6px;
+}
+.crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.crumbs li > [aria-hidden="true"] {
+  margin: 0 0.35em;
+  white-space: pre;
+}
+.crumbs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--crumb-link, var(--fg));
+  text-decoration: underline;
+}
+.crumbs a:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.crumbs [aria-current] {
+  color: var(--crumb-ink, var(--fg-2));
+}
+.trip {
+  --crumb-ink: var(--t-muted);
+  --crumb-link: var(--t-accent);
+}
+
+/* The top bar (design §3, mockups 01 and 02): a plain bar on the shared tokens, light and dark; only the logo keeps its
+   flap lettering. One row at a desktop (logo, nav, then the health line and the limits to the right, wrapping); under
+   the nav on a phone (Ruling 10). */
+.topbar {
+  background: var(--t-surface);
+  color: var(--t-ink);
+  border-bottom: 1px solid var(--t-line);
+  font: 400 14px / 1.4 var(--font-ui);
+}
+.topbar-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  padding: 8px var(--gutter);
+}
+.brand-link:focus-visible,
+.nav-link:focus-visible,
+.health-words:focus-visible,
+.limit-item:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  font: 600 15px / 1 var(--font-ui);
+  color: var(--t-muted);
+  text-decoration: none;
+  border-radius: 6px 6px 0 0;
+  border-bottom: 4px solid transparent;
+}
+.nav-link:hover {
+  color: var(--t-ink);
+  background: var(--t-sunk);
+}
+/* The current item: a bar drawn in currentColor, so the cue survives forced colours and greyscale */
+.nav-link[aria-current="page"] {
+  color: var(--t-ink);
+  background: var(--t-sunk);
+  border-bottom: 4px solid currentColor;
+}
+.topbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0 18px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--t-muted);
+}
+.health-line {
+  display: flex;
+  align-items: center;
+}
+.health-words {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.health-glyph {
+  font-size: 12px;
+  line-height: 1;
+}
+.health-ok {
+  color: var(--t-ok);
+}
+.health-warn {
+  color: var(--t-warn);
+}
+.health-bad {
+  color: var(--t-bad);
+}
+a.health-words {
+  color: var(--t-ink);
+  text-decoration: underline;
+}
+a.health-link-warn {
+  color: var(--t-warn);
+}
+a.health-link-bad {
+  color: var(--t-bad);
+  font-weight: 600;
+}
+.limits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 18px;
+}
+.limit-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+a.limit-item {
+  color: var(--t-accent);
+}
+.limit-item b,
+.limit-item[data-cost] {
+  color: var(--t-ink);
+  font-weight: 600;
+}
+/* The spend is the UI face like the rest of the bar (the board's [data-cost] rule sets the flap face) */
+.limit-item[data-cost] {
+  font-family: inherit;
+}
+.limit-near {
+  margin-left: 6px;
+  color: var(--t-warn);
+  font-weight: 600;
+}
+@media (max-width: 899px) {
+  .topbar-in {
+    padding-top: 6px;
+    padding-bottom: 4px;
+  }
+  .topbar-status {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .health-words {
+    min-height: 32px;
+  }
+  .limits {
+    column-gap: 12px;
+  }
+}
+
+/* Settings (Ruling 9): plain cards on the shared tokens like the Trip page, light and dark */
+.settings {
+  color-scheme: light;
+  color: var(--t-ink);
+  background: var(--t-bg);
+  border-radius: 10px;
+  padding: 20px var(--t-gutter) 32px;
+  margin-top: 20px;
+  font: 400 15px / 1.45 var(--font-ui);
+  max-width: 1120px;
+  overflow-wrap: anywhere;
+}
+@media (prefers-color-scheme: dark) {
+  .settings {
+    color-scheme: dark;
+  }
+}
+.settings a {
+  color: var(--t-accent);
+  text-decoration: none;
+}
+.settings a:hover {
+  text-decoration: underline;
+}
+.settings a:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.settings-title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.settings-lede {
+  margin: 0 0 18px;
+  color: var(--t-muted);
+}
+.settings-sections {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.settings-card-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+.settings-card p {
+  margin: 0;
+  color: var(--t-muted);
+}
+
+/* The run's progress bar (RunProgress): the accent on the sunk track, in every browser's own pseudo-elements */
+.run-bar {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: var(--t-sunk);
+  color: var(--t-accent);
+}
+.run-bar::-webkit-progress-bar {
+  background: var(--t-sunk);
+}
+.run-bar::-webkit-progress-value {
+  background: var(--t-accent);
+}
+.run-bar::-moz-progress-bar {
+  background: var(--t-accent);
+}

@@ -4,15 +4,15 @@ import {
   CLEARED_FILTERS,
   DATES_PARAMS,
   type DatesUiState,
-  DEFAULT_DATES_SORT,
   datesPatch,
   filtersActive,
+  foldOf,
   parseDatesState,
   scopeQuery,
 } from '../../src/state/datesState.js';
 
-// Spec §11 URLs and Filters: the Dates view's state lives in the URL under d.*, parsed strictly against the
-// definition's own airports (decision 53).
+// Spec §11 URLs and Filters: the Search page's state lives in the URL under d.*, parsed strictly against the
+// definition's own airports (decision 53). The board's sort went with the board (design 2026-11-08 Ruling 21).
 
 const DEF = { origins: [asIata('LHR'), asIata('LGW')], destinations: [asIata('JFK'), asIata('EWR')] };
 const parse = (q: string) => parseDatesState(new URLSearchParams(q), DEF);
@@ -22,7 +22,6 @@ const full: DatesUiState = {
   from: [asIata('LHR'), asIata('LGW')],
   to: [asIata('JFK')],
   journey: 900,
-  sort: { key: 'journey', dir: 'asc' },
   bestPerWeek: true,
   coverageOpen: true,
 };
@@ -36,7 +35,7 @@ function toParams(patch: Record<string, string | null>): URLSearchParams {
 afterEach(() => window.history.replaceState(null, '', '/'));
 
 describe('parseDatesState (spec §11 Filters and URLs)', () => {
-  it('reads every parameter the view keeps in the URL', () => {
+  it('reads every parameter the page keeps in the URL; an old d.sort is read as nothing', () => {
     expect(
       parse(
         'd.nights=10-14&d.from=LHR,LGW&d.to=JFK&d.journey=900&d.sort=journey.asc&d.week=best&d.coverage=open',
@@ -44,17 +43,15 @@ describe('parseDatesState (spec §11 Filters and URLs)', () => {
     ).toEqual(full);
   });
 
-  it('a bare URL is the unfiltered board, sorted by price, the week switch off and the coverage section folded', () => {
+  it('a bare URL is the unfiltered page, the week switch off and the coverage section folded', () => {
     expect(parse('')).toEqual({
       nights: null,
       from: [],
       to: [],
       journey: null,
-      sort: DEFAULT_DATES_SORT,
       bestPerWeek: false,
       coverageOpen: false,
     });
-    expect(DEFAULT_DATES_SORT).toEqual({ key: 'price', dir: 'asc' });
   });
 
   it('an airport outside the definition is ignored, and an origin is never read as a destination', () => {
@@ -74,15 +71,19 @@ describe('parseDatesState (spec §11 Filters and URLs)', () => {
       expect(parse(`d.journey=${bad}`).journey, bad).toBeNull();
   });
 
-  it('an unknown sort key or direction falls back to the price rank', () => {
-    expect(parse('d.sort=carriers.asc').sort).toEqual(DEFAULT_DATES_SORT);
-    expect(parse('d.sort=nights.sideways').sort).toEqual(DEFAULT_DATES_SORT);
-    expect(parse('d.sort=departure.desc').sort).toEqual({ key: 'departure', dir: 'desc' });
-  });
-
   it('only the exact words switch the week view and open the coverage section', () => {
     expect(parse('d.week=all').bestPerWeek).toBe(false);
     expect(parse('d.coverage=yes').coverageOpen).toBe(false);
+  });
+});
+
+describe('foldOf', () => {
+  it('names one of the three folds, and anything else is no fold', () => {
+    for (const f of ['price', 'searched', 'alert'])
+      expect(foldOf(new URLSearchParams(`d.fold=${f}`))).toBe(f);
+    for (const bad of ['', 'Price', 'coverage', 'all'])
+      expect(foldOf(new URLSearchParams(`d.fold=${bad}`))).toBeNull();
+    expect(foldOf(new URLSearchParams(''))).toBeNull();
   });
 });
 
@@ -97,14 +98,13 @@ describe('datesPatch', () => {
     expect(datesPatch({ journey: 600 })).toEqual({ 'd.journey': '600' });
   });
 
-  it('removes a parameter whose value is the default: no range, no airports, no limit, the price sort, switches off', () => {
+  it('removes a parameter whose value is the default: no range, no airports, no limit, switches off', () => {
     expect(
       datesPatch({
         nights: null,
         from: [],
         to: [],
         journey: null,
-        sort: DEFAULT_DATES_SORT,
         bestPerWeek: false,
         coverageOpen: false,
       }),
@@ -113,18 +113,16 @@ describe('datesPatch', () => {
       'd.from': null,
       'd.to': null,
       'd.journey': null,
-      'd.sort': null,
       'd.week': null,
       'd.coverage': null,
     });
-    expect(datesPatch({ sort: { key: 'price', dir: 'desc' } })).toEqual({ 'd.sort': 'price.desc' });
   });
 
-  it('"Clear filters" resets the stay range, airports, journey limit and week switch, and keeps the sort and the section', () => {
+  it('"Clear filters" resets the stay range, airports, journey limit and week switch, and keeps the section', () => {
     expect(CLEARED_FILTERS).toEqual({ nights: null, from: [], to: [], journey: null, bestPerWeek: false });
   });
 
-  it('filtersActive counts a filter the operator set, never the sort or the coverage section', () => {
+  it('filtersActive counts a filter the operator set, never an old sort or the coverage section', () => {
     expect(filtersActive(parse(''))).toBe(false);
     expect(filtersActive(parse('d.sort=nights.asc&d.coverage=open'))).toBe(false);
     for (const q of ['d.nights=10-12', 'd.from=LHR', 'd.to=EWR', 'd.journey=600', 'd.week=best'])

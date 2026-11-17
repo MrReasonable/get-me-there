@@ -64,7 +64,6 @@ async function installAction(flags: Flags, deps: Deps): Promise<number> {
     deps.io.err(`${staged.message}\n`);
     return staged.kind === 'failed' ? EXIT.failed : EXIT.badConfig;
   }
-  const sm = deps.platform.serviceManager;
   const stopped: Action[] = [];
   if (worker !== undefined && workerText !== null) {
     stopped.push(...workerStop(deps, worker.unit, factOf(facts, worker.unit)));

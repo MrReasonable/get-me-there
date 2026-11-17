@@ -3,7 +3,6 @@ import {
   API,
   airports,
   budgetResponse,
-  calendarGap,
   coverageCheck,
   coverageResponse,
   definition,
@@ -75,7 +74,6 @@ export const handlers = [
     ),
   ),
   http.get(url('/api/definitions/:id/coverage'), () => HttpResponse.json(coverageResponse())),
-  http.get(url('/api/definitions/:id/calendar-gap'), () => HttpResponse.json(calendarGap({ cells: [] }))),
   http.get(url('/api/airports'), () => HttpResponse.json(airports)),
   ...MUTATIONS.map((m) =>
     (m.method === 'POST' ? http.post : http.put)(url(m.path), () => HttpResponse.json(m.body)),

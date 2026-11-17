@@ -159,6 +159,20 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
         arriveOut: columnAt(q.arriveOut, k),
         departBack: columnAt(q.departBack, k),
         arriveBack: columnAt(q.arriveBack, k),
+        legs: {
+          out: {
+            durationMinutes: columnAt(q.outMinutes, k),
+            stops: columnAt(q.outStops, k),
+            carriers: columnAt(q.outCarriers, k),
+            arrivesDayOffset: columnAt(q.outArrivesDayOffset, k),
+          },
+          back: {
+            durationMinutes: columnAt(q.backMinutes, k),
+            stops: columnAt(q.backStops, k),
+            carriers: columnAt(q.backCarriers, k),
+            arrivesDayOffset: columnAt(q.backArrivesDayOffset, k),
+          },
+        },
         mismatch: columnAt(q.mismatch, k),
         provenance: columnAt(r.provenances, columnAt(q.provenance, k)),
         stale: columnAt(q.stale, k),
@@ -171,6 +185,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     discoveryProviders: r.discoveryProviders,
     verificationProviderConfigured: r.verificationProviderConfigured,
     staleAfterHours: r.staleAfterHours,
+    pointOfSale: r.pointOfSale,
     space: {
       departureFrom: space.departureFrom,
       departureTo: space.departureTo,
@@ -180,5 +195,6 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     scope: r.scope,
     summary: r.summary,
     pairs,
+    verifiedDetails: r.verifiedDetails,
   };
 }

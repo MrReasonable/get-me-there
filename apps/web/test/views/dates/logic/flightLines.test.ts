@@ -1,93 +1,26 @@
-import {
-  asIsoDateTime,
-  type DatePair,
-  type DatePairFigure,
-  decodeDatePairs,
-  flightLimitsOf,
-} from '@gmt/core';
+import { asIsoDateTime } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import type { FlightList } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
-import { boardModel } from '../../../../src/views/Dates/board.js';
-import {
-  boardGroups,
-  datesShort,
-  headLine,
-  hoursText,
-  legMarks,
-  limitsOf,
-  ranksInOrder,
-  readButtonWords,
-} from '../../../../src/views/Dates/flightLines.js';
+import { carriersText, datesShort, hoursText, pairKey } from '../../../../src/lib/flightLines.js';
 import { londonDaysAgo } from '../../../../src/views/Dates/stateLines.js';
-import { at, datesResponse, figurePairing, pairingFig, priced, pricedPair } from '../../../fixtures.dates.js';
-import { definition } from '../../../fixtures.js';
-import { flightList, listedFlight, listedReturn } from '../../../fixtures.searches.js';
 import { NOW } from '../../../render.js';
 
-// Spec rev 55 §11 Flights (WP20 Task 20.10 fix round): the block's pure lines. NOW is 2026-10-14T15:00Z, 16:00 London.
+// Spec rev 55 §11 Flights: the words a flight read is said in, kept beside their users once the flights block went
+// (design 2026-11-08 Ruling 21). NOW is 2026-10-14T15:00Z, 16:00 London.
 
 const F = COPY.flights;
-const read = (fetchedAt: string, ageHours: number): FlightList => flightList({ fetchedAt, ageHours });
 
-describe('headLine (finding 7: the London day decides, never the words)', () => {
-  it('today: the age alone', () => {
-    expect(headLine(read('2026-10-14T10:44:00.000Z', 4), NOW, COPY)).toBe(F.head('4h ago', null));
-  });
-  it('yesterday: the age and "yesterday 11:44"', () => {
-    expect(headLine(read('2026-10-13T10:44:00.000Z', 28), NOW, COPY)).toBe(
-      F.head('28h ago', 'yesterday 11:44'),
-    );
-  });
-  it('older: the age and its date and time', () => {
-    expect(headLine(read('2026-10-10T10:44:00.000Z', 100), NOW, COPY)).toBe(F.head('4d ago', '10 Oct 11:44'));
-  });
-  it('the day is London’s: 23:30 London yesterday is yesterday though under a day old', () => {
+describe('the London day (finding 7: the day decides, never the words)', () => {
+  it('23:30 London yesterday is yesterday though under a day old', () => {
     expect(londonDaysAgo(asIsoDateTime('2026-10-13T22:30:00.000Z'), NOW)).toBe(1);
     expect(londonDaysAgo(asIsoDateTime('2026-10-13T23:30:00.000Z'), NOW)).toBe(0);
-    expect(headLine(read('2026-10-13T22:30:00.000Z', 16), NOW, COPY)).toBe(
-      F.head('16h ago', 'yesterday 23:30'),
-    );
   });
 });
 
 describe('the limit words', () => {
-  const limits = {
-    maxJourneyMinutes: 1500,
-    maxStops: null,
-    arrivalWindowLocal: null,
-    departureWindowLocal: null,
-  };
   it('whole hours read "25h", else hours and minutes', () => {
     expect(hoursText(1500)).toBe('25h');
     expect(hoursText(1600)).toBe('26h 40m');
-  });
-  it('within, over, and nothing when no limit is set', () => {
-    expect(legMarks('outbound', listedFlight(), limits, F)).toEqual([
-      'outbound 10h 50m, within your 25h limit; return not read',
-    ]);
-    expect(legMarks('outbound', listedFlight({ durationMinutes: 1560 }), limits, F)).toEqual([
-      'outbound 26h: over your 25h limit',
-    ]);
-    expect(
-      legMarks(
-        'outbound',
-        listedFlight(),
-        { maxJourneyMinutes: null, maxStops: null, arrivalWindowLocal: null, departureWindowLocal: null },
-        F,
-      ),
-    ).toEqual([]);
-  });
-  it('both window marks on one flight', () => {
-    const w = {
-      maxJourneyMinutes: null,
-      maxStops: null,
-      arrivalWindowLocal: { from: '06:00', to: '23:00' },
-      departureWindowLocal: { from: '08:00', to: '20:00' },
-    };
-    expect(
-      legMarks('outbound', listedFlight({ departsLocal: '06:10', arrivesLocal: '03:10' }), w, F),
-    ).toEqual(['arrives 03:10, outside your window', 'departs 06:10, outside your window']);
   });
 });
 
@@ -98,142 +31,14 @@ describe('datesShort', () => {
   });
 });
 
-describe('legMarks: both legs against the limits (spec rev 56 §6.2, §11)', () => {
-  const limits = {
-    maxJourneyMinutes: 1500,
-    maxStops: 1,
-    arrivalWindowLocal: { from: '06:00', to: '23:00' },
-    departureWindowLocal: { from: '08:00', to: '20:00' },
-  };
-  it('a return: over the journey limit, over the stops limit, within; never a window mark, never "; return not read"', () => {
-    expect(legMarks('return', listedReturn({ durationMinutes: 1560 }), limits, F)).toEqual([
-      'return 26h: over your 25h limit',
-    ]);
-    expect(legMarks('return', listedReturn({ stops: 2 }), limits, F)).toEqual([
-      'return 2 changes: over your 1-change limit',
-    ]);
-    // 14:20 → 06:25 is outside both outbound windows: no window mark on a return
-    expect(
-      legMarks('return', listedReturn({ departsLocal: '05:00', arrivesLocal: '03:00' }), limits, F),
-    ).toEqual(['return 12h 05m, within your 25h limit']);
-    expect(legMarks('return', listedReturn(), limits, F, false)).toEqual([
-      'return 12h 05m, within your 25h limit',
-    ]);
+describe('pairKey and carriersText', () => {
+  it("the wire's departure_return key", () => {
+    expect(pairKey({ departureDate: '2027-03-14', returnDate: '2027-03-24' })).toBe('2027-03-14_2027-03-24');
   });
-  it('an outbound: WP20\'s marks plus the stops mark; "; return not read" only when no return was read', () => {
-    const f = listedFlight({ departsLocal: '09:00' });
-    expect(legMarks('outbound', f, limits, F)).toEqual([
-      'outbound 10h 50m, within your 25h limit; return not read',
-    ]);
-    expect(legMarks('outbound', f, limits, F, true)).toEqual(['outbound 10h 50m, within your 25h limit']);
-    expect(legMarks('outbound', listedFlight({ departsLocal: '09:00', stops: 2 }), limits, F, true)).toEqual([
-      'outbound 2 changes: over your 1-change limit',
-    ]);
-    expect(
-      legMarks('outbound', listedFlight({ departsLocal: '06:10', stops: 1 }), { ...limits, maxStops: 0 }, F),
-    ).toEqual(['outbound 1 change: over your direct-only limit', 'departs 06:10, outside your window']);
-  });
-  it('no limit set: no mark on either leg', () => {
-    const none = {
-      maxJourneyMinutes: null,
-      maxStops: null,
-      arrivalWindowLocal: null,
-      departureWindowLocal: null,
-    };
-    expect(legMarks('return', listedReturn({ stops: 3 }), none, F)).toEqual([]);
-    expect(legMarks('outbound', listedFlight(), none, F, true)).toEqual([]);
-  });
-});
-
-describe("limitsOf (spec rev 56 §6.2: flightLimitsOf of the search's constraints)", () => {
-  it('equals the literal flightLimitsOf result, stops included, for a search with every constraint set', () => {
-    const d = definition({
-      constraints: {
-        maxJourneyMinutes: 1500,
-        maxStops: 1,
-        departureWindowLocal: { from: '06:00', to: '22:00' },
-        arrivalWindowLocal: { from: '07:00', to: '23:00' },
-      },
-    });
-    expect(limitsOf(d)).toEqual({
-      maxJourneyMinutes: 1500,
-      maxStops: 1,
-      departureWindowLocal: { from: '06:00', to: '22:00' },
-      arrivalWindowLocal: { from: '07:00', to: '23:00' },
-    });
-    expect(limitsOf(d)).toEqual(flightLimitsOf(d.constraints));
-    expect(limitsOf(definition({ constraints: {} }))).toEqual({
-      maxJourneyMinutes: null,
-      maxStops: null,
-      departureWindowLocal: null,
-      arrivalWindowLocal: null,
-    });
-  });
-});
-
-describe('readButtonWords (ruling D3, prov-008: the pages from the response, never a refusal)', () => {
-  it('the planned pages as the response states them', () => {
-    expect(readButtonWords(2, F)).toBe('Read flights for this date (free, up to 2 pages)');
-    expect(readButtonWords(1, F)).toBe('Read flights for this date (free, 1 page)');
-  });
-});
-
-// Design 2026-11-08 §5.2, §5.4: tie groups never mix a trip with flights read and a calendar price, and the ranks in a
-// tie follow the order the rows are shown in.
-describe('tiers and ranks in a tie', () => {
-  /** Rows of the board for these figures, in rank order, all on distinct departures. */
-  function rowsOf(figures: readonly DatePairFigure[]) {
-    const pairs: Record<string, ReturnType<typeof pricedPair>> = {};
-    figures.forEach((f, i) => {
-      pairs[at(`2027-03-${String(14 + i).padStart(2, '0')}`, 12)] = pricedPair(f);
-    });
-    const decoded: DatePair[] = decodeDatePairs(datesResponse({ pairs })).pairs;
-    const m = boardModel(
-      decoded,
-      { nights: null, bestPerWeek: false, sort: { key: 'price', dir: 'asc' } },
-      NOW,
+  it('the carriers, and the operator when the page names one', () => {
+    expect(carriersText({ carriers: ['Virgin Atlantic'], operatedBy: null }, F)).toBe('Virgin Atlantic');
+    expect(carriersText({ carriers: ['Aer Lingus', 'Virgin Atlantic'], operatedBy: 'QQ Air' }, F)).toBe(
+      F.operatedBy('Aer Lingus, Virgin Atlantic', 'QQ Air'),
     );
-    const rows = m.rows.flatMap((p) => (p.figure === null ? [] : [{ ...p, figure: p.figure }]));
-    return { rows, rankOf: m.rankOf };
-  }
-  const trip = (pence: number, stale: 'refresh' | false = false) =>
-    pairingFig({
-      pairing: figurePairing({ pricePence: pence, fromPence: pence, stale }),
-      price: { ...pairingFig().price, pricePence: pence, stale },
-    });
-
-  it('a trip with flights read and a calendar price at one price are not one tie group', () => {
-    const { rows } = rowsOf([trip(56_400), priced(56_400), priced(56_400)]);
-    expect(boardGroups(rows, true).map((g) => g.map((r) => r.figure.basis))).toEqual([
-      ['pairing'],
-      ['calendar', 'calendar'],
-    ]);
-  });
-
-  it('a fresh trip and an older trip at one price are not one tie group either', () => {
-    const { rows } = rowsOf([trip(56_400), trip(56_400, 'refresh')]);
-    expect(boardGroups(rows, true).map((g) => g.length)).toEqual([1, 1]);
-  });
-
-  it('each row is its own group when not sorted by price', () => {
-    const { rows } = rowsOf([priced(56_400), priced(56_400)]);
-    expect(boardGroups(rows, false).map((g) => g.length)).toEqual([1, 1]);
-  });
-
-  it('three tied pairs reordered by their flights take ranks 1, 2, 3 top to bottom', () => {
-    const { rows, rankOf } = rowsOf([priced(56_400), priced(56_400), priced(56_400)]);
-    const [a, b, c] = rows;
-    if (a === undefined || b === undefined || c === undefined) throw new Error('rows');
-    // the flights put the third pair first, then the first, then the second
-    const ranks = ranksInOrder([[c, a, b]], rankOf);
-    expect([c, a, b].map((r) => ranks.get(r.index))).toEqual([1, 2, 3]);
-  });
-
-  it('a group of one, and groups after a tie, keep their price ranks', () => {
-    const { rows, rankOf } = rowsOf([priced(56_400), priced(56_400), priced(60_000)]);
-    const [a, b, c] = rows;
-    if (a === undefined || b === undefined || c === undefined) throw new Error('rows');
-    const ranks = ranksInOrder([[b, a], [c]], rankOf);
-    expect([b, a, c].map((r) => ranks.get(r.index))).toEqual([1, 2, 3]);
   });
 });

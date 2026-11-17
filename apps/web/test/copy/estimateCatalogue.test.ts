@@ -14,22 +14,24 @@ const SAMPLES: Record<string, unknown[][]> = {
     [2, true],
   ],
   'estimate.about': [['£1.20']],
-  'estimate.asksAll': [['1'], ['405']],
-  'estimate.asksSome': [['300', '405']],
+  'estimate.asksSome': [
+    ['300', '405'],
+    ['1', '1'],
+  ],
   'estimate.partly': [['20']],
-  'estimate.reused': [['105']],
+  'estimate.kept': [['105']],
   'estimate.restNext': [['Monday']],
   'estimate.nothingNew': [['1'], ['405']],
   'estimate.flights': [
     ['1', 'under a minute'],
-    ['10', 'about 12 minutes'],
+    ['10', 'about 12 min'],
   ],
   'estimate.minutes': [[1], [41]],
   'estimate.hours': [
     [1, false],
     [2, true],
   ],
-  'estimate.flightsChecking': [['about 2 minutes'], ['about 1 minute']],
+  'estimate.flightsUntilSettled': [[5]],
   'estimate.flightsDates': [
     ['15', '290'],
     ['1', '1'],
@@ -39,7 +41,7 @@ const SAMPLES: Record<string, unknown[][]> = {
     ['12', '91', 'SearchApi', 'lifetime'],
   ],
   'estimate.billedNoCap': [['120', 'SearchApi']],
-  'estimate.searchesTag': [['120', 'SearchApi']],
+  'estimate.callsTag': [['120', 'SearchApi']],
   'estimate.withTag': [['Search now', 'about £1.20']],
   'estimate.notUsed': [
     ['Google Flights via SearchApi', 'no calls left this month', '£3.40'],
@@ -94,20 +96,26 @@ describe('the estimate and refusal catalogues (spec §11 banned words)', () => {
     expect(out.strings.filter(({ text }) => /(?<![\p{L}])verified(?![\p{L}])/u.test(text))).toEqual([]);
     for (const word of ['priced', 'prices for', 'all combinations', 'will find'])
       expect(out.strings.filter(({ text }) => text.includes(word))).toEqual([]);
+    // why: the Trips plan's main-path words: the sentence beside the panel's Search says "dates", never these
+    for (const word of ['date pair', 'reused', 'superseded', 'billed calls'])
+      expect(out.strings.filter(({ text }) => text.toLowerCase().includes(word))).toEqual([]);
   });
 
   it('reads as the spec words it (spec rev 55 §11)', () => {
     const L = ESTIMATE_COPY;
     expect(L.withTag('Search now', 'about £1.20')).toBe('Search now · about £1.20');
     expect(L.billed('120', '9,880', 'SearchApi', 'month')).toBe(
-      'uses about 120 of the 9,880 SearchApi searches left this month',
+      'uses about 120 of the 9,880 SearchApi calls left this month',
     );
     expect(L.billed('12', '91', 'SearchApi', 'lifetime')).toBe(
-      'uses about 12 of the 91 SearchApi searches left on your trial',
+      'uses about 12 of the 91 SearchApi calls left on your trial',
     );
     expect(L.aboutHours(1, false)).toBe('about 1 hour');
     expect(L.aboutHours(1, true)).toBe('about 1½ hours');
-    expect(L.nothingNew('1')).toBe('Nothing new to ask: 1 date pair reused from earlier runs');
+    expect(L.nothingNew('1')).toBe('Nothing new to ask: 1 date kept from earlier searches');
+    expect(L.flightsUntilSettled(5)).toBe(
+      'Then flights are read for the cheapest dates until the 5 cheapest stop changing',
+    );
     expect(REFUSED_COPY.capResets('1 Nov 2026')).toBe(
       "This month's limit is used up; it resets on 1 Nov 2026",
     );

@@ -468,10 +468,9 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
             if (underDrawnSettle(rec)) expect(v.drawn, `${file} view ${i}`).toBe(true);
             const sel = v.candidates.find((c) => c?.endsWith(', selected'));
             // why: an unpriced selected pair prints no price line (grid/2026-10-27/2)
-            if (sel !== undefined && sel !== null && sel.startsWith('£'))
+            if (sel?.startsWith('£') === true)
               expect(parseSelectedPrice(v.selectedLines[0] ?? ''), file).toBe(parseCellName(sel)?.pounds);
-            if (sel !== undefined && sel !== null && !sel.startsWith('£'))
-              expect(v.selectedLines, file).toEqual([]);
+            if (sel?.startsWith('£') === false) expect(v.selectedLines, file).toEqual([]);
           }
         }
       });

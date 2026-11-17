@@ -571,10 +571,6 @@ apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 7
 apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started prints the refusal in startRefusalSchema’s terms, exits 78, and writes no file
 apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started prints { "ok": true } when every check passes, writing nothing
 apps/camoufox-worker/test/startRefusal.test.ts > the refusal file (decision 75) is { reason, at } only, 0600, for every reason; cleared by a start
-apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file
-apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) money is formatted only by PriceCell and the cost and cap views
-apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the estimate sentence formats money only through the estimate panel’s formatter
-apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the tie line formats money only through the estimate panel’s formatter; the flights block formats none
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) a really corrupted copy fails the production integrity check, which throws and removes the file (test-strategy M3)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) an integrity failure throws and removes the file it created (test-009)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) copies committed rows still in the WAL while the writer is open (sec-004, test-009)

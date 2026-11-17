@@ -5,7 +5,7 @@
  */
 export const REFUSED_COPY = {
   disabled: 'No price source is set up, so nothing was searched',
-  disabledFix: 'Set up a price source (Providers)',
+  disabledFix: 'Set up a price source (Settings → Price sources)',
   capResets: (date: string) => `This month's limit is used up; it resets on ${date}`,
   cap: 'A spending limit stops this search from starting',
   window: 'Nothing to search: the dates have passed',

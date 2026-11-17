@@ -120,39 +120,63 @@ describe('barSummary', () => {
       check({ note: 'caught up the run missed at 01:30, ran 07:02' }),
       check({ id: 'x', state: 'off', offReason: 'not-set-up' }),
     ]);
-    expect(r.kind).toBe('clean');
-    expect(r.text).toBe('Status: nothing to check');
-    expect(barSummary([]).kind).toBe('clean');
+    expect(r).toEqual({ kind: 'clean', count: 0, subject: null });
+    expect(barSummary([])).toEqual({ kind: 'clean', count: 0, subject: null });
   });
-  it('names the area for one item and counts for several', () => {
+  it('names the one problem by its label, else its provider, else its area, and counts several without a name', () => {
     expect(barSummary([check({ area: 'schedule', state: 'fail' })])).toEqual({
       kind: 'fail',
-      text: 'Status: schedule failing',
+      count: 1,
+      subject: { kind: 'area', area: 'schedule' },
+    });
+    expect(barSummary([check({ area: 'email', label: 'London to New York', state: 'warn' })])).toEqual({
+      kind: 'warn',
+      count: 1,
+      subject: { kind: 'label', text: 'London to New York' },
     });
     expect(
       barSummary([
         check({ area: 'schedule', state: 'fail' }),
         check({ id: 'b', area: 'app', state: 'fail' }),
       ]),
-    ).toEqual({ kind: 'fail', text: 'Status: 2 failing' });
-    expect(barSummary([check({ area: 'consent', state: 'warn' })])).toEqual({
-      kind: 'warn',
-      text: 'Status: consent to check',
-    });
+    ).toEqual({ kind: 'fail', count: 2, subject: null });
     expect(
       barSummary([
         check({ area: 'consent', state: 'warn' }),
         check({ id: 'b', area: 'data', state: 'warn' }),
       ]),
-    ).toEqual({ kind: 'warn', text: 'Status: 2 to check' });
+    ).toEqual({ kind: 'warn', count: 2, subject: null });
   });
-  it('lets a failure outrank warnings and counts only the failures', () => {
+  it('lets a failure outrank warnings but counts every problem, so a warn and a fail are "2 things"', () => {
     expect(
       barSummary([
         check({ id: 'a', area: 'consent', state: 'warn' }),
         check({ id: 'b', area: 'data', state: 'warn' }),
         check({ id: 'c', area: 'worker', state: 'fail' }),
       ]),
-    ).toEqual({ kind: 'fail', text: 'Status: worker failing' });
+    ).toEqual({ kind: 'fail', count: 3, subject: null });
+    expect(
+      barSummary([
+        check({ id: 'a', area: 'consent', state: 'warn' }),
+        check({ id: 'c', area: 'worker', state: 'fail' }),
+      ]),
+    ).toEqual({ kind: 'fail', count: 2, subject: null });
+  });
+  it('a provider check with no label is about its provider; a label wins, even one spelled like an area', () => {
+    expect(barSummary([check({ area: 'provider', providerId: 'searchapi', state: 'fail' })]).subject).toEqual(
+      { kind: 'provider', providerId: 'searchapi' },
+    );
+    expect(
+      barSummary([check({ area: 'data', label: 'email', providerId: 'searchapi', state: 'warn' })]).subject,
+    ).toEqual({ kind: 'label', text: 'email' });
+  });
+  it('names the one problem even when it is the only non-ok among ok and off checks', () => {
+    expect(
+      barSummary([
+        check({ id: 'o', area: 'app', state: 'ok' }),
+        check({ id: 'x', area: 'email', state: 'off', offReason: 'not-set-up' }),
+        check({ id: 'w', area: 'backups', state: 'warn' }),
+      ]),
+    ).toEqual({ kind: 'warn', count: 1, subject: { kind: 'area', area: 'backups' } });
   });
 });

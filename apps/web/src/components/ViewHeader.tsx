@@ -13,6 +13,8 @@ export interface ViewHeaderProps {
    * named and no single run status or not-completed banner applies. Default 'single'.
    */
   variant?: 'single' | 'span';
+  /** The heading's level: 1 where the header names the page (History), 2 (default) inside a page. */
+  level?: 1 | 2;
 }
 
 /** The fields of an ExecutionSummary the header names. */
@@ -42,14 +44,15 @@ function itemText(e: HeaderRun): string {
  * Spec §11: every view header names the executions shown (by start time, never an id), their status
  * and age, a stale label, and a banner when the latest run that produced the view is not completed.
  */
-export function ViewHeader({ title, executions, stale, variant = 'single' }: ViewHeaderProps) {
+export function ViewHeader({ title, executions, stale, variant = 'single', level = 2 }: ViewHeaderProps) {
+  const Heading = level === 1 ? 'h1' : 'h2';
   const span = variant === 'span';
   // why: a one-cell child run never stands for the view; the banner follows the newest parent run.
   const latest = executions.find((e) => !e.isChild);
   const list = executions.map(itemText).join(', ');
   return (
     <div className="mb-2 space-y-1">
-      <h2 className="h-section">{title}</h2>
+      <Heading className="h-section">{title}</Heading>
       <p className="text-sm text-fg-2">
         {executions.length === 0 ? COPY.noExecution : COPY.executionsShown(list)}
       </p>

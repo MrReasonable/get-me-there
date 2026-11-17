@@ -50,7 +50,7 @@ export async function runConsentNotice(ctx: EngineContext, o: { force?: boolean 
     const sent = await sendSystemNotice(
       ctx,
       CONSENT_SUBJECT[c.cause],
-      `${c.summary}.\n\n${CONSENT_CONSEQUENCE}${fix}\n\nThe Status view shows the same check; so does pnpm gmt status --only consent.`,
+      `${c.summary}.\n\n${CONSENT_CONSEQUENCE}${fix}\n\nSettings → System shows the same check; so does pnpm gmt status --only consent.`,
     );
     if (sent) ctx.repos.notifications.claimNoticeKey(key);
     return sent;

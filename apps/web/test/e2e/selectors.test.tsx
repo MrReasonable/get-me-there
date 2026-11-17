@@ -1,26 +1,25 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { SMOKE } from '../../e2e/selectors.js';
 import { Nav } from '../../src/components/Nav.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
-import { MARK_ORDER } from '../../src/views/Dates/overview.js';
 import { SearchesView } from '../../src/views/Searches/SearchesView.js';
 import { TripView } from '../../src/views/Trip/TripView.js';
-import { workedDates } from '../fixtures.dates.js';
+import { DATES_SPACE, workedDates } from '../fixtures.dates.js';
 import { API, definition } from '../fixtures.js';
-import { flightList, flightPair, pairingList, searchCard } from '../fixtures.searches.js';
+import { flightPair, searchCard } from '../fixtures.searches.js';
 import { readTrip, tripBody } from '../fixtures.trip.js';
 import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
-import { findBoard, renderDates } from '../views/dates/render.js';
+import { findTrips, renderDates } from '../views/dates/render.js';
 import { renderInShell } from '../views/searches/support.js';
 
 // The Playwright smoke needs WP8's api and a browser, so `pnpm test` cannot run it; this proves its selectors match
-// the markup the Dates view, the Trip page and the nav render (review arch2-001, ui-r2-002; WP19 Task 19.9),
+// the markup a search's page, the Trip page and the nav render (review arch2-001, ui-r2-002; WP19 Task 19.9),
 // at both widths it checks.
 
 const one = (selector: string): HTMLElement => {
@@ -29,84 +28,83 @@ const one = (selector: string): HTMLElement => {
   return el;
 };
 
-describe('the Playwright smoke’s Dates selectors match the rendered view', () => {
-  it('desktop: the board, its row links, the overview’s one tab stop, rings, lighting, legend, readout and the coverage toggle', async () => {
-    renderDates({ body: workedDates() });
-    const board = await screen.findByRole('table', { name: SMOKE.boardTable });
-    expect(board).toBe(await findBoard());
-    const rows = board.querySelectorAll(SMOKE.boardRow);
-    expect(rows.length).toBe(10);
-    expect(within(board).getAllByRole('link', { name: SMOKE.rowLink })).toHaveLength(10);
-    expect(within(board).getAllByRole('link')[0]).toHaveAccessibleName('Open 14 Mar 2027 to 25 Mar 2027');
+describe('the Playwright smoke’s Search page selectors match the rendered page', () => {
+  it("desktop: the sections, their rows and links, the run line, the filter row, the calendar's one tab stop, its days, the key, the day panel and the coverage toggle", async () => {
+    const { user } = renderDates({ body: workedDates() });
+    const trips = await screen.findByRole('region', { name: SMOKE.cheapestTrips });
+    const lower = screen.getByRole('region', { name: SMOKE.lowerOnCalendar });
+    // the worked example: one current verified trip; the cheaper calendar prices below it
+    expect(trips.querySelectorAll(SMOKE.tripRow)).toHaveLength(1);
+    expect(within(trips).getAllByRole('link', { name: SMOKE.detailsLink })).toHaveLength(1);
+    expect(lower.querySelectorAll(SMOKE.calendarRow)).toHaveLength(3);
+    expect(within(lower).getByRole('link', { name: SMOKE.seeAll })).toHaveAttribute('href', SMOKE.calendar);
+    expect(one(SMOKE.calendar)).toContainElement(one(SMOKE.calendarTabStop));
+    expect(await waitFor(() => one(SMOKE.runLine))).toHaveTextContent(/^Searched /);
+    expect(screen.getByRole('group', { name: SMOKE.filterRow })).toBeInTheDocument();
 
-    expect(document.querySelectorAll(SMOKE.overviewTabStop)).toHaveLength(1);
-    expect(one(SMOKE.overviewTabStop).tagName).toBe('BUTTON');
-    expect(document.querySelectorAll(SMOKE.overviewCell).length).toBeGreaterThan(10);
-    // why: design 2026-11-08 §5.2: only trips with flights read are outlined; the worked example holds two verified figures
-    expect(document.querySelectorAll(SMOKE.ringedCell)).toHaveLength(2);
-    // pointing at the first row lights its ringed cell
-    expect(document.querySelector(SMOKE.litCell)).toBeNull();
-    fireEvent.pointerEnter(rows[0] ?? board);
-    expect(one(SMOKE.litCell)).toHaveAttribute('data-ringed');
-    // why: design 2026-11-08 §5.1: the fresh verified figure (14 → 25 Mar) ranks before the cheaper calendar prices
-    expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|11');
-    // an unpriced cell carries its glyphs
-    expect(one(`${SMOKE.overviewCell}[data-marks~="no-price-shown"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
-      COPY.datesView.marks.glyph['no-price-shown'],
-    );
+    expect(document.querySelectorAll(SMOKE.calendarTabStop)).toHaveLength(1);
+    expect(one(SMOKE.calendarTabStop).tagName).toBe('BUTTON');
+    expect(document.querySelectorAll(SMOKE.calendarDay)).toHaveLength(31);
+    // why: each priced day prints its price inside a PriceCell; the one trip's day carries the dot
+    expect(document.querySelectorAll(SMOKE.pricedDay)).toHaveLength(8);
+    for (const d of document.querySelectorAll(SMOKE.pricedDay))
+      expect(d.querySelector('[data-testid="price-cell"]')).not.toBeNull();
+    expect(document.querySelectorAll(SMOKE.tripDay)).toHaveLength(1);
+    expect(
+      within(screen.getByRole('list', { name: SMOKE.calendarKey })).getAllByRole('listitem'),
+    ).toHaveLength(5);
 
-    expect(one(SMOKE.legend)).toBeVisible();
-    const marks = document.querySelectorAll(SMOKE.legendMark);
-    expect([...marks].map((m) => m.getAttribute('data-mark'))).toEqual([...MARK_ORDER]);
-    // the five marks first (spec rev 55 §11): priced is its shade, every other mark has its glyph
-    for (const m of marks)
-      if (m.getAttribute('data-mark') !== 'priced')
-        expect(m.querySelector(SMOKE.legendGlyph)?.textContent, m.getAttribute('data-mark') ?? '').not.toBe(
-          '',
-        );
-    expect(marks[0]?.querySelector(SMOKE.legendGlyph)?.className).toContain('lamp-lit');
-
-    fireEvent.pointerOver(one(SMOKE.overviewTabStop));
-    expect(one(SMOKE.readout)).toHaveTextContent('14 Mar 2027');
-    expect(screen.getByRole('link', { name: SMOKE.openThese })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
-    expect(document.querySelector(SMOKE.phoneCard)).toBeNull();
+    await user.click(one(SMOKE.tripDay));
+    const panel = await screen.findByRole('region', { name: SMOKE.dayPanel });
+    expect(panel).toHaveAccessibleName('Sun 14 Mar: 3 stays');
+    expect(panel.querySelectorAll(`${SMOKE.tripRow}, ${SMOKE.calendarRow}`)).toHaveLength(3);
+    expect(within(panel).getByRole('button', { name: SMOKE.dayClose })).toBeInTheDocument();
+    // Ruling 19: the three folds are one group of native details rows, closed until asked
+    const folds = screen.getByRole('region', { name: SMOKE.folds });
+    expect(folds.querySelectorAll(':scope > details')).toHaveLength(3);
+    expect(folds.querySelectorAll('details[open]')).toHaveLength(0);
+    for (const name of [SMOKE.priceFold, SMOKE.searchedFold, SMOKE.alertFold])
+      expect(within(folds).getByText(name)).toBeInTheDocument();
   });
 
-  it('phone: stacked cards, one month with Previous and Next month, the legend and the readout', async () => {
+  it('a day of more than five stays offers "Show N more stays"', async () => {
+    const { user } = renderDates({ body: { ...workedDates(), space: { ...DATES_SPACE, maxNights: 21 } } });
+    await screen.findByRole('region', { name: SMOKE.cheapestTrips });
+    await user.click(one(SMOKE.calendarTabStop));
+    const panel = await screen.findByRole('region', { name: SMOKE.dayPanel });
+    expect(within(panel).getByRole('button', { name: SMOKE.showMoreStays })).toHaveTextContent(
+      'Show 7 more stays',
+    );
+  });
+
+  it('phone: the same sections and rows, one month with Previous and Next month, the key', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
-    expect(await screen.findAllByTestId('board-card')).toHaveLength(10);
-    expect(document.querySelectorAll(SMOKE.phoneCard)).toHaveLength(10);
-    // the cards are the board table's own rows (one semantic table at every width)
-    expect(
-      screen.getByRole('table', { name: SMOKE.boardTable }).querySelectorAll(SMOKE.phoneCard),
-    ).toHaveLength(10);
+    const trips = await screen.findByRole('region', { name: SMOKE.cheapestTrips });
+    expect(trips.querySelectorAll(SMOKE.tripRow)).toHaveLength(1);
+    expect(document.querySelectorAll(SMOKE.calendarRow)).toHaveLength(3);
     expect(screen.getByRole('button', { name: SMOKE.previousMonth })).toBeDisabled();
     expect(screen.getByRole('button', { name: SMOKE.nextMonth })).toBeEnabled();
-    const dates = new Set(
-      [...document.querySelectorAll<HTMLElement>(SMOKE.overviewCell)].map((c) => c.dataset.date?.slice(0, 7)),
+    const months = new Set(
+      [...document.querySelectorAll<HTMLElement>(SMOKE.calendarDay)].map((c) => c.dataset.day?.slice(0, 7)),
     );
-    expect([...dates]).toEqual(['2027-03']);
-    expect(one(SMOKE.legend)).toBeInTheDocument();
-    expect(one(SMOKE.readout)).toBeInTheDocument();
-    expect(document.querySelectorAll(SMOKE.overviewTabStop)).toHaveLength(1);
+    expect([...months]).toEqual(['2027-03']);
+    expect(screen.getByRole('list', { name: SMOKE.calendarKey })).toBeInTheDocument();
+    expect(document.querySelectorAll(SMOKE.calendarTabStop)).toHaveLength(1);
   });
 });
 
 describe('the Playwright smoke’s nav and Trip page selectors match the rendered markup', () => {
-  it('the nav: two tiers labelled by their names, the current entry with its non-colour cue, 44 px links', () => {
-    renderWithProviders(<Nav current="dates" search={{ id: 'def-0001', name: 'Worked example' }} />, {
-      search: '?view=dates&def=def-0001',
-    });
+  it('the nav: two links named Trips and Settings, the current entry with its non-colour cue, 44 px links', () => {
+    renderWithProviders(<Nav current="trips" />, { search: '?view=dates&def=def-0001' });
     const nav = screen.getByRole('navigation', { name: SMOKE.nav });
-    const lists = SMOKE.navTiers.map((name) => within(nav).getByRole('list', { name }));
-    expect(lists).toHaveLength(2);
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual([...SMOKE.navItems]);
     const current = one(SMOKE.navCurrent);
-    expect(current).toHaveTextContent('Worked example');
+    expect(current).toHaveTextContent('Trips');
     expect(current.className).toContain('border-b-4');
     for (const link of within(nav).getAllByRole('link')) expect(link.className).toContain('min-h-11');
   });
@@ -128,6 +126,7 @@ describe('the Playwright smoke’s nav and Trip page selectors match the rendere
     );
     expect(await screen.findByRole('region', { name: SMOKE.tripCard })).toBeInTheDocument();
     expect(one(SMOKE.tripPage)).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: SMOKE.crumbs })).toBeInTheDocument();
     expect(one(SMOKE.tripBack)).toHaveAttribute('href', expect.stringContaining('view=dates'));
     expect(one(SMOKE.priceLabel).tagName).toBe('SUMMARY');
     expect(one(SMOKE.aboutPrice).tagName).toBe('SUMMARY');
@@ -136,30 +135,31 @@ describe('the Playwright smoke’s nav and Trip page selectors match the rendere
 });
 
 describe('the Playwright smoke’s WP20 selectors match the rendered markup (Task 20.11)', () => {
-  it('Searches: the new-search form holds From and its Search now button, one card per search with its actions', async () => {
+  it('Searches: the new-search panel holds the form with From and its Search button, after the cards with their actions', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
     const form = await waitFor(() => one(SMOKE.newSearchForm));
     expect(within(form).getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
     expect(within(form).getByRole('button', { name: SMOKE.searchNow })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelectorAll(SMOKE.searchCard)).toHaveLength(1));
-    // a card's See dates, Search again, Edit and Remove
+    // a card's All trips and dates, Search again, Edit and Remove
     expect(document.querySelectorAll(SMOKE.cardAction).length).toBeGreaterThanOrEqual(4);
-    // the form is above the list in the DOM, which is what puts it first below 900 px (spec rev 55 §11)
+    // Ruling 13: the cards come first in the DOM and the panel after them, which is what puts it below them on a phone
+    expect(one(SMOKE.newSearchPanel).contains(form)).toBe(true);
     expect(
-      form.compareDocumentPosition(one(SMOKE.searchCard)) & Node.DOCUMENT_POSITION_FOLLOWING,
+      one(SMOKE.searchCard).compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
   it('a search’s page: the state line is a status named "Search state", reading "Searched"', async () => {
     renderDates({ body: workedDates() });
-    await findBoard();
+    await findTrips();
     // why: the status is empty until the search state is read from the latest run, so the smoke waits on its text
     const status = await screen.findByRole('status', { name: SMOKE.stateLine });
     await waitFor(() => expect(status).toHaveTextContent(COPY.searchPage.stateKind.searched));
   });
 
-  it('flights: the unavailable line where lists cannot be read (no block), the block where one was read', async () => {
+  it('flights: the unavailable line under Lower on the calendar where lists cannot be read, and no row offers a read', async () => {
     server.use(
       serveFlightLists((dep, ret) => flightPair(dep, ret, { link: null }), {
         available: false,
@@ -167,37 +167,8 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
       }),
     );
     renderDates({ body: workedDates() });
-    await findBoard();
-    expect(await screen.findByTestId('flights-unavailable')).toBe(one(SMOKE.flightsUnavailable));
-    expect(document.querySelector(SMOKE.flightsBlock)).toBeNull();
-    expect(screen.queryByRole('link', { name: /^Open in Google Flights/ })).toBeNull();
-  });
-
-  it('flights: a read list draws the block with its Google Flights link', async () => {
-    server.use(
-      serveFlightLists((dep, ret) =>
-        flightPair(dep, ret, { list: flightList({ departureDate: dep, returnDate: ret }) }),
-      ),
-    );
-    const { user } = renderDates({ body: workedDates() });
-    await findBoard();
-    // why: design 2026-11-08 §5.3 — rows are closed by default; the first row's button opens its flights
-    await user.click((await screen.findAllByRole('button', { name: /^Show flights/ }))[0] ?? document.body);
-    await waitFor(() => expect(document.querySelector(SMOKE.flightsBlock)).not.toBeNull());
-    expect(screen.getAllByRole('link', { name: /^Open in Google Flights/ }).length).toBeGreaterThan(0);
-  });
-
-  it('flights: a list with returns draws the pairing section the smoke names (WP21 Task 21.8)', async () => {
-    server.use(
-      serveFlightLists((dep, ret) =>
-        flightPair(dep, ret, { list: pairingList({ departureDate: dep, returnDate: ret }) }),
-      ),
-    );
-    const { user } = renderDates({ body: workedDates() });
-    await findBoard();
-    // why: design 2026-11-08 §5.3 — rows are closed by default; the first row's button opens its flights
-    await user.click((await screen.findAllByRole('button', { name: /^Show flights/ }))[0] ?? document.body);
-    await waitFor(() => expect(document.querySelector(SMOKE.pairing)).not.toBeNull());
-    expect(document.querySelector(SMOKE.flightsBlock)?.contains(one(SMOKE.pairing))).toBe(true);
+    const lower = await screen.findByRole('region', { name: SMOKE.lowerOnCalendar });
+    expect(await within(lower).findByTestId('flights-unavailable')).toBe(one(SMOKE.flightsUnavailable));
+    expect(screen.queryByRole('button', { name: /^Read flights/ })).toBeNull();
   });
 });

@@ -43,12 +43,60 @@ describe('URL state shared by the views (spec §11: parameters persist across vi
     expect(new URLSearchParams(window.location.search).get('f.stops')).toBe('1');
   });
 
-  it('updating search parameters keeps the URL fragment', () => {
+  // why: final review C2/I1: one fragment policy — a filter edit (replace) keeps the page's fragment; a link and a push
+  // navigation reset it unless the link names its own
+  it('a filter edit keeps the URL fragment; a link and a push navigation drop it', () => {
     window.history.replaceState(null, '', '/?view=results&f.stops=1#details');
-    expect(hrefWith({ view: 'coverage' })).toBe('/?view=coverage&f.stops=1#details');
+    expect(hrefWith({ view: 'coverage' })).toBe('/?view=coverage&f.stops=1');
     updateSearchParams({ 'f.stops': null });
     expect(window.location.search).toBe('?view=results');
     expect(window.location.hash).toBe('#details');
+    updateSearchParams({ view: 'dates' }, 'push');
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates', '']);
+    window.history.replaceState(null, '', '/?view=results#calendar');
+    const go = navigateTo({ def: 'd2' });
+    go({ metaKey: false, ctrlKey: false, shiftKey: false, button: 0, preventDefault: () => undefined });
+    expect([window.location.search, window.location.hash]).toEqual(['?view=results&def=d2', '']);
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('a replace may drop the fragment by naming an empty one', () => {
+    window.history.replaceState(null, '', '/?view=dates&def=d1#calendar');
+    updateSearchParams({}, 'replace', '');
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=d1', '']);
+    window.history.replaceState(null, '', '/');
+  });
+
+  // why: final review C2: URLSearchParams keeps a fragment as part of the last value ("def-1#calendar"), so a
+  // from-scratch link's query is parsed without it; the link's own fragment, if it names one, is where the click lands
+  it("a from-scratch link's fragment never reaches a parameter; the page's fragment is dropped", () => {
+    const click = {
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      button: 0,
+      preventDefault: () => undefined,
+    };
+    window.history.replaceState(null, '', '/?view=dates&def=d1#main');
+    navigateToQuery('?view=searches&d.to=JFK')(click);
+    expect([window.location.search, window.location.hash]).toEqual(['?view=searches&d.to=JFK', '']);
+    navigateToQuery('?view=dates&def=d1#calendar')(click);
+    expect(new URLSearchParams(window.location.search).get('def')).toBe('d1');
+    expect(window.location.search).not.toContain('%23');
+    expect(window.location.hash).toBe('#calendar');
+    window.history.replaceState(null, '', '/');
+  });
+
+  // Task 9 (the Trips card's counts link): a link may name its own fragment, which replaces the page's
+  it('a link may name its fragment: the address and the click go there, the parameters kept', () => {
+    window.history.replaceState(null, '', '/?view=searches#top');
+    expect(hrefWith({ view: 'dates', def: 'd1' }, '#calendar')).toBe('/?view=dates&def=d1#calendar');
+    updateSearchParams({ view: 'dates', def: 'd1' }, 'push', '#calendar');
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=d1', '#calendar']);
+    window.history.replaceState(null, '', '/?view=searches');
+    const go = navigateTo({ view: 'dates', def: 'd1' }, '#calendar');
+    go({ metaKey: false, ctrlKey: false, shiftKey: false, button: 0, preventDefault: () => undefined });
+    expect([window.location.search, window.location.hash]).toEqual(['?view=dates&def=d1', '#calendar']);
     window.history.replaceState(null, '', '/');
   });
 
@@ -126,7 +174,15 @@ describe('an old detail link and the way back to a search (trip-page plan Task 7
   });
 
   it("back to a search's page drops the Trip page's own parameters; the coverage link opens its section", () => {
-    expect(BACK_TO_DATES).toEqual({ view: 'dates', depart: null, return: null, basis: null, row: null });
+    expect(BACK_TO_DATES).toEqual({
+      view: 'dates',
+      depart: null,
+      return: null,
+      basis: null,
+      row: null,
+      't.from': null,
+      't.to': null,
+    });
     expect(DATES_COVERAGE).toEqual({ ...BACK_TO_DATES, 'd.coverage': 'open' });
   });
 });

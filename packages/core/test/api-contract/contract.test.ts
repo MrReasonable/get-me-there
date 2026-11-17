@@ -56,7 +56,6 @@ describe('api-contract (spec §10)', () => {
       'GET /definitions/:id/results',
       'GET /definitions/:id/date-pairs',
       'GET /definitions/:id/coverage',
-      'GET /definitions/:id/calendar-gap',
       'GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
       'POST /tools/smoke',
       'POST /tools/record',

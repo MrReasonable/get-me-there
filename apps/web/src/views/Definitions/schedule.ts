@@ -1,3 +1,4 @@
+import { DEFAULT_CRON } from '@gmt/core';
 import { SETUP_COPY } from '../../copy/setup.js';
 
 /**
@@ -120,4 +121,13 @@ export function switchSchedule(from: Schedule, to: ScheduleKind, cron: string | 
       // why: switching to custom shows the cron the picker would store, so the operator edits from it, not from blank.
       return { kind: 'custom', cron: cron ?? '' };
   }
+}
+
+/** Repeat's three choices (design 2026-11-08 Ruling 14): no cron, the default weekly one, or any other. */
+export type RepeatKind = 'never' | 'weekly' | 'other';
+
+/** Which of Repeat's choices a stored cron is: null is Never, `DEFAULT_CRON` (Mondays 05:00) Weekly, anything else Other. */
+export function repeatKind(cron: string | null): RepeatKind {
+  if (cron === null) return 'never';
+  return cron === DEFAULT_CRON ? 'weekly' : 'other';
 }

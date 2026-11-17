@@ -2,16 +2,17 @@ import { z } from 'zod';
 import { columnAt } from '../datePairs/decode.js';
 import { provenanceKey } from '../datePairs/encode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
-import { stayCount } from '../datePairs/space.js';
-import { flightTextSchema } from '../flights/types.js';
+import { datePairIndex, stayCount } from '../datePairs/space.js';
+import { flightTextSchema, legRest, listedFlightSchema, listedReturnSchema } from '../flights/types.js';
 import { MAX_URL_LENGTH } from '../normalise/vendorUrl.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
-import { type Provenance, provenanceSchema } from '../types/provenance.js';
+import { type Provenance, pointOfSaleSchema, provenanceSchema } from '../types/provenance.js';
 import { HHMM } from '../types/window.js';
 import {
   ageHoursSchema,
+  bookingSchema,
   coverageSummarySchema,
   executionSummarySchema,
   moneyPenceSchema,
@@ -198,6 +199,21 @@ const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
 const bookingOptionsSchema = z.strictObject({ figure: counts });
 
 /**
+ * Ruling 1: one way's facts, held to the flight list's own rules (they are the list's): minutes 1 to 6000, stops 0 to 5,
+ * one to six airline names, and each leg's arrival day offset (the outbound's 0 to 3, the return's −1 to 3).
+ */
+const { durationMinutes: legMinutes, stops: legStops, carriers: legCarriers } = legRest;
+const outOffset = listedFlightSchema.shape.arrivesDayOffset;
+const backOffset = listedReturnSchema.shape.arrivesDayOffset;
+const legFactsSchema = (arrivesDayOffset: typeof outOffset) =>
+  z.strictObject({
+    durationMinutes: legMinutes,
+    stops: legStops,
+    carriers: legCarriers,
+    arrivesDayOffset,
+  });
+
+/**
  * Spec rev 56 §10: one entry per pairing figure, the calendar price it replaced (shown beneath it with its own source,
  * age, "not checked" and stale mark); `figure` strictly ascending. Sparse, as `cheaperCached` is (§10's 4 MiB bound).
  */
@@ -238,6 +254,16 @@ const pairingGroupSchema = z.strictObject({
   arriveOut: z.array(hhmm),
   departBack: z.array(hhmm),
   arriveBack: z.array(hhmm),
+  /** Ruling 1: each way's journey time, changes and airlines (names, as the list page states them) */
+  outMinutes: z.array(legMinutes),
+  outStops: z.array(legStops),
+  outCarriers: z.array(legCarriers),
+  /** the days from the outbound's date to its arrival (0 to 3) and from the return's (−1, a date-line return, to 3) */
+  outArrivesDayOffset: z.array(outOffset),
+  backMinutes: z.array(legMinutes),
+  backStops: z.array(legStops),
+  backCarriers: z.array(legCarriers),
+  backArrivesDayOffset: z.array(backOffset),
   mismatch: z.array(z.boolean()),
   provenance: counts,
   stale: z.array(staleMarkSchema),
@@ -259,6 +285,14 @@ const PAIRING_COLUMNS = [
   'arriveOut',
   'departBack',
   'arriveBack',
+  'outMinutes',
+  'outStops',
+  'outCarriers',
+  'outArrivesDayOffset',
+  'backMinutes',
+  'backStops',
+  'backCarriers',
+  'backArrivesDayOffset',
   'mismatch',
   'provenance',
   'stale',
@@ -299,6 +333,30 @@ const LIST_REASON_COLUMNS = ['figure', 'reason'] as const satisfies ReadonlyArra
 /** `within`'s code: exactly a pairing figure's. */
 const WITHIN_CODE = PAIRING_READ.indexOf('within');
 
+/** One way of a verified trip as its result row states it (Ruling 2): its journey time and changes, null where unknown. */
+// why: Task 2 minor: a journey time is positive; one the row does not state is null, never 0
+const verifiedLegSchema = z.strictObject({
+  durationMinutes: z.number().int().min(1).nullable(),
+  stops: count.nullable(),
+});
+
+/**
+ * Ruling 2: a current verified figure's details from its own result row (`outboundMinutes`, `inboundMinutes`,
+ * `stopsOut`, `stopsIn`, `booking`), named by its dates and airports, so a verified trip links its seller and shows its
+ * legs on every surface. The booking is re-validated on the wire (`bookingSchema`, decision 54).
+ */
+export const verifiedDetailSchema = z.strictObject({
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema,
+  origin: iataSchema,
+  destination: iataSchema,
+  legs: z.strictObject({ out: verifiedLegSchema, back: verifiedLegSchema }),
+  booking: bookingSchema,
+});
+export type VerifiedDetail = z.output<typeof verifiedDetailSchema>;
+/** Ruling 2: the details of each current verified figure; none for a verified figure the latest search did not see. */
+export const verifiedDetailsSchema = z.array(verifiedDetailSchema);
+
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
   executionId: z.string().nullable(),
@@ -308,6 +366,8 @@ const datePairsBodySchema = z.strictObject({
   discoveryProviders: z.array(providerIdSchema),
   verificationProviderConfigured: z.boolean(),
   staleAfterHours: count,
+  /** fix round 1 (Ruling 2): the install's POINT_OF_SALE, the market of the Google Flights search a trip falls back to */
+  pointOfSale: pointOfSaleSchema,
   /** the current resolved space's dates and stays */
   space: z.strictObject({
     departureFrom: isoDateSchema,
@@ -345,6 +405,8 @@ const datePairsBodySchema = z.strictObject({
   pairingRead: pairingReadGroupSchema.exactOptional(),
   /** the 21.6 ruling: a failed list's reason; a body without it (an older api) has no `list-failed` read */
   listReason: listReasonGroupSchema.exactOptional(),
+  /** Ruling 2: one entry for each current verified figure, in figure order */
+  verifiedDetails: verifiedDetailsSchema,
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -838,6 +900,48 @@ function refineGroups(v: DatePairsBody, fail: Fail): void {
     }
   const b = v.bookingOptions;
   for (let k = 0; k < b.figure.length; k += 1) verifiedFigureOf(v, 'bookingOptions', k, fail);
+  refineVerifiedDetails(v, fail);
+}
+
+/**
+ * Ruling 2: exactly one verified detail for each current verified figure (one the latest search saw again), in figure
+ * order, named by that figure's dates and airports, its booking a seller's exactly when the figure has booking options;
+ * none for any other figure. Reported once a rule, at the first offending entry.
+ */
+function refineVerifiedDetails(v: DatePairsBody, fail: Fail): void {
+  const f = v.figures;
+  const details = v.verifiedDetails;
+  const sellers = new Set(v.bookingOptions.figure);
+  const exact = () =>
+    fail('verifiedDetailsExact', ['verifiedDetails'], 'one verified detail for each current verified figure');
+  let k = 0;
+  for (let j = 0; j < f.pair.length; j += 1) {
+    // why: a verified figure is never superseded (`refineFigures`), so it is current exactly when the latest search saw it
+    if (columnAt(f.basis, j) !== 'verified' || columnAt(f.notSeenInLatestAgeHours, j) !== null) continue;
+    const d = details[k];
+    if (d === undefined) {
+      exact();
+      return;
+    }
+    if (
+      datePairIndex(v.space, d.departureDate, d.returnDate) !== columnAt(f.pair, j) ||
+      d.origin !== v.scope.origins[columnAt(f.origin, j)] ||
+      d.destination !== v.scope.destinations[columnAt(f.destination, j)]
+    )
+      fail(
+        'verifiedDetailsFigure',
+        ['verifiedDetails', k],
+        'verified details name the current verified figures, in their order',
+      );
+    if ((d.booking.kind !== 'none') !== sellers.has(j))
+      fail(
+        'verifiedDetailsBooking',
+        ['verifiedDetails', k, 'booking'],
+        "a verified detail's booking is a seller's exactly when its figure has booking options",
+      );
+    k += 1;
+  }
+  if (k < details.length) exact();
 }
 
 /**
@@ -878,6 +982,7 @@ const pairingCellSchema = z.strictObject({
   arriveOut: hhmm,
   departBack: hhmm,
   arriveBack: hhmm,
+  legs: z.strictObject({ out: legFactsSchema(outOffset), back: legFactsSchema(backOffset) }),
   mismatch: z.boolean(),
   provenance: provenanceSchema,
   stale: staleMarkSchema,

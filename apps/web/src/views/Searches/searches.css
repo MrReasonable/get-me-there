@@ -1,22 +1,26 @@
-/* The Searches view (spec rev 55 §11, layout B): the list as the main column and the new-search form beside it on the
-   right; narrower than 900 px the view puts the form above the list (the DOM order), so the grid is one column there. */
+/* The Trips page (design 2026-11-08 §5.3, mockup 01-searches.html): plain cards on the shared tokens (styles/theme.css),
+   light and dark, like the Trip page and Settings. The cards are the main column and the new-search panel sits beside
+   them from 900 px (sticky); narrower it stacks in the DOM's order, the cards first (Ruling 13). Spec
+   §4's CSP blocks inline styles: nothing here is set from markup. */
 @layer components {
   .searches-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
-    gap: 24px 32px;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+    gap: 24px;
     align-items: start;
-    max-width: 1280px;
   }
-  /* The DOM puts the form first (so keyboard order matches what a phone shows); a desk places it in the right column,
-     beside the list, in the one stable tree, so crossing the breakpoint remounts nothing */
+  /* A desk puts the panel in the right column, sticky, and the cards in the left, from one DOM order */
   .searches-side {
     grid-column: 2;
     grid-row: 1;
+    min-width: 0;
+    position: sticky;
+    top: 16px;
   }
   .searches-main {
     grid-column: 1;
     grid-row: 1;
+    min-width: 0;
   }
   @media (max-width: 899px) {
     .searches-layout {
@@ -27,67 +31,201 @@
       grid-column: 1;
       grid-row: auto;
     }
+    .searches-side {
+      position: static;
+    }
   }
-  .searches-side {
-    min-width: 0;
+
+  /* The new-search panel (Ruling 13, mockup 01 #new): a plain card; its fields are the token form's (definitions.css),
+     here only what makes the panel narrow and quiet */
+  .new-search {
+    padding: 16px 18px 18px;
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 10px;
   }
-  /* The existing form is a two-column plate; in the narrow side column it stacks */
-  .searches-side .def-form {
+  .new-search-heading {
+    margin-bottom: 12px;
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+  .new-search-heading:focus-visible {
+    outline: 2px solid var(--t-focus);
+    outline-offset: 2px;
+  }
+  .new-search-form {
+    display: grid;
+    gap: 12px;
+  }
+  .new-search .search-fields,
+  .new-search .search-places {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
-  .searches-side .def-side {
-    position: static;
+  .new-search .search-more {
+    gap: 12px;
+    padding: 0 0 8px;
   }
-  .searches-main {
-    min-width: 0;
+  .new-search .def-fold-group {
+    padding-top: 0;
+    border-top: 0;
+  }
+  /* the rolling switch says what it is (mockup 01 has the checkbox alone); its group keeps the name for a screen reader */
+  .new-search .def-fold-group > .def-fold-legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .new-search .where-to-look {
+    margin-top: 2px;
+    padding-top: 12px;
+    border-top: 1px solid var(--t-line);
+  }
+  /* More options: the mockup's accent summary with no rules around it */
+  .new-search .def-more {
+    border: 0;
+  }
+  .new-search .fold > summary {
+    padding: 0;
+  }
+  /* the estimate as mockup 01's quiet line (SentenceRegion's `quiet`) */
+  .estimate-quiet {
+    font-size: 13.5px;
+    color: var(--t-muted);
+  }
+  .estimate-quiet .text-fg-2 {
+    color: var(--t-muted);
+  }
+  .new-search-form > .btn {
+    width: 100%;
   }
   .searches-list {
     display: grid;
     gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
-  .search-card {
+
+  /* One search's card */
+  .tcard {
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: 10px;
+    min-width: 0;
+    list-style: none;
+  }
+  .tcard-empty {
+    padding: 16px 18px;
+    font-weight: 600;
+  }
+  .tcard-head {
+    padding: 16px 18px 10px;
+  }
+  .tcard-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+  }
+  .tcard-name {
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+  .tcard .tcard-name-link {
+    color: var(--t-ink);
+  }
+  .tcard-name:focus-visible {
+    outline: 2px solid var(--t-focus);
+    outline-offset: 2px;
+  }
+  .tcard-repeat {
+    font-size: 13px;
+    color: var(--t-muted);
+  }
+  .tcard-meta {
+    margin-top: 3px;
+    font-size: 13.5px;
+    color: var(--t-muted);
+  }
+  .tcard-run,
+  .tcard-state {
+    padding: 0 18px 14px;
+    font-size: 14px;
+  }
+  .tcard-run .run-progress {
+    gap: 8px;
+  }
+  .tcard-run .run-line {
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .tcard-run .run-line.warn-text {
+    font-weight: 600;
+  }
+  .tcard-nothing {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding-top: 14px;
+    border-top: 1px solid var(--t-line);
+  }
+  .tcard-mark {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
     display: grid;
-    gap: 6px;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--t-cal-bg);
+    color: var(--t-cal-ink);
   }
-  .search-card-name {
-    font: 700 20px / 1.2 var(--font-ui);
-  }
-  .search-card-name:focus-visible {
-    outline: 3px solid currentColor;
-    outline-offset: 2px;
-  }
-  .search-card-route {
+  .tcard-changed {
+    color: var(--t-warn);
     font-weight: 600;
   }
-  /* The card's price opens its trip: an underlined link in the accent (6.4:1 on the plate), so it reads as one on touch */
-  .search-card-price-link {
-    color: #0a58ca;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    font-weight: 600;
+  .tcard-trips {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--t-line);
   }
-  .search-card-price-link:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 2px;
+  .tcard-lower {
+    padding: 10px 18px;
+    font-size: 13.5px;
+    color: var(--t-muted);
+    border-top: 1px solid var(--t-line);
   }
-  .search-card-cheapest {
+  .tcard-foot {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px 12px;
+    gap: 8px;
+    padding: 10px 18px 14px;
+    border-top: 1px solid var(--t-line);
   }
-  /* Search again beside the other two; Remove at the far end, with a rule between, so it is never next to Search again */
-  .search-card-actions {
-    display: flex;
+  .tcard-foot-end {
+    margin-left: auto;
+    display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px 24px;
-    margin-top: 8px;
-    padding-top: 10px;
-    border-top: 1px solid var(--line);
+    gap: 8px;
   }
-  .search-card-main-actions,
+  .tcard .tcard-btn {
+    min-height: 40px;
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .tcard .trip-btn:not(.trip-btn-primary):not(.trip-btn-quiet) {
+    color: var(--t-ink);
+  }
   .search-remove,
   .search-remove-ask {
     display: inline-flex;
@@ -95,4 +233,57 @@
     align-items: center;
     gap: 8px;
   }
+  .search-again-confirm {
+    max-width: 100%;
+  }
+}
+
+/* Unlayered, like the rows' own grid (rows.css), so these win over it */
+/* Beside the 340 px panel a card is about 724 px wide at 1280 px: these minima (as the mockup's) keep each trip row,
+   its › included, inside its card; a card narrower than that (a phone, or beside the panel at 900 px) takes the rows'
+   own two-column layout (rows.css, by the row list's width) */
+@container rows (min-width: 721px) {
+  .tcard .trip-row {
+    grid-template-columns: 130px minmax(150px, 1.3fr) 52px minmax(110px, 1fr) minmax(110px, 1fr) 24px;
+  }
+}
+/* A card's price reads "£412 ↗" at every width (mockup 01); the booking words stay in the link's accessible name */
+.tcard .trip-row .row-price .book-link .book-words {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.tcard .trip-row .row-price .book-link .book-amount::after {
+  content: " ↗" / "";
+  font-size: 13px;
+}
+
+/* A card's price and its label, left-aligned on a wide card (the board's rule puts the label on the amount's right);
+   right-aligned on a narrow one, as mockup 01's phone */
+.tcard .row-price > .price-label:not([open]) {
+  margin-inline-start: 0;
+}
+@container rows (min-width: 721px) {
+  .tcard .row-price .book-link {
+    text-align: left;
+  }
+}
+@container rows (max-width: 720px) {
+  .tcard .row-price {
+    align-items: flex-end;
+  }
+  .tcard .row-price .book-link {
+    text-align: right;
+  }
+}
+
+/* Task 7 fix round 2: a long label ("Google price · just now") wraps inside the card's 130 px price column rather than
+   running into the dates; the pill keeps its rounded ends on two lines */
+.tcard .row-price > .price-label > summary {
+  white-space: normal;
+  line-height: 1.25;
+  border-radius: 10px;
 }

@@ -7,8 +7,8 @@ import {
   confirmStepGoing,
 } from '../../../../src/views/Dates/confirmWords.js';
 
-// Design 2026-11-08 §5.5: the line under the board that says how checking flights ended. Exact copy; the operator reads
-// "trips with flights read", never "confirmed".
+// Design 2026-11-08 §5.5, Ruling 22: the stopping sentence in "Cheapest trips"' lead, how reading flights ended. Exact
+// copy; the operator reads "trips with flights read", never "confirmed"; "these five" only of the five shown unfiltered.
 
 const summary = (over: Partial<ConfirmSummary> = {}): ConfirmSummary => ({
   mode: 'confirm',
@@ -22,23 +22,40 @@ const line = (
   confirm: ConfirmSummary | null,
   over: Partial<Omit<ConfirmLineInput, 'confirm'>> = {},
 ): string | null =>
-  confirmLineText({ confirm, ended: null, stopCause: null, running: false, planned: 18, ...over }, COPY);
+  confirmLineText(
+    { confirm, ended: null, stopCause: null, running: false, planned: 18, theseFive: false, ...over },
+    COPY,
+  );
+const PATIENT = 'Reading stopped after 12 reads in a row found nothing cheaper than the five cheapest.';
 
 describe('confirmLineText, rule A (patience)', () => {
-  it('5 or more trips: counts the dates that look cheaper on the calendar', () => {
+  it('5 or more trips: the rule that stopped it, then the dates that look cheaper on the calendar', () => {
     expect(line(summary())).toBe(
-      "Checked 18 dates; 7 trips with flights read. 31 dates look cheaper on the calendar but weren't checked.",
+      `Checked 18 dates; 7 trips with flights read. ${PATIENT} 31 dates look cheaper on the calendar but weren't checked.`,
     );
   });
 
   it('adds how many could not be read to the checked count', () => {
     expect(line(summary({ unread: 2 }))).toBe(
-      "Checked 18 dates, 2 couldn't be read; 7 trips with flights read. 31 dates look cheaper on the calendar but weren't checked.",
+      `Checked 18 dates, 2 couldn't be read; 7 trips with flights read. ${PATIENT} 31 dates look cheaper on the calendar but weren't checked.`,
     );
   });
 
   it('says nothing more with none left unchecked', () => {
-    expect(line(summary({ uncheckedCheaper: 0 }))).toBe('Checked 18 dates; 7 trips with flights read.');
+    expect(line(summary({ uncheckedCheaper: 0 }))).toBe(
+      `Checked 18 dates; 7 trips with flights read. ${PATIENT}`,
+    );
+  });
+
+  it('"these five" when the section shows the five cheapest with no filter (Ruling 22, mockup 02)', () => {
+    expect(line(summary({ uncheckedCheaper: 0, confirmed: 5 }), { theseFive: true })).toBe(
+      'Checked 18 dates; 5 trips with flights read. Reading stopped after 12 reads in a row found nothing cheaper than these five.',
+    );
+    // and never on a sentence that is not the patient stop's
+    expect(line(summary({ stop: 'queue-empty', uncheckedCheaper: 0 }), { theseFive: true })).not.toContain(
+      'these five',
+    );
+    expect(line(summary({ confirmed: 2 }), { theseFive: true })).not.toContain('these five');
   });
 
   it('fewer than 5 trips: why the other dates gave none, and the dates not checked', () => {
@@ -47,12 +64,18 @@ describe('confirmLineText, rule A (patience)', () => {
     );
   });
 
+  it('fewer than 5 trips with none left unchecked: the counts alone, no rule and no "other dates" clause', () => {
+    expect(line(summary({ confirmed: 2, uncheckedCheaper: 0 }), { planned: 12 })).toBe(
+      'Checked 12 dates; 2 trips with flights read.',
+    );
+  });
+
   it('the singulars: 1 date, 1 trip, 1 left', () => {
     expect(line(summary({ confirmed: 1, uncheckedCheaper: 1 }), { planned: 1 })).toBe(
       "Checked 1 date; 1 trip with flights read: the other dates' flights didn't fit your limits or couldn't be read. 1 date wasn't checked.",
     );
     expect(line(summary({ confirmed: 5, uncheckedCheaper: 1 }), { planned: 1 })).toBe(
-      "Checked 1 date; 5 trips with flights read. 1 date looks cheaper on the calendar but wasn't checked.",
+      `Checked 1 date; 5 trips with flights read. ${PATIENT} 1 date looks cheaper on the calendar but wasn't checked.`,
     );
   });
 });

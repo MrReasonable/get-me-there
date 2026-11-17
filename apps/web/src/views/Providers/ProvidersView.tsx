@@ -11,6 +11,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import { SettingsCrumbs } from '../Settings/SettingsView.js';
 import './providers.css';
 
 function maxAgeText(info: CapabilityInfo): string {
@@ -95,8 +96,9 @@ export function ProvidersView() {
   if (q.data === undefined) return <Loading />;
   return (
     <div className="providers pt-5">
+      <SettingsCrumbs title={COPY.crumbs.priceSources} />
       <div className="space-y-2">
-        <h2 className="h-view">{COPY.providersHeading}</h2>
+        <h1 className="h-view">{COPY.providersHeading}</h1>
         <p className="lede">{P.intro}</p>
       </div>
       {q.data.providers.length === 0 ? <NoProviders /> : null}

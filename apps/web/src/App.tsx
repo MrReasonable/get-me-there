@@ -3,30 +3,40 @@ import { useDefinitions, useProviders } from './api/queries.js';
 import { AppBoundary } from './components/AppBoundary.js';
 import { LoadError, Loading } from './components/LoadState.js';
 import { Nav } from './components/Nav.js';
-import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
+import { TopBar } from './components/TopBar.js';
 import { COPY } from './copy.js';
 import { Flaps } from './flaps/Flaps.js';
 import { type Landing, land } from './state/landing.js';
 import { useLastSearch } from './state/lastSearch.js';
 import { parseTripState } from './state/tripState.js';
-import { updateSearchParams, useSearchParams } from './state/urlState.js';
-import type { ViewId } from './state/view.js';
+import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from './state/urlState.js';
+import { navItemOf, navPatch, type ViewId } from './state/view.js';
 import { AlertsView } from './views/Alerts/index.js';
 import { DatesView } from './views/Dates/DatesView.js';
 import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
 import { HistoryView } from './views/History/HistoryView.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { SearchesView } from './views/Searches/SearchesView.js';
+import { SettingsView } from './views/Settings/SettingsView.js';
 import { StatusView } from './views/Status.js';
 import { TripView } from './views/Trip/TripView.js';
 
 /** The views that need no definition (spec §11: the Set up views other than Alerts). */
-const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['searches', 'definitions', 'providers', 'status']);
+const NO_DEFINITION: ReadonlySet<ViewId> = new Set([
+  'searches',
+  'definitions',
+  'settings',
+  'providers',
+  'status',
+]);
+
+/** The Trips link (the logo's and the nav's): Searches, which names no search (ruling R-bar). */
+const TRIPS = { ...navPatch('searches'), def: null };
 
 /**
- * Spec rev 55 §11 layout: synthetic banner, header with the nav (no search selector: every action lives on the search it
- * acts on), status bar on every view. When /providers fails, the page says provider status is unknown instead of silently showing
+ * Spec rev 55 §11 layout (design 2026-11-08 Rulings 9 and 10): synthetic banner, header with the logo and the nav (no search selector: every action lives on the search it
+ * acts on), the top bar (health line and limits) on every view. When /providers fails, the page says provider status is unknown instead of silently showing
  * no banner (decision 36); the shell and the views each sit inside a boundary, so a render error never blanks the page.
  */
 export function App() {
@@ -43,8 +53,6 @@ export function App() {
   // opened, else the first, and a search's page without `def=` lands on Searches (below)
   const selectedId = requested ?? (list.some((d) => d.id === lastId) ? lastId : null) ?? list[0]?.id ?? null;
   const selected = list.find((d) => d.id === selectedId) ?? null;
-  // why: the nav names the search last opened (spec rev 55 §11); it is absent until one has been, or once it is gone
-  const lastOpened = list.find((d) => d.id === lastId) ?? null;
   // why: spec §11 URLs (WP20 Task 20.3): an absent or unknown view, a search's page without def= and an Edit page without
   // edit= land on Searches; the retired views and a Results URL without a date pair land on a search's page, which with
   // no def= is Searches too. The view drawn follows the landing at once, and the URL is rewritten to it
@@ -63,14 +71,6 @@ export function App() {
   useEffect(() => {
     if (rewriteReady && Object.keys(landing.patch).length > 0) updateSearchParams(landing.patch, 'replace');
   }, [rewriteReady, landing]);
-  const editing = params.get('edit');
-  const barNeedsSearch = view === 'dates' || view === 'trip' || view === 'definitions';
-  const barSearch =
-    view === 'dates' || view === 'trip'
-      ? selected
-      : view === 'definitions'
-        ? (list.find((d) => d.id === editing) ?? null)
-        : null;
   const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
   // why: until /providers answers (or fails, which the page then says), the page cannot tell whether its prices are
   // synthetic, so no price view renders: a fixture price must never look real for the moment before the banner.
@@ -95,27 +95,26 @@ export function App() {
         <a href="#main" className="skip-link">
           {COPY.skipToContent}
         </a>
-        <div className="steel-strip topbar">
-          <header className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <h1 className="brand">
-              {/* why: the name is the heading's words; on a phone, where flap cells would be too small to read, the
-              words are shown in painted caps and the cells hidden */}
-              <span className="brand-words">{COPY.appTitle}</span>
-              <Flaps text={COPY.appTitle} className="brand-flaps" />
-            </h1>
-            <Nav
-              current={view}
-              search={lastOpened === null ? null : { id: lastOpened.id, name: lastOpened.name }}
-            />
+        <div className="topbar">
+          <header className="topbar-in">
+            <div className="brand">
+              {/* why: the logo links to Trips (Ruling 9). The name is the link's words; on a phone, where flap cells
+              would be too small to read, the words are shown in painted caps and the cells hidden */}
+              <a
+                href={hrefWith(TRIPS)}
+                onClick={navigateTo(TRIPS)}
+                aria-label={COPY.logoLink}
+                className="brand-link"
+              >
+                <span className="brand-words">{COPY.appTitle}</span>
+                <Flaps text={COPY.appTitle} className="brand-flaps" />
+              </a>
+            </div>
+            <Nav current={navItemOf(view)} />
+            {/* why: Ruling 10 — one health line and the limits on every view; a run's progress is the page's own
+            (RunProgress), not the bar's */}
+            <TopBar />
           </header>
-          <div className="statusbar-row">
-            {/* why: ruling R-bar — the bar follows the search the view shows (its page and detail by `def=`, the Edit page by
-            `edit=`), with Cancel and Resume; on every other view it follows any search's run, named, with no controls */}
-            <StatusBar
-              definition={barSearch}
-              hold={barSearch === null && barNeedsSearch && definitions.isPending}
-            />
-          </div>
         </div>
         <main id="main" tabIndex={-1} className="view-main pt-5">
           <AppBoundary>
@@ -155,6 +154,7 @@ export function App() {
               <AlertsView definitionId={selected.id} />
             ) : null}
             {show('definitions') ? <DefinitionsView /> : null}
+            {show('settings') ? <SettingsView /> : null}
             {show('providers') ? <ProvidersView /> : null}
             {show('status') ? <StatusView /> : null}
           </AppBoundary>

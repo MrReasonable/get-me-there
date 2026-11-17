@@ -1,7 +1,6 @@
 /** Spec §10 read routes over a definition's executions: results, the date pairs, a trip, the views, the cell detail. */
 import { apiContract, type CellKey, iataSchema, isoDateSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
-import { assembleCalendarGap } from '../read/calendarGap.js';
 import { assembleCellDetail } from '../read/cell.js';
 import { assembleCoverage } from '../read/coverageView.js';
 import { assembleDatePairs } from '../read/datePairs.js';
@@ -43,9 +42,6 @@ export const resultHandlers: HandlerTable = {
   ),
   'GET /api/definitions/:id/coverage': plain((c, input, ctx) =>
     c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
-  ),
-  'GET /api/definitions/:id/calendar-gap': plain((c, input, ctx) =>
-    c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
   ),
   'GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': plain((c, input, ctx) =>
     c.json(

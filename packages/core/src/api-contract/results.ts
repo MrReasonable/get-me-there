@@ -132,15 +132,6 @@ export const resultsResponseSchema = z.object({
    */
   datePairFigure: datePairFigureSchema.nullable(),
 });
-const pricedCell = priceCellSchema.extend({ cell: cellSchema });
-/**
- * Plan decision 54 on the calendar gap's reference price: a verified-basis minimum the latest search no longer
- * returned carries `notSeenInLatest` (the same shape as a results row's). (The calendar-basis figure with its
- * `superseded` mark went with the calendar and duration-analysis routes, WP19; the Dates view's figures are
- * `datePairFigureSchema`'s.)
- */
-const notSeenInLatest = z.object({ ageHours: ageHoursSchema }).nullable();
-const verifiedFigure = pricedCell.extend({ itineraryHash: z.string(), notSeenInLatest });
 export const coverageResponseSchema = z.object({
   executionId: z.string(),
   summary: coverageSummarySchema,
@@ -214,10 +205,6 @@ export const coverageResponseSchema = z.object({
       ),
     }),
   ),
-});
-export const calendarGapResponseSchema = z.object({
-  cheapestVerified: verifiedFigure.nullable(),
-  cells: z.array(z.object({ cell: cellSchema, calendar: priceCellSchema, verifyAvailable: z.boolean() })),
 });
 export const cellOutcomeSchema = cellKeySchema.extend({
   executionId: z.string(),

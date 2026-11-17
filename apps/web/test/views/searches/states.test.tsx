@@ -12,9 +12,9 @@ import { renderInShell } from './support.js';
 // Spec rev 55 §11 "Searches": a failed read, remove or start is said in plain words beside its action, with Retry for
 // the read.
 
-const NAME = 'Birmingham → Frankfurt';
+const NAME = 'London → New York';
 const cardOf = async () => {
-  const heading = await screen.findByRole('heading', { level: 3, name: NAME });
+  const heading = await screen.findByRole('heading', { level: 2, name: NAME });
   const card = heading.closest('li');
   if (card === null) throw new Error('no card');
   return card;
@@ -33,7 +33,7 @@ describe('the Searches view’s states', () => {
     server.use(
       http.get(CARDS_URL, () =>
         ok
-          ? HttpResponse.json({ cards: [] })
+          ? HttpResponse.json({ cards: [], pointOfSale: 'GB' })
           : HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 }),
       ),
     );

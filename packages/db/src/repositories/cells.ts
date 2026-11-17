@@ -14,6 +14,7 @@ import {
   type RollUp,
   type SelectionReason,
   type SkipDetail,
+  type SkipReason,
   type Stage,
   stripUrlsInText,
 } from '@gmt/core';
@@ -149,6 +150,45 @@ ORDER BY origin, destination, departure_date, return_date`;
  * predicate for every mix of the six buckets, so the two can never disagree.
  */
 export const SEARCHED_DATE_PAIR_SQL = 'priced > 0 OR (not_run = 0 AND failed = 0 AND shown > 0)';
+
+/**
+ * The skip reasons that mean the browser was unavailable to a run (spec §3 rev 32, rev 36): the worker could not be
+ * reached, or a cell was left for a scheduled run because the browser was not there for it (the Trip page's
+ * "browser-unavailable" state reads the same two).
+ */
+const BROWSER_SKIPS = ['provider_unavailable', 'scheduled_only'] as const satisfies readonly SkipReason[];
+
+/** One date pair of a card's latest run (Ruling 7): its six buckets (`reused` 0) and its skips by cause. */
+export interface LatestDatePair {
+  buckets: Buckets;
+  /** airport pairs skipped for the budget */
+  budgetSkips: number;
+  /** airport pairs skipped because the browser was unavailable (`BROWSER_SKIPS`) */
+  browserSkips: number;
+}
+
+/** `searchedDatePairs`' answer for one card, keyed `dep|ret`. */
+export interface CardDatePairs {
+  ever: Set<string>;
+  latest: Map<string, LatestDatePair>;
+}
+
+/** One row of `searchedDatePairs`: a date pair, whether any run searched it, and the latest run's counts if it seeded it. */
+interface CardDatePairRow {
+  definition_id: string;
+  dep: string;
+  ret: string;
+  ever: number;
+  mine: number;
+  l_priced: number | null;
+  l_empty: number | null;
+  l_no_data: number | null;
+  l_error: number | null;
+  l_skipped: number | null;
+  l_not_run: number | null;
+  l_budget: number | null;
+  l_browser: number | null;
+}
 
 /**
  * Spec §7 `search_cells` + `cell_outcomes` and the stored roll-ups. Every method that changes an outcome stores the
@@ -354,20 +394,21 @@ export class CellsRepo {
   }
 
   /**
-   * Spec revision 55 §10, §6.6 (the cards, ruling R2): for each card's latest parent run, the date pairs of that run's
-   * space that any parent run of the search searched (`ever`), and those the latest run itself searched (`mine`), by
-   * `datePairSearched` over the space's airport pairs, in one statement for every card. Each run is judged on its own
-   * (a date pair two runs each half searched is not searched), a cell a run never seeded counting not run, as
-   * `datePairBuckets` counts it. The predicate runs in SQL on each run's per-date-pair counts
+   * Spec revision 55 §10, §6.6 (the cards, ruling R2; Ruling 7): for each card's latest parent run, the date pairs of
+   * that run's space that any parent run of the search searched (`ever`), and the latest run's own counts of each date
+   * pair it seeded (`latest`): its six buckets over the space's airport pairs, and its skips by cause, in one statement
+   * for every card. Each run is judged on its own (a date pair two runs each half searched is not searched), a cell a run
+   * never seeded counting not run, as `datePairBuckets` counts it; a date pair the latest run never seeded has no entry
+   * in `latest` (every airport pair not run). The predicate runs in SQL on each run's per-date-pair counts
    * (`SEARCHED_DATE_PAIR_SQL`, pinned to core's `datePairSearched` over every bucket mix), so the read returns at most
-   * one row per searched date pair of each space and never the run history's cells (CodeRabbit finding: the cards read
-   * had no upper bound). Children and tool runs are left out.
+   * one row per date pair of each space and never the run history's cells (CodeRabbit finding: the cards read had no
+   * upper bound). Children and tool runs are left out.
    */
   searchedDatePairs(
     cards: ReadonlyArray<{ definitionId: string; latestRunId: string; space: ResolvedSpace }>,
-  ): Map<string, { ever: Set<string>; mine: Set<string> }> {
-    const out = new Map<string, { ever: Set<string>; mine: Set<string> }>();
-    for (const c of cards) out.set(c.definitionId, { ever: new Set(), mine: new Set() });
+  ): Map<string, CardDatePairs> {
+    const out = new Map<string, CardDatePairs>();
+    for (const c of cards) out.set(c.definitionId, { ever: new Set(), latest: new Map() });
     if (cards.length === 0) return out;
     const param = JSON.stringify(
       cards.map((c) => ({
@@ -383,7 +424,7 @@ export class CellsRepo {
       })),
     );
     const rows = this.db.raw
-      .prepare<{ cards: string }, { definition_id: string; dep: string; ret: string; mine: number }>(
+      .prepare<{ cards: string }, CardDatePairRow>(
         `WITH card AS (
            SELECT json_extract(j.value, '$.d') AS def, json_extract(j.value, '$.e') AS latest,
                   json_extract(j.value, '$.n') AS pairs, json_extract(j.value, '$.from') AS dep_from,
@@ -398,8 +439,15 @@ export class CellsRepo {
              card.pairs - COUNT(*) + SUM(CASE WHEN c.discovery_status IS NULL OR c.discovery_status = 'not_run'
                                            THEN 1 ELSE 0 END) AS not_run,
              SUM(CASE WHEN c.discovery_status = 'priced' THEN 1 ELSE 0 END) AS priced,
+             SUM(CASE WHEN c.discovery_status = 'empty' THEN 1 ELSE 0 END) AS empty,
+             SUM(CASE WHEN c.discovery_status = 'no_data' THEN 1 ELSE 0 END) AS no_data,
              SUM(CASE WHEN c.discovery_status IN ('empty', 'no_data') THEN 1 ELSE 0 END) AS shown,
-             SUM(CASE WHEN c.discovery_status = 'error' THEN 1 ELSE 0 END) AS failed
+             SUM(CASE WHEN c.discovery_status = 'error' THEN 1 ELSE 0 END) AS failed,
+             SUM(CASE WHEN c.discovery_status = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+             SUM(CASE WHEN c.discovery_status = 'skipped' AND c.discovery_reason = 'budget' THEN 1 ELSE 0 END)
+               AS budget,
+             SUM(CASE WHEN c.discovery_status = 'skipped'
+                       AND c.discovery_reason IN (${sqlList(BROWSER_SKIPS)}) THEN 1 ELSE 0 END) AS browser
            FROM search_cells c
            JOIN search_executions e ON e.id = c.execution_id AND e.is_child = 0 AND e.trigger <> 'tool'
            JOIN card ON card.def = e.definition_id
@@ -409,17 +457,41 @@ export class CellsRepo {
              AND CAST(julianday(c.return_date) - julianday(c.departure_date) AS INTEGER) BETWEEN card.min_n AND card.max_n
            GROUP BY card.def, c.execution_id, c.departure_date, c.return_date
          )
-         SELECT def AS definition_id, dep, ret, MAX(run = latest) AS mine FROM per_run
-         WHERE ${SEARCHED_DATE_PAIR_SQL}
-         GROUP BY def, dep, ret`,
+         SELECT def AS definition_id, dep, ret,
+           MAX(CASE WHEN (${SEARCHED_DATE_PAIR_SQL}) THEN 1 ELSE 0 END) AS ever,
+           MAX(run = latest) AS mine,
+           MAX(CASE WHEN run = latest THEN priced END) AS l_priced,
+           MAX(CASE WHEN run = latest THEN empty END) AS l_empty,
+           MAX(CASE WHEN run = latest THEN no_data END) AS l_no_data,
+           MAX(CASE WHEN run = latest THEN failed END) AS l_error,
+           MAX(CASE WHEN run = latest THEN skipped END) AS l_skipped,
+           MAX(CASE WHEN run = latest THEN not_run END) AS l_not_run,
+           MAX(CASE WHEN run = latest THEN budget END) AS l_budget,
+           MAX(CASE WHEN run = latest THEN browser END) AS l_browser
+         FROM per_run
+         GROUP BY def, dep, ret
+         HAVING ever = 1 OR mine = 1`,
       )
       .all({ cards: param });
     for (const r of rows) {
       const card = out.get(r.definition_id);
       if (card === undefined) continue;
       const key = `${r.dep}|${r.ret}`;
-      card.ever.add(key);
-      if (r.mine === 1) card.mine.add(key);
+      if (r.ever === 1) card.ever.add(key);
+      if (r.mine !== 1) continue;
+      card.latest.set(key, {
+        buckets: {
+          priced: r.l_priced ?? 0,
+          empty: r.l_empty ?? 0,
+          no_data: r.l_no_data ?? 0,
+          error: r.l_error ?? 0,
+          skipped: r.l_skipped ?? 0,
+          not_run: r.l_not_run ?? 0,
+          reused: 0,
+        },
+        budgetSkips: r.l_budget ?? 0,
+        browserSkips: r.l_browser ?? 0,
+      });
     }
     return out;
   }

@@ -8,12 +8,18 @@ import { describe, expect, it } from 'vitest';
 // why: under jsdom import.meta.url is not a file: URL, so the module's directory comes from import.meta.dirname.
 const ROOT = resolve(import.meta.dirname, '../..');
 
-/** Every .ts/.tsx file under a directory of apps/web, with its path relative to apps/web. */
+/**
+ * Every .ts/.tsx file under a directory of apps/web, with its path relative to apps/web in forward slashes on every
+ * host, so the guards' path lists ('src/lib/', MONEY_FILES) match on Windows too.
+ */
 function sources(dir: 'src' | 'test'): Array<{ file: string; text: string }> {
   const base = join(ROOT, dir);
   return readdirSync(base, { recursive: true, encoding: 'utf8' })
     .filter((f) => /\.tsx?$/.test(f))
-    .map((f) => ({ file: relative(ROOT, join(base, f)), text: readFileSync(join(base, f), 'utf8') }));
+    .map((f) => ({
+      file: relative(ROOT, join(base, f)).replaceAll('\\', '/'),
+      text: readFileSync(join(base, f), 'utf8'),
+    }));
 }
 
 const LETTER = /\p{L}/u;
@@ -35,11 +41,12 @@ const MONEY_FILES = new Set([
   'src/views/Alerts/ruleText.ts',
   'src/format.ts',
   'src/components/PriceCell.tsx',
-  'src/components/StatusBar.tsx',
-  // WP19: the coverage section's ledger costs (moved from the Coverage view), and the overview legend's band ranges,
-  // scale values in [data-scale], never fares
+  'src/components/TopBar.tsx',
+  // WP19: the coverage section's ledger costs (moved from the Coverage view), never fares
   'src/views/Dates/CoverageSection.tsx',
-  'src/views/Dates/Legend.tsx',
+  // Task 9 (Ruling 18; Global Constraints): a calendar day's accessible name says its price with its label kind and
+  // age ("Wed 11 Nov, £372, Calendar · 3h"); the day prints that price through PriceCell
+  'src/views/Dates/overview.ts',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
   // WP20 Task 20.5 (spec rev 55 §11): the estimate sentence, the tie line's sibling, formats money only through the
@@ -109,10 +116,8 @@ const NON_COPY_PROPS = new Set([
   'htmlFor',
   'inputMode',
   'value',
-  // the departure board's flap groups: an alignment and a board slot's name, never copy
+  // the departure board's flap groups: an alignment, never copy
   'align',
-  'slot',
-  'flapSlot',
   // WP10: Recharts' identifier props (a data field, an axis scale, a legend position), never copy
   'dataKey',
   'scale',
@@ -228,19 +233,22 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
     expect(panel).toMatch(/export const estimateMoney = /);
   });
 
-  // why: spec rev 55 §11 — the tie line formats its price only through the same cost formatter (WP20 Task 20.10), and
-  // the flights block's own words format none: every flight amount is a PriceCell (ruling C3)
-  it('the tie line formats money only through the estimate panel’s formatter; the flights block formats none', () => {
-    const tie = src.find((s) => s.file === 'src/views/Dates/TieLine.tsx');
-    expect(tie).toBeDefined();
-    expect(moneyOffenders('src/views/Elsewhere.tsx', tie?.text ?? '')).toEqual([]);
-    expect(tie?.text).toMatch(/estimateMoney\(pricePence, \{ wholePounds: true \}\)/);
-    for (const f of ['Flights.tsx', 'FlightRow.tsx', 'flightLines.ts']) {
-      const file = src.find((s) => s.file === `src/views/Dates/${f}`);
+  // why: spec rev 55 §11 (ruling C3): the flight words that outlived the flights block format no money; every flight
+  // amount is a PriceCell
+  it('the flight words and the flight reads format no money', () => {
+    for (const f of ['src/lib/flightLines.ts', 'src/lib/flightReads.ts']) {
+      const file = src.find((s) => s.file === f);
       expect(file, f).toBeDefined();
       expect(moneyOffenders('src/views/Elsewhere.tsx', file?.text ?? '')).toEqual([]);
       expect(file?.text).not.toMatch(/estimateMoney/);
     }
+  });
+
+  // why: Task 8 fix round 1 (C): the web's lib sits under its views; a lib file never reaches into views/
+  it('no file under src/lib imports from src/views', () => {
+    const libs = src.filter((x) => x.file.startsWith('src/lib/'));
+    expect(libs.length).toBeGreaterThan(0);
+    expect(libs.filter((x) => /from '(\.\.\/)+views\//.test(x.text)).map((x) => x.file)).toEqual([]);
   });
 
   it('the guards catch planted offenders, multi-line and conditional ones included', () => {

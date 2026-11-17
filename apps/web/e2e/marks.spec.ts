@@ -1,15 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+import { expectNoSidewaysScroll } from './layout.js';
 import { PERF_DEFINITION_ID, type PerfCase, servePerfCase } from './perfFixtures.js';
 import { SMOKE } from './selectors.js';
 
-// Spec §11 Overview, the marks in a real layout (jsdom has no paint): the "partly not searched" stripes are drawn in
-// the cell's own ink, the same colour as its glyphs, so the glyphs sit on the cell's own fill and no stripe crosses
-// their strokes (CodeRabbit on PR #32). The smoke's fixture run searches every cell, so this case is served through
-// route interception with some date pairs partly not searched.
+// Ruling 18 (Task 9), the calendar's days in a real layout (jsdom has no paint): a day not searched or not reached keeps
+// its hatching, every day's price, words or glyph sit inside its box at 375 px and 1280 px, light and dark, and under
+// forced colours every day keeps its edge (the hatching turns to a dashed one) and the key keeps its words. The smoke's
+// fixture run prices every day, so this case is served through route interception with every other day unpriced.
 
-/** Four weeks × 3 stays × the example's 4 airport pairs, every date pair priced, every fifth partly not searched. */
-const PARTLY_CASE: PerfCase = {
-  name: 'partly not searched',
+/** Four weeks × 3 stays × the example's 4 airport pairs, every second day without a price, each in turn of its kind. */
+const DAYS_CASE: PerfCase = {
+  name: 'days of every kind',
   from: '2027-01-04',
   days: 28,
   minNights: 10,
@@ -17,56 +18,81 @@ const PARTLY_CASE: PerfCase = {
   origins: ['LGW', 'LHR'],
   destinations: ['EWR', 'JFK'],
   everyPriced: true,
-  partly: true,
+  unpricedDays: true,
 };
 
-test('a partly-not-searched cell keeps its stripes, and its glyphs sit on its own fill', async ({ page }) => {
-  await servePerfCase(page, PARTLY_CASE);
+async function open(page: Page) {
+  await servePerfCase(page, DAYS_CASE);
   await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
-  await expect(page.getByRole('table', { name: SMOKE.boardTable })).toBeVisible();
-  const striped = page.locator(`${SMOKE.overviewCell}[data-marks~="partly"]`);
-  await expect(striped.first()).toBeVisible();
-  await expect(striped.first()).toHaveCSS('background-image', /repeating-linear-gradient/);
-  const backings = await striped.evaluateAll(
-    (cells, glyphs) =>
-      cells.map((c) => {
-        const g = c.querySelector(glyphs);
-        return {
-          cell: c.getAttribute('data-cell'),
-          fill: getComputedStyle(c).backgroundColor,
-          glyph: g === null ? null : getComputedStyle(g).backgroundColor,
-        };
-      }),
-    SMOKE.cellGlyphs,
-  );
-  expect(backings.length).toBeGreaterThan(0);
-  for (const b of backings) {
-    // why: an opaque backing in the cell's own fill colour, so the stripes show only around the glyphs
-    expect(b.fill, `${b.cell}`).not.toBe('rgba(0, 0, 0, 0)');
-    expect(b.glyph, `${b.cell}`).toBe(b.fill);
-  }
-});
+  await expect(page.locator(SMOKE.calendarTabStop)).toBeVisible();
+}
 
-test('forced colours: every marked overview cell still shows its glyphs', async ({ page }) => {
-  // why: spec §11 (nothing by colour alone): the smoke's fixture run prices every date pair, so no cell there carries
-  // a glyph; this seed has partly-not-searched cells, so the check is never vacuous
-  await page.emulateMedia({ forcedColors: 'active' });
-  await servePerfCase(page, PARTLY_CASE);
-  await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
-  await expect(page.getByRole('table', { name: SMOKE.boardTable })).toBeVisible();
-  const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
-  await expect(marked.first()).toBeVisible();
-  expect(await marked.count()).toBeGreaterThan(0);
-  const unseen = await marked.evaluateAll(
-    (cells, glyphs) =>
-      cells
-        .filter((c) => {
-          const g = c.querySelector<HTMLElement>(glyphs);
-          const box = g?.getBoundingClientRect();
-          return g === null || box === undefined || box.width === 0 || g.textContent === '';
-        })
-        .map((c) => c.getAttribute('data-cell')),
-    SMOKE.cellGlyphs,
+/**
+ * Every day whose content is wider or taller than its box, or whose printed price or words are cut (the printed part
+ * clips its own overflow, so it is measured too), as its date.
+ */
+const spilled = (page: Page) =>
+  page.locator(SMOKE.calendarDay).evaluateAll((days) =>
+    days
+      .filter((d) => {
+        const printed = d.querySelector('.cal-dp');
+        const over = (e: Element) => e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1;
+        return over(d) || (printed !== null && over(printed));
+      })
+      .map((d) => d.getAttribute('data-day')),
   );
-  expect(unseen).toEqual([]);
+
+for (const width of [375, 1280] as const)
+  for (const scheme of ['light', 'dark'] as const)
+    test(`at ${width}px, ${scheme}: a day not searched or not reached is hatched, and every day's content fits its box`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await open(page);
+      const hatched = page.locator(
+        `${SMOKE.calendarDay}:is([data-mark="not-searched"], [data-mark="not-reached"])`,
+      );
+      await expect(hatched.first()).toBeVisible();
+      await expect(hatched.first()).toHaveCSS('background-image', /repeating-linear-gradient/);
+      // a day with no price says "no price", a day that couldn't be read prints its cross
+      await expect(page.locator(`${SMOKE.calendarDay}[data-mark="no-price-shown"]`).first()).toHaveText(
+        /no price$/,
+      );
+      await expect(page.locator(`${SMOKE.calendarDay}[data-mark="couldnt-read"]`).first()).toHaveText(/×$/);
+      expect(await spilled(page)).toEqual([]);
+      // why: a day is a touch target: at least 24 × 24 px at every width
+      const small = await page
+        .locator(SMOKE.calendarDay)
+        .evaluateAll((days) =>
+          days
+            .filter((d) => d.getBoundingClientRect().width < 24 || d.getBoundingClientRect().height < 24)
+            .map((d) => d.getAttribute('data-day')),
+        );
+      expect(small).toEqual([]);
+      await expectNoSidewaysScroll(page);
+    });
+
+test('forced colours: every day keeps its edge, the hatching a dashed one, and the key its words', async ({
+  page,
+}) => {
+  await page.emulateMedia({ forcedColors: 'active' });
+  await open(page);
+  const edges = await page.locator(SMOKE.calendarDay).evaluateAll((days) =>
+    days.map((d) => ({
+      mark: d.getAttribute('data-mark'),
+      style: getComputedStyle(d).borderTopStyle,
+      width: getComputedStyle(d).borderTopWidth,
+    })),
+  );
+  expect(edges.length).toBeGreaterThan(0);
+  for (const e of edges) {
+    expect(e.width, `${e.mark}`).not.toBe('0px');
+    expect(e.style, `${e.mark}`).toBe(
+      e.mark === 'not-searched' || e.mark === 'not-reached' ? 'dashed' : 'solid',
+    );
+  }
+  const key = page.getByRole('list', { name: SMOKE.calendarKey }).getByRole('listitem');
+  await expect(key).toHaveCount(5);
+  for (const item of await key.all()) await expect(item).not.toHaveText('');
 });

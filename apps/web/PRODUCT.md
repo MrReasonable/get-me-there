@@ -29,18 +29,18 @@ journey duration, stops) in view. Watching a chosen itinerary's price over time 
 alerts) supports that decision; it does not replace it. The app never books: the operator books
 with the airline or an agent.
 
-Success: one press of Search now on a new search gives the board of best date pairs and its
-overview of months for it, within budgets the operator sets; scheduled searches keep them
-current, and an email arrives when an itinerary that meets the operator's constraints drops
-under their threshold.
+Success: one press of **Search** on a new search gives its cheapest trips and a calendar of its
+months, within budgets the operator sets; scheduled searches keep them current, and an email
+arrives when a price the operator watches drops under their threshold.
 
 ## Positioning
 
 Honest coverage and provenance, within a hard budget the operator controls.
 
 - Every price states its source, its age and whether its constraints were checked, visible
-  without hovering. The headline is the cheapest round trip **found**, with its basis, verdict
-  class, provider and age.
+  without hovering. Each price carries one label saying what it is (a seller's or Google's price
+  for a trip whose flights were read, a calendar or cached price, or a price not seen again) and
+  its age; the headline is the cheapest trip **found**.
 - Coverage is stated cell by cell: a date pair is a departure and a return date; a cell is one
   airport pair on one date pair; coverage is stated per date pair over its airport pairs, so "not
   searched" or "no cached data" can never be mistaken for "no flights".
@@ -51,12 +51,13 @@ Honest coverage and provenance, within a hard budget the operator controls.
 
 The operator uses it in four situations, all of which matter:
 
-- **At a desk, deliberately:** studying the Dates board and overview, a date pair's detail and
-  History to choose dates, then booking elsewhere.
+- **At a desk, deliberately:** studying a search's page (its cheapest trips, the dates lower on
+  the calendar, the calendar and a day's stays) and a trip's page to choose dates, then booking
+  elsewhere.
 - **A quick glance between runs:** has anything moved, is anything failing or waiting on them.
-  The status bar on every view carries this.
-- **From an alert email:** its link opens that fare's date pair, with the itinerary whose price
-  dropped.
+  The top bar on every view carries this: the health line, the SearchApi calls left and the
+  month's spend, and the search running now.
+- **From an alert email:** its link opens the Trip page for that pair of dates.
 - **On a phone:** checking results and status. This needs an install the phone can reach (a
   server or VPS, behind the app's sign-in); a laptop install bound to localhost is not
   reachable from a phone.
@@ -68,25 +69,29 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 
 ## Capabilities and Constraints
 
-- **Views:** in two tiers. Decide: Searches (the first screen: the operator's searches as cards,
-  and the new-search form with From, To, Leave between and Stay, everything else under More
-  options; one press of **Search now** shows its estimate beforehand and runs it), a search's
-  page (the nav names the search last opened: its state line, a ranked board of the best date
-  pairs, an overview of months with a strip of stay lengths per day whose key says "brighter is
-  cheaper", the flights read for the cheapest date pairs, Search again, Edit and Repeat weekly…,
-  and a coverage section saying what was and was not searched) and History (price over time for a
-  route or an itinerary). Set up: Providers, Alerts and Status. A search's Edit page (reached
-  from a card or the page, not from the nav) holds the full set of fields, the estimate and
-  budget fit. A date pair's detail (its itineraries and calendar prices, one panel per airport
-  pair) opens from the board, the overview or an alert email, not from the nav.
+- **Views:** the nav has two items, Trips and Settings. **Trips** is the first screen: the
+  operator's searches as cards (each with its three cheapest trips, how many dates have flights
+  read and how many look lower on the calendar, and the run's progress while one goes) beside a
+  new-search panel (From, To, Leave between and Stay; Where to look, the sources this search
+  uses; More options for the longest journey, cabin, Repeat, rolling dates and name; one sentence
+  of what the search will take; and **Search**). A **search's page**, opened from its card, has
+  its header with the run line, a filter row (stay, From, To, one per week), **Cheapest trips**,
+  **Lower on the calendar**, a calendar of its months (each day prints its cheapest trip's
+  price, else its lowest calendar price, and opens a panel of its stays) and three folds: Price
+  over time, What was searched (with the full search log) and Alert. The **Trip page** is one
+  pair of dates, ending in a booking link; it opens from a trip row, a day's panel or an alert
+  email. A search's **Edit** page holds the same form with its Limits and checks. **History**
+  (price over time for a route) opens from the Price over time fold. **Settings** is an interim
+  page linking Price sources, Alerts and System, which keep their earlier look until stage 3 of
+  the redesign.
 - **Flight lists:** for the cheapest date pairs the browser worker reads Google Flights' own
   list of outbound flights (times, changes, airline, the lowest round trip listed with each),
   selects the cheapest outbound within the search's journey, stops and time limits, and reads the
   return flights Google lists with it (and the next outbound's, from a fresh load of the page,
   when none fits), each priced as Google words it ("from"). It then opens the booking options of
   the shown pairing and reads the offers Google listed. The cheapest of the sellers read leads
-  the date pair, on the board and on the search's page alike, only when both flights are within
-  the search's limits, the list is fresh, it was read under the search's current limits and the
+  the date pair, on the search's page, its card and the Trip page alike, only when both flights
+  are within the search's limits, the list is fresh, it was read under the search's current limits and the
   offers are complete, with the grid price beside it; otherwise the grid price leads and the
   pairing shows beneath it, saying why. When no return fits on either outbound tried, the pairing
   whose sellers were read is shown with its offers, marked over the limits. A read that did not
@@ -99,7 +104,8 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   loads up to 2 pages a date pair (a second outbound loads the page again). A run reads the
   cheapest date pairs first, down the calendar, until more reading stops finding cheaper trips (five
   trips with flights read wanted, twelve reads in a row without an improvement ends it), with no page
-  allowance; a pair read recently is reused, and a line under the table says how checking ended.
+  allowance; a pair read recently is reused, and a line under Cheapest trips says how reading
+  ended.
   Without the worker the page says flight times need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
@@ -111,10 +117,10 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   (itinerary search of selected cells).
 - **Coverage buckets per cell:** priced, no fares, no cached data, error, skipped, not searched.
   On the main path these are worded as searched, "not searched", "not reached" and "couldn't be
-  read"; the six buckets stay in the coverage section.
-- **Main-path words:** Search now, Search again, Searching, Searched, Reading flights, Repeat
-  weekly, More options; set-up terms (stages, cells, discovery, verification) stay in the
-  coverage section and the Providers view.
+  read"; the six buckets stay in the full search log.
+- **Main-path words:** Search, Search again, Searching, Searched, Reading flights, Checking
+  fares, Repeat weekly, More options; set-up terms (stages, cells, discovery, verification) stay
+  in the full search log and the Price sources view.
 - **Budgets:** caps per run and per month on calls and spend, and per run on browser pages;
   estimates before spending; a ledger of every call.
 - **Route-agnostic:** any airports in the airports table; nothing in the product is tied to a
@@ -156,7 +162,7 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 
 ## Accessibility & Inclusion
 
-At 375 px every view stays reachable and usable: navigation wraps rather than hiding views, and
-compact layouts keep each price's source, age and verdict class. Keyboard operation has a
-visible focus and labelled controls, and no meaning is carried by colour alone. Beyond these and
+At 375 px every view stays reachable and usable: the nav is the same two links in one row, the
+top bar wraps under it, and compact layouts keep each price's label and age. Keyboard operation
+has a visible focus and labelled controls, and no meaning is carried by colour alone. Beyond these and
 the spec's other requirements, no formal accessibility standard has been chosen yet.

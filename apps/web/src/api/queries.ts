@@ -20,6 +20,12 @@ import type {
 } from './types.js';
 
 /** Query keys; prefixes are what mutations invalidate. */
+/** A search's alert rules and events (the Alerts view's reads; the Search page's Alert fold reads the rules). */
+export const alertKeys = {
+  rules: (id: string) => ['alerts', id] as const,
+  events: (id: string) => ['alert-events', id] as const,
+};
+
 export const qk = {
   providers: ['providers'] as const,
   definitions: ['definitions'] as const,
@@ -30,7 +36,6 @@ export const qk = {
   // WP19 §6: the key holds every route parameter, so a filtered read is never answered from an unfiltered one
   datePairs: (id: string, s: DatePairsScope) =>
     ['date-pairs', id, s.origins ?? '', s.destinations ?? '', s.maxJourneyMinutes ?? ''] as const,
-  calendarGap: (id: string) => ['calendar-gap', id] as const,
   // design 2026-11-08 §6.1: the 'trip' prefix of one search is what a flight read invalidates
   tripOf: (id: string) => ['trip', id] as const,
   trip: (id: string, q: TripQuery) =>
@@ -295,15 +300,6 @@ export function useCoverage(definitionId: string | null) {
   });
 }
 
-/** Spec §6.9: only fetched when a verification provider is configured. */
-export function useCalendarGap(definitionId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: qk.calendarGap(definitionId),
-    queryFn: () => api.calendarGap(definitionId),
-    enabled,
-  });
-}
-
 /** Airport autocomplete (GET /api/airports?q=); two characters minimum. */
 export function useAirportSearch(q: string) {
   return useQuery({
@@ -319,16 +315,9 @@ export function useExecutionActions() {
   const qc = useQueryClient();
   const refresh = async () => {
     await Promise.all(
-      [
-        ['results'],
-        ['execution'],
-        ['coverage'],
-        ['date-pairs'],
-        ['calendar-gap'],
-        ['cell'],
-        ['history'],
-        ['cards'],
-      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+      [['results'], ['execution'], ['coverage'], ['date-pairs'], ['cell'], ['history'], ['cards']].map(
+        (queryKey) => qc.invalidateQueries({ queryKey }),
+      ),
     );
   };
   return {

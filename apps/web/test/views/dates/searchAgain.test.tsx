@@ -270,7 +270,7 @@ describe('SearchAgainButton, the second press (spec rev 55 §11; ruling A10; Ian
     expect(seen.estimateBodies[0]).not.toHaveProperty('confirmedCostPence');
     expect(
       screen.getByText(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest when you search again.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/engine text that must not show/)).toBeNull();
@@ -311,7 +311,7 @@ describe('SearchAgainButton, the second press (spec rev 55 §11; ruling A10; Ian
     await button('Search again · about £1.20');
     expect(
       screen.getByText(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest next Monday',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest next Monday.',
       ),
     ).toBeInTheDocument();
   });

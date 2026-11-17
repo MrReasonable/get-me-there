@@ -113,6 +113,45 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(m.io.stdout).toContain('fix: add Travelpayouts');
   });
 
+  it('the bar line counts every concern and says how many fail, naming a lone one by its label, provider or area', async () => {
+    const warn = (id: string, area: apiContract.StatusCheck['area']) =>
+      check({ id, area, state: 'warn', summary: 'look', fix: { text: 'x', command: null } });
+    const fail = (id: string, area: apiContract.StatusCheck['area']) =>
+      check({ id, area, state: 'fail', summary: 'down', fix: { text: 'x', command: null } });
+    const lineOf = async (checks: Parameters<typeof installed>[0]) => {
+      const { m } = await installed(checks);
+      await runCli(['status'], m.deps);
+      return m.io.stdout.match(/^Status: .*?(?= \(app)/m)?.[0];
+    };
+    expect(await lineOf([fail('a', 'schedule'), warn('b', 'backups')])).toBe('Status: 2 to check, 1 failing');
+    expect(await lineOf([fail('a', 'schedule'), fail('b', 'app')])).toBe('Status: 2 failing');
+    expect(await lineOf([warn('a', 'backups'), warn('b', 'data')])).toBe('Status: 2 to check');
+    expect(
+      await lineOf([
+        check({
+          id: 'd',
+          area: 'data',
+          label: 'Worked example',
+          state: 'warn',
+          summary: 'x',
+          fix: { text: 'x', command: null },
+        }),
+      ]),
+    ).toBe('Status: Worked example to check');
+    expect(
+      await lineOf([
+        check({
+          id: 'p',
+          area: 'provider',
+          providerId: 'searchapi',
+          state: 'fail',
+          summary: 'x',
+          fix: { text: 'x', command: null },
+        }),
+      ]),
+    ).toBe('Status: searchapi failing');
+  });
+
   it('a clean report says nothing is to be checked', async () => {
     const { m } = await installed([check()]);
     expect(await runCli(['status'], m.deps)).toBe(0);

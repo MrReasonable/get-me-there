@@ -19,10 +19,33 @@ import { zeroBuckets } from './coverage.js';
 import { datePairFigures } from './datePairs.js';
 import { loadRows } from './load.js';
 import { pairingsFor } from './pairings.js';
+import type { ResultRow } from './rows.js';
 import type { ParsedScope } from './scope.js';
 
-/** A ranked date pair with its figure (never null: a pair without one is not ranked). */
-export type RankedFigure = DatePair & { figure: DatePairFigure };
+/**
+ * A ranked date pair with its figure (never null: a pair without one is not ranked) and the figure's own result row
+ * (Ruling 2: a verified figure's legs and seller booking are its row's).
+ */
+export type RankedFigure = DatePair & { figure: DatePairFigure; chosen: ResultRow };
+
+/**
+ * Date pair `i`'s figure and its own row, or null when it has neither. `datePairFigures` sets the two together, so one
+ * without the other is a broken read: a RangeError, never a date pair silently left out of the ranking (Task 2 minor).
+ */
+export function pairedAt<F, R>(
+  figures: ReadonlyMap<number, F>,
+  chosen: ReadonlyMap<number, R>,
+  i: number,
+): { figure: F; row: R } | null {
+  const figure = figures.get(i);
+  const row = chosen.get(i);
+  if (figure === undefined && row === undefined) return null;
+  if (figure === undefined || row === undefined)
+    throw new RangeError(
+      `date pair ${i} has a ${figure === undefined ? 'row' : 'figure'} without its ${figure === undefined ? 'figure' : 'row'}`,
+    );
+  return { figure, row };
+}
 
 /**
  * The board's ranked date pairs of `def` over `space` with the journey limit, best first, leaving out those departing on
@@ -39,7 +62,7 @@ export function rankedFigures(
 ): RankedFigure[] {
   const scope: ParsedScope = { space: q.space, maxJourneyMinutes: q.maxJourneyMinutes, datePair: null };
   const loaded = loadRows(def, ports, { scope });
-  const { figures } = datePairFigures(
+  const { figures, chosen } = datePairFigures(
     loaded,
     scope,
     loaded.rc,
@@ -48,8 +71,9 @@ export function rankedFigures(
   const today = ports.clock.todayLondon();
   const pairs: RankedFigure[] = [];
   for (let i = 0, n = datePairCount(q.space); i < n; i++) {
-    const figure = figures.get(i);
-    if (figure === undefined) continue;
+    const paired = pairedAt(figures, chosen, i);
+    if (paired === null) continue;
+    const { figure, row } = paired;
     const at = datePairAt(q.space, i);
     if (at.departureDate <= today) continue;
     pairs.push({
@@ -66,6 +90,7 @@ export function rankedFigures(
       partiallyVerified: 0,
       journeyLeftOut: 0,
       figure,
+      chosen: row,
     });
   }
   // why: rankDatePairs keeps every pair it is given that has a figure, so the narrowing below never drops one

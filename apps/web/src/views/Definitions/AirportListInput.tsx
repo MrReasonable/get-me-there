@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type Ref, useEffect, useRef, useState } from 'react';
 import { api } from '../../api/endpoints.js';
 import { qk, useAirportSearch } from '../../api/queries.js';
 import { PLAN_COPY } from '../../copy/plan.js';
@@ -38,6 +38,8 @@ export interface AirportListInputProps {
   details: ReadonlyMap<string, AirportRow>;
   /** Messages from the API's 422 `details.fields` for this field, e.g. the metro-code message. */
   errors: readonly string[];
+  /** The text box, for a caller that moves focus to it ("+ New search" on the Trips page). */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 const choiceText = (c: AirportChoice) =>
@@ -63,6 +65,7 @@ export function AirportListInput({
   onChange,
   details,
   errors,
+  inputRef,
 }: AirportListInputProps) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
@@ -251,6 +254,7 @@ export function AirportListInput({
           {label}
         </label>
         <input
+          ref={inputRef}
           id={`${id}-input`}
           type="text"
           role="combobox"

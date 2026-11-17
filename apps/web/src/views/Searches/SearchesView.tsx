@@ -5,6 +5,8 @@ import type { SearchCard as Card } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
+import { syntheticProvenance } from '../../lib/bookingTarget.js';
+import { sourceConfigured } from '../../lib/sources.js';
 import '../Definitions/definitions.css';
 import { NewSearchForm } from './NewSearchForm.js';
 import { RemovedLine } from './RemovedLine.js';
@@ -39,24 +41,27 @@ interface Removed {
   restored: boolean;
 }
 
-/** A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). */
-const hasSyntheticCheapest = (cards: readonly Card[]): boolean =>
+/**
+ * A synthetic or fixture price among the cards: the red banner shows whatever `/providers` says (spec §5.5). It covers
+ * every price the page shows: each card's trips and its lower-on-calendar price (the only prices a card carries).
+ */
+const hasSyntheticPrice = (cards: readonly Card[]): boolean =>
   cards.some(
     (c) =>
-      c.cheapest !== null &&
-      (c.cheapest.provenance.providerId === 'fixture' || c.cheapest.provenance.sourceKind === 'synthetic'),
+      c.trips.some((t) => syntheticProvenance(t.figure.price.provenance)) ||
+      (c.lowerOnCalendar !== null && syntheticProvenance(c.lowerOnCalendar.cheapest.price.provenance)),
   );
 
 /**
  * Spec rev 55 §11 "Searches" (`?view=searches`, the first screen and always the landing view): layout B, the operator's
- * searches as the main column and the new-search form beside it on the right; narrower than 900 px the form sits above the
- * list. It reads `GET /definitions/cards` and keeps the served order (while a mutation is pending the order is held and
+ * searches as the main column and the new-search panel beside it on the right, sticky; narrower than 900 px the panel sits
+ * below the list (design 2026-11-08 Ruling 13). It reads `GET /definitions/cards` and keeps the served order (while a mutation is pending the order is held and
  * changes only on the next settled read), re-reading at the status bar's poll interval only while a card is pending or
  * running.
  *
  * Remove asks inline on its card; once it succeeds the card is replaced, in its place, by "Removed <name>. Undo" for
  * `UNDO_MS`, kept through any re-read. Undo restores the search and puts its card back where the api's order puts it,
- * with focus on its heading. The side column holds the new-search form and Search now (Task 20.5, ruling A18).
+ * with focus on its heading. The side column holds the new-search panel and its Search (Task 20.5, Ruling 13).
  */
 export function SearchesView() {
   const cards = useCards();
@@ -71,6 +76,7 @@ export function SearchesView() {
   const [removals, setRemovals] = useState<ReadonlyMap<string, Pending>>(new Map());
   const [undos, setUndos] = useState<ReadonlyMap<string, Pending>>(new Map());
   const served = cards.data?.cards ?? [];
+  const pointOfSale = cards.data?.pointOfSale ?? 'unknown';
 
   // why: the served order is the api's; while a mutation of this view is pending it is held, so a re-read that lands
   // meanwhile cannot move a card under the pointer, and it changes only on the next settled read
@@ -136,14 +142,20 @@ export function SearchesView() {
     return v instanceof Error ? v : null;
   };
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const fromRef = useRef<HTMLInputElement>(null);
+  const browserConfigured = providers.data !== undefined && sourceConfigured(providers.data, 'camoufox');
   const side = (
-    <section aria-label={S.sideHeading} className="searches-side">
+    <section aria-labelledby="new-search-heading" className="searches-side new-search token-form">
+      <h2 id="new-search-heading" ref={headingRef} tabIndex={-1} className="new-search-heading">
+        {S.sideHeading}
+      </h2>
       {providers.error ? (
         <LoadError error={providers.error} retry={() => void providers.refetch()} />
       ) : providers.data === undefined ? (
         <Loading />
       ) : (
-        <NewSearchForm providers={providers.data} />
+        <NewSearchForm providers={providers.data} fromRef={fromRef} />
       )}
     </section>
   );
@@ -152,7 +164,7 @@ export function SearchesView() {
       {cards.error ? <LoadError error={cards.error} retry={() => void cards.refetch()} /> : null}
       {cards.data === undefined && cards.error === null ? <Loading /> : null}
       {cards.data !== undefined && items.length === 0 ? (
-        <p className="plate notice font-semibold">{S.noSearches}</p>
+        <p className="tcard tcard-empty">{S.noSearches}</p>
       ) : null}
       {items.length > 0 ? (
         <ul aria-label={S.listLabel} className="searches-list">
@@ -161,6 +173,8 @@ export function SearchesView() {
               <SearchCard
                 key={item.card.id}
                 card={item.card}
+                pointOfSale={pointOfSale}
+                browserConfigured={browserConfigured}
                 removing={removals.get(item.card.id) === 'pending'}
                 removeError={errorOf(removals, item.card.id)}
                 onRemove={() => removeCard(item.card)}
@@ -184,15 +198,27 @@ export function SearchesView() {
     </section>
   );
   return (
-    <div className="searches-view space-y-5">
+    <div className="searches-view token-page">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner) */}
-      {hasSyntheticCheapest(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
-      <h2 className="h-view">{S.heading}</h2>
-      {/* why: one stable tree with the form first, as a phone shows it (focus order follows what is seen, WCAG 2.4.3);
-      from 900 px CSS grid puts it in the right column (searches.css), so crossing the breakpoint never remounts it */}
+      {hasSyntheticPrice(served) && providers.data?.synthetic !== true ? <SyntheticBanner /> : null}
+      <div className="token-page-head">
+        <h1 className="token-page-title">{S.heading}</h1>
+        <button
+          type="button"
+          className="trip-btn trip-btn-primary"
+          // why: Ruling 13 — focus moves to the panel's first field, From; while the sources are still loading there is
+          // no field yet, so the panel's heading takes it (focus scrolls it into view)
+          onClick={() => (fromRef.current ?? headingRef.current)?.focus()}
+        >
+          {S.newSearch}
+        </button>
+      </div>
+      {/* why: Ruling 13 (withdrawing ruling A18) — the cards first and the panel after them at every width, as a phone
+      shows them (focus order follows what is seen, WCAG 2.4.3); from 900 px CSS grid puts the panel in the right column,
+      sticky (searches.css), so crossing the breakpoint never remounts it */}
       <div className="searches-layout">
-        {side}
         {main}
+        {side}
       </div>
     </div>
   );

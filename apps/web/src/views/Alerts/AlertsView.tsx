@@ -1,8 +1,10 @@
 /** Alerts view (spec §11): the rule form, the rules list and the events list. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
+import { alertKeys } from '../../api/queries.js';
 import { LoadError } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
+import { SettingsCrumbs } from '../Settings/SettingsView.js';
 import { EventsTable } from './EventsTable.js';
 import { RuleForm } from './RuleForm.js';
 import { describeRule } from './ruleText.js';
@@ -11,11 +13,6 @@ import './alerts.css';
 const C = COPY.alertsView;
 /** The newest events shown (alertEventsQuerySchema allows up to 1000). */
 const EVENTS_LIMIT = 200;
-
-export const alertKeys = {
-  rules: (id: string) => ['alerts', id] as const,
-  events: (id: string) => ['alert-events', id] as const,
-};
 
 export function AlertsView(props: { definitionId: string }) {
   const qc = useQueryClient();
@@ -39,10 +36,13 @@ export function AlertsView(props: { definitionId: string }) {
 
   return (
     <section aria-labelledby="alerts-heading" className="alerts grid gap-5 pt-5">
+      <div className="alerts-wide">
+        <SettingsCrumbs title={COPY.crumbs.alerts} />
+      </div>
       <div className="alerts-wide space-y-2">
-        <h2 id="alerts-heading" className="h-view">
+        <h1 id="alerts-heading" className="h-view">
           {C.heading}
-        </h2>
+        </h1>
         <p className="lede">{C.intro}</p>
       </div>
       <RuleForm

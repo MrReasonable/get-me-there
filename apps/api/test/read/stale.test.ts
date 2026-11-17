@@ -105,7 +105,7 @@ describe('the api readers go through it (one case each over the same row)', () =
   }
   const figureOf = (pairs: DatePair) => pairs.figure?.price.stale;
 
-  it('rows.ts, the date-pairs figure, /results, the card’s cheapest and route history: not stale at 1 h, stale at 2 h, the mark naming the refresh (ruling 20.6-2)', async () => {
+  it('rows.ts, the date-pairs figure, /results, the card’s lower-on-calendar price and route history: not stale at 1 h, stale at 2 h, the mark naming the refresh (ruling 20.6-2)', async () => {
     const { x, def } = await world();
     const route = async () =>
       apiContract.routeHistoryResponseSchema
@@ -114,7 +114,7 @@ describe('the api readers go through it (one case each over the same row)', () =
     const card = async () =>
       apiContract.searchCardsResponseSchema
         .parse(await (await x.request('/api/definitions/cards')).json())
-        .cards.find((c) => c.id === def.id)?.cheapest?.stale;
+        .cards.find((c) => c.id === def.id)?.lowerOnCalendar?.cheapest.price.stale;
     const read = async () => [
       figureOf(pairOf(await datesOf(x, def.id), '2026-11-02', '2026-11-12')),
       (await resultsOf(x, def.id, '?basis=calendar')).rows[0]?.stale,

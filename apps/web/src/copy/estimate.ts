@@ -1,57 +1,63 @@
 import type { ProviderId } from '@gmt/core';
 
 /**
- * The estimate sentence's words (spec rev 55 §11 "The estimate sentence"; WP20 Task 20.5): the one sentence beside
- * Search now, Search again's second look, Save and search again and Repeat weekly's Save, and the notes under it. They
- * live apart from `src/copy.ts`, as the plan and set-up words do; `test/copy/estimateCatalogue.test.ts` sweeps every
- * string here for the spec §11 banned words. Coverage is worded as what is asked, never as prices found ("priced",
- * "prices for", "all combinations" and "will find" never appear); counts arrive already grouped ("9,880") and money
- * already formatted by the estimate panel's formatter.
+ * The estimate sentence's words (spec rev 55 §11 "The estimate sentence"; design 2026-11-08 Ruling 13): the sentence
+ * beside the new-search panel's Search, Search again's second look, Save and search again and Repeat weekly's Save, and
+ * the notes under it. A free run reads as the mockup's "About 25 min, free. Then flights are read for the cheapest dates
+ * until the 5 cheapest stop changing." They live apart from `src/copy.ts`, as the plan and set-up words do;
+ * `test/copy/estimateCatalogue.test.ts` sweeps every string here for the spec §11 banned words and the main path's words
+ * ("date pair", "reused"). Coverage is worded as what is asked, never as prices found ("priced", "prices for", "all
+ * combinations" and "will find" never appear); counts arrive already grouped ("9,880") and money already formatted by
+ * the estimate panel's formatter.
  */
 
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
 
 export const ESTIMATE_COPY = {
+  /** Joins the cost tags of several billed sources on a button ("Search · 120 SearchApi calls · …"). */
   separator: ' · ',
+  /** Joins the clauses of one sentence ("About 3 hours, about £1.20, asks about …"). */
+  clause: ', ',
+  /** Ends each sentence; the sentences of the line are joined by a space. */
+  stop: '.',
   underAMinute: 'under a minute',
-  aboutMinutes: (n: number) => `about ${n} ${noun(n, 'minute', 'minutes')}`,
+  aboutMinutes: (n: number) => `about ${n} min`,
   // why: "about 1 hour", "about 1½ hours": a half takes the plural, as it is read aloud
   aboutHours: (whole: number, half: boolean) =>
     `about ${whole}${half ? '½' : ''} ${whole === 1 && !half ? 'hour' : 'hours'}`,
   // the same lengths without "about" (kept for callers that word a length after their own "about")
-  minutes: (n: number) => `${n} ${noun(n, 'minute', 'minutes')}`,
+  minutes: (n: number) => `${n} min`,
   hours: (whole: number, half: boolean) =>
     `${whole}${half ? '½' : ''} ${whole === 1 && !half ? 'hour' : 'hours'}`,
   free: 'free',
   about: (money: string) => `about ${money}`,
-  asksAll: (total: string) => `asks about all ${total} date ${noun(total, 'pair', 'pairs')}`,
   asksSome: (asked: string, total: string) =>
-    `asks about ${asked} of ${total} date ${noun(total, 'pair', 'pairs')}`,
+    `asks about ${asked} of ${total} ${noun(total, 'date', 'dates')}`,
   thisRun: 'this run',
   partly: (n: string) => `(${n} on some airports only)`,
-  reused: (n: string) => `(${n} reused from earlier runs)`,
+  kept: (n: string) => `(${n} kept from earlier searches)`,
   restAgain: 'the rest when you search again',
   restNext: (day: string) => `the rest next ${day}`,
   restScheduled: 'the rest at the next scheduled run',
   nothingNew: (n: string) =>
-    `Nothing new to ask: ${n} date ${noun(n, 'pair', 'pairs')} reused from earlier runs`,
+    `Nothing new to ask: ${n} ${noun(n, 'date', 'dates')} kept from earlier searches`,
   nothingToAsk: 'Nothing can be asked this run',
   cachedOnly: 'cached prices only where travellers searched recently',
-  // why: ruling 20.5 concern 2 (spec rev 55 §11): the browser worker's flight lists after the first pass
-  flights: (pairs: string, duration: string) =>
-    `+ flights for up to ${pairs} date ${noun(pairs, 'pair', 'pairs')}, ${duration}`,
-  // design 2026-11-08 §6: with the return leg the step reads flights until more reading stops finding cheaper trips, so
-  // the line says how long that takes, not how many pages; the dates read are a range in a note under the sentence
-  flightsChecking: (duration: string) =>
-    `then ${duration} checking flights, longer if prices are close together`,
+  // why: ruling 20.5 concern 2 (spec rev 55 §11): the browser's flight lists after the first pass, outbound only
+  flights: (dates: string, duration: string) =>
+    `Then flights are read for up to ${dates} ${noun(dates, 'date', 'dates')}, ${duration}`,
+  // design 2026-11-08 §6, Ruling 13: with the return leg the step reads flights until more reading stops finding cheaper
+  // trips (core's CONFIRM_TARGET), so the sentence says the rule, not how many pages; the dates read go in a note
+  flightsUntilSettled: (target: number) =>
+    `Then flights are read for the cheapest dates until the ${target} cheapest stop changing`,
   flightsDates: (typical: string, most: string) =>
     `usually about ${typical} ${noun(typical, 'date', 'dates')}, at most ${most}`,
   billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime') =>
     window === 'month'
-      ? `uses about ${calls} of the ${left} ${name} searches left this month`
-      : `uses about ${calls} of the ${left} ${name} searches left on your trial`,
-  billedNoCap: (calls: string, name: string) => `uses about ${calls} ${name} searches`,
-  searchesTag: (calls: string, name: string) => `${calls} ${name} searches`,
+      ? `uses about ${calls} of the ${left} ${name} calls left this month`
+      : `uses about ${calls} of the ${left} ${name} calls left on your trial`,
+  billedNoCap: (calls: string, name: string) => `uses about ${calls} ${name} calls`,
+  callsTag: (calls: string, name: string) => `${calls} ${name} calls`,
   withTag: (verb: string, tag: string) => `${verb} · ${tag}`,
   notUsed: (source: string, why: string, cost: string | null) =>
     `${source} is not used: ${why}${cost === null ? '' : ` (about ${cost} not included)`}`,
@@ -72,10 +78,10 @@ export const ESTIMATE_COPY = {
     `This costs about ${estimate}, above your ${threshold} check; pressing ${press} confirms it`,
   softShare: (name: string, window: 'month' | 'lifetime', press: string) =>
     window === 'month'
-      ? `This uses more than a fifth of this month's ${name} searches; pressing ${press} confirms it`
-      : `This uses more than a fifth of your ${name} trial searches; pressing ${press} confirms it`,
-  /** The billable-plan sources by the name their calls are counted in ("120 SearchApi searches"). */
-  searchesOf: {
+      ? `This uses more than a fifth of this month's ${name} calls; pressing ${press} confirms it`
+      : `This uses more than a fifth of your ${name} trial calls; pressing ${press} confirms it`,
+  /** The billable-plan sources by the name their calls are counted in ("120 SearchApi calls"). */
+  callsOf: {
     searchapi: 'SearchApi',
     travelpayouts: 'Aviasales',
     camoufox: 'browser',

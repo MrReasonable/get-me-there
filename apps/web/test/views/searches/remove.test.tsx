@@ -20,9 +20,9 @@ afterEach(() => {
 });
 
 const S = COPY.searchesView;
-const NAME = 'Birmingham → Frankfurt';
+const NAME = 'London → New York';
 const cardOf = async (name: string) => {
-  const heading = await screen.findByRole('heading', { level: 3, name });
+  const heading = await screen.findByRole('heading', { level: 2, name });
   const card = heading.closest('li');
   if (card === null) throw new Error(`no card around ${name}`);
   return card;
@@ -122,13 +122,13 @@ describe('Remove, the undo line and Undo', () => {
     expect(undo.closest('[role="status"]')).toHaveTextContent(`Removed ${NAME}.Undo`);
     expect(undo).toHaveFocus();
     // in its place: between the two other cards, which have not moved
-    const items = within(screen.getByRole('list', { name: S.listLabel })).getAllByRole('listitem');
-    expect(items.map((li) => li.querySelector('h3')?.textContent ?? 'removed')).toEqual([
+    const items = [...screen.getByRole('list', { name: S.listLabel }).querySelectorAll(':scope > li')];
+    expect(items.map((li) => li.querySelector('h2')?.textContent ?? 'removed')).toEqual([
       'Alpha',
       'removed',
       'Charlie',
     ]);
-    expect(screen.queryByRole('heading', { level: 3, name: NAME })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 2, name: NAME })).toBeNull();
   });
 
   it('keeps the line for UNDO_MS through a re-read of the cards, then it is gone', async () => {
@@ -149,7 +149,7 @@ describe('Remove, the undo line and Undo', () => {
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect(screen.queryByRole('button', { name: `Undo removing ${NAME}` })).toBeNull();
     expect(screen.queryByText(`Removed ${NAME}.`)).toBeNull();
-    expect(screen.queryByRole('heading', { level: 3, name: NAME })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 2, name: NAME })).toBeNull();
   });
 
   it('Undo restores the search, the card returns to its place with its schedule, and focus moves to its heading', async () => {
@@ -159,13 +159,13 @@ describe('Remove, the undo line and Undo', () => {
     await user.click(within(card).getByRole('button', { name: `Remove ${NAME}` }));
     await user.click(within(card).getByRole('button', { name: 'Remove' }));
     await user.click(await screen.findByRole('button', { name: `Undo removing ${NAME}` }));
-    const heading = await screen.findByRole('heading', { level: 3, name: NAME });
+    const heading = await screen.findByRole('heading', { level: 2, name: NAME });
     expect(calls.restored).toEqual(['b']);
     await waitFor(() => expect(heading).toHaveFocus());
     expect(heading.closest('li')).toHaveTextContent('repeats Mondays 05:00');
     expect(screen.queryByText(`Removed ${NAME}.`)).toBeNull();
     const names = within(screen.getByRole('list', { name: S.listLabel }))
-      .getAllByRole('heading', { level: 3 })
+      .getAllByRole('heading', { level: 2 })
       .map((h) => h.textContent);
     expect(names).toEqual(['Alpha', NAME, 'Charlie']);
   });
@@ -213,8 +213,8 @@ describe('back-to-back Remove and Undo each keep their own outcome (review findi
     await waitFor(() => expect(calls.restored).toEqual(['a']));
     await user.click(screen.getByRole('button', { name: `Undo removing ${NAME}` }));
     hold.release();
-    expect(await screen.findByRole('heading', { level: 3, name: 'Alpha' })).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { level: 3, name: NAME })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Alpha' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: NAME })).toBeInTheDocument();
     expect(screen.queryByText(/^Removed /)).toBeNull();
   });
 });

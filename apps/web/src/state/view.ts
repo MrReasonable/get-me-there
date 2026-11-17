@@ -1,11 +1,14 @@
 import { DETAIL_LINK_PARAMS } from '@gmt/core';
 import { oneOf } from './oneOf.js';
+import { TRIP_PAIR_PARAMS } from './resultsState.js';
 
 /**
- * Every view of spec rev 55 §11 (WP20 Task 20.3): Searches is the first screen and the landing for every URL
+ * Every view of spec rev 55 §11 (WP20 Task 20.3; design 2026-11-08 Ruling 9): Searches is the first screen (the nav says
+ * Trips) and the landing for every URL
  * that names no usable view; `dates` is a search's page (`def=`), `trip` one pair of dates of it (design
  * 2026-11-08 §6.1; an old `view=results` link lands there) and `definitions` the Edit page (`edit=`). These are
- * opened from a card, a board row or an alert email, never from the nav's Set up.
+ * opened from a card, a board row or an alert email, never from the nav. `settings` is the interim page whose three
+ * sections are `providers`, `alerts` and `status`.
  */
 export type ViewId =
   | 'searches'
@@ -13,6 +16,7 @@ export type ViewId =
   | 'trip'
   | 'history'
   | 'definitions'
+  | 'settings'
   | 'providers'
   | 'alerts'
   | 'status';
@@ -22,20 +26,33 @@ export const VIEWS: readonly ViewId[] = [
   'trip',
   'history',
   'definitions',
+  'settings',
   'providers',
   'alerts',
   'status',
 ];
 
-/**
- * Spec §11 layout: the nav's two labelled tiers. Decide lists Searches, the search last opened (its `dates`
- * view, rendered only once one has been opened) and History; Set up lists Providers, Alerts and Status. The Trip
- * page and the Edit page are in neither.
- */
-export const NAV_TIERS: readonly { id: 'decide' | 'setup'; views: readonly ViewId[] }[] = [
-  { id: 'decide', views: ['searches', 'dates', 'history'] },
-  { id: 'setup', views: ['providers', 'alerts', 'status'] },
-];
+/** The nav's two items (Ruling 9). */
+export type NavItem = 'trips' | 'settings';
+export const NAV_ITEMS: readonly NavItem[] = ['trips', 'settings'];
+
+/** The view a nav item opens. */
+export const NAV_VIEW: Record<NavItem, ViewId> = { trips: 'searches', settings: 'settings' };
+
+const NAV_ITEM_OF: Record<ViewId, NavItem> = {
+  searches: 'trips',
+  dates: 'trips',
+  trip: 'trips',
+  definitions: 'trips',
+  history: 'trips',
+  settings: 'settings',
+  providers: 'settings',
+  alerts: 'settings',
+  status: 'settings',
+};
+
+/** The nav item a view sits under: a search, its Trip page, Edit and History are Trips; Settings and its sections are Settings. */
+export const navItemOf = (view: ViewId): NavItem => NAV_ITEM_OF[view];
 
 export const isView = oneOf(VIEWS);
 
@@ -45,7 +62,7 @@ export function parseView(v: string | null): ViewId {
 }
 
 /**
- * A nav link's patch: the view, with the detail's date pair and row dropped (they name one date pair's results and
+ * A nav link's patch: the view, with the detail's date pair, its airport pair and row dropped (they name one trip and
  * mean nothing to another view); every filter (`d.*`, `f.*`, the sort, `def=`) is kept, so the filters travel with
  * every nav link (spec §11; WP19 Task 19.7).
  */
@@ -55,5 +72,7 @@ export function navPatch(view: ViewId): Record<string, string | null> {
     [DETAIL_LINK_PARAMS.depart]: null,
     [DETAIL_LINK_PARAMS.return]: null,
     [DETAIL_LINK_PARAMS.row]: null,
+    [TRIP_PAIR_PARAMS.from]: null,
+    [TRIP_PAIR_PARAMS.to]: null,
   };
 }

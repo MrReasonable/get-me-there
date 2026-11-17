@@ -1,13 +1,14 @@
 import { type LegTimes, type PairingRead, RETURN_FINISHED, withinLimits } from '@gmt/core';
 import type { TripResponse } from '../../api/types.js';
-import { pairingOf } from '../Dates/pairing.js';
+import { LIMIT_NAMES, type LimitName } from '../../lib/limitsWords.js';
+import { pairingOf } from '../../lib/pairing.js';
 
 /**
  * Design 2026-11-08 §6.1 (plan Task 6): every state of the Trip page's card, decided once from the trip read so the
  * view only draws. The card follows the board: the figure the search page's row shows decides it, and a failed newest
  * list never lets an older trip lead (the board's rule, `pairingsFor` takes the newest list whatever its status).
  */
-export type LimitName = 'journey' | 'stops' | 'departure' | 'arrival';
+export type { LimitName } from '../../lib/limitsWords.js';
 
 export type CardState =
   | { kind: 'unreachable' }
@@ -36,9 +37,6 @@ export interface Card {
   /** The newest read's failure beside any state (`listFailure`: set only where the board shows a failed read). */
   couldNotRead: TripResponse['listFailure'];
 }
-
-/** The order the limits are named in. */
-const LIMIT_NAMES = ['journey', 'stops', 'departure', 'arrival'] as const satisfies readonly LimitName[];
 
 /**
  * The limits that rule out every flight read on a leg, over both legs: a limit no flight of a leg meets is one the

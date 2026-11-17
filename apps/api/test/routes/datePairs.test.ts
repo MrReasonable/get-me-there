@@ -1,10 +1,27 @@
 // Spec §10 `GET /definitions/:id/date-pairs` (WP19 Task 19.2): decision 53's honesty, the figure and its marks, the
 // distinct-cell counts, the journey limit, the 422s, gzip, and the calendar route's rules ported before it goes.
 import { gunzipSync } from 'node:zlib';
-import { apiContract, asIata, type CellKey, type DatePair, type DecodedDatePairs } from '@gmt/core';
+import {
+  apiContract,
+  asIata,
+  asIsoDate,
+  type CellKey,
+  type DatePair,
+  type DecodedDatePairs,
+} from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { errorOf } from '../helpers/contract.js';
-import { DATE_PAIRS, datesOf, pairOf, resultsOf, SCOPE_422, seedDatesWorld, W } from '../helpers/dates.js';
+import {
+  DATE_PAIRS,
+  datesOf,
+  emptyVerification,
+  pairOf,
+  resultsOf,
+  SCOPE_422,
+  seedDatesWorld,
+  W,
+} from '../helpers/dates.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
@@ -756,5 +773,158 @@ describe('ported: one set of executions per read (review prov-012)', () => {
     const fresh = pairOf(d, C2.departureDate, C2.returnDate);
     expect(fresh.figure).toMatchObject({ price: { pricePence: 61_000 }, fromEarlierSearch: false });
     expect([fresh.selected, fresh.itinerarySearched]).toEqual([1, 1]);
+  });
+});
+
+describe("the install's point of sale (fix round 1)", () => {
+  it('carries POINT_OF_SALE, the market of the search a trip falls back to', async () => {
+    const x = await harness({ POINT_OF_SALE: 'US' });
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput(FOUR));
+    expect((await datesOf(x, def.id)).pointOfSale).toBe('US');
+  });
+});
+
+describe("a verified figure's details (Ruling 2)", () => {
+  /** A seller's booking SearchApi's booking options gave, as stored; the api re-validates it on the way out. */
+  const SELLER = {
+    kind: 'get',
+    url: 'https://www.google.com/travel/clk?seller=qq',
+    host: 'www.google.com',
+  } as const;
+
+  it("carries a current verified figure's legs and seller booking from its own row, and nothing for one not seen again", async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput(FOUR));
+    const s = seeder(x.ports);
+    const top = (cs: CellKey[]) => cs.map((c) => ({ cell: c, reason: 'top_n' as const }));
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [W.J4], { selected: top([W.J4]), verification: ['searchapi'] });
+    s.verified(
+      'E1',
+      W.J4,
+      [{ hash: 'hOld', pricePence: 55_000, fetchedAt: at(-29), booking: SELLER }],
+      'searchapi',
+    );
+    s.execution('E2', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E2', [W.J1, W.J4, W.J8], { selected: top([W.J1, W.J4, W.J8]), verification: ['searchapi'] });
+    s.verified(
+      'E2',
+      W.J1,
+      [
+        {
+          hash: 'hV',
+          pricePence: 60_000,
+          fetchedAt: at(-2),
+          stopsOut: 1,
+          minutes: { outbound: 500, inbound: 470 },
+          booking: SELLER,
+        },
+      ],
+      'searchapi',
+    );
+    // why: a row whose source stated no travel time and gave no seller: its legs say so, its booking is none
+    s.verified(
+      'E2',
+      W.J8,
+      [{ hash: 'hBare', pricePence: 47_000, fetchedAt: at(-2), minutes: { outbound: null, inbound: null } }],
+      'searchapi',
+    );
+    // why: the latest itinerary search of J4 found no fares, so E1's price is not seen again: not a trip
+    emptyVerification(x, s.id('E2'), W.J4, 'searchapi');
+    const d = await datesOf(x, def.id);
+    expect(pairOf(d, '2026-11-03', '2026-11-14').figure).toMatchObject({
+      basis: 'verified',
+      notSeenInLatest: { ageHours: 2 },
+    });
+    expect(d.verifiedDetails).toEqual([
+      {
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: 500, stops: 1 }, back: { durationMinutes: 470, stops: 0 } },
+        booking: SELLER,
+      },
+      {
+        departureDate: '2026-11-05',
+        returnDate: '2026-11-16',
+        origin: 'LHR',
+        destination: 'JFK',
+        legs: { out: { durationMinutes: null, stops: 0 }, back: { durationMinutes: null, stops: 0 } },
+        booking: { kind: 'none' },
+      },
+    ]);
+  });
+
+  // why: Task 2 minor: a pairing figure is seeded beside a current verified one and a calendar one, so a details entry
+  // for the pairing (or the calendar price) would show
+  it('carries none for a calendar or a pairing figure', async () => {
+    const x = await harness({
+      CAMOUFOX_ENABLED: 'true',
+      CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+      CAMOUFOX_WORKER_KEY: 'test-worker-key-0123456789abcdef0123456789abcdef',
+    });
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        origins: [LHR, LGW],
+        destinations: [JFK, EWR],
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-04') },
+        minNights: 10,
+        maxNights: 10,
+        // the shared pairing fixture's limits: 25 h a leg, at most one stop
+        constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+        providers: {
+          discovery: ['fixture', 'camoufox'],
+          verification: ['searchapi'],
+          discoveryRefreshHours: { fixture: 168, camoufox: 168 },
+        },
+      }),
+    );
+    const [pairing, verified, calendar] = [
+      cell(LHR, JFK, '2026-11-02', '2026-11-12'),
+      cell(LGW, EWR, '2026-11-03', '2026-11-13'),
+      cell(LHR, EWR, '2026-11-04', '2026-11-14'),
+    ];
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E', [pairing, verified, calendar], {
+      selected: [{ cell: verified, reason: 'top_n' }],
+      verification: ['searchapi'],
+    });
+    s.tile('E', pairing, { status: 'priced', pricePence: 40_000, fetchedAt: at(-2), tileIndex: 0 });
+    s.tile('E', verified, { status: 'priced', pricePence: 41_000, fetchedAt: at(-2), tileIndex: 1 });
+    s.tile('E', calendar, { status: 'priced', pricePence: 42_000, fetchedAt: at(-2), tileIndex: 2 });
+    s.verified('E', verified, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-2) }], 'searchapi');
+    const flights = PAIRING_FIXTURE.flights;
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...pairing,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'read',
+      reason: null,
+      listed: 'flights',
+      minMinor: Math.min(...flights.map((f) => f.amountMinor)),
+      tabMinor: null,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: flights.length,
+      flights,
+      returns: PAIRING_FIXTURE.returns,
+    });
+    const d = await datesOf(x, def.id);
+    expect(d.pairs.map((p) => [p.departureDate, p.figure?.basis])).toEqual([
+      ['2026-11-02', 'pairing'],
+      ['2026-11-03', 'verified'],
+      ['2026-11-04', 'calendar'],
+    ]);
+    expect(d.verifiedDetails.map((v) => `${v.departureDate} ${v.origin}→${v.destination}`)).toEqual([
+      '2026-11-03 LGW→EWR',
+    ]);
   });
 });

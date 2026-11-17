@@ -97,7 +97,7 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
     expect(screen.getByText('Mondays at 05:00 (Europe/London)')).toBeInTheDocument();
     expect(
       await screen.findByText(
-        'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest next Monday',
+        'About 3 hours, about £1.20, asks about 300 of 405 dates this run, the rest next Monday.',
       ),
     ).toBeInTheDocument();
     // the monthly figure: the budget fit at the schedule's runs a month (spec rev 64: the browser worker has no month

@@ -1,10 +1,10 @@
 /** Spec §10 definitions CRUD, both estimate routes and the coverage check; spec §8.2 schedule sync. */
 import {
   apiContract,
-  budgetScopeLabel,
   countCells,
   type DefinitionInput,
   isScheduled,
+  monthlyCapsMissed,
   type SearchDefinition,
   validateSearchSpace,
 } from '@gmt/core';
@@ -160,13 +160,11 @@ export function validateForSave(
   if (!v.ok)
     throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, fieldsDetail(v.errors));
   if (scheduleChanges(def, before)) {
-    const monthScopes = new Set(
-      ctx.ports.providers.map((p) => budgetScopeLabel({ kind: 'provider-month', providerId: p.id })),
+    // why: core's one rule, which the new-search panel also refuses by before sending (Ruling 14)
+    const over = monthlyCapsMissed(
+      ctx.engine.budgetFit(def).perScope,
+      ctx.ports.providers.map((p) => p.id),
     );
-    const over = ctx.engine
-      .budgetFit(def)
-      .perScope.filter((s) => monthScopes.has(s.scope) && !s.fits)
-      .map((s) => s.scope);
     if (over.length > 0)
       throw new ApiError(
         422,

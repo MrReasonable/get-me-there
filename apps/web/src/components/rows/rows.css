@@ -1,0 +1,212 @@
+/* =====================================================================================================================
+   The shared trip and calendar rows (design 2026-11-08 §5.2, mockups 01-searches and 02-search; Ruling 20): list items
+   in a grid where their list is wide, two-column cards where it is under 720 px. They read the shared tokens
+   (styles/theme.css), light and dark.
+   The price's link and label are trip.css's (`.row-price`). Spec §4's CSP blocks inline styles: nothing is set from markup.
+   ===================================================================================================================== */
+
+/* Every list of rows is the container its rows lay out by (Trips and Search Task 7 fix round 1): a card beside the
+   new-search panel at 900 px, a Search page section and a day panel each take the layout their own width allows, from
+   this one set of rules, whatever the window's width */
+:where(ul, ol):has(> .trip-row) {
+  container: rows / inline-size;
+}
+
+.trip-row {
+  display: grid;
+  /* the price column holds "Find on Google Flights ↗" on one line (Task 8 fix round 1); the dates and both legs shrink
+     to nothing and wrap (fix round 2), so a row fits its list at every width the grid is used */
+  grid-template-columns: 180px minmax(0, 1.3fr) 60px minmax(0, 1fr) minmax(0, 1fr) 28px;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--t-line);
+  color: var(--t-ink);
+  list-style: none;
+  min-width: 0;
+}
+.trip-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-row:last-child {
+  border-bottom: 0;
+}
+.trip-row-head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 12px;
+  color: var(--t-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.trip-row-cal {
+  grid-template-columns: 180px minmax(0, 1.3fr) 60px minmax(0, 2fr) auto;
+}
+/* A calendar price is no link: bold in the body ink, as a trip's price is bold in the link's (mockup 02) */
+.trip-row-cal .row-price .book-price {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--t-ink);
+}
+.trip-row .row-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.trip-row .book-link {
+  color: var(--t-accent);
+}
+/* a long seller host may wrap, but never leaves "↗" alone on its line */
+.trip-row .book-link .book-words {
+  text-wrap: pretty;
+}
+.trip-row .book-link:hover {
+  color: var(--t-accent-hover);
+}
+.trip-row .row-dates b {
+  font-weight: 600;
+}
+.trip-row .row-airports {
+  display: block;
+  color: var(--t-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.trip-row .row-leg {
+  font-size: 14px;
+}
+.trip-row .row-muted {
+  color: var(--t-muted);
+  font-size: 13px;
+}
+.trip-row .row-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 28px;
+  min-height: 44px;
+  color: var(--t-muted);
+  font-size: 20px;
+  text-decoration: none;
+}
+.trip-row .row-go:hover {
+  color: var(--t-accent);
+}
+.trip-row .row-read {
+  justify-self: end;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trip-row :is(a, button):focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.trip-row .row-nights-inline {
+  display: none;
+  color: var(--t-muted);
+}
+/* The names a value carries for assistive technology: visually hidden on a desktop (the column head says them), drawn as
+   a small tag on a phone, where the head is gone. */
+.trip-row .row-vh,
+.trip-row .row-leg-tag {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@container rows (max-width: 720px) {
+  .trip-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "dates pc" "out out" "back go";
+    padding: 12px 16px;
+  }
+  .trip-row-head {
+    display: none;
+  }
+  .trip-row .row-dates {
+    grid-area: dates;
+  }
+  .trip-row .row-price {
+    grid-area: pc;
+    align-items: flex-end;
+  }
+  .trip-row .row-nights {
+    display: none;
+  }
+  .trip-row .row-nights-inline {
+    display: inline;
+  }
+  .trip-row .row-out {
+    grid-area: out;
+  }
+  .trip-row .row-back {
+    grid-area: back;
+  }
+  .trip-row .row-go {
+    grid-area: go;
+    align-self: end;
+  }
+  .trip-row-cal {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "dates pc" "out go";
+  }
+  .trip-row-cal .row-read {
+    grid-area: go;
+  }
+  /* The booking words stay in the link's accessible name; the price reads "£412 ↗" (mockup 01) so the legs keep the
+     row's width. */
+  .trip-row .row-price .book-link .book-words {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .trip-row .row-price .book-link .book-amount::after {
+    content: " ↗" / "";
+    font-size: 13px;
+  }
+  .trip-row .row-leg-tag {
+    position: static;
+    display: inline-block;
+    width: 38px;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    color: var(--t-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+}
+
+/* A trip an earlier search read (shown while another search runs): quieter ink and a dashed edge, never the price's */
+.trip-row-earlier {
+  border-left: 2px dashed var(--t-old-line);
+}
+.trip-row-earlier .row-dates,
+.trip-row-earlier .row-nights,
+.trip-row-earlier .row-leg {
+  color: var(--t-muted);
+}
+
+/* A stay with no price (the day panel's, Ruling 18): the dash in the price's place, its word under it in muted ink */
+.trip-row .row-none {
+  color: var(--t-muted);
+  font-size: 13px;
+}

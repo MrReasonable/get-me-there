@@ -1,5 +1,5 @@
 /**
- * The words of the Searches view's "Plan a search" form: where from, where to, when and how long, in plain words,
+ * The words of the new-search panel on the Trips page: where from, where to, when and how long, in plain words,
  * with everything else behind "More options". They live apart from `src/copy.ts` so the two can change
  * independently; `test/copy/planCatalogue.test.ts` sweeps every string here for the spec §11 banned words.
  * No place is named here: the airports come from the airports table, never from code (spec §1).
@@ -9,7 +9,7 @@ const noun = (n: number, one: string, many: string): string => (n === 1 ? one : 
 
 export const PLAN_COPY = {
   // --- The view ---
-  viewHeading: 'Searches',
+  viewHeading: 'Trips',
   notFound: 'The search in this link no longer exists. See your searches:',
 
   // --- The short form ---
@@ -27,23 +27,22 @@ export const PLAN_COPY = {
     `starts in ${start} ${noun(start, 'day', 'days')}, lasts ${length} ${noun(length, 'day', 'days')}`,
   rollingResolved: (line: string, resolved: string) => `${line}: ${resolved}`,
   onlyIfSet: 'only if you set one',
-  moreOptionsNew: 'Journey limit, cabin, rolling dates, price sources, name and run budget.',
-  earliest: 'Earliest departure',
-  latest: 'Latest departure',
+  // design 2026-11-08 Ruling 13 (mockup 01): the two date fields' labels
+  earliest: 'Leave from',
+  latest: 'Leave by',
   stay: 'Stay',
   shortest: 'Shortest stay',
   longest: 'Longest stay',
   stayTo: 'to',
   nights: 'nights',
   journey: 'Longest journey each way',
-  journeyHint: 'Blank for no limit.',
+  journeyHint: 'Trips over this are left out once their flights are read.',
   name: 'Name',
   nameHint: 'Suggested from the airports; change it if you like.',
   nameArrow: (from: string, to: string) => `${from} → ${to}`,
 
   // --- More options ---
   moreOptions: 'More options',
-  moreOptionsHint: 'Price sources, checking fares, constraints, run budget, schedule, notes per destination.',
   rollingHeading: 'Rolling window',
   notesHeading: 'Notes and onward costs per destination',
   notesEmpty: 'Add a destination above to give it a note or an onward cost.',

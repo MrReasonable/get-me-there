@@ -2,9 +2,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
+import { useBudget } from '../../api/queries.js';
 import type { DefinitionResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
+import { searchApiCallsLeft } from '../../lib/searchApiCallsLeft.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { SentenceButton, SentenceRegion, sentenceIds, sentenceOf } from '../Searches/EstimateSentence.js';
@@ -39,12 +41,13 @@ function openPage(id: string): void {
 }
 
 /**
- * Spec rev 55 §11 Edit (`?view=definitions&edit=<id>`; WP20 Task 20.5): the search's fields as the new-search form
- * shows them, with More options, the note and onward cost per destination, the schedule fields, the coverage check and
- * "import example"; the same estimate sentence, asked for automatically. It ends with two presses, both acting on the
+ * Spec rev 55 §11 Edit (`?view=definitions&edit=<id>`; WP20 Task 20.5; design 2026-11-08 Ruling 13): the search's
+ * fields as the new-search panel shows them (its own sources in Where to look, Repeat under More options), plus the
+ * Limits and checks fold (the note and onward cost per destination, constraints, checking fares, the run budget), the
+ * coverage check and "import example"; the same estimate sentence, asked for automatically. It ends with two presses, both acting on the
  * search being edited and never on another:
  *
- * - **Save and search again**, carrying the cost as Search now does ("Save and search again · about £1.20"): it saves
+ * - **Save and search again**, carrying the cost as the panel's Search does ("Save and search again · about £1.20"): it saves
  *   (a `PUT` storing no confirmation: a confirmation covers that run only, Ian's ruling 3), then starts **that** search
  *   with the sentence's figures, `requireCovered` and `replaceStopped`, and opens its page. A refused start is said
  *   beside the press, as Search again says it, and opens nothing (ruling R1).
@@ -67,6 +70,7 @@ export function DefinitionForm({
   const qc = useQueryClient();
   const [initial] = useState(() => definitionToDraft(existing));
   const form = useSearchForm(initial, { nameTouched: true, debounceMs, definitionId: existing.id });
+  const budget = useBudget();
   const { draft } = form;
   const [saved, setSaved] = useState<DefinitionResponse>(existing);
   const [notice, setNotice] = useState<string | null>(null);
@@ -153,7 +157,7 @@ export function DefinitionForm({
 
   const pending = save.isPending || saveAndSearch.isPending;
   return (
-    <form onSubmit={(e) => e.preventDefault()} className="plate plate-pad def-form text-[15px]">
+    <form onSubmit={(e) => e.preventDefault()} className="plate plate-pad def-form token-form text-[15px]">
       <div className="def-main">
         {saved.notices.length > 0 ? (
           <ul aria-label={COPY.definitionNotices} className="def-notices">
@@ -177,6 +181,7 @@ export function DefinitionForm({
         <SearchFields
           form={form}
           providers={providers}
+          callsLeft={budget.data === undefined ? null : searchApiCallsLeft(budget.data, providers)}
           edit
           budgetFit={form.estimate.estimate?.budgetFit ?? null}
           extra={<CoverageCheck draft={draft} available={travelpayouts} />}

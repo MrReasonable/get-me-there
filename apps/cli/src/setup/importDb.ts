@@ -89,7 +89,7 @@ export function startNote(
     parts.push(
       when === 'later'
         ? `Starting the app resumes ${runs} from this database (set AUTO_RESUME=false in app.env first to leave them for you to resume or cancel).`
-        : `The app now starts on this database and resumes ${runs} it holds (cancel them from the app's status bar if you did not want them).`,
+        : `The app now starts on this database and resumes ${runs} it holds (cancel them from their cards on the app's Trips page if you did not want them).`,
     );
   if (summary.scheduled > 0)
     parts.push(

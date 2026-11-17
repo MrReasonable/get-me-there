@@ -102,7 +102,7 @@ describe('the subject comes from the cause, not the state (V2)', () => {
     expect(sent[0]?.body).toBe(
       'consent rejected, expires 2026-11-01 (capture).\n\n' +
         'Browser prices stop when consent lapses; the other price sources are unaffected.\n\n' +
-        'The Status view shows the same check; so does pnpm gmt status --only consent.',
+        'Settings → System shows the same check; so does pnpm gmt status --only consent.',
     );
   });
 

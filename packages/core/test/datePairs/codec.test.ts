@@ -24,6 +24,7 @@ import {
   flightListProvenance,
   pairingFigure,
   summaryOf,
+  verifiedDetailsOf,
   verifiedFigure,
   verifiedProvenance,
   workedExample,
@@ -293,7 +294,12 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
             figure: r.figure,
           };
         });
-    return fc.tuple(...base.pairs.map(arbPair)).map((ps) => ({ ...base, pairs: ps, summary: summaryOf(ps) }));
+    return fc.tuple(...base.pairs.map(arbPair)).map((ps) => ({
+      ...base,
+      pairs: ps,
+      summary: summaryOf(ps),
+      verifiedDetails: verifiedDetailsOf(ps),
+    }));
   });
 
 describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table is an encoding only)', () => {
@@ -539,40 +545,48 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
 /** The worked example with a pairing figure at date pair 1 and a calendar figure with a "from" pairing beneath at 3. */
 function withPairings(): DecodedDatePairs {
   const x = workedExample();
-  return {
-    ...x,
-    pairs: x.pairs.map((p) =>
-      p.index === 1
-        ? { ...p, figure: pairingFigure({ fromEarlierSearch: true }) }
-        : p.index === 3
-          ? {
-              ...p,
-              figure: calendarFigure({
-                pairingRead: 'sellers-not-read',
-                pairing: figurePairing({
-                  pricePence: 117_000,
-                  fromPence: 117_000,
-                  isFrom: true,
-                  seller: null,
-                  fare: null,
-                  offersRead: 0,
-                  complete: false,
-                  which: 'cheapest',
-                  departOut: '09:40',
-                  arriveOut: '19:25',
-                  departBack: '19:10',
-                  arriveBack: '07:15',
-                  mismatch: false,
-                  provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
-                  // why: final review B-M5: sellers-not-read follows within-older, so its list is fresh
-                  stale: false,
-                  ageHours: 'unknown',
-                }),
+  const pairs = x.pairs.map((p) =>
+    p.index === 1
+      ? { ...p, figure: pairingFigure({ fromEarlierSearch: true }) }
+      : p.index === 3
+        ? {
+            ...p,
+            figure: calendarFigure({
+              pairingRead: 'sellers-not-read',
+              pairing: figurePairing({
+                pricePence: 117_000,
+                fromPence: 117_000,
+                isFrom: true,
+                seller: null,
+                fare: null,
+                offersRead: 0,
+                complete: false,
+                which: 'cheapest',
+                departOut: '09:40',
+                arriveOut: '19:25',
+                departBack: '19:10',
+                arriveBack: '07:15',
+                legs: {
+                  out: {
+                    durationMinutes: 345,
+                    stops: 0,
+                    carriers: ['Virgin Atlantic', 'Delta'],
+                    arrivesDayOffset: 1,
+                  },
+                  back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'], arrivesDayOffset: -1 },
+                },
+                mismatch: false,
+                provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
+                // why: final review B-M5: sellers-not-read follows within-older, so its list is fresh
+                stale: false,
+                ageHours: 'unknown',
               }),
-            }
-          : p,
-    ),
-  };
+            }),
+          }
+        : p,
+  );
+  // why: Ruling 2: date pair 1's verified figure is replaced, so its details go with it
+  return { ...x, pairs, verifiedDetails: verifiedDetailsOf(pairs) };
 }
 
 describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice, pairing and pairingRead sparse)', () => {
@@ -614,6 +628,25 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
     });
     const back = decodeDatePairs(wire).pairs[3]?.figure?.pairing;
     expect(back?.provenance.fetchedAt).toBe('2027-02-27T09:30:00.000Z');
+  });
+
+  it("Ruling 1: the pairing group carries each way's minutes, stops and airline names, aligned per entry", () => {
+    const wire = encodeDatePairs(withPairings());
+    expect(wire.pairing).toMatchObject({
+      outMinutes: [640, 345],
+      outStops: [1, 0],
+      outCarriers: [['Aer Lingus'], ['Virgin Atlantic', 'Delta']],
+      backMinutes: [415, 480],
+      backStops: [0, 2],
+      backCarriers: [['Virgin Atlantic'], ['Aer Lingus']],
+      outArrivesDayOffset: [0, 1],
+      backArrivesDayOffset: [0, -1],
+    });
+    const parsed = datePairsResponseSchema.parse(JSON.parse(JSON.stringify(wire)));
+    expect(decodeDatePairs(parsed).pairs[3]?.figure?.pairing?.legs).toEqual({
+      out: { durationMinutes: 345, stops: 0, carriers: ['Virgin Atlantic', 'Delta'], arrivesDayOffset: 1 },
+      back: { durationMinutes: 480, stops: 2, carriers: ['Aer Lingus'], arrivesDayOffset: -1 },
+    });
   });
 
   // why: Ruling 6: the board's pairing group carries the booking page's address, so a read trip's price is its booking

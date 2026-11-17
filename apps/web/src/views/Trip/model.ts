@@ -19,13 +19,14 @@ import {
   type StaleMark,
   withinLimits,
 } from '@gmt/core';
-import type { FlightList, TripResponse } from '../../api/types.js';
+import type { DefinitionResponse, FlightList, TripResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDateShort, formatWeekday, londonParts } from '../../format.js';
+import { rowBookingTarget, syntheticProvenance } from '../../lib/bookingTarget.js';
 import { figureLabelKind, labelDetail } from '../../lib/figureLabel.js';
+import { carriersText, hoursText } from '../../lib/flightLines.js';
+import { type PairingView, pairingOf } from '../../lib/pairing.js';
 import { instantMs } from '../../lib/time.js';
-import { carriersText, hoursText } from '../Dates/flightLines.js';
-import { type PairingView, pairingOf } from '../Dates/pairing.js';
 import type { CardState } from './cardState.js';
 
 // Design 2026-11-08 §6.1 (trip-page plan Task 7): the pure side of the Trip page. Which trip the card shows, with its
@@ -45,10 +46,6 @@ const PAGE_SECONDS = 40;
 export function readMinutes(pagesPlanned: number): number {
   return Math.max(1, Math.round((pagesPlanned * PAGE_SECONDS) / 60));
 }
-
-/** The source tags of a provenance that make a price made up (spec §5.5): either one raises the banner. */
-const synthetic = (p: Pick<Provenance, 'providerId' | 'sourceKind'>): boolean =>
-  p.sourceKind === 'synthetic' || p.providerId === 'fixture';
 
 /**
  * Whether any price the trip read carries is synthetic or the fixture provider's (spec §5.5): the figure and every
@@ -75,7 +72,7 @@ export function tripSynthetic(r: TripResponse): boolean {
     ]),
     ...(r.flightList === null ? [] : [r.flightList.provenance]),
   ];
-  return tags.some(synthetic);
+  return tags.some(syntheticProvenance);
 }
 
 /** One leg of a trip as the card shows it: times and airports, the day it leaves, and what the list read of it. */
@@ -196,15 +193,33 @@ function listPairing(
  * a calendar figure (`calendar-with-trip`); a verified figure's (`verified`; one not seen again is `gone`, no trip); the list
  * read by hand where there is no figure (`read-without-calendar`, Ruling 3). Its booking target is core's one rule:
  * nothing out of the app for a synthetic read; a verified price's own seller booking; a pairing's booking page
- * (Ruling 5: the pairing's own address); else the Google Flights search for the dates.
+ * (Ruling 5: the pairing's own address); else the Google Flights search for the dates. Where the card shows the
+ * figure's own trip (a verified or a pairing figure), the target is the one every other surface links for that figure
+ * (`rowBookingTarget`, Ruling 2), with the verified figure's own booking; `cabin` is the search's.
  */
-export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: boolean): ShownTrip | null {
+export function shownTripOf(
+  r: TripResponse,
+  state: CardState,
+  isSynthetic: boolean,
+  cabin: DefinitionResponse['cabin'],
+): ShownTrip | null {
   const f = r.figure;
-  const target = (
-    bookingUrl: string | null,
-    booking: TripResponse['booking'] = null,
-    searchLink: TripResponse['searchLink'] = r.searchLink,
-  ) => bookingTargetOf({ synthetic: isSynthetic, booking, bookingUrl, searchLink });
+  // why: Ruling 2: the figure's own trip links what its row, its card and its day panel link; a synthetic read links
+  // nowhere, whichever of its prices is synthetic
+  const figureTarget = (figure: Figure, booking: TripResponse['booking']): BookingTarget =>
+    isSynthetic
+      ? { kind: 'none' }
+      : rowBookingTarget(
+          { departureDate: r.departureDate, returnDate: r.returnDate },
+          figure,
+          cabin,
+          booking,
+          r.pointOfSale,
+        );
+  // why: a trip that is not the figure's (the pairing beneath a calendar figure, a list read by hand) links its own
+  // booking page, else the search for the list's cell
+  const target = (bookingUrl: string | null) =>
+    bookingTargetOf({ synthetic: isSynthetic, booking: null, bookingUrl, searchLink: r.searchLink });
   if (state.kind === 'verified' && f !== null && f.basis === 'verified') {
     const label = figureLabelKind(f);
     return {
@@ -217,7 +232,7 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       times: null,
       // why: a verified price's own booking, else its own airports' search (final review I2); the list's booking page
       // and search are the calendar cell's, another pairing's and maybe another airport pair's (Ruling 5)
-      target: target(null, r.booking, r.figureSearchLink),
+      target: figureTarget(f, r.booking),
     };
   }
   const q = f?.pairing ?? null;
@@ -251,8 +266,9 @@ export function shownTripOf(r: TripResponse, state: CardState, isSynthetic: bool
       pairingKind: kind,
       legs: read === null ? null : pairingLegs(r, read.list, read.p),
       times: read === null ? { out: q.departOut, back: q.departBack } : null,
-      // why: Ruling 6: the board's pairing carries its own booking address, so the card links where the row links
-      target: target(q.bookingUrl),
+      // why: Ruling 6: the board's pairing carries its own booking address, so the card links where the row links; the
+      // pairing beneath a calendar figure is not the figure's trip, so it links its own booking page or search
+      target: state.kind === 'trip' && f !== null ? figureTarget(f, null) : target(q.bookingUrl),
     };
   }
   if (state.kind === 'read-without-calendar') {

@@ -3,7 +3,7 @@ import { PLAN_COPY } from '../../copy/plan.js';
 import { formatIsoDate } from '../../format.js';
 import type { DateEnd, SearchForm } from './useSearchForm.js';
 
-const dateInput = 'input min-h-11 w-40';
+const dateInput = 'input min-h-11';
 /** The two ends of Leave between, first then last, with their labels. */
 const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
   { end: 'from', label: PLAN_COPY.earliest },
@@ -11,7 +11,7 @@ const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
 ];
 
 /**
- * Spec rev 67 §11 "Leave between": two browser date fields, so the operator picks each date from a calendar (the
+ * Spec rev 67 §11 "Leave between" (labelled "Leave from" and "Leave by", design 2026-11-08 Ruling 13): two browser date fields, so the operator picks each date from a calendar (the
  * phone's own date wheel) and it is shown in the browser's own date format. The earliest cannot be picked before
  * today, nor the latest before the earliest. While the window rolls (More options) the fields give way to the dates
  * it covers today.
@@ -39,8 +39,9 @@ export function LeaveBetweenField({ form }: { form: SearchForm }) {
   }
   return (
     <fieldset className="flex flex-col gap-2">
-      <legend className="def-group-title">{PLAN_COPY.leaveBetween}</legend>
-      <div className="flex flex-wrap items-start gap-3">
+      {/* why: mockup 01 labels the two fields "Leave from" and "Leave by"; the group keeps its name for a screen reader */}
+      <legend className="sr-only">{PLAN_COPY.leaveBetween}</legend>
+      <div className="leave-dates">
         {ENDS.map((e) => (
           <DateBox key={e.end} form={form} end={e.end} label={e.label} />
         ))}
@@ -62,7 +63,7 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
   const messages = form.errorsFor(`window.${end}`);
   const noteId = `${id}-note`;
   return (
-    <span className="flex flex-col gap-1">
+    <span className="leave-date flex flex-col gap-1">
       <label htmlFor={id} className="field-label">
         {label}
       </label>

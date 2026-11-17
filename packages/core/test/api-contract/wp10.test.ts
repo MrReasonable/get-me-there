@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calendarGapResponseSchema,
   cellDetailResponseSchema,
   historyPointSchema,
   itineraryHistoryResponseSchema,
@@ -113,16 +112,6 @@ describe('WP10 contract additions (plan decision 38)', () => {
   });
 
   it('decision 54: verified minima say when the latest search no longer returned them; calendar prices when superseded; route points their staleness', () => {
-    const notSeen = { ageHours: 30 };
-    const gap = {
-      cheapestVerified: { ...price, cell, itineraryHash: 'h1', notSeenInLatest: null },
-      cells: [],
-    };
-    expect(calendarGapResponseSchema.safeParse(gap).success).toBe(true);
-    const notSeenGap = { ...gap, cheapestVerified: { ...gap.cheapestVerified, notSeenInLatest: notSeen } };
-    expect(calendarGapResponseSchema.safeParse(notSeenGap).success).toBe(true);
-    const { notSeenInLatest: _g, ...bareGap } = gap.cheapestVerified;
-    expect(calendarGapResponseSchema.safeParse({ ...gap, cheapestVerified: bareGap }).success).toBe(false);
     const detail = {
       cell,
       outcomes: [],

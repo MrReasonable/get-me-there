@@ -7,11 +7,6 @@ export interface FlapsProps {
   /** The fixed number of cells; text longer than this gets as many cells as it needs. */
   cells?: number;
   align?: 'left' | 'right';
-  /**
-   * The board's slot name for this group (BoardTable): the board flips its rows by slot, so a group with a slot never
-   * flips itself. Without one, the group flips its own changed cells whenever its text changes.
-   */
-  slot?: string | undefined;
   className?: string;
 }
 
@@ -30,7 +25,7 @@ function Arrow() {
  * cells hold no text nodes (each glyph is drawn from `data-ch`), so the text beside it stays the one source of words
  * for readers, tests and find-in-page alike.
  */
-export function Flaps({ text, cells = 0, align = 'left', slot, className }: FlapsProps) {
+export function Flaps({ text, cells = 0, align = 'left', className }: FlapsProps) {
   const shown = padFlaps(text, cells, align);
   const ref = useRef<HTMLSpanElement>(null);
   const last = useRef(shown);
@@ -38,9 +33,9 @@ export function Flaps({ text, cells = 0, align = 'left', slot, className }: Flap
     const from = last.current;
     last.current = shown;
     const el = ref.current;
-    if (slot !== undefined || from === shown || el === null || motionReduced()) return;
+    if (from === shown || el === null || motionReduced()) return;
     afterPaint(() => flipGroup(el, from, 0, browserAnimate));
-  }, [shown, slot]);
+  }, [shown]);
   return (
     <span
       ref={ref}
@@ -48,7 +43,6 @@ export function Flaps({ text, cells = 0, align = 'left', slot, className }: Flap
       className={className === undefined ? 'flaps' : `flaps ${className}`}
       data-flaps={shown}
       data-align={align}
-      data-slot={slot}
     >
       {[...shown].map((ch, i) => (
         // why: a cell is its position: the same element shows each character that position takes, so it can flip

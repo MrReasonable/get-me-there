@@ -1,55 +1,53 @@
 import { apiContract } from '@gmt/core';
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import type { BudgetFit, ProvidersResponse } from '../../api/types.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
+import type { CallsLeft } from '../../lib/searchApiCallsLeft.js';
 import { withKey } from '../../state/withKey.js';
-import { AdvancedFields, type ProviderCapabilities } from './AdvancedFields.js';
+import { AdvancedFields } from './AdvancedFields.js';
 import { AirportListInput } from './AirportListInput.js';
 import { BudgetFitPanel } from './EstimatePanel.js';
 import { FieldErrors, HoursMinutesField, NumberField, PoundsField } from './fields.js';
 import { LeaveBetweenField } from './LeaveBetweenField.js';
+import { RepeatField } from './RepeatField.js';
 import { RollingWindowFields } from './RollingWindowFields.js';
 import type { SearchForm } from './useSearchForm.js';
+import { WhereToLook } from './WhereToLook.js';
 
 const input = 'input min-h-11';
 /** The short form's group titles (From, Leave between, Stay): one weight and size. */
 const GROUP_TITLE = 'def-group-title';
 const SR_ONLY = 'sr-only';
 
-/** The enabled sources by what they can do, for the price-source ticks in More options. */
-export function capabilitiesOf(providers: ProvidersResponse): ProviderCapabilities[] {
-  return providers.providers
-    .filter((p) => p.enabled)
-    .map((p) => ({
-      id: p.providerId,
-      displayName: p.displayName,
-      discovery: p.capabilities.discovery !== null,
-      verification: p.capabilities.verification !== null,
-    }));
-}
-
 /**
- * Spec rev 55 §11 (WP20 Task 20.5; design §4.1): the fields of a search, as the new-search form and the Edit page both
- * show them. In view: From, To (the airport search), Leave between (two browser date fields) and Stay (shortest to
- * longest nights). Under More options, already filled in from the presets: the longest journey each way (25 h), the
- * cabin, rolling dates instead of fixed ones, the name (suggested from the airports), the price sources, policy and run
- * budget with their one-line explanations, and the budget-fit table. The time windows are empty, "only if you set one".
- * `edit` adds what only a saved search has: the notes and onward costs per destination and the schedule fields (`extra`
- * renders after the fold: the coverage check).
+ * Spec rev 55 §11 (WP20 Task 20.5; design 2026-11-08 Rulings 13–14): the fields of a search, as the new-search panel and
+ * the Edit page both show them. In view: From, To (the airport search), Leave from and Leave by (two browser date
+ * fields), Stay (shortest to longest nights) and Where to look (each source set up, with its cost). Under More options,
+ * already filled in from the presets: the longest journey each way (25 h), the cabin, Repeat, rolling dates instead of
+ * fixed ones, and the name (suggested from the airports). The time windows are empty, "only if you set one". `edit`
+ * adds a second fold, Limits and checks, with what only the Edit page shows: the notes and onward costs per
+ * destination, the constraints, checking fares, the run budget with its refresh intervals, and the budget fit
+ * (`extra` renders after the folds: the coverage check).
  */
 export function SearchFields({
   form,
   providers,
+  callsLeft,
   edit,
   budgetFit,
   extra,
+  fromRef,
 }: {
   form: SearchForm;
   providers: ProvidersResponse;
+  /** SearchApi's calls left, as the top bar says them (`searchApiCallsLeft`), or null when there is nothing to say. */
+  callsLeft: CallsLeft | null;
   edit: boolean;
   budgetFit: BudgetFit | null;
   extra?: ReactNode;
+  /** From's text box, for "+ New search" to move focus to (Ruling 13). */
+  fromRef?: Ref<HTMLInputElement>;
 }) {
   const { draft, setDraft, blank, markBlank } = form;
   return (
@@ -64,8 +62,8 @@ export function SearchFields({
           </ul>
         </div>
       ) : null}
-      <section aria-label={PLAN_COPY.heading} className="space-y-5">
-        <div className="grid gap-5 md:grid-cols-2">
+      <section aria-label={PLAN_COPY.heading} className="search-fields">
+        <div className="search-places">
           <AirportListInput
             id="origins"
             label={PLAN_COPY.from}
@@ -74,6 +72,7 @@ export function SearchFields({
             details={form.details}
             onChange={(origins) => setDraft({ ...draft, origins })}
             errors={form.errorsFor('origins')}
+            {...(fromRef === undefined ? {} : { inputRef: fromRef })}
           />
           <AirportListInput
             id="destinations"
@@ -118,6 +117,7 @@ export function SearchFields({
             />
           </span>
         </fieldset>
+        <WhereToLook draft={draft} onChange={setDraft} providers={providers} callsLeft={callsLeft} />
       </section>
       <details
         open={form.advancedOpen}
@@ -126,24 +126,21 @@ export function SearchFields({
       >
         <summary className="min-h-12">
           <span>{PLAN_COPY.moreOptions}</span>
-          <span className="hint font-normal">
-            {edit ? PLAN_COPY.moreOptionsHint : PLAN_COPY.moreOptionsNew}
-          </span>
         </summary>
-        <div className="space-y-5 pt-2 pb-6">
-          <div className="flex flex-wrap items-start gap-x-8 gap-y-5">
-            <HoursMinutesField
-              id="c-maxJourney"
-              label={PLAN_COPY.journey}
-              legendClassName={GROUP_TITLE}
-              description={PLAN_COPY.journeyHint}
-              value={draft.constraints.maxJourneyMinutes}
-              onChange={(n) =>
-                setDraft({ ...draft, constraints: withKey(draft.constraints, 'maxJourneyMinutes', n) })
-              }
-            />
+        <div className="search-more">
+          <HoursMinutesField
+            id="c-maxJourney"
+            label={PLAN_COPY.journey}
+            legendClassName={GROUP_TITLE}
+            description={PLAN_COPY.journeyHint}
+            value={draft.constraints.maxJourneyMinutes}
+            onChange={(n) =>
+              setDraft({ ...draft, constraints: withKey(draft.constraints, 'maxJourneyMinutes', n) })
+            }
+          />
+          <div className="search-pair">
             <span className="flex flex-col gap-1">
-              <label htmlFor="d-cabin" className={GROUP_TITLE}>
+              <label htmlFor="d-cabin" className="field-label">
                 {COPY.cabin}
               </label>
               <select
@@ -157,25 +154,42 @@ export function SearchFields({
               >
                 {apiContract.cabinSchema.options.map((c) => (
                   <option key={c} value={c}>
-                    {COPY.cabinName[c]}
+                    {COPY.cabinOption[c]}
                   </option>
                 ))}
               </select>
             </span>
+            {/* why: Ruling 14 — a search that is not repeating (never, or stopped: `enabled` off) reads Never; a pick
+            stores the cron and turns repeating on or off with it */}
+            <RepeatField
+              cron={draft.enabled ? draft.scheduleCron : null}
+              tz={draft.scheduleTz}
+              onChange={(scheduleCron) =>
+                setDraft({ ...draft, scheduleCron, enabled: scheduleCron !== null })
+              }
+              onIncomplete={form.markIncomplete}
+            />
           </div>
           <RollingWindowFields form={form} />
           <NameField form={form} />
-          {edit ? <DestinationFields form={form} /> : null}
-          <AdvancedFields
-            draft={draft}
-            setDraft={setDraft}
-            capabilities={capabilitiesOf(providers)}
-            onIncomplete={form.markIncomplete}
-            schedule={edit}
-          />
-          {budgetFit !== null ? <BudgetFitPanel fit={budgetFit} /> : null}
         </div>
       </details>
+      {edit ? (
+        <details
+          open={form.limitsOpen}
+          onToggle={(e) => form.setLimitsOpen(e.currentTarget.open)}
+          className="fold def-more"
+        >
+          <summary className="min-h-12">
+            <span>{COPY.newSearch.limitsHeading}</span>
+          </summary>
+          <div className="space-y-5 pt-2 pb-6">
+            <DestinationFields form={form} />
+            <AdvancedFields draft={draft} setDraft={setDraft} onIncomplete={form.markIncomplete} />
+            {budgetFit !== null ? <BudgetFitPanel fit={budgetFit} /> : null}
+          </div>
+        </details>
+      ) : null}
       {extra}
     </>
   );

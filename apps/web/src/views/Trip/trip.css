@@ -1,36 +1,8 @@
 /* =====================================================================================================================
    The Trip page (design 2026-11-08 §6.1, mockup 03-trip.html): plain text on plain cards, no split-flap lettering.
-   Its own tokens, light and dark (the departure board's world stays for the shell around it). Every text pair's WCAG
-   ratio is written beside it and asserted by test/views/trip/contrast.test.ts, which reads this file. Spec §4's CSP
-   blocks inline styles, so nothing here is set from markup.
+   Its tokens, light and dark, are the app's shared ones (styles/theme.css; the departure board's world stays for the
+   shell around it). Spec §4's CSP blocks inline styles, so nothing here is set from markup.
    ===================================================================================================================== */
-
-/* The tokens are shared with the search page's price cells (`.row-price`: a board row's price, its label and its
-   booking link), so a label reads the same colours on both pages. */
-.trip,
-.row-price {
-  --t-bg: #f5f4f0;
-  --t-surface: #ffffff;
-  --t-sunk: #f0eee9;
-  --t-ink: #17191c; /* 17.0:1 on surface */
-  --t-muted: #5c636c; /* 6.1:1 on surface, 5.5:1 on bg */
-  --t-line: #e2dfd8;
-  --t-accent: #0a58ca; /* 6.4:1 on surface, 5.9:1 on bg */
-  --t-accent-hover: #0847a3;
-  --t-accent-ink: #ffffff; /* 6.4:1 on accent */
-  --t-seller-bg: #e2f1e7;
-  --t-seller-ink: #17643a; /* 6.2:1 */
-  --t-google-bg: #e5edf8;
-  --t-google-ink: #1f4a82; /* 7.5:1 */
-  --t-cal-bg: #fbeed2;
-  --t-cal-ink: #74500a; /* 6.3:1 */
-  --t-cache-bg: #ebe9e4;
-  --t-cache-ink: #4a5057; /* 6.7:1 */
-  --t-old-ink: #5c636c; /* 6.1:1 on surface */
-  --t-warn: #8f5200; /* the stale age: 5.1:1 or more on every label's ground and on surface */
-  --t-bad: #b3261e; /* 6.5:1 on surface */
-  --t-gutter: 16px;
-}
 
 .trip {
   color-scheme: light;
@@ -47,30 +19,6 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .trip,
-  .row-price {
-    --t-bg: #121416;
-    --t-surface: #1b1e21;
-    --t-sunk: #16191b;
-    --t-ink: #eceef0; /* 14.9:1 on surface */
-    --t-muted: #a5acb5; /* 7.3:1 on surface, 8.1:1 on bg */
-    --t-line: #2c3035;
-    --t-accent: #6aa6ff; /* 6.8:1 on surface */
-    --t-accent-hover: #8dbaff;
-    --t-accent-ink: #0b1220; /* 7.6:1 on accent */
-    --t-seller-bg: #173526;
-    --t-seller-ink: #8fd6aa; /* 7.9:1 */
-    --t-google-bg: #1a2a40;
-    --t-google-ink: #9cc0f0; /* 7.7:1 */
-    --t-cal-bg: #3a2c10;
-    --t-cal-ink: #f0c873; /* 8.5:1 */
-    --t-cache-bg: #2a2d31;
-    --t-cache-ink: #c3c8ce; /* 8.2:1 */
-    --t-old-ink: #a5acb5; /* 7.3:1 on surface */
-    --t-warn: #f0b860; /* 7.4:1 or more on every label's ground and on surface */
-    --t-bad: #ff8a80; /* 7.3:1 on surface */
-  }
-
   .trip {
     color-scheme: dark;
   }
@@ -84,21 +32,13 @@
   text-decoration: underline;
 }
 .trip :is(a, button, summary):focus-visible {
-  outline: 2px solid var(--t-accent);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 .trip p {
   margin: 0;
 }
 
-.trip-crumbs {
-  font-size: 13px;
-  color: var(--t-muted);
-  margin-bottom: 6px;
-}
-.trip-crumbs [aria-current] {
-  color: var(--t-muted);
-}
 .trip-title {
   margin: 0 0 18px;
   font-size: 24px;

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   datePairBuckets,
   datePairSearched,
+  markCounts,
+  REDUCED_MARKS,
   type ReducedMark,
   reducedMark,
   searchedDatePairCount,
@@ -128,5 +130,38 @@ describe('datePairBuckets and searchedDatePairCount (spec rev 55 §6.6, §8.1)',
     expect(searchedDatePairCount(space, of({ 'LGW|2027-03-14|2027-03-24': 'empty' }))).toBe(0);
     expect(searchedDatePairCount({ ...space, minNights: 12, maxNights: 11 }, () => 'priced')).toBe(0);
     expect(searchedDatePairCount(space, () => 'no_data')).toBe(4);
+  });
+});
+
+describe("markCounts (Ruling 7: a run's marks over its whole space; the Dates key's counts)", () => {
+  it('counts each date pair once by reducedMark, every mark present, the counts summing to the date pairs', () => {
+    const pairs = [
+      b({ priced: 1, not_run: 3 }),
+      b({ empty: 2 }),
+      b({ no_data: 1 }),
+      b({ error: 1, empty: 1 }),
+      b({ skipped: 2 }),
+      b({ empty: 1, not_run: 1 }),
+      ZERO,
+    ];
+    const counts = markCounts(pairs);
+    expect(counts).toEqual({
+      priced: 1,
+      'no-price-shown': 2,
+      'couldnt-read': 1,
+      'not-reached': 1,
+      'not-searched': 2,
+    });
+    expect(Object.keys(counts)).toEqual([...REDUCED_MARKS]);
+  });
+
+  it('gives every mark zero for no date pairs', () => {
+    expect(markCounts([])).toEqual({
+      priced: 0,
+      'no-price-shown': 0,
+      'couldnt-read': 0,
+      'not-reached': 0,
+      'not-searched': 0,
+    });
   });
 });

@@ -23,7 +23,7 @@ const BODY = {
   flightList: null,
   bookingUrl: null,
   searchLink: null,
-  figureSearchLink: null,
+  pointOfSale: 'GB',
   booking: null,
   calendar: null,
   cached: null,

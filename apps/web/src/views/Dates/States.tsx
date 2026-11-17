@@ -1,16 +1,15 @@
 import { londonDateOf, type StartRefusalCode } from '@gmt/core';
-import { useExecutionActions, useRefusal } from '../../api/queries.js';
+import { useRefusal } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
 import { REFUSED_COPY } from '../../copy/refused.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
-import { CLEARED_FILTERS, datesPatch } from '../../state/datesState.js';
-import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { SearchAgainButton } from './SearchAgainButton.js';
 import type { StateLine } from './stateLines.js';
 
-// Spec §11 Dates "States", each in words, never colour alone. The view composes them; the board, the overview and
-// the coverage line carry the rest of each state.
+// Spec §11 Dates "States", each in words, never colour alone. The page composes them; `RunProgress`, the sections and
+// the calendar carry the rest of each state.
 
 const D = COPY.datesView;
 
@@ -36,8 +35,14 @@ export function NoSearch() {
  * source is set up, so nothing was searched" with the way to set one up (Review Focus 1), from its own data, and offers
  * no press that could only be refused.
  */
-export function NeverRun({ definition, line }: { definition: DefinitionResponse; line: StateLine }) {
-  const fix = line.kind === 'never' ? (line.fix ?? null) : null;
+export function NeverRun({
+  definition,
+  line,
+}: {
+  definition: DefinitionResponse;
+  line: Extract<StateLine, { kind: 'never' }>;
+}) {
+  const fix = line.fix ?? null;
   return (
     <div className="plate notice flex flex-wrap items-center gap-3">
       <p className="font-bold">{line.text}</p>
@@ -57,66 +62,8 @@ export function NeverRun({ definition, line }: { definition: DefinitionResponse;
 }
 
 /**
- * Spec rev 55 §11 "State line", *searching*, *reading flights* and *checking fares*: the line from the run's progress
- * and `estimatedFinishAt`, with Cancel beside it.
- */
-export function RunningLine({
-  text,
-  executionId,
-  buckets,
-}: {
-  text: string;
-  executionId: string;
-  /** The six buckets under the count, under a searching line (spec rev 55 §3); null under the other two. */
-  buckets: string | null;
-}) {
-  const { cancel } = useExecutionActions();
-  return (
-    <div className="plate notice flex flex-wrap items-center gap-3 text-[15px]">
-      <p className="font-bold">{text}</p>
-      <button
-        type="button"
-        className="btn btn-sm min-h-11"
-        disabled={cancel.isPending}
-        onClick={() => cancel.mutate(executionId)}
-      >
-        {cancel.isPending ? COPY.working : COPY.searchPage.cancel}
-      </button>
-      {buckets !== null ? <p className="basis-full text-sm text-fg-2">{buckets}</p> : null}
-      {cancel.error ? (
-        <p role="alert" className="bad-text">
-          {COPY.actionFailed(cancel.error.message)}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * No date pair in the filtered scope has a figure: the board's line, never "no date pair exists" or "no flights"; the
- * counts over the filtered scope in the five marks (the header line's clauses, passed in) keep its not searched, not
- * reached and couldn't-be-read counts in view.
- */
-export function NoPriceInFilters({ counts, buckets }: { counts: string; buckets: string }) {
-  return (
-    <div className="plate notice space-y-2">
-      <p className="font-bold">{D.noPriceInFilters}</p>
-      <p className="text-sm text-fg-2">{counts}</p>
-      <p className="text-sm text-fg-2">{buckets}</p>
-      <button
-        type="button"
-        className="btn min-h-11"
-        onClick={() => updateSearchParams(datesPatch(CLEARED_FILTERS))}
-      >
-        {COPY.clearFilters}
-      </button>
-    </div>
-  );
-}
-
-/**
- * The route's 422 `too_many_cells`: how many date pairs on airport pairs the scope holds, the bound, and the airport
- * filter as the way under it, in main-path words (spec rev 55 §3: no "cells").
+ * The route's 422 `too_many_cells`: how many combinations of dates and airports the scope holds, the bound, and From or
+ * To as the way under it, in main-path words (spec rev 55 §3: no "cells").
  */
 export function TooManyCells({ cells, bound }: { cells: number; bound: number }) {
   return (

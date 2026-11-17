@@ -18,6 +18,29 @@ export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; 
 /** The areas `--only` accepts. */
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
 
+/**
+ * The one line under the report: core's structured summary, worded here. One concern is named by its label, else its
+ * provider, else its area ("Status: schedule failing"); several are counted, and a failure among warnings says both
+ * ("Status: 3 to check, 1 failing").
+ */
+function barLine(checks: readonly apiContract.StatusCheck[]): string {
+  const { kind, count, subject } = apiContract.barSummary(checks);
+  if (kind === 'clean') return 'Status: nothing to check';
+  const verb = kind === 'fail' ? 'failing' : 'to check';
+  if (subject !== null) {
+    const name =
+      subject.kind === 'label'
+        ? subject.text
+        : subject.kind === 'provider'
+          ? subject.providerId
+          : subject.area;
+    return `Status: ${name} ${verb}`;
+  }
+  const failing = checks.filter((c) => c.state === 'fail').length;
+  if (kind === 'warn' || failing === count) return `Status: ${count} ${verb}`;
+  return `Status: ${count} to check, ${failing} failing`;
+}
+
 /** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
 export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(deps)): Promise<ReportRead> {
   if (a.kind === 'none') return { kind: 'down', reason: a.reason };
@@ -118,9 +141,7 @@ export async function finishStatus(
   if (rf.json) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
   else {
     deps.io.out(`\n${describeReport(checks)}`);
-    deps.io.out(
-      `${apiContract.barSummary(checks).text} (app ${read.report.version}, ${read.report.mode} mode)\n`,
-    );
+    deps.io.out(`${barLine(checks)} (app ${read.report.version}, ${read.report.mode} mode)\n`);
   }
   // why: CodeRabbit on PR #14 — the exit code never depends on what was printed: a failing check anywhere, local or in
   // any area of the report, fails the command, whatever `--only` or `--json` filtered out of the output

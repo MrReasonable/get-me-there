@@ -110,6 +110,14 @@ export function PriceCell(props: PriceCellProps) {
           </>
         ) : null}
         {formatPence(props.pricePence)}
+        {props.truncated === true ? (
+          <>
+            <span aria-hidden="true" title={COPY.truncatedNote}>
+              {COPY.priceMarkGlyph.truncated}
+            </span>
+            <span className="sr-only"> {COPY.truncatedNote}</span>
+          </>
+        ) : null}
       </span>
     );
   }

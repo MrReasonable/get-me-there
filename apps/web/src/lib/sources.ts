@@ -23,3 +23,12 @@ export function discoverySourceLabel(
 export function sourceLabelOf(kinds: Iterable<SourceKind>): string {
   return [...new Set(kinds)].map((k) => SOURCE_LABELS[k]).join(' / ');
 }
+
+/**
+ * Whether the install has a source set up: `/providers` lists only the sources the api registered (the browser only with
+ * its worker set up, SearchApi and the Aviasales cache only with their keys), each `enabled`. The cards' "Turn on the
+ * browser" fix and the new-search panel's Where to look ask this one question.
+ */
+export function sourceConfigured(providers: Pick<ProvidersResponse, 'providers'>, id: ProviderId): boolean {
+  return providers.providers.some((p) => p.providerId === id && p.enabled);
+}

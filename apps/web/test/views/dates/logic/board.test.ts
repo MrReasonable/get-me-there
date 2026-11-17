@@ -1,19 +1,17 @@
-import { asIsoDate, type DatePair, decodeDatePairs } from '@gmt/core';
+import { type DatePair, decodeDatePairs } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../../src/copy.js';
+import { isSyntheticRead } from '../../../../src/lib/bookingTarget.js';
+import type { ListsState } from '../../../../src/lib/flightReads.js';
 import {
-  arrival,
   boardModel,
-  calendarStyled,
+  FIRST_PAGE,
   flightReadLine,
-  gridFetchedAtOf,
-  isSyntheticRead,
-  type ListsState,
+  LOWER_SHOWN,
+  nextPage,
   PAGE_SIZE,
-  sellerCoverage,
   sellerOf,
-  setsAirlineOrLayover,
-  sortBoard,
+  shownCount,
 } from '../../../../src/views/Dates/board.js';
 import {
   at,
@@ -33,12 +31,18 @@ import {
 } from '../../../fixtures.dates.js';
 import { NOW } from '../../../render.js';
 
-// Spec §11 Board, Filters: the stay filter applies first, then the rank (core's rankDatePairs, the price rank whatever
-// the sort), then the week switch, then the sort. Pure; Stryker runs it (revision 50).
+// Design 2026-11-08 §5.2, Rulings 3–6: the stay filter applies first, then the rank (core's rankDatePairs), then core's
+// shared rules split it into Cheapest trips and Lower on the calendar, each one per week with the switch on; five
+// trips, then ten more per press; three lower dates. Pure; Stryker runs it (revision 50).
 
 const pairsOf = (o: DatesOptions) => decodeDatePairs(datesResponse(o)).pairs;
-const NO_FILTER = { nights: null, bestPerWeek: false, sort: { key: 'price', dir: 'asc' } } as const;
+const NO_FILTER = { nights: null, bestPerWeek: false } as const;
 const indexes = (xs: readonly DatePair[]) => xs.map((p) => `${p.departureDate}/${p.nights}`);
+const trip = (pence: number) =>
+  pairingFig({
+    pairing: figurePairing({ pricePence: pence, fromPence: pence }),
+    price: { ...pairingFig().price, pricePence: pence },
+  });
 
 /** Three priced date pairs: the 12-night one is cheapest, so a 10–11 stay filter moves the 3rd-ranked one to 1st. */
 const three: DatesOptions = {
@@ -53,11 +57,10 @@ describe('order of operations (spec §11 Filters; WP19 Task 19.4)', () => {
   it('the stay filter applies before ranking: it moves a date pair from rank 3 to rank 1', () => {
     const pairs = pairsOf(three);
     const all = boardModel(pairs, NO_FILTER, NOW);
-    expect(all.rankOf.get(all.rows[2]?.index ?? -1)).toBe(3);
-    expect(indexes(all.rows)).toEqual(['2027-03-14/12', '2027-03-15/12', '2027-03-16/10']);
+    expect(indexes(all.ranked)).toEqual(['2027-03-14/12', '2027-03-15/12', '2027-03-16/10']);
     const filtered = boardModel(pairs, { ...NO_FILTER, nights: { min: 10, max: 11 } }, NOW);
-    expect(indexes(filtered.rows)).toEqual(['2027-03-16/10']);
-    expect(filtered.rankOf.get(filtered.rows[0]?.index ?? -1)).toBe(1);
+    expect(indexes(filtered.ranked)).toEqual(['2027-03-16/10']);
+    expect(indexes(filtered.lower)).toEqual(['2027-03-16/10']);
   });
 
   it('only date pairs in the stay range are in view, every one of them (with or without a figure)', () => {
@@ -68,207 +71,95 @@ describe('order of operations (spec §11 Filters; WP19 Task 19.4)', () => {
     expect(boardModel(pairs, NO_FILTER, NOW).inView).toBe(pairs);
   });
 
-  it('rows are the date pairs with a figure, in rankDatePairs order (cheapest first)', () => {
+  it('the ranking is the date pairs with a figure, in rankDatePairs order (cheapest first)', () => {
     const m = boardModel(pairsOf(three), NO_FILTER, NOW);
     expect(m.ranked.map((p) => p.figure?.price.pricePence)).toEqual([30_000, 31_000, 32_000]);
-    expect(m.rows).toEqual(m.ranked);
-    expect(m.weeks).toBeNull();
-  });
-
-  it('the week switch applies after ranking: the first-ranked date pair of each Monday-start departure week', () => {
-    // 14 Mar 2027 is a Sunday: 14 Mar is one week, 15–21 Mar the next
-    const o: DatesOptions = {
-      pairs: {
-        [at('2027-03-14', 10)]: pricedPair(priced(40_000)),
-        [at('2027-03-15', 10)]: pricedPair(priced(35_000)),
-        [at('2027-03-21', 10)]: pricedPair(priced(30_000)),
-        [at('2027-03-22', 10)]: pricedPair(priced(45_000)),
-      },
-    };
-    const m = boardModel(pairsOf(o), { ...NO_FILTER, bestPerWeek: true }, NOW);
-    expect(indexes(m.rows)).toEqual(['2027-03-21/10', '2027-03-14/10', '2027-03-22/10']);
-    expect(m.weeks).toBe(3);
-    // the rank stays the price rank among every date pair in view
-    expect(m.rows.map((p) => m.rankOf.get(p.index))).toEqual([1, 3, 4]);
-  });
-
-  it('shows ten rows at first', () => {
-    expect(PAGE_SIZE).toBe(10);
   });
 });
 
-describe('sortBoard: the sort changes the order, never the rank (spec §11 Board)', () => {
-  const o: DatesOptions = {
+describe("the two sections (Rulings 3–6: core's shared rules over the ranking)", () => {
+  const mixed: DatesOptions = {
     pairs: {
-      [at('2027-03-14', 12)]: pricedPair(
-        verifiedFig({ journeyMinutes: 900, price: { ...verifiedFig().price, pricePence: 30_000 } }),
-      ),
-      [at('2027-03-15', 10)]: pricedPair(
-        calendarFig({ price: { ...calendarFig().price, pricePence: 31_000 } }),
-      ),
-      [at('2027-03-16', 11)]: pricedPair(
-        verifiedFig({ journeyMinutes: 700, price: { ...verifiedFig().price, pricePence: 32_000 } }),
-      ),
-      [at('2027-03-17', 10)]: pricedPair(
-        verifiedFig({ journeyMinutes: 900, price: { ...verifiedFig().price, pricePence: 33_000 } }),
+      [at('2027-03-14', 10)]: pricedPair(trip(48_000)),
+      [at('2027-03-15', 10)]: pricedPair(trip(41_200)),
+      [at('2027-03-16', 10)]: pricedPair(priced(37_200)),
+      [at('2027-03-17', 10)]: pricedPair(priced(39_000)),
+      // above the cheapest trip: not lower
+      [at('2027-03-18', 10)]: pricedPair(priced(45_000)),
+      // a superseded calendar price is not lower, however cheap
+      [at('2027-03-19', 10)]: pricedPair(priced(20_000, { superseded: true })),
+      // flights read, none within the limits: not lower, but read and over the limit
+      [at('2027-03-20', 10)]: pricedPair(priced(30_000, { pairingRead: 'over-limit' })),
+      // a calendar price whose flights failed to read: lower, its flights not read
+      [at('2027-03-21', 10)]: pricedPair(
+        priced(38_000, { pairingRead: 'list-failed', listReason: 'network' }),
       ),
     },
   };
-  const m = boardModel(pairsOf(o), NO_FILTER, NOW);
-  const sorted = (key: 'price' | 'departure' | 'nights' | 'journey', dir: 'asc' | 'desc') =>
-    indexes(sortBoard(m.rows, { key, dir }, m.rankOf));
 
-  // why: design 2026-11-08 §5.1: the three fresh verified figures (trips with flights read) rank before the calendar price
-  // at 31000, which ranks last whatever it costs
-  it('price ascending is the rank order; a second press reverses it', () => {
-    expect(sorted('price', 'asc')).toEqual([
-      '2027-03-14/12',
-      '2027-03-16/11',
-      '2027-03-17/10',
-      '2027-03-15/10',
-    ]);
-    expect(sorted('price', 'desc')).toEqual([
-      '2027-03-15/10',
-      '2027-03-17/10',
-      '2027-03-16/11',
-      '2027-03-14/12',
-    ]);
+  it('Cheapest trips are the trips in rank order; Lower on the calendar the calendar prices below the cheapest, by price', () => {
+    const m = boardModel(pairsOf(mixed), NO_FILTER, NOW);
+    expect(m.trips.map((p) => p.figure.price.pricePence)).toEqual([41_200, 48_000]);
+    expect(m.lower.map((p) => p.figure.price.pricePence)).toEqual([37_200, 38_000, 39_000]);
   });
-  it('departure orders by departure date, then nights', () => {
-    expect(sorted('departure', 'asc')).toEqual([
-      '2027-03-14/12',
-      '2027-03-15/10',
-      '2027-03-16/11',
-      '2027-03-17/10',
-    ]);
-    expect(sorted('departure', 'desc')).toEqual([
-      '2027-03-17/10',
-      '2027-03-16/11',
-      '2027-03-15/10',
-      '2027-03-14/12',
-    ]);
+
+  it('counts the dates over the journey limit, and the dates with flights read (trips and reads with none)', () => {
+    const m = boardModel(pairsOf(mixed), NO_FILTER, NOW);
+    expect(m.overLimit).toBe(1);
+    // two trips and the over-limit read; a failed read is not a read
+    expect(m.readDates).toBe(3);
   });
-  it('nights orders by stay length, ties by rank', () => {
-    expect(sorted('nights', 'asc')).toEqual([
-      '2027-03-17/10',
-      '2027-03-15/10',
-      '2027-03-16/11',
-      '2027-03-14/12',
-    ]);
-    expect(sorted('nights', 'desc')).toEqual([
-      '2027-03-14/12',
-      '2027-03-16/11',
-      '2027-03-17/10',
-      '2027-03-15/10',
-    ]);
+
+  it('with no trip every current calendar price is lower, cheapest first', () => {
+    const m = boardModel(pairsOf(three), NO_FILTER, NOW);
+    expect(m.trips).toEqual([]);
+    expect(m.lower.map((p) => p.figure.price.pricePence)).toEqual([30_000, 31_000, 32_000]);
+    expect(m.readDates).toBe(0);
+    expect(m.overLimit).toBe(0);
   });
-  it('journey time orders by minutes, ties by rank, and an unknown journey time sorts last either way', () => {
-    expect(sorted('journey', 'asc')).toEqual([
-      '2027-03-16/11',
-      '2027-03-14/12',
-      '2027-03-17/10',
-      '2027-03-15/10',
-    ]);
-    expect(sorted('journey', 'desc')).toEqual([
-      '2027-03-14/12',
-      '2027-03-17/10',
-      '2027-03-16/11',
-      '2027-03-15/10',
-    ]);
+
+  it('the stay filter narrows both sections and their counts', () => {
+    const m = boardModel(pairsOf(mixed), { ...NO_FILTER, nights: { min: 11, max: 12 } }, NOW);
+    expect([m.trips, m.lower, m.overLimit, m.readDates]).toEqual([[], [], 0, 0]);
   });
-  it('two unknown journey times fall to the rank between themselves, whatever order they arrive in', () => {
-    const o2: DatesOptions = {
+
+  it("the week switch keeps each section's first of each Monday-start departure week, in its own order", () => {
+    // 14 Mar 2027 is a Sunday: 14 Mar is one week, 15–21 Mar the next, 22 Mar the one after
+    const o: DatesOptions = {
       pairs: {
-        [at('2027-03-14', 10)]: pricedPair(priced(30_000)),
-        [at('2027-03-15', 10)]: pricedPair(priced(31_000)),
-        [at('2027-03-16', 10)]: pricedPair(
-          verifiedFig({ journeyMinutes: 600, price: { ...verifiedFig().price, pricePence: 32_000 } }),
-        ),
-        [at('2027-03-17', 10)]: pricedPair(
-          verifiedFig({ journeyMinutes: 900, price: { ...verifiedFig().price, pricePence: 33_000 } }),
-        ),
+        [at('2027-03-14', 10)]: pricedPair(trip(60_000)),
+        [at('2027-03-15', 10)]: pricedPair(trip(55_000)),
+        [at('2027-03-16', 10)]: pricedPair(trip(50_000)),
+        [at('2027-03-17', 10)]: pricedPair(priced(30_000)),
+        [at('2027-03-18', 10)]: pricedPair(priced(32_000)),
+        [at('2027-03-22', 10)]: pricedPair(priced(31_000)),
       },
     };
-    const m2 = boardModel(pairsOf(o2), NO_FILTER, NOW);
-    const reversed = [...m2.rows].reverse();
-    for (const dir of ['asc', 'desc'] as const)
-      expect(indexes(sortBoard(reversed, { key: 'journey', dir }, m2.rankOf)).slice(2), dir).toEqual([
-        '2027-03-14/10',
-        '2027-03-15/10',
-      ]);
-    expect(indexes(sortBoard(reversed, { key: 'journey', dir: 'asc' }, m2.rankOf)).slice(0, 2)).toEqual([
-      '2027-03-16/10',
-      '2027-03-17/10',
-    ]);
-    expect(indexes(sortBoard(reversed, { key: 'journey', dir: 'desc' }, m2.rankOf)).slice(0, 2)).toEqual([
-      '2027-03-17/10',
-      '2027-03-16/10',
-    ]);
-  });
-  it('ties on the key fall to the rank whatever order the rows arrive in', () => {
-    const reversed = [...m.rows].reverse();
-    expect(indexes(sortBoard(reversed, { key: 'nights', dir: 'asc' }, m.rankOf))).toEqual(
-      sorted('nights', 'asc'),
-    );
-    expect(indexes(sortBoard(reversed, { key: 'price', dir: 'asc' }, m.rankOf))).toEqual(
-      sorted('price', 'asc'),
-    );
-  });
-  it('a date pair without a figure has no journey key and sorts last', () => {
-    const bare = pairsOf({}).slice(0, 1);
-    expect(sortBoard([...bare, ...m.rows], { key: 'journey', dir: 'asc' }, m.rankOf).at(-1)).toBe(bare[0]);
-  });
-  it('does not change the input', () => {
-    const before = indexes(m.rows);
-    sortBoard(m.rows, { key: 'nights', dir: 'desc' }, m.rankOf);
-    expect(indexes(m.rows)).toEqual(before);
+    const m = boardModel(pairsOf(o), { ...NO_FILTER, bestPerWeek: true }, NOW);
+    expect(indexes(m.trips)).toEqual(['2027-03-16/10', '2027-03-14/10']);
+    expect(indexes(m.lower)).toEqual(['2027-03-17/10', '2027-03-22/10']);
+    // the rank stays the rank among every date pair in view
+    expect(m.trips.map((p) => m.ranked.indexOf(p) + 1)).toEqual([1, 3]);
   });
 });
 
-describe('arrival: "arrives HH:MM" and the day offset (spec §11 Board, revision 50)', () => {
-  it('reads a well-formed local time and its date', () => {
-    expect(arrival('2027-03-14T09:00', '2027-03-14T21:05')).toEqual({
-      time: '21:05',
-      date: asIsoDate('2027-03-14'),
-      dayOffset: 0,
-    });
+describe('paging (Rulings 4 and 5: five trips, then "Show 10 more"; three lower dates)', () => {
+  it('the numbers', () => {
+    expect([FIRST_PAGE, PAGE_SIZE, LOWER_SHOWN]).toEqual([5, 10, 3]);
   });
-  it('an overnight arrival carries +1, and two days later +2', () => {
-    expect(arrival('2027-03-14T18:30', '2027-03-15T06:40')?.dayOffset).toBe(1);
-    expect(arrival('2027-03-31T22:00', '2027-04-02T06:40')).toEqual({
-      time: '06:40',
-      date: asIsoDate('2027-04-02'),
-      dayOffset: 2,
-    });
+
+  it('shownCount: five, then ten more per press, never more than there are', () => {
+    expect([0, 3, 5, 6, 40].map((n) => shownCount(n, 0))).toEqual([0, 3, 5, 5, 5]);
+    expect([0, 3, 5, 6, 15, 16, 40].map((n) => shownCount(n, 1))).toEqual([0, 3, 5, 6, 15, 15, 15]);
+    expect(shownCount(40, 2)).toBe(25);
   });
-  it('an arrival on an earlier date than its departure (a date-line crossing) shows no offset', () => {
-    expect(arrival('2027-03-15T01:00', '2027-03-14T22:00')?.dayOffset).toBe(0);
-  });
-  it('without a well-formed departure the time still shows, with no offset', () => {
-    expect(arrival(null, '2027-03-15T06:40')).toEqual({
-      time: '06:40',
-      date: asIsoDate('2027-03-15'),
-      dayOffset: 0,
-    });
-    expect(arrival('soon', '2027-03-15T06:40')?.dayOffset).toBe(0);
-  });
-  it('the whole string is the local time: nothing before or after it', () => {
-    expect(arrival(null, 'x2027-03-15T06:40')).toBeNull();
-    expect(arrival(null, '2027-03-15T06:40x')).toBeNull();
-  });
-  it('nothing for a missing or malformed arrival: seconds, a zone, a bad date or hour', () => {
-    for (const bad of [
-      null,
-      '',
-      '2027-03-15',
-      '2027-03-15T06:40:00',
-      '2027-03-15T06:40Z',
-      '2027-13-15T06:40',
-      '2027-03-15T24:00',
-      '2027-03-15T06:60',
-      '2027-02-30T06:40',
-    ])
-      expect(arrival('2027-03-14T18:30', bad), String(bad)).toBeNull();
+
+  it('nextPage: up to ten, what is left, none when every row shows', () => {
+    expect(nextPage(40, 5)).toBe(10);
+    expect(nextPage(15, 5)).toBe(10);
+    expect(nextPage(12, 5)).toBe(7);
+    expect(nextPage(5, 5)).toBe(0);
+    expect(nextPage(3, 3)).toBe(0);
   });
 });
 
@@ -372,14 +263,6 @@ describe('isSyntheticRead: the red banner, judged on the whole decoded read (spe
   });
 });
 
-describe('calendarStyled: every basis but verified is calendar-styled (spec rev 56 §6.9: resultBasisOf)', () => {
-  it('verified is not; calendar and pairing are', () => {
-    expect(calendarStyled('verified')).toBe(false);
-    expect(calendarStyled('calendar')).toBe(true);
-    expect(calendarStyled('pairing')).toBe(true);
-  });
-});
-
 describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6.9, §11 Board)', () => {
   const D = COPY.datesView;
   const reason = (d: string) => `the words for ${d}`;
@@ -474,64 +357,10 @@ describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6
   });
 });
 
-describe('sellerCoverage (21.7 persona coverage: seller prices read for N of the M date pairs shown)', () => {
-  const from = figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false });
-  // why: design 2026-11-08 §4.1: only complete offers count; an incomplete one is Google's price, not a seller's
-  it('null without a pairing figure; else the rows with a complete offer (leading or beneath) of the rows shown', () => {
-    expect(sellerCoverage([])).toBeNull();
-    expect(
-      sellerCoverage([
-        { figure: null },
-        { figure: calendarFig({ pairingRead: 'within-older', pairing: figurePairing() }) },
-      ]),
-    ).toBeNull();
-    expect(
-      sellerCoverage([
-        { figure: pairingFig() },
-        {
-          figure: calendarFig({
-            pairingRead: 'offers-incomplete',
-            pairing: figurePairing({ complete: false }),
-          }),
-        },
-        { figure: calendarFig({ pairingRead: 'sellers-not-read', pairing: from }) },
-        { figure: calendarFig() },
-        { figure: null },
-      ]),
-    ).toEqual({ read: 1, shown: 5 });
-  });
-});
-
 describe('sellerOf (21.7 code M9: an offer always names its seller; the contract says so)', () => {
   it("the offer's seller; a RangeError naming the broken rule when an offer has none", () => {
     expect(sellerOf(figurePairing())).toBe('QQ Travel');
     expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(RangeError);
     expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(/an offer names its seller/);
-  });
-});
-
-describe('setsAirlineOrLayover (spec rev 56 §11 Board: "airline settings not applied to flights read")', () => {
-  it('any airline list, layover bound or the overnight-layover rule; nothing else', () => {
-    expect(setsAirlineOrLayover({})).toBe(false);
-    expect(setsAirlineOrLayover({ includeAirlines: [] })).toBe(false);
-    expect(setsAirlineOrLayover({ excludeAirlines: [] })).toBe(false);
-    expect(setsAirlineOrLayover({ includeAirlines: ['VS'] })).toBe(true);
-    expect(setsAirlineOrLayover({ excludeAirlines: ['VS'] })).toBe(true);
-    expect(setsAirlineOrLayover({ minLayoverMinutes: 60 })).toBe(true);
-    expect(setsAirlineOrLayover({ maxLayoverMinutes: 240 })).toBe(true);
-    expect(setsAirlineOrLayover({ noOvernightLayover: true })).toBe(true);
-    expect(setsAirlineOrLayover({ noOvernightLayover: false })).toBe(false);
-  });
-});
-
-// why: spec rev 63: the block weighs an older pairing against the same grid price the board's figure does
-describe('gridFetchedAtOf', () => {
-  it("names a pairing figure's grid price, a calendar figure's own, and none for a verified figure or none", () => {
-    const pairing = pairingFig();
-    expect(gridFetchedAtOf(pairing)).toBe(pairing.gridPrice?.provenance.fetchedAt);
-    const calendar = calendarFig();
-    expect(gridFetchedAtOf(calendar)).toBe(calendar.price.provenance.fetchedAt);
-    expect(gridFetchedAtOf(verifiedFig())).toBeNull();
-    expect(gridFetchedAtOf(null)).toBeNull();
   });
 });

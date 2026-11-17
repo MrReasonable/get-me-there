@@ -2,6 +2,7 @@ import type { Iata } from '@gmt/core';
 import { useId } from 'react';
 import { useItineraryHistory, useResults, useRouteHistories } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
+import { Crumbs, searchCrumb, tripsCrumb } from '../../components/Crumbs.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
@@ -99,7 +100,14 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
 
   return (
     <section aria-label={H.title} className="history flex flex-col gap-4 pt-5">
-      <ViewHeader title={H.title} variant="span" executions={executions} stale={newestAllStale(fetchLines)} />
+      <Crumbs items={[tripsCrumb(), searchCrumb(definition), { label: COPY.crumbs.priceOverTime }]} />
+      <ViewHeader
+        title={H.title}
+        variant="span"
+        level={1}
+        executions={executions}
+        stale={newestAllStale(fetchLines)}
+      />
       {span !== null ? (
         <p className="lede text-[15px]">
           <span>

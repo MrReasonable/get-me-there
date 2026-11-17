@@ -319,8 +319,8 @@ describe('the trip read (design 2026-11-08 §6.1)', () => {
     expect(t.listFailure).toEqual({ at: at(-1), cause: 'execution-cap' });
     expect(t.bookingUrl).toBeNull();
     expect(t.searchLink).toEqual(safeSearchLink('camoufox', A, def, null, 'GB'));
-    // final review I2: the verified price's own search is its own cell's, never the calendar cell's
-    expect(t.figureSearchLink).toEqual(safeSearchLink('camoufox', G, def, null, 'GB'));
+    // fix round 1: the card builds the verified price's own search (its own cell's) in the install's market
+    expect(t.pointOfSale).toBe('GB');
     // a list a per-run limit stopped offers no read again (the calendar cell's; the verified cell's would), and a read
     // from the card names the calendar cell
     expect(t.read).toMatchObject({ wouldGo: false, origin: 'LHR', destination: 'JFK' });
@@ -725,3 +725,10 @@ function noReturn(): ReturnRead {
     booking: null,
   });
 }
+
+describe("the install's point of sale (fix round 1)", () => {
+  it('carries POINT_OF_SALE, so the card builds the same search as its board row', async () => {
+    const { x, def } = await harness({ POINT_OF_SALE: 'US' });
+    expect((await tripOf(x, def.id, Q)).pointOfSale).toBe('US');
+  });
+});
