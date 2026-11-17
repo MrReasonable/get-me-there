@@ -402,6 +402,9 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       ),
       ...Object.fromEntries(entries.filter(([n]) => names.has(n))),
     };
+    // why: the app runs on the file as written: an answer outside the group (an answers-file port during
+    // --reconfigure timezone) is not in it, so the health wait and the test email use the file's values
+    effective = readBack;
   } else if (settings?.ok === true) {
     // why: the file with the password its settings need (above) is written as it is, every other line kept
     if (baseText !== null && baseText !== existingText) {

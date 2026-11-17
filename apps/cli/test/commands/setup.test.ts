@@ -297,6 +297,24 @@ describe('--reconfigure <group>', () => {
     expect(m.io.stdout).not.toContain(after.APP_BASIC_AUTH_PASS ?? 'none');
   });
 
+  it('a group’s health check and app address follow the file: an answers-file port outside the group is not used', async () => {
+    const m = await setUp();
+    answersFile(m, { port: 4000, timezone: 'America/New_York' });
+    expect(await runCli(['setup', '--reconfigure', 'timezone', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    const env = parseEnv(m.fs.read(ENV) ?? '');
+    expect(env).toMatchObject({ PORT: '3000', SCHEDULER_TIMEZONE: 'America/New_York' });
+    expect(show(m.executor.log)).toContain('wait http://127.0.0.1:3000/api/health');
+    expect(show(m.executor.log)).not.toContain('wait http://127.0.0.1:4000/api/health');
+  });
+
+  it('--reconfigure port waits on the new port', async () => {
+    const m = await setUp();
+    answersFile(m, { port: 4000 });
+    expect(await runCli(['setup', '--reconfigure', 'port', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '').PORT).toBe('4000');
+    expect(show(m.executor.log)).toContain('wait http://127.0.0.1:4000/api/health');
+  });
+
   it('refuses before a first setup', async () => {
     const m = machine();
     expect(await runCli(['setup', '--reconfigure', 'port'], m.deps)).toBe(78);
