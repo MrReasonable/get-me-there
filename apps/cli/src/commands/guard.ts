@@ -1,5 +1,5 @@
 import { join } from 'node:path/posix';
-import { type ActiveExecution, type AppCreds, activeLine, readActive } from '../appClient.js';
+import { type ActiveExecution, type AppTarget, activeLine, readActive } from '../appClient.js';
 import { dockerAppState, dockerEndpoint, nativeEndpoint } from '../appEndpoint.js';
 import type { Deps } from '../deps.js';
 import { factOf, factsOf, serviceSet } from '../services/set.js';
@@ -20,17 +20,19 @@ export function forceStatement(label: string, autoResume: boolean): string {
 export interface GuardTarget {
   label: string;
   up: boolean;
-  creds: AppCreds | null;
+  /** Where to ask it, with its basic auth when it has a password; null when it cannot be asked. */
+  app: AppTarget | null;
   autoResume: boolean;
-  /** Why an app that may be up cannot be asked (no credentials, or an unknown Docker state); the default names no auth. */
+  /** Why an app that may be up cannot be asked (unreadable settings, or an unknown Docker state or port). */
   cannot?: string;
 }
 
 /**
  * The guard's target for this machine's app (review X4), through appEndpoint.ts's readers: the native app (up while its
  * service runs) with app.env's credentials, or, with no native install, the Docker app on the port compose publishes
- * with the checkout's .env credentials (read, never printed). A Docker app whose state, port or credentials cannot be
- * read may be running a search, so it is up with the reason it cannot be asked: the guard refuses unless --force.
+ * with the checkout's .env credentials (read, never printed). An app with no password is asked without credentials.
+ * A Docker app whose state, port or settings cannot be read may be running a search, so it is up with the reason it
+ * cannot be asked: the guard refuses unless --force.
  */
 export async function appGuardTarget(deps: Deps): Promise<GuardTarget> {
   const paths = deps.platform.paths;
@@ -45,22 +47,22 @@ export async function appGuardTarget(deps: Deps): Promise<GuardTarget> {
       // why: an unreadable app.env is the endpoint's own reason below
     }
     return e.kind === 'none'
-      ? { label: 'the app', up, creds: null, autoResume, cannot: e.reason }
-      : { label: 'the app', up, creds: e.creds, autoResume };
+      ? { label: 'the app', up, app: null, autoResume, cannot: e.reason }
+      : { label: 'the app', up, app: e.target, autoResume };
   }
   const state = await dockerAppState(deps);
   if (state === null || state === 'absent' || state === 'stopped')
-    return { label: 'the Docker app', up: false, creds: null, autoResume: true };
+    return { label: 'the Docker app', up: false, app: null, autoResume: true };
   const e = await dockerEndpoint(deps, state);
   if (e.kind === 'none')
-    return { label: 'the Docker app', up: true, creds: null, autoResume: true, cannot: e.reason };
+    return { label: 'the Docker app', up: true, app: null, autoResume: true, cannot: e.reason };
   let autoResume = true;
   try {
     autoResume = readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '').AUTO_RESUME !== 'false';
   } catch {
     // why: the endpoint has read .env already; a failure here leaves the default
   }
-  return { label: 'the Docker app', up: true, creds: e.creds, autoResume };
+  return { label: 'the Docker app', up: true, app: e.target, autoResume };
 }
 
 const runningIn = (label: string, e: ActiveExecution): string =>
@@ -80,9 +82,9 @@ export async function guardActiveRun(
   if (!t.up) return { ok: true, forced: false };
   for (;;) {
     const r =
-      t.creds === null
-        ? { kind: 'failed' as const, reason: t.cannot ?? 'no basic auth in its settings' }
-        : await readActive(deps, t.creds);
+      t.app === null
+        ? { kind: 'failed' as const, reason: t.cannot ?? 'its settings could not be read' }
+        : await readActive(deps, t.app);
     if (r.kind === 'none') return { ok: true, forced: false };
     const what =
       r.kind === 'active'

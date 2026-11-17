@@ -8,6 +8,7 @@ import {
   sharedSettingMessage,
 } from '../camoufox/settings.js';
 import { DEFAULT_MAX_CELLS } from '../space/limits.js';
+import { isLoopbackHost, reachBeyondThisMachine, reachRefusal } from './access.js';
 import {
   type CappedProviderLimits,
   PENCE_TO_MICRO,
@@ -27,6 +28,11 @@ export interface Config {
   databasePath: string;
   port: number;
   bindAddress: string;
+  /**
+   * PUBLISHED_ADDRESS (spec §4, §13): the host address docker-compose.yml publishes the container on, which the app
+   * cannot see from inside; null when not set. Read only in the container, by core's access rule.
+   */
+  publishedAddress: string | null;
   allowedHosts: string[];
   appBaseUrl: string | null;
   auth: { user: string; pass: Secret } | null;
@@ -116,16 +122,12 @@ export type ConfigError = { field: string; message: string };
 export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: ConfigError[] };
 
 type Env = Record<string, string | undefined>;
-const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
-/** Whether a bind address or host is this machine's loopback: the one rule config, the boot guard and Status share. */
-export const isLoopbackHost = (host: string): boolean => LOOPBACK.test(host);
-
 /**
  * Spec §8.3: SMTP_TLS=none is allowed only for a loopback host, or the `mailpit` host under NODE_ENV=development. The
  * one copy of the rule: the config schema enforces it and the engine's EmailNotifier re-checks it (WP11).
  */
 export function smtpPlaintextAllowed(host: string, nodeEnv: Config['nodeEnv']): boolean {
-  return LOOPBACK.test(host) || (host === 'mailpit' && nodeEnv === 'development');
+  return isLoopbackHost(host) || (host === 'mailpit' && nodeEnv === 'development');
 }
 
 /**
@@ -351,13 +353,6 @@ function providerLimits(
 }
 
 /** Spec §12. Returns every bad field at once rather than the first. */
-/**
- * The refusal an operator who skipped docs/setup.md section 1 reads in `docker compose logs` (devops-final-001): the
- * exact two lines to add to .env. bootApp's assertAuthInvariants says the same.
- */
-export const AUTH_MISSING =
-  'add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)';
-
 export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const r = new Reader(env);
   const shared = sharedSettingsOf(r);
@@ -391,22 +386,23 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     else auth = { user: authUser, pass: new Secret(authPass) };
   }
   const allowUnauthenticated = r.bool('ALLOW_UNAUTHENTICATED') ?? false;
-  if (auth === null && authUser === undefined && !LOOPBACK.test(bindAddress) && !allowUnauthenticated) {
-    // why: devops-final-001 (ruling 14): the fix is the two auth lines, so they lead. In the container BIND_ADDRESS is
-    // fixed by docker-compose.yml and ALLOW_UNAUTHENTICATED is not forwarded, so neither is named as the thing to edit.
-    const container = r.raw('IN_CONTAINER') !== undefined;
-    r.fail('APP_BASIC_AUTH_USER', AUTH_MISSING);
-    if (!container)
-      r.fail(
-        'BIND_ADDRESS',
-        `binding ${bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (Tailscale-only hosts)`,
-      );
-    r.fail(
-      'ALLOW_UNAUTHENTICATED',
-      container
-        ? 'not an option here: docker-compose.yml does not forward it, so add the two auth lines instead'
-        : 'set to true only on a host that is not reachable from the internet',
-    );
+  const trustProxy = r.bool('TRUST_PROXY') ?? false;
+  const inContainer = r.raw('IN_CONTAINER') !== undefined;
+  const publishedAddress = r.str('PUBLISHED_ADDRESS') ?? null;
+  // why: spec §4: no password only while nothing but this machine can reach the app; ALLOW_UNAUTHENTICATED (a
+  // tailnet-only host) bypasses the rule. The refusal names the setting that lets others in and the fix for this mode.
+  if (authUser === undefined && authPass === undefined && !allowUnauthenticated) {
+    const reach = reachBeyondThisMachine({
+      inContainer,
+      bindAddress,
+      publishedAddress,
+      allowedHosts,
+      trustProxy,
+    });
+    if (reach !== null) {
+      const refusal = reachRefusal(reach, runModeOf({ inContainer, nodeEnv }));
+      r.fail(refusal.field, refusal.message);
+    }
   }
 
   // why: POINT_OF_SALE is a shared setting (the worker loads its pages with it), read by the one rule set
@@ -516,8 +512,6 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
   const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
-  const trustProxy = r.bool('TRUST_PROXY') ?? false;
-  const inContainer = r.raw('IN_CONTAINER') !== undefined;
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
 
   if (r.errors.length > 0) return { ok: false, errors: r.errors };
@@ -529,6 +523,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       databasePath,
       port,
       bindAddress,
+      publishedAddress,
       allowedHosts,
       appBaseUrl,
       auth,

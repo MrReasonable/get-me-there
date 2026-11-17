@@ -1,5 +1,5 @@
 import { CONSENT_FIX, START_REFUSAL_TEXT } from '@gmt/core';
-import { appUrl, credsFrom } from '../appClient.js';
+import { appUrl, targetFrom } from '../appClient.js';
 import type { Ask } from '../ask.js';
 import { consentChild } from '../commands/consent.js';
 import type { Deps } from '../deps.js';
@@ -76,7 +76,8 @@ async function writeAndRestart(
   const facts = await factsOf(deps, [...entries, worker]);
   const wf = factOf(facts, worker.unit);
   const af = factOf(facts, app?.unit ?? '');
-  const port = credsFrom(readEnvText(deps.files.read(appEnvPath(deps.platform.paths)) ?? ''))?.port ?? 3000;
+  // why: app.env's PORT whether or not it has a password (spec §4)
+  const port = targetFrom(readEnvText(deps.files.read(appEnvPath(deps.platform.paths)) ?? '')).port;
   const command = 'setup: the browser provider';
   const stopped = await apply(
     {

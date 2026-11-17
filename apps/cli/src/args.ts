@@ -90,7 +90,7 @@ const SPEC: Record<
       force: bool,
     },
     positional: null,
-    help: 'install or re-check the app as a user service on this machine (127.0.0.1, basic auth; setup generates its password)',
+    help: 'install or re-check the app as a user service on this machine (127.0.0.1; no password while only this machine can reach it)',
     flags: [
       '--dry-run                 print the plan and change nothing',
       '--non-interactive         ask nothing (with --answers <file>)',
@@ -155,7 +155,12 @@ const SPEC: Record<
     help: 'replace the database with a backup (the app must be stopped)',
     flags: [],
   },
-  password: { options: {}, positional: null, help: 'print the app’s password to this terminal', flags: [] },
+  password: {
+    options: {},
+    positional: null,
+    help: 'print the app’s password to this terminal, or say why it has none',
+    flags: [],
+  },
   smoke: {
     options: { yes: bool, 'accept-total': bool, from: str, to: str },
     positional: null,

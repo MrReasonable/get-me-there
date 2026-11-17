@@ -296,6 +296,12 @@ describe('browserSetup’s outcomes and words', () => {
       'writeFile /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
     );
   });
+  it('waits for the app on app.env’s port when app.env has no password (spec §4)', async () => {
+    const m = await world();
+    m.fs.file(ENV, (m.fs.read(ENV) ?? '').replace('PORT="3000"', 'PORT="3917"'), 0o600);
+    expect(await run(m)).toBe('on');
+    expect(show(m.executor.log).at(-1)).toBe('waitHealthy http://127.0.0.1:3917/api/health');
+  });
   it('turning it on with a worker that never answers: the app is started again all the same, and the outcome is failed', async () => {
     const m = await world();
     const inner = m.deps.executor;

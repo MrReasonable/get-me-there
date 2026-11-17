@@ -1,13 +1,20 @@
 import { join } from 'node:path/posix';
-import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
-import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublications } from '../appEndpoint.js';
+import { BACKUP_MAX_AGE_MS, backupTimeOf, isLoopbackHost, START_REFUSAL_TEXT } from '@gmt/core';
+import { authFrom } from '../appClient.js';
+import {
+  composeConfigFacts,
+  type DockerAppState,
+  dockerAppState,
+  dockerEndpoint,
+  dockerPublications,
+} from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
 import type { ServiceFacts } from '../platform/types.js';
 import { type Check, scheduleUnit, settingsChecks, staleChecks } from '../services/checks.js';
 import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
-import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
+import { appEnvPath, dailyBackupsDir } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
 import { COMPOSE_PROJECT } from '../setup/docker.js';
 import { finishStatus, nativeTarget, reportFlags, type StatusTarget } from '../statusReport.js';
@@ -183,7 +190,7 @@ function appEnvChecks(deps: Deps): Check[] {
         },
   ];
   const bind = env.BIND_ADDRESS;
-  if (bind !== undefined && bind !== '' && !isLoopback(bind))
+  if (bind !== undefined && bind !== '' && !isLoopbackHost(bind))
     out.push({
       name: 'bind address',
       level: 'warn',
@@ -194,14 +201,21 @@ function appEnvChecks(deps: Deps): Check[] {
 }
 
 /**
- * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host address compose
- * publishes. Beyond loopback is the same warning as a native BIND_ADDRESS beyond loopback; loopback says nothing.
+ * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host addresses compose
+ * publishes, read from the effective configuration (every compose file and override, `docker compose config`) and from
+ * the running container (`docker compose port`, which names one mapping only). Beyond loopback is the same warning as
+ * a native BIND_ADDRESS beyond loopback, and a fail when the checkout's .env has no password and neither .env nor
+ * compose's environment sets ALLOW_UNAUTHENTICATED=true (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an override
+ * file leaves behind, so this is the one place the drift shows); loopback says nothing. When the configuration cannot
+ * be read, a warning says only the running mapping was checked.
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
-  const published = await dockerPublications(deps);
+  const running = await dockerPublications(deps);
+  const config = await composeConfigFacts(deps);
+  const configured = config?.ports ?? null;
   // why: an unread address is not a loopback one: error must not look empty
-  if (published === null)
+  if (running === null && configured === null)
     return [
       {
         name: 'bind address',
@@ -210,14 +224,51 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
         fix: 'docker compose port app 3000',
       },
     ];
-  return published
-    .filter((p) => !isLoopback(p.address))
-    .map((p) => ({
+  let noPassword: boolean;
+  try {
+    const env = readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '');
+    // why: ALLOW_UNAUTHENTICATED=true is the operator's explicit tailnet-only exception, so it keeps the warning, from
+    // .env or from compose's environment (the documented tailscale-only override sets it there)
+    noPassword =
+      authFrom(env) === null && env.ALLOW_UNAUTHENTICATED !== 'true' && config?.allowUnauthenticated !== true;
+  } catch {
+    // why: an unreadable .env is the endpoint's own reason; the warning below still stands
+    noPassword = false;
+  }
+  const addresses = [...new Set([...(running ?? []), ...(configured ?? [])].map((p) => p.address))];
+  const beyond = addresses.filter((a) => !isLoopbackHost(a));
+  // why: compose port names one mapping only, so without the configuration an override's mapping goes unseen: say so,
+  // never with any of the configuration's text
+  const partial: Check[] =
+    configured === null
+      ? [
+          {
+            name: 'bind address',
+            level: 'warn',
+            detail: 'compose’s configuration could not be read, so only the running mapping was checked',
+            fix: 'docker compose config --quiet',
+          },
+        ]
+      : [];
+  if (noPassword)
+    return [
+      ...partial,
+      ...beyond.map((address) => ({
+        name: 'bind address',
+        level: 'fail' as const,
+        detail: `${address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
+        fix: 'publish only 127.0.0.1 in docker-compose.yml and any override file (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
+      })),
+    ];
+  return [
+    ...partial,
+    ...beyond.map((address) => ({
       name: 'bind address',
       level: 'warn' as const,
-      detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+      detail: `${address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
       fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
-    }));
+    })),
+  ];
 }
 
 const workerUnit = (deps: Deps) => ({

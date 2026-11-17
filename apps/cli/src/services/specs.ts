@@ -149,10 +149,6 @@ export function stableNodePath(
   return candidates.find((c) => c !== real && resolve(c) === real) ?? execPath;
 }
 
-/** The one loopback rule (setup's note and status's warning): any 127/8 address, `::1` and `localhost`. */
-export const isLoopback = (address: string): boolean =>
-  /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost)$/.test(address);
-
 // why: \p{Cc} is every C0 and C1 control character, newline and tab included
 const CONTROL = /\p{Cc}/u;
 

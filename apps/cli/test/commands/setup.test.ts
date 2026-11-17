@@ -74,10 +74,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
       PORT: '3000',
       SCHEDULER_TIMEZONE: 'Europe/London',
       POINT_OF_SALE: 'GB',
-      APP_BASIC_AUTH_USER: 'operator',
-      APP_BASIC_AUTH_PASS: PASS,
     });
-    expect(PASS).toMatch(/^[A-Za-z0-9_-]{32}$/);
     expect(m.executor.log.find((a) => a.kind === 'waitHealthy')).toMatchObject({ timeoutSeconds: 240 });
   });
 
@@ -174,7 +171,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
 });
 
 describe('the closing screen (brief §6)', () => {
-  it('with no price source its first line says so and points at Travelpayouts; it names URL, user, file and password command, never the password', async () => {
+  it('with no price source its first line says so and points at Travelpayouts; with no password it says why and how to turn sign-in on', async () => {
     const m = machine();
     answersFile(m, {});
     await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps);
@@ -182,10 +179,11 @@ describe('the closing screen (brief §6)', () => {
     expect(closing.split('\n')[0]).toBe(
       'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.',
     );
+    expect(closing).not.toContain('User name');
+    expect(closing).not.toContain('The password is in');
     for (const s of [
       'http://127.0.0.1:3000',
-      'User name: operator',
-      `The password is in ${ENV}; show it with \`pnpm gmt password\` (if scrollback or a shared screen may have kept it, \`pnpm gmt setup --reconfigure password\` replaces it).`,
+      'There is no password: only this machine can reach the app, and that means every account on it. On a machine other people log in to, or before another device or name reaches the app (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.',
       'Only if you want to reach it from another device: an SSH tunnel (ssh -L 3000:127.0.0.1:3000 <this machine>)',
       'docs/setup.md section 3',
       'plain HTTP',
@@ -240,7 +238,7 @@ describe('a second setup (spec §16: the first failing test)', () => {
     expect(m.io.stdout).toContain(
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
     );
-    expect(m.io.stdout).toContain(`write ${ENV} (0600, 10 lines, values hidden)`);
+    expect(m.io.stdout).toContain(`write ${ENV} (0600, 8 lines, values hidden)`);
     expect(m.io.stdout).toContain('then: run launchctl kickstart gui/501/local.get-me-there.backup');
     expect(m.io.stdout).not.toContain(PASS);
   });
@@ -279,7 +277,6 @@ describe('--reconfigure <group>', () => {
       [true, 'smtp.example.com', '', '', 'me', 'smtp-pass-0123', 'me@example.com', 'gmt@example.com', false],
       ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS', 'SMTP_USER', 'SMTP_PASS', 'ALERT_EMAIL_TO', 'ALERT_EMAIL_FROM'],
     ],
-    ['password', [], ['APP_BASIC_AUTH_PASS']],
   ] as const)('%s touches only its lines', async (group, answers, names) => {
     const m = await setUp();
     m.fs.file(ENV, `${m.fs.read(ENV)}LOG_LEVEL=debug\n`, 0o600);
@@ -298,6 +295,24 @@ describe('--reconfigure <group>', () => {
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
     );
     expect(m.io.stdout).not.toContain(after.APP_BASIC_AUTH_PASS ?? 'none');
+  });
+
+  it('a group’s health check and app address follow the file: an answers-file port outside the group is not used', async () => {
+    const m = await setUp();
+    answersFile(m, { port: 4000, timezone: 'America/New_York' });
+    expect(await runCli(['setup', '--reconfigure', 'timezone', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    const env = parseEnv(m.fs.read(ENV) ?? '');
+    expect(env).toMatchObject({ PORT: '3000', SCHEDULER_TIMEZONE: 'America/New_York' });
+    expect(show(m.executor.log)).toContain('wait http://127.0.0.1:3000/api/health');
+    expect(show(m.executor.log)).not.toContain('wait http://127.0.0.1:4000/api/health');
+  });
+
+  it('--reconfigure port waits on the new port', async () => {
+    const m = await setUp();
+    answersFile(m, { port: 4000 });
+    expect(await runCli(['setup', '--reconfigure', 'port', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '').PORT).toBe('4000');
+    expect(show(m.executor.log)).toContain('wait http://127.0.0.1:4000/api/health');
   });
 
   it('refuses before a first setup', async () => {
@@ -345,8 +360,26 @@ describe('--reconfigure <group>', () => {
       'run launchctl bootout gui/501/local.get-me-there.app',
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
     ]);
+    // why: spec §4: the fresh install has no password, so the guard asks the app with no Authorization header
+    expect(http.requests[0]?.headers).toEqual({});
+  });
+  it('browser asks an app with a password with its basic auth', async () => {
+    const m = await setUp();
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    m.deps.http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+    });
+    m.deps.io = testIo({ tty: true });
+    expect(await runCli(['setup', '--reconfigure', 'password'], m.deps)).toBe(0);
+    const pass = parseEnv(m.fs.read(ENV) ?? '').APP_BASIC_AUTH_PASS ?? 'none';
+    const http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+    });
+    m.deps.http = http;
+    m.deps.ask = scriptedAsk([false, false]);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
     expect(http.requests[0]?.headers.Authorization).toBe(
-      `Basic ${Buffer.from(`operator:${PASS}`).toString('base64')}`,
+      `Basic ${Buffer.from(`operator:${pass}`).toString('base64')}`,
     );
   });
   it('browser with no run active asks and writes scheduled for no', async () => {
@@ -361,9 +394,182 @@ describe('--reconfigure <group>', () => {
   });
 });
 
+const ALLOW_TEXT =
+  'There is no password because ALLOW_UNAUTHENTICATED is set in app.env, so every device that reaches this machine can use the app (docs/setup.md section 3). To turn sign-in on: `pnpm gmt setup --reconfigure password`.';
+const NEEDS_TEXT =
+  'app.env has no password, but its settings let something other than this machine reach the app, so the app refuses to start: run `pnpm gmt setup --reconfigure password`.';
+
+describe('signing in (spec §4: no password while only this machine can reach the app)', () => {
+  const GEN = Buffer.alloc(24, 9).toString('base64url');
+  const turnOn = async (m: ReturnType<typeof machine>) => {
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    m.deps.io = testIo({ tty: true });
+    return runCli(['setup', '--reconfigure', 'password'], m.deps);
+  };
+
+  it('a fresh loopback install writes no sign-in lines', async () => {
+    const m = await setUp();
+    const env = parseEnv(m.fs.read(ENV) ?? '');
+    expect(env).not.toHaveProperty('APP_BASIC_AUTH_USER');
+    expect(env).not.toHaveProperty('APP_BASIC_AUTH_PASS');
+  });
+
+  it('--reconfigure password writes both lines, turning sign-in on, and restarts the app', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}LOG_LEVEL=debug\n`, 0o600);
+    const before = parseEnv(m.fs.read(ENV) ?? '');
+    expect(await turnOn(m)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).toEqual({
+      ...before,
+      APP_BASIC_AUTH_USER: 'operator',
+      APP_BASIC_AUTH_PASS: GEN,
+    });
+    expect(GEN).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(show(m.executor.log)).toContain(
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+    );
+    expect(m.io.stdout).not.toContain(GEN);
+  });
+
+  it('--reconfigure password replaces an existing password, touching only its own line', async () => {
+    const m = await setUp();
+    expect(await turnOn(m)).toBe(0);
+    const before = parseEnv(m.fs.read(ENV) ?? '');
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 4);
+    expect(await runCli(['setup', '--reconfigure', 'password'], m.deps)).toBe(0);
+    const after = parseEnv(m.fs.read(ENV) ?? '');
+    expect(after).toEqual({ ...before, APP_BASIC_AUTH_PASS: Buffer.alloc(24, 4).toString('base64url') });
+  });
+
+  it('a re-run keeps an existing password, and keeps a file without one as it is', async () => {
+    const m = await setUp();
+    expect(await turnOn(m)).toBe(0);
+    const withPassword = m.fs.read(ENV);
+    m.executor.log.length = 0;
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 3);
+    m.deps.io = m.io;
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(m.fs.read(ENV)).toBe(withPassword);
+    expect(show(m.executor.log)).toEqual(['wait http://127.0.0.1:3000/api/health']);
+    const bare = await setUp();
+    const without = bare.fs.read(ENV);
+    expect(await runCli(['setup'], bare.deps)).toBe(0);
+    expect(bare.fs.read(ENV)).toBe(without);
+    expect(bare.io.stdout).not.toContain('app.env differs');
+  });
+
+  it('a kept ALLOWED_HOSTS that is not this machine generates a password: the app would refuse to start without one', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=localhost:3000,laptop.tail1234.ts.net\n`, 0o600);
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    const env = parseEnv(m.fs.read(ENV) ?? '');
+    expect(env).toMatchObject({
+      ALLOWED_HOSTS: 'localhost:3000,laptop.tail1234.ts.net',
+      APP_BASIC_AUTH_USER: 'operator',
+      APP_BASIC_AUTH_PASS: GEN,
+    });
+    expect(m.io.stdout).toContain('app.env has no password, which its settings need now; setup writes one');
+    expect(show(m.executor.log)).toContain(`writeFile ${ENV}`);
+    expect(m.io.stdout).not.toContain(GEN);
+  });
+
+  it.each([
+    [
+      'a kept BIND_ADDRESS beyond loopback',
+      (t: string) => t.replace('BIND_ADDRESS="127.0.0.1"', 'BIND_ADDRESS="0.0.0.0"'),
+      { BIND_ADDRESS: '0.0.0.0' },
+    ],
+    [
+      'a non-loopback ALLOWED_HOSTS',
+      (t: string) => `${t}ALLOWED_HOSTS=flights.example.com\n`,
+      { ALLOWED_HOSTS: 'flights.example.com' },
+    ],
+    ['TRUST_PROXY=true', (t: string) => `${t}TRUST_PROXY=true\n`, { TRUST_PROXY: 'true' }],
+  ] as const)(
+    '--reconfigure password repairs a file with %s and no password, keeping it (the fix the app’s refusal names)',
+    async (_l, edit, kept) => {
+      const m = await setUp();
+      m.fs.file(ENV, edit(m.fs.read(ENV) ?? ''), 0o600);
+      const before = parseEnv(m.fs.read(ENV) ?? '');
+      const io = testIo({ tty: true });
+      m.deps.io = io;
+      m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+      expect(await runCli(['setup', '--reconfigure', 'password'], m.deps)).toBe(0);
+      expect(parseEnv(m.fs.read(ENV) ?? '')).toEqual({
+        ...before,
+        ...kept,
+        APP_BASIC_AUTH_USER: 'operator',
+        APP_BASIC_AUTH_PASS: GEN,
+      });
+      expect(io.stdout).toContain(
+        'setup --reconfigure password: APP_BASIC_AUTH_USER, APP_BASIC_AUTH_PASS written; the app restarted',
+      );
+      expect(io.stdout + io.stderr).not.toContain(GEN);
+    },
+  );
+
+  it('--reconfigure password repairs the same file (the fix the app’s refusal names)', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\n`, 0o600);
+    expect(await turnOn(m)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).toMatchObject({
+      ALLOWED_HOSTS: 'flights.example.com',
+      APP_BASIC_AUTH_USER: 'operator',
+      APP_BASIC_AUTH_PASS: GEN,
+    });
+  });
+
+  it('a kept BIND_ADDRESS beyond loopback generates a password too', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      (m.fs.read(ENV) ?? '').replace('BIND_ADDRESS="127.0.0.1"', 'BIND_ADDRESS="0.0.0.0"'),
+      0o600,
+    );
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).toMatchObject({
+      BIND_ADDRESS: '0.0.0.0',
+      APP_BASIC_AUTH_PASS: GEN,
+    });
+  });
+
+  it('a re-run over an ALLOW_UNAUTHENTICATED file keeps it without a password and says why there is none', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}ALLOW_UNAUTHENTICATED=true\nALLOWED_HOSTS=localhost:3000,laptop.tail1234.ts.net\n`,
+      0o600,
+    );
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).not.toHaveProperty('APP_BASIC_AUTH_PASS');
+    expect(m.io.stdout).toContain(ALLOW_TEXT);
+    expect(m.io.stdout).not.toContain('only this machine can reach the app');
+  });
+
+  it('a TRUST_PROXY=true file gets a password written: a proxy is in front', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}TRUST_PROXY=true\n`, 0o600);
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).toMatchObject({ TRUST_PROXY: 'true', APP_BASIC_AUTH_PASS: GEN });
+  });
+
+  it('a file with another fault is still refused, naming its fields', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\nLOG_LEVEL=loud\n`, 0o600);
+    expect(await runCli(['setup'], m.deps)).toBe(78);
+    expect(m.io.stderr).toContain('would not pass the app’s settings check (ALLOWED_HOSTS, LOG_LEVEL)');
+  });
+});
+
 describe('password', () => {
   it('prints the password to a terminal only, read with parseEnv; refuses a pipe and a missing app.env (CodeRabbit …k7n)', async () => {
     const m = await setUp();
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 7);
+    m.deps.io = testIo({ tty: true });
+    expect(await runCli(['setup', '--reconfigure', 'password'], m.deps)).toBe(0);
     const tty = testIo({ tty: true });
     m.deps.io = tty;
     expect(await runCli(['password'], m.deps)).toBe(0);
@@ -375,6 +581,58 @@ describe('password', () => {
     expect(pipe.stderr).toContain('prints only to a terminal');
     const none = machine({ io: testIo({ tty: true }) });
     expect(await runCli(['password'], none.deps)).toBe(78);
+    expect(none.io.stderr).toContain('run pnpm gmt setup first');
+  });
+
+  it('with none and ALLOW_UNAUTHENTICATED=true says that, not that only this machine can reach the app', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}ALLOW_UNAUTHENTICATED=true\nALLOWED_HOSTS=localhost:3000,laptop.tail1234.ts.net\n`,
+      0o600,
+    );
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
+    expect(await runCli(['password'], m.deps)).toBe(0);
+    expect(tty.stderr).toBe(`${ALLOW_TEXT}\n`);
+  });
+
+  it('with none and settings that need one says the app refuses to start and names the fix (78)', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\n`, 0o600);
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
+    expect(await runCli(['password'], m.deps)).toBe(78);
+    expect(tty.stderr).toBe(`${NEEDS_TEXT}\n`);
+  });
+
+  it.each([
+    ['the user line alone', 'APP_BASIC_AUTH_USER="operator"\n', 'no password in'],
+    ['the password line alone', 'APP_BASIC_AUTH_PASS="half-pair-pass-0123"\n', 'has a password but'],
+  ])(
+    'with %s (a half pair) prints no password, names the settings fault and exits 78',
+    async (_l, line, words) => {
+      const m = await setUp();
+      m.fs.file(ENV, `${m.fs.read(ENV)}${line}`, 0o600);
+      const tty = testIo({ tty: true });
+      m.deps.io = tty;
+      expect(await runCli(['password'], m.deps)).toBe(78);
+      expect(tty.stdout).toBe('');
+      expect(tty.stderr).toContain(words);
+      expect(tty.stderr).toContain('would not pass the app’s settings check: run pnpm gmt setup to see why');
+      expect(tty.stderr).not.toContain('half-pair-pass-0123');
+    },
+  );
+
+  it('with none set (spec §4) says why on stderr and how to turn sign-in on, and succeeds', async () => {
+    const m = await setUp();
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
+    expect(await runCli(['password'], m.deps)).toBe(0);
+    expect(tty.stdout).toBe('');
+    expect(tty.stderr).toBe(
+      'There is no password: only this machine can reach the app, and that means every account on it. On a machine other people log in to, or before another device or name reaches the app (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.\n',
+    );
   });
 });
 

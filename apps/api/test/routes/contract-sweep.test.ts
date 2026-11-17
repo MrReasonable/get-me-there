@@ -1,6 +1,7 @@
 // Spec §9 item 5 sweeps: strict mounting, auth flags, every GET against core/api-contract with provenance on every
 // price, banned words in every API string, sentinel secrets never in a body or a log line.
 import {
+  AUTH_MISSING_NATIVE,
   apiContract,
   BANNED_WORD_ALLOWLIST,
   decodeDatePairs,
@@ -157,6 +158,7 @@ function apiTexts(): string[] {
     API_TEXT.rateLimited(42),
     API_TEXT.hostRejected('evil.example:3000'),
     API_TEXT.originRejected('https://evil.example'),
+    API_TEXT.proxiedWithoutPassword(AUTH_MISSING_NATIVE),
     API_TEXT.bodyTooLarge,
     API_TEXT.contentType,
     API_TEXT.requestedWith,

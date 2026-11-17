@@ -1,12 +1,14 @@
 // Spec §4 basic auth, the failed-auth rate limit, auth over static files, the SPA fallback.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixedClock } from '@gmt/core';
+import { AUTH_MISSING, AUTH_MISSING_NATIVE, fixedClock } from '@gmt/core';
 import type { Context } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { FailedAuthLimiter } from '../../src/middleware/auth.js';
 import type { AppEnv } from '../../src/routes/types.js';
+import { API_TEXT } from '../../src/text.js';
+import { REPO } from '../deploy/files.js';
 import { errorOf } from '../helpers/contract.js';
 import { SENTINEL_AUTH } from '../helpers/env.js';
 import { AUTH_USER, basic, createHarness, type Harness, T0 } from '../helpers/harness.js';
@@ -47,6 +49,15 @@ describe('basic auth gate (spec §4)', () => {
   it('with no credentials configured on loopback no credentials are needed', async () => {
     const x = await harness({ env: { APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' } });
     expect((await x.request('/api/providers', { auth: false })).status).toBe(200);
+    // why: spec §4: with no password the Host allowlist is what stops a page reaching the app through DNS rebinding
+    const loopbackHost = await x.request('/api/providers', {
+      auth: false,
+      headers: { host: '127.0.0.1:3000' },
+    });
+    expect(loopbackHost.status).toBe(200);
+    const rebound = await x.request('/api/providers', { auth: false, headers: { host: 'evil.example' } });
+    expect(rebound.status).toBe(403);
+    expect((await errorOf(rebound)).message).toBe(API_TEXT.hostRejected('evil.example'));
   });
 });
 
@@ -136,6 +147,82 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
       headers: { authorization: WRONG, 'x-forwarded-for': '203.0.113.1' },
     });
     expect(res.status).toBe(429);
+  });
+});
+
+describe('no password and a forwarded request (spec §4: a proxy or tunnel needs a password)', () => {
+  const NO_AUTH = { APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' };
+  const FORWARDING: Array<[string, string]> = [
+    ['forwarded', 'for=198.51.100.7;proto=https'],
+    ['x-forwarded-for', '198.51.100.7'],
+    ['x-forwarded-host', 'flights.example.com'],
+    ['x-forwarded-proto', 'https'],
+    ['x-real-ip', '198.51.100.7'],
+  ];
+  function webRoot(dir = tempDir('gmt-web-')): string {
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>gmt</title>');
+    return dir;
+  }
+
+  it.each(FORWARDING)(
+    'a request carrying %s is refused 403 on an api route, a static file and /api/health',
+    async (name, value) => {
+      const x = await harness({ env: NO_AUTH, app: { webRoot: webRoot() } });
+      for (const path of ['/api/providers', '/', '/api/health']) {
+        const res = await x.request(path, { auth: false, headers: { [name]: value } });
+        expect(res.status, path).toBe(403);
+        const e = await errorOf(res);
+        expect(e.code).toBe('proxied_without_password');
+        expect(e.message).toBe(API_TEXT.proxiedWithoutPassword(AUTH_MISSING_NATIVE));
+      }
+      // why: the same requests without the header are this machine's own, and pass
+      expect((await x.request('/api/providers', { auth: false })).status).toBe(200);
+      expect((await x.request('/', { auth: false })).status).toBe(200);
+      expect((await x.request('/api/health', { auth: false })).status).toBe(200);
+    },
+  );
+
+  it('the message names the fix for the mode: the two .env lines in development', async () => {
+    const x = await harness({ env: { ...NO_AUTH, NODE_ENV: 'development' } });
+    const res = await x.request('/api/providers', {
+      auth: false,
+      headers: { 'x-forwarded-for': '198.51.100.7' },
+    });
+    expect((await errorOf(res)).message).toBe(API_TEXT.proxiedWithoutPassword(AUTH_MISSING));
+  });
+
+  it('header names match in any case, as a proxy writes them', async () => {
+    const x = await harness({ env: NO_AUTH });
+    for (const name of ['X-Forwarded-For', 'X-REAL-IP', 'Forwarded']) {
+      const res = await x.request('/api/providers', { auth: false, headers: { [name]: '198.51.100.7' } });
+      expect(res.status, name).toBe(403);
+    }
+  });
+
+  it('with a password, or with ALLOW_UNAUTHENTICATED=true, a forwarded request is not refused for it', async () => {
+    const withAuth = await harness();
+    expect(
+      (await withAuth.request('/api/providers', { headers: { 'x-forwarded-for': '198.51.100.7' } })).status,
+    ).toBe(200);
+    await withAuth.close();
+    const tailnet = await harness({ env: { ...NO_AUTH, ALLOW_UNAUTHENTICATED: 'true' } });
+    expect(
+      (
+        await tailnet.request('/api/providers', {
+          auth: false,
+          headers: { 'x-forwarded-for': '198.51.100.7' },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it('the image’s health check sends no forwarding header', () => {
+    const dockerfile = readFileSync(join(REPO, 'Dockerfile'), 'utf8');
+    const check = dockerfile.slice(dockerfile.indexOf('HEALTHCHECK'));
+    expect(check).toContain("fetch('http://127.0.0.1:3000/api/health')");
+    expect(check.slice(0, check.indexOf('\nCMD ["node", "apps/api'))).not.toMatch(
+      /forwarded|real-ip|headers/i,
+    );
   });
 });
 

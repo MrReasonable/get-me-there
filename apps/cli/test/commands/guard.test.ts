@@ -13,7 +13,7 @@ const ACTIVE = {
     estimatedFinishAt: null,
   },
 };
-const creds = { port: 3000, user: 'operator', pass: 'p-0123456789ab' };
+const app = { port: 3000, auth: { user: 'operator', pass: 'p-0123456789ab' } };
 function world(answers: unknown[]) {
   const queue = [...answers];
   const http = stubHttp({
@@ -31,7 +31,7 @@ function world(answers: unknown[]) {
   const w = testWorld({ http, io, deps: { sleep: async (ms) => void slept.push(ms) } });
   return { ...w, http, slept };
 }
-const target = { label: 'the app', up: true, creds, autoResume: true };
+const target = { label: 'the app', up: true, app, autoResume: true };
 const none = { wait: false, force: false };
 
 describe('guardActiveRun', () => {
@@ -55,9 +55,24 @@ describe('guardActiveRun', () => {
         ok: false,
         message: expect.stringContaining('cannot tell whether a search is running in the app'),
       });
-    expect(await guardActiveRun(world([ACTIVE]).deps, { ...target, creds: null }, none)).toMatchObject({
-      ok: false,
+    expect(
+      await guardActiveRun(
+        world([ACTIVE]).deps,
+        { ...target, app: null, cannot: 'its port is unknown' },
+        none,
+      ),
+    ).toEqual({ ok: false, message: expect.stringContaining('(its port is unknown)') });
+  });
+  it('an app with no password (spec §4) is asked without an Authorization header', async () => {
+    const w = world([{ execution: null }]);
+    expect(await guardActiveRun(w.deps, { ...target, app: { port: 3000, auth: null } }, none)).toMatchObject({
+      ok: true,
     });
+    expect(w.http.requests).toHaveLength(1);
+    expect(w.http.requests[0]?.headers).toEqual({});
+    const withAuth = world([{ execution: null }]);
+    await guardActiveRun(withAuth.deps, target, none);
+    expect(withAuth.http.requests[0]?.headers).toHaveProperty('Authorization');
   });
   it('--wait polls every 60 s until none', async () => {
     const w = world([ACTIVE, ACTIVE, { execution: null }]);

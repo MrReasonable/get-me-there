@@ -4,8 +4,9 @@
 # address, so the host's worker stops for it, the session's spacing starts from the host's last page, and the session's
 # pages, scrolls and any pause come back to the host before its worker starts again.
 #
-#   session.sh before > line        on the host: refuses while a search runs (GET /api/executions/active, the app's
-#                                   basic auth read from the host checkout's .env and never printed), stops the host
+#   session.sh before > line        on the host: refuses while a search runs (GET /api/executions/active, with the
+#                                   app's basic auth read from the host checkout's .env and never printed, or none
+#                                   when .env has no password: spec §4), stops the host
 #                                   worker alone (pnpm gmt stop --only worker, from the host checkout), and prints the
 #                                   host's `run.ts session export` line
 #   session.sh run <args…>          runs the worker's run.ts with <args…> from this checkout, in the current
@@ -38,17 +39,23 @@ host_checkout() {
 }
 
 # The app's active run, asked with the basic auth from the host checkout's .env; curl reads the credentials from its
-# standard input (-K -), so they reach no command line and no output.
+# standard input (-K -), so they reach no command line and no output. With neither auth line in .env the app has no
+# password (spec §4: only this machine can reach it), so it is asked without credentials; with one line alone it is not.
 refuse_while_active() {
   env_file="$(host_checkout)/.env"
   url="${GMT_APP_URL:-http://127.0.0.1:3000}/api/executions/active"
   user=$(sed -n 's/^APP_BASIC_AUTH_USER=//p' "$env_file" 2>/dev/null | tail -n 1)
   pass=$(sed -n 's/^APP_BASIC_AUTH_PASS=//p' "$env_file" 2>/dev/null | tail -n 1)
-  if [ -z "$user" ] || [ -z "$pass" ]; then
-    echo "refused: no APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS in $env_file, so whether a search runs is unknown" >&2
+  if [ -z "$user" ] && [ -z "$pass" ]; then
+    credentials=''
+  elif [ -z "$user" ] || [ -z "$pass" ]; then
+    echo "refused: $env_file has only one of APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS, so whether a search runs is unknown" >&2
     exit 69
+  else
+    credentials=$(printf 'user = "%s:%s"\n' "$user" "$pass")
   fi
-  answer=$(printf 'user = "%s:%s"\n' "$user" "$pass" | curl -sS --fail --max-time 10 -K - "$url") || {
+  # why: an empty config on standard input adds nothing, so the request carries no Authorization header
+  answer=$(printf '%s\n' "$credentials" | curl -sS --fail --max-time 10 -K - "$url") || {
     echo "refused: the app at $url did not answer whether a search runs" >&2
     exit 69
   }

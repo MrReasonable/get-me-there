@@ -177,6 +177,7 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
   const WORKER_PLIST = `/Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`;
   const WORKER_ENV = '/Users/op/.local/state/get-me-there/camoufox/worker.env';
   const DOCKER_PASS = 'docker-pass-0123456789abcdef';
+  const CONFIG_SECRET = 'config-env-secret-0123456789';
   const report = {
     generatedAt: '2026-10-24T09:30:00.000Z',
     mode: 'container',
@@ -195,12 +196,20 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       },
     ],
   };
-  /** Docker with the compose project's app in this state, publishing its port 3000 on this host address. */
+  /**
+   * Docker with the compose project's app in this state, publishing its port 3000 on this host address; `config` is the
+   * effective config's `services.app.ports` (overrides included), or no answer from `docker compose config`.
+   */
   const docker =
     (
       state: 'running' | 'exited' | null,
       published: string | null = '127.0.0.1:3000',
       ps?: { code: number; stdout: string },
+      config?:
+        | Array<unknown>
+        | { stdout: string }
+        | { ports: Array<unknown>; environment: Record<string, unknown> }
+        | 'fail',
     ): RunHandler =>
     (a) => {
       if (a[0] !== 'docker') return undefined;
@@ -213,6 +222,31 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
             stdout: state === null ? '' : `${JSON.stringify({ Service: 'app', State: state })}\n`,
           }
         );
+      if (a.includes('config')) {
+        if (config === 'fail') return { code: 1, stderr: 'no config' };
+        if (config !== undefined && !Array.isArray(config) && 'stdout' in config)
+          return { code: 0, stdout: config.stdout };
+        // why: by default the configuration publishes what `compose port` names, so the two sources agree
+        const m = published === null ? null : /^\[?(.+?)\]?:(\d+)$/.exec(published);
+        const ports =
+          config === undefined
+            ? m === null
+              ? []
+              : [{ host_ip: m[1], target: 3000, published: m[2] }]
+            : Array.isArray(config)
+              ? config
+              : config.ports;
+        const environment = {
+          APP_BASIC_AUTH_PASS: CONFIG_SECRET,
+          ...(config !== undefined && !Array.isArray(config) ? config.environment : {}),
+        };
+        return {
+          code: 0,
+          // why: the real output carries the interpolated environment; status must read only ports and
+          // ALLOW_UNAUTHENTICATED from it, and print nothing of it
+          stdout: JSON.stringify({ name: 'get-me-there', services: { app: { ports, environment } } }),
+        };
+      }
       if (a.includes('port') && a.includes('app') && a.includes('3000'))
         return state === 'running' && published !== null
           ? { code: 0, stdout: `${published}\n` }
@@ -228,9 +262,14 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     }),
     published?: string | null,
     ps?: { code: number; stdout: string },
+    config?:
+      | Array<unknown>
+      | { stdout: string }
+      | { ports: Array<unknown>; environment: Record<string, unknown> }
+      | 'fail',
   ) {
     const http = stubHttp({ 'GET /api/status': status });
-    const m = machine({ http, extra: docker(state, published, ps) });
+    const m = machine({ http, extra: docker(state, published, ps, config) });
     // why: compose fixes the container's PORT and publishes it; a PORT line in .env is not the host port
     m.fs.file(DOT_ENV, `APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=${DOCKER_PASS}\nPORT=9999\n`, 0o600);
     m.fs.file(WORKER_PLIST, 'worker plist');
@@ -292,6 +331,169 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       expect(m.io.stdout).toContain('fix: publish 127.0.0.1:3000:3000 in docker-compose.yml');
     }
   });
+  it('Docker only, published beyond loopback with no password in .env (spec §4): a fail naming both fixes', async () => {
+    for (const published of ['0.0.0.0:3917', '[::]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      m.fs.file(DOT_ENV, 'TRAVELPAYOUTS_TOKEN=tp-token-0123456789\n', 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(
+        /bind address +fail .*published beyond loopback with no password, so anyone who reaches it can use the app/,
+      );
+      expect(m.io.stdout).toContain(
+        'fix: publish only 127.0.0.1 in docker-compose.yml and any override file (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
+      );
+    }
+    // why: on loopback no password is fine, and nothing is said
+    const { m } = dockerOnly('running', undefined, '127.0.0.1:3917');
+    m.fs.file(DOT_ENV, 'TRAVELPAYOUTS_TOKEN=tp-token-0123456789\n', 0o600);
+    expect(await runCli(['status'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('bind address');
+  });
+  describe('the effective publications, overrides included (docker compose config, spec §4)', () => {
+    const NO_AUTH = 'TRAVELPAYOUTS_TOKEN=tp-token-0123456789\n';
+    const OVERRIDE = [
+      { mode: 'ingress', host_ip: '127.0.0.1', target: 3000, published: '3917', protocol: 'tcp' },
+      { mode: 'ingress', host_ip: '0.0.0.0', target: 3000, published: '8080', protocol: 'tcp' },
+    ];
+    it('an override adding 0.0.0.0, with no password, fails although compose port names only the loopback one', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, OVERRIDE);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(
+        /bind address +fail +0\.0\.0\.0: published beyond loopback with no password/,
+      );
+      expect(m.io.stdout).not.toMatch(/127\.0\.0\.1: published beyond loopback/);
+      expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+      const config = m.runner.calls.find((c) => c.argv.includes('config'));
+      expect(config?.argv.slice(4)).toEqual(['config', '--format', 'json']);
+      expect(config?.cwd).toBe('/repo');
+    });
+    it('a mapping with no host address publishes on every interface', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, [
+        { mode: 'ingress', target: 3000, published: '3917', protocol: 'tcp' },
+      ]);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(
+        /bind address +fail +0\.0\.0\.0: published beyond loopback with no password/,
+      );
+    });
+    it('the same override with the two lines in .env warns, as a public bind with a password does', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, OVERRIDE);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(/bind address +warn +0\.0\.0\.0: published beyond loopback: plain HTTP/);
+      expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+    });
+    it('with ALLOW_UNAUTHENTICATED=true in .env and no password, a publication beyond loopback warns, not fails', async () => {
+      const { m } = dockerOnly('running', undefined, '0.0.0.0:3917', undefined, OVERRIDE);
+      m.fs.file(DOT_ENV, `${NO_AUTH}ALLOW_UNAUTHENTICATED=true\n`, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(/bind address +warn +0\.0\.0\.0: published beyond loopback: plain HTTP/);
+      expect(m.io.stdout).not.toMatch(/bind address +fail/);
+    });
+    const LOOP = { host_ip: '127.0.0.1', target: 3000, published: '3917' };
+    it.each([
+      ['`::`', [LOOP, { host_ip: '::', target: 3000, published: '8080' }], '::'],
+      [
+        'a null host_ip (every interface)',
+        [LOOP, { host_ip: null, target: 3000, published: '8080' }],
+        '0.0.0.0',
+      ],
+      [
+        'a range published on 0.0.0.0',
+        [LOOP, { host_ip: '0.0.0.0', target: 3000, published: '3000-3001' }],
+        '0.0.0.0',
+      ],
+      [
+        'an entry that cannot be read, beside readable ones (fail-safe)',
+        [LOOP, { host_ip: 42, target: 3000, published: '8080' }],
+        'an unreadable ports entry',
+      ],
+      ['a short-syntax string entry', [LOOP, '8080:3000'], 'an unreadable ports entry'],
+    ])('the config’s %s with no password fails', async (_l, ports, shown) => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, ports);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toContain(`${shown}: published beyond loopback with no password`);
+      expect(m.io.stdout).not.toContain('127.0.0.1: published');
+      expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+    });
+    it('a range published on loopback says nothing', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, [
+        { host_ip: '127.0.0.1', target: 3000, published: '3000-3001' },
+      ]);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).not.toContain('bind address');
+    });
+    it('a publication in the config only, which compose port does not name, fails with no password', async () => {
+      const { m } = dockerOnly('running', undefined, null, undefined, [
+        { host_ip: '0.0.0.0', target: 3000, published: '8080' },
+      ]);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(
+        /bind address +fail +0\.0\.0\.0: published beyond loopback with no password/,
+      );
+    });
+    it.each([
+      ['fails', 'fail' as const],
+      [
+        'prints what is not JSON',
+        { stdout: `not json APP_BASIC_AUTH_PASS=${'config-env-secret-0123456789'}` },
+      ],
+      [
+        'prints JSON of another shape',
+        { stdout: JSON.stringify({ services: { app: { ports: 'x' } }, x: CONFIG_SECRET }) },
+      ],
+    ])(
+      'when compose config %s, a warning says only the running mapping was checked, with none of its text',
+      async (_l, config) => {
+        const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, config);
+        m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+        expect(await runCli(['status'], m.deps)).toBe(0);
+        expect(m.io.stdout).toMatch(
+          /bind address +warn +compose’s configuration could not be read, so only the running mapping was checked/,
+        );
+        expect(m.io.stdout).toContain('fix: docker compose config --quiet');
+        expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+        expect(m.io.stdout).not.toContain('not json');
+      },
+    );
+    it('ALLOW_UNAUTHENTICATED=true in the compose environment (the tailscale-only override) warns, not fails', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, {
+        ports: OVERRIDE,
+        environment: { ALLOW_UNAUTHENTICATED: 'true', SEARCHAPI_KEY: 'env-searchapi-secret-0123456789' },
+      });
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(/bind address +warn +0\.0\.0\.0: published beyond loopback: plain HTTP/);
+      expect(m.io.stdout).not.toMatch(/bind address +fail/);
+      expect(m.io.stdout + m.io.stderr).not.toContain('env-searchapi-secret-0123456789');
+      expect(m.io.stdout + m.io.stderr).not.toContain(CONFIG_SECRET);
+    });
+    it.each([['false'], [''], [null], [true]])(
+      'ALLOW_UNAUTHENTICATED=%j in the compose environment is not the exception: still a fail',
+      async (value) => {
+        const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, {
+          ports: OVERRIDE,
+          environment: { ALLOW_UNAUTHENTICATED: value },
+        });
+        m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+        expect(await runCli(['status'], m.deps)).toBe(1);
+        expect(m.io.stdout).toMatch(/bind address +fail +0\.0\.0\.0/);
+      },
+    );
+    it('loopback only, in both IPv4 and IPv6, says nothing', async () => {
+      const { m } = dockerOnly('running', undefined, '127.0.0.1:3917', undefined, [
+        { mode: 'ingress', host_ip: '127.0.0.1', target: 3000, published: '3917', protocol: 'tcp' },
+        { mode: 'ingress', host_ip: '::1', target: 3000, published: '3918', protocol: 'tcp' },
+      ]);
+      m.fs.file(DOT_ENV, NO_AUTH, 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).not.toContain('bind address');
+    });
+  });
   it.each([
     ['IPv4 loopback only', '127.0.0.1:3917', 'http://127.0.0.1:3917'],
     ['IPv4 wildcard only', '0.0.0.0:3917', 'http://127.0.0.1:3917'],
@@ -317,7 +519,8 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
   });
   it('Docker only, the published address unreadable: a warning that it is not checked, never silence', async () => {
-    const { m } = dockerOnly('running', undefined, null);
+    // why: neither compose port nor compose config answers
+    const { m } = dockerOnly('running', undefined, null, undefined, 'fail');
     await runCli(['status'], m.deps);
     expect(m.io.stdout).toMatch(/bind address +warn +compose did not say which address/);
   });
@@ -405,6 +608,12 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     const http = stubHttp({});
     const m = await afterSetup(docker('running'), http);
     m.fs.file(DOT_ENV, `APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=${DOCKER_PASS}\n`, 0o600);
+    // why: sign-in on, as `--reconfigure password` leaves it (spec §4: a fresh loopback install has no password)
+    m.fs.file(
+      APP_ENV,
+      `${m.fs.read(APP_ENV) ?? ''}APP_BASIC_AUTH_USER="operator"\nAPP_BASIC_AUTH_PASS="native-pass-0123456789"\n`,
+      0o600,
+    );
     http.requests.length = 0;
     expect(await runCli(['status'], m.deps)).toBe(0);
     expect(m.io.stdout).toMatch(/docker +warn +a Docker app runs beside the native one \(two ledgers\)/);

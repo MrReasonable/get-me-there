@@ -2,17 +2,20 @@
  * The one answer to "where is this machine's app, and how does the CLI authenticate to it" (spec §13; W1: the app in
  * Docker with the worker on this machine is a supported mode). `gmt status` reads its report through it, and any command
  * that must ask the running app something (an active-run guard) does the same. The password is read, never printed: it
- * travels only in the Authorization header of an in-process request to 127.0.0.1.
+ * travels only in the Authorization header of an in-process request to 127.0.0.1. With no password in the settings
+ * (spec §4: only this machine can reach the app) the app is asked all the same, with no Authorization header.
  *
- * - The native app: app.env's port and basic auth.
+ * - The native app: app.env's port and basic auth, if any.
  * - The app in Docker, when there is no native install: the host port compose publishes for the container's 3000
  *   (docker-compose.yml fixes the container's PORT, so a PORT line in .env is not it) and the basic auth in the
- *   checkout's .env. With no published port known nothing is read or sent: a guessed port could be another program's.
+ *   checkout's .env, if any. With no published port known nothing is read or sent: a guessed port could be another
+ *   program's.
  * - Otherwise none, with the reason.
  */
 import { isIP } from 'node:net';
 import { join } from 'node:path/posix';
-import { type AppCreds, appUrl, authHeaders, credsFrom } from './appClient.js';
+import { z } from 'zod';
+import { type AppTarget, appUrl, authHeaders, targetFrom } from './appClient.js';
 import type { Deps } from './deps.js';
 import { appEnvPath } from './services/specs.js';
 import { readEnvText } from './setup/appEnv.js';
@@ -24,23 +27,18 @@ export type AppEndpoint =
       /** `http://127.0.0.1:<port>`, with no trailing slash. */
       baseUrl: string;
       port: number;
-      creds: AppCreds | null;
-      /** The Authorization header when there are credentials, else none. */
+      target: AppTarget;
+      /** The Authorization header when the app has a password, else none. */
       headers: Record<string, string>;
     }
   | { kind: 'none'; reason: string };
 
-const ready = (
-  kind: 'native' | 'docker',
-  port: number,
-  creds: AppCreds | null,
-  host = '127.0.0.1',
-): AppEndpoint => ({
+const ready = (kind: 'native' | 'docker', target: AppTarget): AppEndpoint => ({
   kind,
-  baseUrl: appUrl(port, '', host),
-  port,
-  creds,
-  headers: creds === null ? {} : authHeaders(creds),
+  baseUrl: appUrl(target.port, '', target.host),
+  port: target.port,
+  target,
+  headers: authHeaders(target),
 });
 
 /** The native app, from app.env: its port and, when app.env has them, the credentials. */
@@ -55,11 +53,7 @@ export function nativeEndpoint(deps: Deps): AppEndpoint {
     };
   }
   if (text === null) return { kind: 'none', reason: 'there is no app.env yet: run pnpm gmt setup' };
-  const record = readEnvText(text);
-  const creds = credsFrom(record);
-  const port =
-    creds?.port ?? (record.PORT !== undefined && /^\d+$/.test(record.PORT) ? Number(record.PORT) : 3000);
-  return ready('native', port, creds);
+  return ready('native', targetFrom(readEnvText(text)));
 }
 
 /**
@@ -84,9 +78,21 @@ const V4_LOCAL: ReadonlySet<string> = new Set(['127.0.0.1', '0.0.0.0']);
 const V6_LOCAL: ReadonlySet<string> = new Set(['::1', '::']);
 
 /**
- * The host addresses and ports compose publishes for the container's 3000 (`docker compose port app 3000` prints one
- * `address:port` line per family), or null when compose does not say. Addresses have no brackets (`::1`, not `[::1]`).
- * Inside the container the app binds 0.0.0.0; these published addresses decide who can reach it.
+ * An address as compose wrote it, without brackets and in canonical form (compose prints the host text as written, so
+ * 0:0:0:0:0:0:0:1 must read as ::1; URL writes the canonical form), or null when it is no IP address.
+ */
+function ipAddress(text: string): string | null {
+  const raw = text.replace(/^\[|\]$/g, '');
+  const kind = isIP(raw);
+  if (kind === 0) return null;
+  return kind === 6 ? new URL(`http://[${raw}]`).hostname.replace(/^\[|\]$/g, '') : raw;
+}
+
+/**
+ * The host address and port compose publishes for the running container's 3000 (`docker compose port app 3000`), or
+ * null when compose does not say. It prints one mapping only, even when the app has two (Docker Compose 5.5, checked
+ * 2026-11-17), so it says where to ask the app, never everywhere it is published: composeConfigFacts says that.
+ * Addresses have no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0.
  */
 export async function dockerPublications(deps: Deps): Promise<{ address: string; port: number }[] | null> {
   const r = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
@@ -95,14 +101,105 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   for (const line of r.stdout.split('\n')) {
     // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
     const m = /^(.+):(\d+)$/.exec(line.trim());
-    const raw = m?.[1]?.replace(/^\[|\]$/g, '');
-    if (raw === undefined || m?.[2] === undefined) continue;
-    const kind = isIP(raw);
-    // why: compose prints the host text as written, so 0:0:0:0:0:0:0:1 must read as ::1; URL writes the canonical form
-    const address = kind === 6 ? new URL(`http://[${raw}]`).hostname.replace(/^\[|\]$/g, '') : raw;
-    if (kind !== 0) out.push({ address, port: Number(m[2]) });
+    const address = m?.[1] === undefined ? null : ipAddress(m[1]);
+    if (address !== null && m?.[2] !== undefined) out.push({ address, port: Number(m[2]) });
   }
   return out.length === 0 ? null : out;
+}
+
+/**
+ * The part of `docker compose config --format json` read here: the app's `ports`, each entry read alone, and its
+ * environment's ALLOW_UNAUTHENTICATED alone. `z.object` strips every other key, so nothing else of the environment is
+ * kept; an environment that is not an object reads as none.
+ */
+const configSchema = z.object({
+  services: z.object({
+    app: z.object({
+      ports: z.array(z.unknown()).optional(),
+      environment: z.object({ ALLOW_UNAUTHENTICATED: z.string().nullish() }).optional().catch(undefined),
+    }),
+  }),
+});
+/** One `ports` entry (long syntax): its host address and published port; a null host address is every interface. */
+const configPortSchema = z.looseObject({
+  host_ip: z.string().nullish(),
+  published: z.union([z.string(), z.number()]).nullish(),
+});
+
+/** How status names a `ports` entry it could not read; never any of the config's own text. */
+export const UNREADABLE_PORTS_ENTRY = 'an unreadable ports entry';
+
+/** What status reads of compose's effective configuration: where the app is published, and the one exception. */
+export interface ComposeConfigFacts {
+  ports: { address: string; port: number }[];
+  /** `services.app.environment.ALLOW_UNAUTHENTICATED` is `true` (the documented tailscale-only override sets it). */
+  allowUnauthenticated: boolean;
+}
+
+/**
+ * Every host address the app is published on by compose's effective configuration, every compose file and override
+ * included (spec §4: the app trusts PUBLISHED_ADDRESS, which an extra `ports:` mapping leaves behind), and whether its
+ * environment sets ALLOW_UNAUTHENTICATED=true; null when the configuration cannot be read. The JSON holds the
+ * interpolated environment, secrets included, so it is parsed here, in process, and only `ports` and that one key are
+ * taken; it is never printed, logged or written. A mapping with no host address (missing, empty or null) publishes on
+ * every interface (0.0.0.0). Each entry is read alone: one that cannot be read is kept as UNREADABLE_PORTS_ENTRY, which
+ * is no loopback address, so it is judged beyond loopback (fail-safe).
+ */
+export async function composeConfigFacts(deps: Deps): Promise<ComposeConfigFacts | null> {
+  const r = await deps.run(compose('config', '--format', 'json'), { cwd: deps.checkout, timeoutMs: 20_000 });
+  if (r.code !== 0) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+  const parsed = configSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const app = parsed.data.services.app;
+  const ports: { address: string; port: number }[] = [];
+  for (const entry of app.ports ?? []) {
+    const p = configPortSchema.safeParse(entry);
+    if (!p.success) {
+      ports.push({ address: UNREADABLE_PORTS_ENTRY, port: 0 });
+      continue;
+    }
+    const hostIp = p.data.host_ip ?? '';
+    const address = hostIp === '' ? '0.0.0.0' : ipAddress(hostIp);
+    // why: a host address that is no IP (a name) is not loopback, so it is judged as written; a range's port is NaN,
+    // which only labels the mapping
+    ports.push({ address: address ?? hostIp, port: Number(p.data.published ?? 0) });
+  }
+  return { ports, allowUnauthenticated: app.environment?.ALLOW_UNAUTHENTICATED === 'true' };
+}
+
+/** Where the Docker app may be asked on this machine, from what compose publishes, or why it may not be. */
+export type LoopbackPublication = { ok: true; port: number; host: string } | { ok: false; reason: string };
+
+/**
+ * The one choice of where to ask the Docker app (appEndpoint and the import's guard): its published port in the loopback
+ * family compose published (IPv4 first when both; 0.0.0.0 and :: include loopback), never another address.
+ */
+export function loopbackPublication(
+  published: ReadonlyArray<{ address: string; port: number }> | null,
+): LoopbackPublication {
+  const list = published ?? [];
+  // why: the basic auth is sent only to this machine's loopback, in the family compose published (IPv4 first when both):
+  // a port published on another address, or on a family that was not, could belong to another program on 127.0.0.1
+  const v4 = list.find((p) => V4_LOCAL.has(p.address));
+  const v6 = list.find((p) => V6_LOCAL.has(p.address));
+  const chosen = v4 ?? v6;
+  const unsaid = 'compose did not say which host port the Docker app publishes';
+  if (chosen === undefined)
+    return {
+      ok: false,
+      reason:
+        list[0] === undefined
+          ? unsaid
+          : `compose publishes the Docker app on ${list[0].address}, not on this machine’s loopback`,
+    };
+  if (chosen.port < 1 || chosen.port > 65535) return { ok: false, reason: unsaid };
+  return { ok: true, port: chosen.port, host: v4 === undefined ? '[::1]' : '127.0.0.1' };
 }
 
 /** The Docker app, given its compose state (read it with dockerAppState). */
@@ -113,24 +210,9 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'there is no native install, and Docker’s compose state could not be read',
     };
   if (state !== 'running') return { kind: 'none', reason: 'the Docker app is not running' };
-  const published = (await dockerPublications(deps)) ?? [];
-  // why: the basic auth is sent only to this machine's loopback, in the family compose published (IPv4 first when both):
-  // a port published on another address, or on a family that was not, could belong to another program on 127.0.0.1
-  const v4 = published.find((p) => V4_LOCAL.has(p.address));
-  const v6 = published.find((p) => V6_LOCAL.has(p.address));
-  const chosen = v4 ?? v6;
-  if (chosen === undefined)
-    return {
-      kind: 'none',
-      reason:
-        published[0] === undefined
-          ? 'compose did not say which host port the Docker app publishes'
-          : `compose publishes the Docker app on ${published[0].address}, not on this machine’s loopback`,
-    };
-  const { port } = chosen;
-  if (port < 1 || port > 65535)
-    return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
-  const host = v4 === undefined ? '[::1]' : '127.0.0.1';
+  const where = loopbackPublication(await dockerPublications(deps));
+  if (!where.ok) return { kind: 'none', reason: where.reason };
+  const { port, host } = where;
   let text: string | null;
   try {
     text = deps.files.read(join(deps.checkout, '.env'));
@@ -140,8 +222,8 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'the checkout’s .env could not be read: check that it is yours and readable (chmod 600)',
     };
   }
-  const creds = text === null ? null : credsFrom(readEnvText(text));
-  return ready('docker', port, creds === null ? null : { ...creds, port, host }, host);
+  // why: no .env (or no auth lines in it) is an app with no password, asked without an Authorization header
+  return ready('docker', { ...targetFrom(readEnvText(text ?? '')), port, host });
 }
 
 /**

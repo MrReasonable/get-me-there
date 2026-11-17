@@ -50,8 +50,14 @@ Pressing Enter at every question gives a running app with no price source.
 | 6 | Email alerts | skip | Send alerts and notices by email. |
 | 7 | Keep running after you log out (Linux) | no | Without it, the app stops when you log out of every session; setup runs loginctl enable-linger for you. |
 
-Secrets (tokens, keys, the SMTP password) are typed hidden; setup generates the app's password
-itself. For the SearchApi free trial, setup also asks how many of the trial's 100 searches are
+Secrets (tokens, keys, the SMTP password) are typed hidden. Setup asks no password for the app:
+while it answers only on this machine (127.0.0.1, under this machine's own names) it needs none, so
+setup writes no sign-in lines. `pnpm gmt setup --reconfigure password` generates one and turns
+sign-in on, which the app needs before another device or name reaches it (section 3), and before
+any proxy or tunnel forwards to it. "This machine" means every account on it: on a machine other
+people log in to, keep a password (`pnpm gmt setup --reconfigure password`). To turn an existing
+password off, delete the two `APP_BASIC_AUTH_*` lines from `~/.config/get-me-there/app.env` and
+run `pnpm gmt restart`. For the SearchApi free trial, setup also asks how many of the trial's 100 searches are
 already used (100 minus what your SearchApi dashboard says is left). For email it asks the SMTP
 host, port, TLS, user, password, and the to and from addresses. Row 7 runs
 `loginctl enable-linger <you>` without `sudo`; if that is refused it prints the `sudo` line for
@@ -98,10 +104,15 @@ With no price source, the closing screen says so first:
 
 > No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.
 
-Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
-password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
-prints it to the terminal only. If scrollback or a shared screen may have kept it,
-`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app and
+Then it gives the address (`http://127.0.0.1:3000`) and says there is no password: only this
+machine can reach the app. Before another device or name reaches it (section 3), turn sign-in on
+with `pnpm gmt setup --reconfigure password`: setup writes the user name (`operator`) and a
+generated password into `~/.config/get-me-there/app.env` and restarts the app. From then on the
+closing screen says where the password is, `pnpm gmt password` prints it to the terminal only,
+and `pnpm gmt setup --reconfigure password` replaces it if scrollback or a shared screen may have
+kept it. A re-run of setup keeps whatever the file has, except that settings which let another
+device or name reach the app (a `BIND_ADDRESS` or `ALLOWED_HOSTS` you set) get a password
+written, since the app would refuse to start without one. It names the next step: open the app and
 use the new-search panel on Trips (From, To, the dates), then press **Search**; the
 sentence beside the button says what the search will use before you press. A new search runs
 once, when you press the button; nothing runs on a schedule until you add one from the search's
@@ -155,7 +166,7 @@ pnpm gmt restart
 pnpm gmt logs
 pnpm gmt backup                         # a backup now (the daily job's, run once)
 pnpm gmt restore <file>                 # see "Restore (native)" below
-pnpm gmt password
+pnpm gmt password                       # with sign-in on; with none it says why there is none
 pnpm gmt smoke --from LHR --to JFK      # section 13; it spends real calls
 pnpm gmt update                         # fast-forward only to origin/main, with a backup first
 pnpm gmt update --dry-run               # print the update's plan and change nothing
@@ -275,13 +286,32 @@ backup held as running and catches up a missed firing once per scheduled search 
 detached commit: run `git switch main` before the next `pnpm gmt update` (`pnpm gmt status`
 reports it).
 
-## 1. Authentication first
+## 1. Signing in
 
-*Applies to: the container path. A native install generates its basic auth (section 0).*
+*Applies to: the container path. Natively, setup writes no password while the app answers only on
+this machine, and `pnpm gmt setup --reconfigure password` turns sign-in on (section 0).*
 
-The container listens on all interfaces inside Docker, compose publishes it on
-`127.0.0.1:3000` only, and the app refuses to start without basic auth. Create `.env` next to
-`docker-compose.yml`, readable by you alone, with a password nobody else has seen:
+No password is needed while you open the app on this machine. The container listens on all
+interfaces inside Docker, but compose publishes it on `127.0.0.1:3000` only and tells the app so
+(`PUBLISHED_ADDRESS` in `docker-compose.yml`), and with the default `ALLOWED_HOSTS` the app answers
+only to `localhost:3000` and `127.0.0.1:3000`. That Host check is also what stops a web page from
+reaching the app through a name of its own. So with no sign-in lines in `.env` the app starts and
+asks for no password. "This machine" means every account on it: on a machine other people log in
+to, keep a password (the two lines below).
+
+Before another device or name reaches it, add two lines to `.env`. That is the moment
+`ALLOWED_HOSTS` names anything but `localhost`, `127.x.x.x` or `[::1]` (Tailscale and a reverse
+proxy do, section 3), `TRUST_PROXY=true` says a proxy is in front, or the published address in
+`docker-compose.yml` is not `127.0.0.1`; without the lines the app then refuses to start. Anything
+that lets another device reach the app’s port needs the two lines, whatever `ALLOWED_HOSTS` says: a
+reverse proxy, `tailscale serve`, or any tunnel (`ssh -R`, `ssh -L` from another machine, `socat`).
+A proxy that rewrites the Host header to `127.0.0.1:3000`, as nginx’s plain `proxy_pass` does,
+passes the name check; while the app has no password it refuses every request that carries a
+forwarding header (`Forwarded`, `X-Forwarded-For` and the like), but a raw tunnel adds none, so set
+the password before you open one. On Linux, Docker Engine before 28.0 let other machines on the
+same local network reach a port published on `127.0.0.1` (Docker's 28.0 release notes); there,
+update Docker or keep the password. Create `.env` next to `docker-compose.yml`, readable by you
+alone, with a password nobody else has seen:
 
 ```bash
 openssl rand -base64 24       # prints a random password; use it below
@@ -295,13 +325,14 @@ APP_BASIC_AUTH_PASS=CHANGE-ME
 
 Replace `CHANGE-ME` with that random value (the app needs at least 12 characters, so the
 placeholder itself is refused). If a value contains `$`, wrap it in single quotes, because
-compose interpolates `$` in `.env`.
+compose interpolates `$` in `.env`. Set both lines or neither. To turn an existing password off,
+delete the two lines from `.env` and run `docker compose up -d`.
 
-These are the two lines the app asks for when they are missing. If `docker compose logs app`
-shows exit 78 with "add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)",
+These are the two lines the app asks for when it needs them. If `docker compose logs app` shows
+exit 78 naming `ALLOWED_HOSTS` (or `PUBLISHED_ADDRESS`) and ending "add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)",
 add exactly these two lines and run `docker compose up -d` again. Do not set
-`ALLOW_UNAUTHENTICATED` in `.env`: compose does not forward it (section 3 is the only way to run
-without auth).
+`ALLOW_UNAUTHENTICATED` in `.env`: compose does not forward it (section 3 has the only way to run
+without a password on a host only your tailnet can reach).
 
 Basic auth sends the password with every request. Over plain HTTP that is only acceptable on
 loopback. To reach the app from another device, put TLS in front of it (section 3).
@@ -310,7 +341,7 @@ Anyone who can run `docker` on this host can read the container's environment, k
 (`docker inspect`), so treat membership of the `docker` group as root and keep this host to
 yourself.
 
-## 2. The £0 configuration: three lines
+## 2. The £0 configuration: one line
 
 *Applies to: the container path. Natively, this is row 4 of section 0, or `pnpm gmt setup --reconfigure travelpayouts`.*
 
@@ -318,11 +349,10 @@ Get a free Travelpayouts token (Travelpayouts account → API token) and add it:
 
 ```dotenv
 TRAVELPAYOUTS_TOKEN=your-travelpayouts-token
-APP_BASIC_AUTH_USER=operator
-APP_BASIC_AUTH_PASS=CHANGE-ME
 ```
 
-That is the whole `.env` for £0. Then:
+That is the whole `.env` for £0 on this machine; add the two sign-in lines of section 1 before
+another device or name reaches the app. Then:
 
 ```bash
 docker compose up -d --build --wait --wait-timeout 240
@@ -334,8 +364,8 @@ refusal (exit 78) names what to fix and restarts until you do. If the log shows 
 starting (a lock wait or the first airport seeding), `docker compose ps` turns `healthy` within
 the 4-minute start period.
 
-Open <http://127.0.0.1:3000> and sign in. Then set up the daily backup of section 6 before
-you rely on the app.
+Open <http://127.0.0.1:3000> (with the section 1 lines set, sign in with them). Then set up the
+daily backup of section 6 before you rely on the app.
 
 What £0 gives: calendar prices from the Aviasales cache only, every row labelled "constraints
 not checked", and coverage that depends on what Aviasales users searched recently. Before you
@@ -366,8 +396,9 @@ private.
 
 Never put `NODE_ENV`, `IN_CONTAINER` or `ALLOW_FIXTURE_PROVIDER` in `.env` for the container:
 compose does not pass them (the image sets the first two), and fixture data cannot be enabled
-in a container. `DATABASE_PATH`, `PORT` and `BIND_ADDRESS` are fixed in `docker-compose.yml`;
-setting them in `.env` changes nothing (section 3 says how to use another host port).
+in a container. `DATABASE_PATH`, `PORT`, `BIND_ADDRESS` and `PUBLISHED_ADDRESS` are fixed in
+`docker-compose.yml`; setting them in `.env` changes nothing (section 3 says how to use another
+host port).
 
 **Publishing the repository.** The repository holds no key and no vendor response: `.env` and
 every recording under `packages/providers/fixtures/recorded/` are ignored by git (only our own
@@ -383,18 +414,34 @@ Each must list only `params-*.json` and `.gitkeep` files. Never force-add a reco
 
 ## 3. Reaching it from other devices: ALLOWED_HOSTS and TLS
 
-*Applies to both paths. Natively, the lines go in `~/.config/get-me-there/app.env`, then `pnpm gmt restart`.*
+*Applies to both paths. Natively, the lines go in `~/.config/get-me-there/app.env`, then `pnpm gmt restart`
+(or, while the app has no password, `pnpm gmt setup --reconfigure password`, which writes one and
+restarts it).*
 
 The app rejects any request whose `Host` header is not in `ALLOWED_HOSTS`, and the error names
 the header value and the variable. The default is `localhost:3000,127.0.0.1:3000`. Setting the
 variable replaces the default, so list every hostname you will type in a browser, including
 the local ones if you still use them.
 
+Anything that lets another device reach the app’s port needs the two lines, whatever `ALLOWED_HOSTS` says: a
+reverse proxy, `tailscale serve`, or any tunnel (`ssh -R`, `ssh -L` from another machine, `socat`).
+Add them (section 1; natively, `pnpm gmt setup --reconfigure password`) before you put one in front.
+
 Keep the port mapping on `127.0.0.1` and put `tailscale serve` or a reverse proxy in front.
 Changing it to `3000:3000` or `0.0.0.0:3000:3000` publishes the app to every network the host
 is on, past a host firewall such as ufw (Docker writes its own packet-filter rules). If the
-port is reachable, basic auth is the only barrier between a stranger and your API budget. To
-use another host port, change only the left side: `127.0.0.1:8080:3000`.
+port is reachable, basic auth is the only barrier between a stranger and your API budget.
+
+To use another host port, change only the left side, for example to `127.0.0.1:8080:3000`, and set
+`ALLOWED_HOSTS=localhost:8080,127.0.0.1:8080` in `.env`, keeping any other names you use. Inside
+the container the app still listens on 3000, so its default names are for port 3000 and the
+browser's `Host: 127.0.0.1:8080` would be refused without them; keep `PUBLISHED_ADDRESS` at
+`127.0.0.1`. The app cannot see the address it is published on, so `PUBLISHED_ADDRESS` beside the
+`ports:` line tells it; if you ever change the address there, change `PUBLISHED_ADDRESS` with it.
+Anything but loopback there needs the two sign-in lines of section 1, and so does a
+`docker-compose.override.yml` (which compose reads on its own) that adds a `ports:` mapping.
+`pnpm gmt status` reads every mapping compose configures, overrides included, and fails when any
+publishes the app beyond loopback while `.env` has no password.
 
 **Tailscale** (the app stays off the public internet):
 
@@ -408,7 +455,9 @@ TRUST_PROXY=true
 ```
 
 `tailscale serve` terminates TLS with a certificate for your tailnet name and forwards to
-`127.0.0.1:3000`. Use your machine's own `*.ts.net` name.
+`127.0.0.1:3000`. Use your machine's own `*.ts.net` name. That name is not this machine's
+loopback, so add the two auth lines (section 1; natively, `pnpm gmt setup --reconfigure password`):
+without them the app refuses to start.
 
 **Reverse proxy** on a VPS, here Caddy, which obtains a certificate automatically:
 
@@ -423,15 +472,18 @@ ALLOWED_HOSTS=flights.example.com
 TRUST_PROXY=true
 ```
 
+Add the two auth lines too (section 1): a public name needs them, and the app refuses to start
+without them.
+
 `TRUST_PROXY=true` makes the failed-login rate limit read the client address from
 `X-Forwarded-For`; set it only when a proxy you control sits in front and is the only way in.
 On a host shared with other users it lets any of them, through the loopback port, claim any
 client address and dodge that limit; use it on a single-user host.
 
-**Without basic auth, Tailscale only.** The default compose always keeps auth on: it does not
-pass `ALLOW_UNAUTHENTICATED` to the container. On a host that nothing but your tailnet can
-reach, you may turn auth off with an override file next to `docker-compose.yml`, named
-`tailscale-only.yml`:
+**Without a password beyond this machine, Tailscale only.** The default compose does not pass
+`ALLOW_UNAUTHENTICATED` to the container, so once another device or name reaches the app it needs
+the two auth lines. On a host that nothing but your tailnet can reach, you may run without them
+with an override file next to `docker-compose.yml`, named `tailscale-only.yml`:
 
 ```yaml
 # tailscale-only.yml: only on a host reachable from nothing but your tailnet.
@@ -758,8 +810,8 @@ down it still prints the local facts (with `--json`, a JSON object whose `appAns
 `pnpm gmt update` prints the report at its end but exits on its own steps and the app's health, not on an unrelated
 failing check.
 
-- **App, database, backups.** The version, how long it has run and whether it is bound to this machine only with a
-  password on; the database answering and its size; the newest daily backup (`warn` after 36 hours, `fail` when there
+- **App, database, backups.** The version, how long it has run and whether it is bound to this machine only, and
+  whether it has a password on (with none, "no password: only this machine can reach the app" is fine); the database answering and its size; the newest daily backup (`warn` after 36 hours, `fail` when there
   is none and the app is older than that; a new install shows "first daily backup due 03:30" until the first one
   exists). In the container path the backups card says they are not visible from there: check your host's backup job
   (section 6).
@@ -872,7 +924,7 @@ SearchApi dashboard shows as used before this app counted any, so the app's wind
 vendor's.
 
 Start with a dry run. It sends nothing and shows the count so far, the plan and the window;
-curl asks for the password:
+with sign-in on (section 1), curl asks for the password (with none set, leave out `-u operator`):
 
 ```bash
 curl -u operator -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there' \
@@ -1043,7 +1095,8 @@ pnpm gmt consent
 ```
 
 1. With the worker service running, it first asks this machine's app whether a search is running: the native app, or
-   the Docker app on the port compose publishes, with the basic auth in the checkout's `.env` (read, never printed).
+   the Docker app on the port compose publishes, with the basic auth in the checkout's `.env` when it has one (read,
+   never printed).
    `--wait` waits for the search to end and `--force` goes ahead, as `stop` does; when Docker answers but its app's
    state cannot be read, it refuses unless `--force`. Then it stops the worker service alone; the app keeps running.
 2. A Camoufox window opens on `https://www.google.com/travel/flights` in a new, throwaway profile, and the command says
@@ -1116,8 +1169,8 @@ start with `consent-missing`, which is expected); then `pnpm gmt consent`, which
 worker once its check passes. After a `git pull` that changes the pin, run `pnpm gmt browser install` again (the worker refuses with
 `build-mismatch` until you do). `pnpm gmt start --only worker`, `stop --only worker` and `restart --only worker` work
 without `app.env`; stopping the worker does not ask the Docker app about a running search, so do it between runs. Point
-the app at the worker as below. `pnpm gmt status` then reads the Docker app (its port from compose, the basic auth from
-this checkout's `.env`) and prints its report beside the worker's service, `worker.env` and refusal; with no native
+the app at the worker as below. `pnpm gmt status` then reads the Docker app (its port from compose, the basic auth, if
+any, from this checkout's `.env`) and prints its report beside the worker's service, `worker.env` and refusal; with no native
 install it does not check `app.env`, the app service or the daily backup job.
 
 ### If you set the worker up by hand before

@@ -1,6 +1,13 @@
 /** Spec §4 basic auth with the failed-auth rate limit. */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import type { Clock, Config, Secret } from '@gmt/core';
+import {
+  AUTH_MISSING,
+  AUTH_MISSING_NATIVE,
+  type Clock,
+  type Config,
+  runModeOf,
+  type Secret,
+} from '@gmt/core';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import type { Context, MiddlewareHandler } from 'hono';
 import { envelope } from '../errors.js';
@@ -120,6 +127,19 @@ export function clientIpFrom(config: Config): (c: Context<AppEnv>) => string | n
   };
 }
 
+/** Headers a proxy or tunnel adds to say it forwarded the request (spec §4). */
+export const FORWARDING_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+] as const;
+
+/** The fix that turns sign-in on in this mode: the setup command natively, the two `.env` lines otherwise. */
+const fixFor = (config: Config): string =>
+  runModeOf(config) === 'native' ? AUTH_MISSING_NATIVE : AUTH_MISSING;
+
 export interface AuthGateOptions {
   config: Config;
   /** `${method} ${path}` of every ROUTES entry whose auth flag is `public`. */
@@ -138,7 +158,14 @@ export function basicAuthGate(o: AuthGateOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const auth = o.config.auth;
     if (auth === null) {
-      // why: config refuses this on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true (spec §4); bootApp re-asserts it.
+      // why: config refuses this unless only this machine can reach the app, or ALLOW_UNAUTHENTICATED=true (spec §4);
+      // bootApp re-asserts it. A proxy or tunnel that rewrites Host to 127.0.0.1 passes that rule unseen, so a request
+      // carrying a forwarding header is refused here, /api/health included (the image's health check sends none)
+      if (!o.config.allowUnauthenticated && FORWARDING_HEADERS.some((h) => c.req.header(h) !== undefined))
+        return c.json(
+          envelope('proxied_without_password', API_TEXT.proxiedWithoutPassword(fixFor(o.config))),
+          403,
+        );
       c.set('authenticated', true);
       return next();
     }

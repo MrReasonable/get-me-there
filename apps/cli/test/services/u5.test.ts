@@ -128,12 +128,15 @@ describe('CodeRabbit round 2 (PR #11)', () => {
     };
     expect(stableNodePath('/opt/node/bin/node', ['/usr/local/bin'], broken)).toBe('/opt/node/bin/node');
   });
-  it('one loopback rule: any 127/8 address, ::1 and localhost; nothing else', async () => {
-    const { isLoopback } = await import('../../src/services/specs.js');
+  it('one loopback rule, core’s (spec §4): any 127/8 address, ::1 and localhost; nothing else', async () => {
+    const { isLoopbackHost } = await import('@gmt/core');
+    const specs = await import('../../src/services/specs.js');
+    // why: the CLI keeps no copy of its own; setup's bind note and status's checks read core's
+    expect(specs).not.toHaveProperty('isLoopback');
     for (const a of ['127.0.0.1', '127.0.0.2', '127.255.0.9', '::1', 'localhost'])
-      expect(isLoopback(a), a).toBe(true);
-    for (const a of ['0.0.0.0', '192.168.1.2', '::', '128.0.0.1', '127.0.0'])
-      expect(isLoopback(a), a).toBe(false);
+      expect(isLoopbackHost(a), a).toBe(true);
+    for (const a of ['0.0.0.0', '192.168.1.2', '::', '128.0.0.1', '127.0.0', '127.1234.0.1'])
+      expect(isLoopbackHost(a), a).toBe(false);
   });
   it('a failed app is not up for the active-run guard: no process can be running a search', async () => {
     const { nativeTarget } = await import('../../src/commands/setup.js');

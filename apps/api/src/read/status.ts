@@ -97,28 +97,33 @@ function fixer(f: Pick<StatusFacts, 'mode'>) {
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
 const at = (f: Frame, iso: IsoDateTime) => formatInstant(iso, f.tz);
 
+/** The app check's words for an app with no password that only this machine can reach (spec §4). */
+export const NO_PASSWORD_LOCAL = 'no password: only this machine can reach the app';
+
 function appCheck(f: StatusFacts): StatusCheck {
   const fix = fixer(f);
   const up = hoursSince(f.app.startedAt, f.now);
   const uptime = up < 1 ? 'less than an hour' : formatDuration(up);
-  if (!f.app.authOn && f.mode !== 'dev')
+  if (!f.app.authOn && !f.app.onlyThisMachine && f.mode !== 'dev')
     return check({
       id: 'app',
       area: 'app',
       state: 'fail',
-      summary: 'sign-in is off outside development, so anyone who reaches the app can use it',
+      summary:
+        'sign-in is off and something other than this machine can reach the app, so anyone who reaches it can use it',
       fix: fix('replace the password so sign-in is on', 'pnpm gmt setup --reconfigure password'),
     });
   const base = `version ${f.version}, up ${uptime}, ${f.mode} mode`;
+  // why: spec §4: no password is fine while only this machine can reach the app, and said so
+  const signIn = f.app.authOn
+    ? 'sign-in on'
+    : f.app.onlyThisMachine
+      ? NO_PASSWORD_LOCAL
+      : 'sign-in off for development';
   // why: in a container the app binds 0.0.0.0 and compose decides the host address, which the app cannot see; `gmt status`
   // judges that address, so the app's own bind is not a finding there
   if (f.mode === 'container')
-    return check({
-      id: 'app',
-      area: 'app',
-      state: 'ok',
-      summary: `${base}, ${f.app.authOn ? 'sign-in on' : 'sign-in off for development'}`,
-    });
+    return check({ id: 'app', area: 'app', state: 'ok', summary: `${base}, ${signIn}` });
   if (!f.app.loopback)
     return check({
       id: 'app',
@@ -127,12 +132,7 @@ function appCheck(f: StatusFacts): StatusCheck {
       summary: `${base}; bound beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
       fix: fix('bind to 127.0.0.1 or put TLS or Tailscale in front of it'),
     });
-  return check({
-    id: 'app',
-    area: 'app',
-    state: 'ok',
-    summary: `${base}, ${f.app.authOn ? 'loopback only, sign-in on' : 'loopback only, sign-in off for development'}`,
-  });
+  return check({ id: 'app', area: 'app', state: 'ok', summary: `${base}, loopback only, ${signIn}` });
 }
 
 function databaseCheck(f: StatusFacts): StatusCheck {

@@ -223,9 +223,10 @@ jobs:
           git push -q origin main
           cd "$RUNNER_TEMP/gmt"
           pnpm gmt update
-          # why: the page needs basic auth; curl reads the throwaway CI password from stdin, never from its argv
-          pass="$(node -e "const { parseEnv } = require('node:util'); const fs = require('fs'); const os = require('os'); process.stdout.write(parseEnv(fs.readFileSync(os.homedir() + '/.config/get-me-there/app.env', 'utf8')).APP_BASIC_AUTH_PASS)")"
-          printf 'user = "operator:%s"\n' "$pass" | curl -fsS -K - http://127.0.0.1:3917/ | grep -F "$marker"
+          # why: spec §4: a fresh loopback install has no password, so the page is read without one; with a password curl
+          # reads the throwaway CI value from stdin, never from its argv
+          pass="$(node -e "const { parseEnv } = require('node:util'); const fs = require('fs'); const os = require('os'); process.stdout.write(parseEnv(fs.readFileSync(os.homedir() + '/.config/get-me-there/app.env', 'utf8')).APP_BASIC_AUTH_PASS ?? '')")"
+          if [ -n "$pass" ]; then printf 'user = "operator:%s"\n' "$pass"; fi | curl -fsS -K - http://127.0.0.1:3917/ | grep -F "$marker"
       - name: uninstall removes the services and keeps the data
         if: env.E2E_MODE == 'real'
         run: |
@@ -300,7 +301,7 @@ jobs:
           # (CodeRabbit batch 3, PR #3 review)
           # why: grep counts, never prints: a real hit must not write the credential into a public CI log (PR #3 re-review)
           n="$(docker history --no-trunc get-me-there:local | grep -Eic -e '(token|key|pass(wd|word)?|secret|auth|bearer|credential)[a-z0-9_]*"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z0-9_]*(token|key|pass|secret|auth|bearer|credential)[a-z0-9_]*[[:space:]]+[^[:space:]]')" || true; if [ "${n:-0}" -gt 0 ]; then echo "image history: $n credential-like line(s) found; not shown" >&2; exit 1; fi
-      - name: Compose boots it healthy with the documented three-line .env
+      - name: Compose boots it healthy with a .env holding the token and the two sign-in lines
         run: |
           # why: CI-only throwaway values that must never match a real credential; the token is a dummy and boot makes no
           # vendor call, and the file is written here, never printed or archived
@@ -385,10 +386,20 @@ jobs:
           # the camoufox cells were skipped by the preflight, and no camoufox ledger row exists
           check='const D=require(require.resolve("better-sqlite3",{paths:["/app/packages/db"]}));const d=new D("/data/get-me-there.db",{readonly:true});const o=d.prepare("SELECT status, reason FROM cell_outcomes WHERE provider_id = ?").all("camoufox");const r=d.prepare("SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ?").get("camoufox").n;console.log(JSON.stringify({o,r}));process.exit(o.length>0&&o.every((x)=>x.status==="skipped"&&x.reason==="provider_unavailable")&&r===0?0:1)'
           docker compose -p gmt-cfabsent exec -T app node -e "$check"
+      - name: Compose boots it healthy with no sign-in lines and serves this machine without a password (spec §4)
+        shell: bash
+        run: |
+          # why: the other steps' projects are stopped, so the published port is free; a separate project and volume,
+          # with an env file holding the dummy token alone
+          printf 'TRAVELPAYOUTS_TOKEN=ci-dummy-token-0123456789\n' > noauth.env
+          trap 'docker compose --env-file noauth.env -p gmt-noauth down -v || true; rm -f noauth.env' EXIT
+          docker compose --env-file noauth.env -p gmt-noauth up -d --wait --wait-timeout 300 || { docker compose --env-file noauth.env -p gmt-noauth logs app; exit 1; }
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: 127.0.0.1:3000' http://127.0.0.1:3000/api/providers)" = 200
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:3000/api/providers)" = 403
       - name: Remove the CI container and its throwaway volume
         if: always()
         run: |
           docker compose logs app | tail -n 50 || true
           # why: CI's volume only; docs/setup.md forbids `down -v` on a real host
           docker compose down -v || true
-          rm -f .env backup.json refusal.json
+          rm -f .env noauth.env backup.json refusal.json

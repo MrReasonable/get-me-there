@@ -68,10 +68,11 @@ describe('parseCommandLine (decision 72: node:util parseArgs, no new dependency)
     if (p.kind === 'usage') expect(p.message).toContain(message);
   });
 
-  it('the help names the first step, says setup generates the password, and update fast-forwards only (pf-b1-012)', () => {
+  it('the help names the first step, says when there is no password (spec §4), and update fast-forwards only (pf-b1-012)', () => {
     const top = helpText();
     expect(top).toContain('First time: pnpm gmt setup');
-    expect(helpText('setup')).toContain('setup generates its password');
+    expect(helpText('setup')).toContain('no password while only this machine can reach it');
+    expect(helpText('password')).toContain('or say why it has none');
     expect(helpText('update')).toContain('fast-forward only');
   });
 });

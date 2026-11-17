@@ -57,6 +57,13 @@ async function installed(
 }
 const password = (m: ReturnType<typeof machine>) =>
   parseEnv(m.fs.read(ENV) ?? '').APP_BASIC_AUTH_PASS ?? 'missing';
+/** Sign-in on, as `--reconfigure password` leaves it (spec §4: a fresh loopback install has no password). */
+const signInOn = (m: ReturnType<typeof machine>) =>
+  m.fs.file(
+    ENV,
+    `${m.fs.read(ENV) ?? ''}APP_BASIC_AUTH_USER="operator"\nAPP_BASIC_AUTH_PASS="status-pass-0123456789"\n`,
+    0o600,
+  );
 
 describe('gmt status: the app report beside the local facts (brief Task 18.5)', () => {
   it('reads GET /api/status with the basic auth of app.env, never in an argv, and prints one row per check and the bar line', async () => {
@@ -76,6 +83,7 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
         note: 'since the app started',
       }),
     ]);
+    signInOn(m);
     expect(await runCli(['status'], m.deps)).toBe(1);
     const req = http.requests.find((r) => r.url.endsWith('/api/status'));
     expect(req?.headers.Authorization).toBe(
@@ -89,6 +97,15 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(m.io.stdout).toContain('Status: schedule failing');
     expect(m.io.stdout).toMatch(/service app +ok +running/);
     expect(m.io.stdout).not.toContain(password(m));
+  });
+
+  it('with no password (spec §4) reads GET /api/status with no Authorization header', async () => {
+    const { m, http } = await installed([check()]);
+    expect(password(m)).toBe('missing');
+    expect(await runCli(['status'], m.deps)).toBe(0);
+    const req = http.requests.find((r) => r.url.endsWith('/api/status'));
+    expect(req?.url).toBe('http://127.0.0.1:3000/api/status');
+    expect(req?.headers).toEqual({});
   });
 
   it('exits 0 with only ok, off and warn checks, and says so in the bar line', async () => {
@@ -374,6 +391,7 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
       () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
       [true, false],
     );
+    signInOn(m);
     expect(await runCli(['setup'], m.deps)).toBe(0);
     expect(ask.asked).toEqual([TEST_EMAIL_QUESTION, 'Open the app in your browser now?']);
     const req = posts(http)[0];
@@ -387,6 +405,17 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     expect(text).toContain(TEST_EMAIL_WORDS.sent);
     expect(text.indexOf('get-me-there is running at')).toBeLessThan(text.indexOf(TEST_EMAIL_WORDS.sent));
     expect(text).not.toContain(password(m));
+  });
+
+  it('with no password (spec §4) the test email is posted with no Authorization header', async () => {
+    const { m, http } = await withEmail(
+      () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
+      [true, false],
+    );
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    const req = posts(http)[0];
+    expect(req?.url).toBe('http://127.0.0.1:3000/api/alerts/test-email');
+    expect(req?.headers).toEqual({ 'Content-Type': 'application/json', 'X-Requested-With': 'get-me-there' });
   });
 
   it('the default is no: nothing is posted', async () => {

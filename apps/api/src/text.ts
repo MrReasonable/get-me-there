@@ -15,6 +15,10 @@ export const API_TEXT = {
   // why: plan decision 54: a rejection names the variable, never its values (they would tell a stranger the host names).
   hostRejected: (host: string) => `Host "${host}" is not in ALLOWED_HOSTS`,
   originRejected: (origin: string) => `Origin "${origin}" does not name a host in ALLOWED_HOSTS`,
+  // why: spec §4: with no password only this machine may reach the app; a forwarding header says a proxy or tunnel sent
+  // the request, so it may come from anywhere
+  proxiedWithoutPassword: (fix: string) =>
+    `this request came through a proxy and the app has no password, so it is refused: ${fix}`,
   bodyTooLarge: 'request body is larger than the api accepts',
   contentType: 'requests that change data need Content-Type: application/json',
   requestedWith: 'requests that change data need X-Requested-With: get-me-there',

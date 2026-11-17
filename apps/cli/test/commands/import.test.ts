@@ -267,7 +267,7 @@ describe('--import-db <path> and --ignore-docker', () => {
     );
     expect(m.io.stdout).toContain('1 scheduled search may catch up its latest missed firing once');
     expect(m.io.stdout.indexOf('resumes 2 unfinished runs')).toBeLessThan(
-      m.io.stdout.indexOf('User name: operator'),
+      m.io.stdout.indexOf('get-me-there is running at'),
     );
   });
   it('refuses while the checkout’s app holds its lock', async () => {

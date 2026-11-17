@@ -16,7 +16,15 @@ const paid: Answers = {
   searchApi: { plan: '40usd', key: 'k-0123456789ab', billingDay: 1, trialUsed: null },
 };
 const closing = (a: Answers, over: Partial<Parameters<typeof closingScreen>[0]> = {}) =>
-  closingScreen({ port: 3000, answers: a, appEnv: '/h/app.env', backupOk: true, os: 'darwin', ...over });
+  closingScreen({
+    port: 3000,
+    answers: a,
+    appEnv: '/h/app.env',
+    backupOk: true,
+    os: 'darwin',
+    signIn: 'password',
+    ...over,
+  });
 
 describe('the source a search can use (U3)', () => {
   it('Travelpayouts or the SearchApi monthly plan; the SearchApi trial alone is none', () => {
@@ -58,6 +66,16 @@ describe('the closing screen (U3, U6)', () => {
       'The app stops when you log out of every session; to keep it running: pnpm gmt setup --reconfigure linger',
     );
     expect(closing({ ...paid, linger: 'enable' }, { os: 'linux' })).not.toContain('stops when you log out');
+  });
+  it('with no password, names the real reason: settings that fail for another fault are not blamed on reach', () => {
+    const text = closing(paid, { signIn: 'invalid' });
+    expect(text).toContain(
+      'no password in /h/app.env, and it would not pass the app’s settings check: run pnpm gmt setup to see why',
+    );
+    expect(text).not.toContain('let something other than this machine reach the app');
+    expect(closing(paid, { signIn: 'needs-password' })).toContain(
+      'let something other than this machine reach the app',
+    );
   });
 });
 

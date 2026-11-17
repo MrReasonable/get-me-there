@@ -132,6 +132,19 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
     expect(w.io.stdout).toContain('smoke ok');
   });
 
+  it('an app with no password (spec §4) is asked on app.env’s port with no Authorization header', async () => {
+    const w = world(ONLY_SA);
+    w.fs.file(ENV, 'PORT="3917"\nBIND_ADDRESS="127.0.0.1"\n', 0o600);
+    expect(await runCli(ARGS, w.deps)).toBe(0);
+    const plan = w.http.requests.find((r) => r.url.endsWith('/api/tools/smoke/plan'));
+    expect(plan?.url).toBe('http://127.0.0.1:3917/api/tools/smoke/plan');
+    expect(plan?.headers).toEqual({});
+    expect(w.posts[1]?.headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'get-me-there',
+    });
+  });
+
   it('with credits already ledgered to tool runs it states the running total and asks for that total (U7, cb-b1-007)', async () => {
     const w = world(ONLY_SA, { ledgered: 4 });
     expect(await runCli(ARGS, w.deps)).toBe(0);
