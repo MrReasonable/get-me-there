@@ -9,12 +9,13 @@
  * it and stops the heartbeat before the database closes.
  */
 import {
-  AUTH_MISSING,
   type Clock,
   type Config,
-  isLoopbackHost,
   type Logger,
   microGbpToPence,
+  reachBeyondThisMachine,
+  reachRefusal,
+  runModeOf,
   type Secret,
   systemClock,
 } from '@gmt/core';
@@ -81,25 +82,26 @@ export interface RunningApp {
 
 /**
  * Spec §4, review SEC-3: the invariants `loadConfigFromEnv` enforces, re-asserted on the injected config, so no caller
- * of `bootApp` can serve without auth on a public bind or with no allowed host. 78, as a config error.
+ * of `bootApp` can serve without a password while something other than this machine can reach it (core's one rule), or
+ * with no allowed host. 78, as a config error.
  */
 export function assertAuthInvariants(config: Config, log: Logger): void {
   if (config.allowedHosts.length === 0)
     throw new BootError('ALLOWED_HOSTS is empty; refusing to serve', EXIT.badConfig);
   if (config.auth !== null && config.auth.pass.reveal().length < 12)
     throw new BootError('APP_BASIC_AUTH_PASS must be at least 12 characters', EXIT.badConfig);
-  if (config.auth === null && !isLoopbackHost(config.bindAddress)) {
-    if (!config.allowUnauthenticated)
-      // why: devops-final-001: the same words as config's refusal, so the fix named is the two auth lines.
-      throw new BootError(
-        `binding ${config.bindAddress} without auth: ${AUTH_MISSING}; ALLOW_UNAUTHENTICATED=true is only for a Tailscale-only host (spec §4)`,
-        EXIT.badConfig,
-      );
-    log.warn(
-      { bindAddress: config.bindAddress },
-      'serving without auth on a non-loopback bind (ALLOW_UNAUTHENTICATED)',
-    );
+  if (config.auth !== null) return;
+  const reach = reachBeyondThisMachine(config);
+  if (reach === null) return;
+  if (!config.allowUnauthenticated) {
+    // why: devops-final-001: the same words as config's refusal, so the fix named is the one that works in this mode
+    const r = reachRefusal(reach, runModeOf(config));
+    throw new BootError(`${r.field}: ${r.message}`, EXIT.badConfig);
   }
+  log.warn(
+    { bindAddress: config.bindAddress, reach },
+    'serving without auth beyond this machine (ALLOW_UNAUTHENTICATED)',
+  );
 }
 
 /**

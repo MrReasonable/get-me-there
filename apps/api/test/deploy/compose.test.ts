@@ -46,7 +46,10 @@ const FIXED: Readonly<Record<string, string>> = {
   DATABASE_PATH: '/data/get-me-there.db',
   PORT: '3000',
   BIND_ADDRESS: '0.0.0.0',
+  PUBLISHED_ADDRESS: '127.0.0.1',
 };
+/** Fixed by compose and not an operator variable, so .env.example offers it only commented (spec §4). */
+const COMPOSE_ONLY = ['PUBLISHED_ADDRESS'];
 /** The one interpolated default: the worker on the Mac, reached through Docker Desktop (spec §12 rev 32, ruling 2). */
 const DEFAULTED: Readonly<Record<string, string>> = {
   CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
@@ -63,9 +66,12 @@ describe('docker-compose.yml app service (spec §13, §5.5)', () => {
   });
 
   it('passes an explicit allowlist: every .env.example variable except the never-passed and override-only ones', () => {
-    const expected = envExampleVariables(read('.env.example')).filter(
-      (n) => !NEVER.includes(n) && !OVERRIDE_ONLY.includes(n),
-    );
+    const expected = [
+      ...envExampleVariables(read('.env.example')).filter(
+        (n) => !NEVER.includes(n) && !OVERRIDE_ONLY.includes(n),
+      ),
+      ...COMPOSE_ONLY,
+    ].sort();
     expect(Object.keys(env).sort()).toEqual(expected);
   });
 
@@ -93,8 +99,17 @@ describe('docker-compose.yml app service (spec §13, §5.5)', () => {
     expect(compose.volumes).toHaveProperty('gmt-data');
   });
 
-  it('keeps basic auth on: ALLOW_UNAUTHENTICATED is not forwarded (decision 63)', () => {
+  it('forwards the two sign-in lines, and never ALLOW_UNAUTHENTICATED (decision 63)', () => {
+    expect(env.APP_BASIC_AUTH_USER).toBe(`\${APP_BASIC_AUTH_USER:-}`);
+    expect(env.APP_BASIC_AUTH_PASS).toBe(`\${APP_BASIC_AUTH_PASS:-}`);
     expect(env).not.toHaveProperty('ALLOW_UNAUTHENTICATED');
+  });
+
+  it('tells the app the host address it publishes on: PUBLISHED_ADDRESS is the ports: line’s (spec §4)', () => {
+    // why: the app binds 0.0.0.0 in the container, so it decides "only this machine" from this value; the two must not drift
+    const hostAddress = (app.ports ?? []).map((p) => /^(.+):\d+:\d+$/.exec(p)?.[1]);
+    expect(hostAddress).toEqual([env.PUBLISHED_ADDRESS]);
+    expect(env.PUBLISHED_ADDRESS).toBe('127.0.0.1');
   });
 
   it('runs with a read-only root, a /tmp tmpfs, no capabilities and no privilege escalation', () => {

@@ -22,6 +22,8 @@ export interface AppFacts {
   startedAt: IsoDateTime;
   loopback: boolean;
   authOn: boolean;
+  /** Spec §4: only this machine can reach the app (core's rule), so it may run without a password. */
+  onlyThisMachine: boolean;
 }
 
 export interface DatabaseFacts {

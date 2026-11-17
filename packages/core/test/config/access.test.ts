@@ -22,6 +22,7 @@ describe('who can reach the app (spec §4)', () => {
   it.each([
     ['127.0.0.1', true],
     ['127.3.4.5', true],
+    ['127.10.200.255', true],
     ['::1', true],
     ['localhost', true],
     ['0.0.0.0', false],
@@ -94,6 +95,13 @@ describe('who can reach the app (spec §4)', () => {
       kind: 'host',
       host: 'flights.example.com',
     });
+  });
+
+  it('the fixes: the two lines in .env, or the setup command natively', () => {
+    expect(AUTH_MISSING).toBe(
+      'add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)',
+    );
+    expect(AUTH_MISSING_NATIVE).toBe('run pnpm gmt setup --reconfigure password, which turns sign-in on');
   });
 
   it('each refusal names its setting, the reason and the fix for its mode', () => {

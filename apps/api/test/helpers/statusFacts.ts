@@ -85,7 +85,7 @@ export function healthyFacts(over: Partial<StatusFacts> = {}): StatusFacts {
     tz: 'Europe/London',
     mode: 'native',
     version: 'abc1234',
-    app: { version: 'abc1234', startedAt: ago(3 * DAY), loopback: true, authOn: true },
+    app: { version: 'abc1234', startedAt: ago(3 * DAY), loopback: true, authOn: true, onlyThisMachine: true },
     database: { answers: true, sizeBytes: 5_242_880, pendingMigrations: 0 },
     backupNewestAt: ago(5 * HOUR),
     schedule: {

@@ -38,8 +38,8 @@ export type Reach =
 /** The reason another device or name can reach the app, or null when only this machine can. */
 export function reachBeyondThisMachine(f: ReachFacts): Reach | null {
   if (f.inContainer) {
-    if (f.publishedAddress === null || !isLoopbackHost(f.publishedAddress))
-      return { kind: 'published', address: f.publishedAddress };
+    // why: an unstated address is not a loopback one
+    if (!isLoopbackHost(f.publishedAddress ?? '')) return { kind: 'published', address: f.publishedAddress };
   } else if (!isLoopbackHost(f.bindAddress)) return { kind: 'bind', address: f.bindAddress };
   const host = f.allowedHosts.find((h) => !isLoopbackHostEntry(h));
   return host === undefined ? null : { kind: 'host', host };

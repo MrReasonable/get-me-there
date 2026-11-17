@@ -1,7 +1,15 @@
 // Spec §5.5 injected-config boot matrix; spec §4 password length and auth invariants; spec §7 the airport sanity check.
 import { chmodSync, copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { apiContract, FIXTURE_OPT_IN_PHRASE, Secret, systemClock } from '@gmt/core';
+import {
+  AUTH_MISSING,
+  AUTH_MISSING_NATIVE,
+  apiContract,
+  type Config,
+  FIXTURE_OPT_IN_PHRASE,
+  Secret,
+  systemClock,
+} from '@gmt/core';
 import { fixtureProvider } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -149,36 +157,90 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     },
   );
 
-  it('auth invariants (spec §4, review SEC-3): config refuses no auth on a public bind and a half-set pair', () => {
-    expect(() =>
-      loadConfigFromEnv(
-        envFor({ BIND_ADDRESS: '0.0.0.0', APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' }),
-      ),
-    ).toThrow(/ALLOW_UNAUTHENTICATED/);
+  it('auth invariants (spec §4, review SEC-3): config refuses no auth beyond this machine and a half-set pair', () => {
+    const noAuth = { APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' };
+    expect(() => loadConfigFromEnv(envFor({ ...noAuth, BIND_ADDRESS: '0.0.0.0' }))).toThrow(
+      /BIND_ADDRESS: the app binds 0\.0\.0\.0.*pnpm gmt setup --reconfigure password/,
+    );
+    expect(() => loadConfigFromEnv(envFor({ ...noAuth, ALLOWED_HOSTS: 'flights.example.com' }))).toThrow(
+      /ALLOWED_HOSTS: flights\.example\.com is not this machine/,
+    );
+    expect(loadConfigFromEnv(envFor(noAuth)).auth).toBeNull();
     expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: '' }))).toThrow(/APP_BASIC_AUTH_PASS/);
   });
 
-  it('bootApp re-asserts them on an injected config (78): public bind, no host, short password; the explicit flag warns', async () => {
-    const env = envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' });
-    const loopback = loadConfigFromEnv(env);
-    const forged = { ...loopback, bindAddress: '0.0.0.0' };
-    const boot = (config: typeof loopback, lines: string[] = []) =>
+  describe('bootApp re-asserts them on an injected config (78)', () => {
+    // why: each test's own data directory (envFor makes one), so a refusal never shares a database with a boot
+    const noAuth = (over: Partial<Config> = {}): Config => ({
+      ...loadConfigFromEnv(envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' })),
+      ...over,
+    });
+    const container = { inContainer: true, bindAddress: '0.0.0.0', publishedAddress: '127.0.0.1' };
+    const boot = (config: Config, lines: string[] = []) =>
       bootApp({
         config,
         log: createLogger({ logLevel: 'warn' }, { destination: captureLines(lines) }),
         listen: false,
         assets: assetPaths(),
       });
-    await expect(boot(forged)).rejects.toMatchObject({ exitCode: 78 });
-    await expect(boot({ ...loopback, allowedHosts: [] })).rejects.toMatchObject({ exitCode: 78 });
-    // why: review SEC-R2-2: the short-password branch on an injected config, which loadConfigFromEnv never builds
-    await expect(
-      boot({ ...loopback, auth: { user: 'operator', pass: new Secret('elevenchars') } }),
-    ).rejects.toMatchObject({ exitCode: 78, message: expect.stringMatching(/APP_BASIC_AUTH_PASS/) });
-    const lines: string[] = [];
-    const running = await boot({ ...forged, allowUnauthenticated: true }, lines);
-    await running.close();
-    expect(lines.join('')).toContain('ALLOW_UNAUTHENTICATED');
+
+    it.each([
+      [
+        'a native public bind',
+        { bindAddress: '0.0.0.0' },
+        `BIND_ADDRESS: the app binds 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING_NATIVE}`,
+      ],
+      [
+        'a native loopback bind with a tailnet name',
+        { allowedHosts: ['localhost:3000', 'laptop.tail1234.ts.net'] },
+        `ALLOWED_HOSTS: laptop.tail1234.ts.net is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING_NATIVE}`,
+      ],
+      [
+        'a container published on loopback with a public name',
+        { ...container, allowedHosts: ['flights.example.com'] },
+        `ALLOWED_HOSTS: flights.example.com is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING}`,
+      ],
+      [
+        'a container with no published address',
+        { ...container, publishedAddress: null },
+        `PUBLISHED_ADDRESS: not set, so the app cannot tell that only this machine reaches it, and it has no password: ${AUTH_MISSING}`,
+      ],
+      [
+        'a container published on 0.0.0.0',
+        { ...container, publishedAddress: '0.0.0.0' },
+        `PUBLISHED_ADDRESS: the app is published on 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING}`,
+      ],
+      ['no allowed host', { allowedHosts: [] }, 'ALLOWED_HOSTS is empty; refusing to serve'],
+    ] satisfies Array<[string, Partial<Config>, string]>)('refuses %s', async (_label, over, message) => {
+      await expect(boot(noAuth(over))).rejects.toMatchObject({ exitCode: 78, message });
+    });
+
+    it('refuses a short password, which loadConfigFromEnv never builds (review SEC-R2-2)', async () => {
+      await expect(
+        boot(noAuth({ auth: { user: 'operator', pass: new Secret('elevenchars') } })),
+      ).rejects.toMatchObject({ exitCode: 78, message: expect.stringMatching(/APP_BASIC_AUTH_PASS/) });
+    });
+
+    it.each([
+      ['a native loopback bind', {}],
+      ['[::1]:3000, 127.0.0.2 and LOCALHOST:3000', { allowedHosts: ['[::1]:3000', '127.0.0.2', 'LOCALHOST:3000'] }],
+      ['a container published on loopback', container],
+    ] satisfies Array<[string, Partial<Config>]>)('boots with no password and no warning on %s', async (_label, over) => {
+      const lines: string[] = [];
+      const running = await boot(noAuth(over), lines);
+      await running.close();
+      expect(lines.join('')).not.toContain('ALLOW_UNAUTHENTICATED');
+    });
+
+    it('ALLOW_UNAUTHENTICATED bypasses both checks with a warning (a tailnet-only host)', async () => {
+      const lines: string[] = [];
+      const running = await boot(
+        noAuth({ bindAddress: '0.0.0.0', allowedHosts: ['laptop.tail1234.ts.net'], allowUnauthenticated: true }),
+        lines,
+      );
+      await running.close();
+      expect(lines.join('')).toContain('ALLOW_UNAUTHENTICATED');
+    });
   });
 
   it.each([

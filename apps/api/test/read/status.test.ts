@@ -82,10 +82,34 @@ const CASES: Case[] = [
     has: ['container mode', 'sign-in on'],
   },
   {
+    // why: spec §4: no password while only this machine can reach the app is fine, and said so
+    row: 'app',
+    state: 'ok',
+    id: 'app',
+    facts: healthyFacts({ app: { ...healthyFacts().app, authOn: false } }),
+    has: ['loopback only, no password: only this machine can reach the app'],
+  },
+  {
+    row: 'app',
+    state: 'ok',
+    id: 'app',
+    facts: healthyFacts({ mode: 'container', app: { ...healthyFacts().app, authOn: false, loopback: false } }),
+    has: ['container mode, no password: only this machine can reach the app'],
+  },
+  {
+    // why: ALLOW_UNAUTHENTICATED: no password while another device or name can reach the app
     row: 'app',
     state: 'fail',
     id: 'app',
-    facts: healthyFacts({ app: { ...healthyFacts().app, authOn: false } }),
+    facts: healthyFacts({ app: { ...healthyFacts().app, authOn: false, onlyThisMachine: false } }),
+    has: ['something other than this machine can reach the app'],
+  },
+  {
+    row: 'app',
+    state: 'ok',
+    id: 'app',
+    facts: healthyFacts({ mode: 'dev', app: { ...healthyFacts().app, authOn: false, onlyThisMachine: false } }),
+    has: ['sign-in off for development'],
   },
   { row: 'database', state: 'ok', id: 'database', facts: healthyFacts(), has: ['5.0 MB'] },
   {

@@ -4,11 +4,11 @@ import { ALL_VARS } from '../helpers/env.js';
 import { envExampleVariables, read, specEnvBlock } from './files.js';
 
 /**
- * Variables the config reads that .env.example must not offer: IN_CONTAINER is set by the Dockerfile (it appears
- * only commented) and FIXTURE_COST_MICRO_GBP exists for engine tests under the synthetic gate (plan "Config").
- * CAMOUFOX_MODE is offered since grid mode (decision 70).
+ * Variables the config reads that .env.example must not offer: IN_CONTAINER is set by the Dockerfile and
+ * PUBLISHED_ADDRESS by docker-compose.yml (both appear only commented), and FIXTURE_COST_MICRO_GBP exists for engine
+ * tests under the synthetic gate (plan "Config"). CAMOUFOX_MODE is offered since grid mode (decision 70).
  */
-const NOT_OPERATOR = ['IN_CONTAINER', 'FIXTURE_COST_MICRO_GBP'];
+const NOT_OPERATOR = ['IN_CONTAINER', 'PUBLISHED_ADDRESS', 'FIXTURE_COST_MICRO_GBP'];
 
 describe('.env.example (spec §12)', () => {
   it('is the spec §12 block verbatim', () => {

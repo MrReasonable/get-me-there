@@ -4898,17 +4898,17 @@ and 45 s), beside the `CAMOUFOX_PAGE_TIMEOUT_SECONDS` comment's discovery
 figures. No setting is added: the flags decide where returns are read.
 
 ```
-# For the container, write only the lines you set. NODE_ENV, IN_CONTAINER, DATABASE_PATH, PORT and BIND_ADDRESS are
-# fixed by the image and docker-compose.yml; ALLOW_UNAUTHENTICATED and ALLOW_FIXTURE_PROVIDER are not forwarded by
-# compose (docs/setup.md sections 2 and 3). The development-only lines are marked below.
+# For the container, write only the lines you set. NODE_ENV, IN_CONTAINER, DATABASE_PATH, PORT, BIND_ADDRESS and
+# PUBLISHED_ADDRESS are fixed by the image and docker-compose.yml; ALLOW_UNAUTHENTICATED and ALLOW_FIXTURE_PROVIDER are
+# not forwarded by compose (docs/setup.md sections 2 and 3). The development-only lines are marked below.
 # --- core ---
 NODE_ENV=production                      # production | development | test (test refused by the app bootstrap)
 DATABASE_PATH=/data/get-me-there.db      # realpath-resolved at boot; .fixture.db required with ALLOW_FIXTURE_PROVIDER
 PORT=3000
-BIND_ADDRESS=0.0.0.0                     # container binds all; compose publishes 127.0.0.1:3000; non-loopback requires auth
+BIND_ADDRESS=0.0.0.0                     # container binds all; compose publishes 127.0.0.1:3000; natively non-loopback requires auth
 ALLOWED_HOSTS=                           # Host allowlist; default derived from PORT: localhost:<port>,127.0.0.1:<port>
 APP_BASE_URL=                            # optional https URL of this app, used for links in email; empty = relative links
-APP_BASIC_AUTH_USER=                     # both or neither; required in the compose path; password ≥ 12 chars
+APP_BASIC_AUTH_USER=                     # both or neither, password ≥ 12 chars; optional while the app is only opened on this machine, required once another device or name reaches it (ALLOWED_HOSTS)
 APP_BASIC_AUTH_PASS=
 ALLOW_UNAUTHENTICATED=false              # only for Tailscale-only hosts
 TRUST_PROXY=false                        # read the client IP from X-Forwarded-For (reverse-proxy deployments)
@@ -4973,8 +4973,9 @@ SMTP_PASS=
 ALERT_EMAIL_TO=
 ALERT_EMAIL_FROM=
 ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling per hour, counted per process lifetime (a restart starts a fresh hour); digests and operator messages share it; only sent or in-flight emails count, a failed send does not; messages beyond it are logged and dropped
-# --- set by the Dockerfile, never by the operator ---
+# --- set by the Dockerfile and docker-compose.yml, never by the operator ---
 # IN_CONTAINER=1
+# PUBLISHED_ADDRESS=127.0.0.1           # the host address compose publishes the container on (its ports: line)
 # --- never in production; development only, not passed by compose ---
 ALLOW_FIXTURE_PROVIDER=
 ```
