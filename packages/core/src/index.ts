@@ -38,6 +38,7 @@ export * from './camoufox/settings.js';
 export * from './camoufox/start.js';
 export * from './camoufox/url.js';
 export * from './camoufox/workerPort.js';
+export * from './config/access.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';

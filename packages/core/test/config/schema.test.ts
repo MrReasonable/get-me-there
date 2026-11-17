@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AUTH_MISSING, parseConfig } from '../../src/config/schema.js';
+import { AUTH_MISSING, AUTH_MISSING_NATIVE } from '../../src/config/access.js';
+import { parseConfig } from '../../src/config/schema.js';
 
 const realpath = (p: string) => p;
 const minimal = {
@@ -46,31 +47,107 @@ describe('parseConfig (spec §12)', () => {
     expect(errors({ ...minimal, APP_BASIC_AUTH_USER: undefined })).toContain('APP_BASIC_AUTH_USER');
     expect(errors({ ...minimal, APP_BASIC_AUTH_PASS: 'short' })).toContain('APP_BASIC_AUTH_PASS');
   });
-  it('refuses unauthenticated on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true', () => {
+  describe('no password while only this machine can reach the app (spec §4)', () => {
     const noAuth = { ...minimal, APP_BASIC_AUTH_USER: undefined, APP_BASIC_AUTH_PASS: undefined };
-    expect(errors({ ...noAuth, IN_CONTAINER: undefined })).toEqual(
-      expect.arrayContaining(['BIND_ADDRESS', 'ALLOW_UNAUTHENTICATED']),
-    );
-    expect(ok({ ...noAuth, ALLOW_UNAUTHENTICATED: 'true' }).auth).toBeNull();
-    expect(ok({ ...noAuth, BIND_ADDRESS: '127.0.0.1' }).auth).toBeNull();
-    expect(ok({ ...noAuth, BIND_ADDRESS: 'localhost' }).auth).toBeNull();
-  });
-  it('the compose refusal without auth names the two lines to add, not the variables compose fixes (devops-final-001, ruling 14)', () => {
-    const noAuth = { ...minimal, APP_BASIC_AUTH_USER: undefined, APP_BASIC_AUTH_PASS: undefined };
-    const r = parseConfig(noAuth, { realpath });
-    if (r.ok) throw new Error('expected failure');
-    // why: in the container BIND_ADDRESS is fixed by compose and ALLOW_UNAUTHENTICATED is not forwarded, so neither
-    // is a field the operator can act on; the two auth lines are.
-    expect(r.errors.map((e) => e.field)).toEqual(['APP_BASIC_AUTH_USER', 'ALLOW_UNAUTHENTICATED']);
-    expect(r.errors[0]?.message).toBe(AUTH_MISSING);
-    const host = parseConfig({ ...noAuth, IN_CONTAINER: undefined }, { realpath });
-    if (host.ok) throw new Error('expected failure');
-    // why: outside the container BIND_ADDRESS is the operator's own, so it is named as well.
-    expect(host.errors.map((e) => e.field)).toEqual([
-      'APP_BASIC_AUTH_USER',
-      'BIND_ADDRESS',
-      'ALLOW_UNAUTHENTICATED',
-    ]);
+    const nativeNoAuth = { ...noAuth, IN_CONTAINER: undefined, BIND_ADDRESS: '127.0.0.1' };
+    const containerNoAuth = { ...noAuth, PUBLISHED_ADDRESS: '127.0.0.1' };
+    function refusal(env: Record<string, string | undefined>) {
+      const r = parseConfig(env, { realpath });
+      if (r.ok) throw new Error('expected failure');
+      return r.errors;
+    }
+
+    it('a loopback bind with the default hosts runs without one', () => {
+      const c = ok(nativeNoAuth);
+      expect(c.auth).toBeNull();
+      expect(c.publishedAddress).toBeNull();
+      expect(ok({ ...nativeNoAuth, BIND_ADDRESS: 'localhost' }).auth).toBeNull();
+      expect(ok({ ...nativeNoAuth, NODE_ENV: 'development' }).allowedHosts).toContain('localhost:5173');
+    });
+
+    it('a container published on loopback with the default hosts runs without one', () => {
+      const c = ok(containerNoAuth);
+      expect(c.auth).toBeNull();
+      expect(c.publishedAddress).toBe('127.0.0.1');
+      expect(c.bindAddress).toBe('0.0.0.0');
+    });
+
+    it.each([
+      ['[::1]:3000', '[::1]:3000'],
+      ['127.0.0.2', '127.0.0.2'],
+      ['LOCALHOST:3000', 'LOCALHOST:3000'],
+      ['several loopback names', 'localhost:3000, 127.0.0.1:3000,[::1]:3000'],
+    ])('accepts ALLOWED_HOSTS of %s', (_label, hosts) => {
+      expect(ok({ ...nativeNoAuth, ALLOWED_HOSTS: hosts }).auth).toBeNull();
+      expect(ok({ ...containerNoAuth, ALLOWED_HOSTS: hosts }).auth).toBeNull();
+    });
+
+    it('refuses a container published on loopback that answers to another name, naming it and the .env fix', () => {
+      expect(refusal({ ...containerNoAuth, ALLOWED_HOSTS: 'flights.example.com' })).toEqual([
+        {
+          field: 'ALLOWED_HOSTS',
+          message: `flights.example.com is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING}`,
+        },
+      ]);
+    });
+
+    it('refuses a native loopback bind with a tailnet name, naming the setup fix', () => {
+      expect(
+        refusal({ ...nativeNoAuth, ALLOWED_HOSTS: 'localhost:3000,laptop.tail1234.ts.net' }),
+      ).toEqual([
+        {
+          field: 'ALLOWED_HOSTS',
+          message: `laptop.tail1234.ts.net is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING_NATIVE}`,
+        },
+      ]);
+    });
+
+    it('refuses a container with no PUBLISHED_ADDRESS', () => {
+      expect(refusal(noAuth)).toEqual([
+        {
+          field: 'PUBLISHED_ADDRESS',
+          message: `not set, so the app cannot tell that only this machine reaches it, and it has no password: ${AUTH_MISSING}`,
+        },
+      ]);
+    });
+
+    it('refuses a container published on 0.0.0.0', () => {
+      expect(refusal({ ...noAuth, PUBLISHED_ADDRESS: '0.0.0.0' })).toEqual([
+        {
+          field: 'PUBLISHED_ADDRESS',
+          message: `the app is published on 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING}`,
+        },
+      ]);
+    });
+
+    it('refuses a native bind beyond loopback, naming the setup fix; development names the .env fix', () => {
+      expect(refusal({ ...nativeNoAuth, BIND_ADDRESS: '0.0.0.0' })).toEqual([
+        {
+          field: 'BIND_ADDRESS',
+          message: `the app binds 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING_NATIVE}`,
+        },
+      ]);
+      expect(refusal({ ...nativeNoAuth, BIND_ADDRESS: '0.0.0.0', NODE_ENV: 'development' })[0]?.message).toContain(
+        AUTH_MISSING,
+      );
+    });
+
+    it('ALLOW_UNAUTHENTICATED=true bypasses both checks (a tailnet-only host)', () => {
+      const tailnet = { ALLOW_UNAUTHENTICATED: 'true', ALLOWED_HOSTS: 'laptop.tail1234.ts.net' };
+      expect(ok({ ...nativeNoAuth, ...tailnet, BIND_ADDRESS: '0.0.0.0' }).allowUnauthenticated).toBe(true);
+      expect(ok({ ...noAuth, ...tailnet }).auth).toBeNull();
+    });
+
+    it('with the two lines set nothing changes: any bind, published address or host', () => {
+      expect(ok({ ...minimal, ALLOWED_HOSTS: 'flights.example.com' }).auth?.user).toBe('ian');
+      expect(ok({ ...minimal, PUBLISHED_ADDRESS: '0.0.0.0' }).auth?.user).toBe('ian');
+      expect(ok({ ...minimal, IN_CONTAINER: undefined, BIND_ADDRESS: '0.0.0.0' }).auth?.user).toBe('ian');
+    });
+
+    it('a half-set pair is only the pair’s error, not a reach refusal too', () => {
+      expect(errors({ ...noAuth, APP_BASIC_AUTH_PASS: 'correct-horse-battery' })).toEqual(['APP_BASIC_AUTH_USER']);
+      expect(errors({ ...noAuth, APP_BASIC_AUTH_USER: 'ian' })).toEqual(['APP_BASIC_AUTH_PASS']);
+    });
   });
   it('refuses SEARCHAPI_TRIAL_USED on a monthly plan, naming both fields: it would be silently ignored (cost-007)', () => {
     const sa = { ...minimal, SEARCHAPI_KEY: 'k'.repeat(32) };
