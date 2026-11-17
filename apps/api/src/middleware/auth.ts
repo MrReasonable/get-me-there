@@ -138,7 +138,8 @@ export function basicAuthGate(o: AuthGateOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const auth = o.config.auth;
     if (auth === null) {
-      // why: config refuses this on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true (spec §4); bootApp re-asserts it.
+      // why: config refuses this unless only this machine can reach the app, or ALLOW_UNAUTHENTICATED=true (spec §4);
+      // bootApp re-asserts it.
       c.set('authenticated', true);
       return next();
     }
