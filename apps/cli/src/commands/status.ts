@@ -1,7 +1,13 @@
 import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, isLoopbackHost, START_REFUSAL_TEXT } from '@gmt/core';
 import { authFrom } from '../appClient.js';
-import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublications } from '../appEndpoint.js';
+import {
+  composeConfigPublications,
+  type DockerAppState,
+  dockerAppState,
+  dockerEndpoint,
+  dockerPublications,
+} from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
@@ -195,16 +201,19 @@ function appEnvChecks(deps: Deps): Check[] {
 }
 
 /**
- * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host address compose
- * publishes. Beyond loopback is the same warning as a native BIND_ADDRESS beyond loopback, and a fail when the
- * checkout's .env has no password (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an
- * override file leaves behind, so this is the one place the drift shows); loopback says nothing.
+ * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host addresses compose
+ * publishes, read from the effective configuration (every compose file and override, `docker compose config`) and from
+ * the running container (`docker compose port`, which names one mapping only). Beyond loopback is the same warning as
+ * a native BIND_ADDRESS beyond loopback, and a fail when the checkout's .env has no password and no
+ * ALLOW_UNAUTHENTICATED=true (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an override
+ * file leaves behind, so this is the one place the drift shows); loopback says nothing.
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
-  const published = await dockerPublications(deps);
+  const running = await dockerPublications(deps);
+  const configured = await composeConfigPublications(deps);
   // why: an unread address is not a loopback one: error must not look empty
-  if (published === null)
+  if (running === null && configured === null)
     return [
       {
         name: 'bind address',
@@ -215,23 +224,26 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
     ];
   let noPassword: boolean;
   try {
-    noPassword = authFrom(readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '')) === null;
+    const env = readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '');
+    // why: ALLOW_UNAUTHENTICATED=true is the operator's explicit tailnet-only exception, so it keeps the warning
+    noPassword = authFrom(env) === null && env.ALLOW_UNAUTHENTICATED !== 'true';
   } catch {
     // why: an unreadable .env is the endpoint's own reason; the warning below still stands
     noPassword = false;
   }
-  const beyond = published.filter((p) => !isLoopbackHost(p.address));
+  const addresses = [...new Set([...(running ?? []), ...(configured ?? [])].map((p) => p.address))];
+  const beyond = addresses.filter((a) => !isLoopbackHost(a));
   if (noPassword)
-    return beyond.map((p) => ({
+    return beyond.map((address) => ({
       name: 'bind address',
       level: 'fail' as const,
-      detail: `${p.address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
-      fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
+      detail: `${address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
+      fix: 'publish only 127.0.0.1 in docker-compose.yml and any override file (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
     }));
-  return beyond.map((p) => ({
+  return beyond.map((address) => ({
     name: 'bind address',
     level: 'warn' as const,
-    detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+    detail: `${address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
     fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
   }));
 }

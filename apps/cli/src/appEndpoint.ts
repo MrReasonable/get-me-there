@@ -14,6 +14,7 @@
  */
 import { isIP } from 'node:net';
 import { join } from 'node:path/posix';
+import { z } from 'zod';
 import { type AppTarget, appUrl, authHeaders, targetFrom } from './appClient.js';
 import type { Deps } from './deps.js';
 import { appEnvPath } from './services/specs.js';
@@ -77,9 +78,21 @@ const V4_LOCAL: ReadonlySet<string> = new Set(['127.0.0.1', '0.0.0.0']);
 const V6_LOCAL: ReadonlySet<string> = new Set(['::1', '::']);
 
 /**
- * The host addresses and ports compose publishes for the container's 3000 (`docker compose port app 3000` prints one
- * `address:port` line per family), or null when compose does not say. Addresses have no brackets (`::1`, not `[::1]`).
- * Inside the container the app binds 0.0.0.0; these published addresses decide who can reach it.
+ * An address as compose wrote it, without brackets and in canonical form (compose prints the host text as written, so
+ * 0:0:0:0:0:0:0:1 must read as ::1; URL writes the canonical form), or null when it is no IP address.
+ */
+function ipAddress(text: string): string | null {
+  const raw = text.replace(/^\[|\]$/g, '');
+  const kind = isIP(raw);
+  if (kind === 0) return null;
+  return kind === 6 ? new URL(`http://[${raw}]`).hostname.replace(/^\[|\]$/g, '') : raw;
+}
+
+/**
+ * The host address and port compose publishes for the running container's 3000 (`docker compose port app 3000`), or
+ * null when compose does not say. It prints one mapping only, even when the app has two (Docker Compose 5.5, checked
+ * 2026-11-17), so it says where to ask the app, never everywhere it is published: composeConfigPublications says that.
+ * Addresses have no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0.
  */
 export async function dockerPublications(deps: Deps): Promise<{ address: string; port: number }[] | null> {
   const r = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
@@ -88,14 +101,55 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   for (const line of r.stdout.split('\n')) {
     // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
     const m = /^(.+):(\d+)$/.exec(line.trim());
-    const raw = m?.[1]?.replace(/^\[|\]$/g, '');
-    if (raw === undefined || m?.[2] === undefined) continue;
-    const kind = isIP(raw);
-    // why: compose prints the host text as written, so 0:0:0:0:0:0:0:1 must read as ::1; URL writes the canonical form
-    const address = kind === 6 ? new URL(`http://[${raw}]`).hostname.replace(/^\[|\]$/g, '') : raw;
-    if (kind !== 0) out.push({ address, port: Number(m[2]) });
+    const address = m?.[1] === undefined ? null : ipAddress(m[1]);
+    if (address !== null && m?.[2] !== undefined) out.push({ address, port: Number(m[2]) });
   }
   return out.length === 0 ? null : out;
+}
+
+/** The part of `docker compose config --format json` read here: the app's `ports`, nothing else. */
+const configPortsSchema = z.looseObject({
+  services: z.looseObject({
+    app: z.looseObject({
+      ports: z
+        .array(
+          z.looseObject({
+            host_ip: z.string().optional(),
+            published: z.union([z.string(), z.number()]).optional(),
+          }),
+        )
+        .optional(),
+    }),
+  }),
+});
+
+/**
+ * Every host address the app is published on by compose's effective configuration, every compose file and override
+ * included (spec §4: the app trusts PUBLISHED_ADDRESS, which an extra `ports:` mapping leaves behind), or null when
+ * compose does not say. The JSON holds the interpolated environment, secrets included, so it is parsed here, in process,
+ * and only `ports` is taken; it is never printed, logged or written. A mapping with no host address publishes on every
+ * interface (0.0.0.0).
+ */
+export async function composeConfigPublications(
+  deps: Deps,
+): Promise<{ address: string; port: number }[] | null> {
+  const r = await deps.run(compose('config', '--format', 'json'), { cwd: deps.checkout, timeoutMs: 20_000 });
+  if (r.code !== 0) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+  const parsed = configPortsSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const out: { address: string; port: number }[] = [];
+  for (const p of parsed.data.services.app.ports ?? []) {
+    const address = p.host_ip === undefined || p.host_ip === '' ? '0.0.0.0' : ipAddress(p.host_ip);
+    // why: a host address that is no IP (a name) is not loopback, so it is judged as written
+    out.push({ address: address ?? p.host_ip ?? '', port: Number(p.published ?? 0) });
+  }
+  return out;
 }
 
 /** Where the Docker app may be asked on this machine, from what compose publishes, or why it may not be. */
