@@ -22,7 +22,7 @@ const closing = (a: Answers, over: Partial<Parameters<typeof closingScreen>[0]> 
     appEnv: '/h/app.env',
     backupOk: true,
     os: 'darwin',
-    signIn: true,
+    signIn: 'password',
     ...over,
   });
 

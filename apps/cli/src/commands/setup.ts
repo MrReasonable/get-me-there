@@ -1,4 +1,5 @@
 import { dirname, join, resolve } from 'node:path/posix';
+import { isLoopbackHost } from '@gmt/core';
 import { authFrom, targetFrom } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';
@@ -16,7 +17,6 @@ import {
   dailyBackupsDir,
   databasePath,
   execPathProblem,
-  isLoopback,
 } from '../services/specs.js';
 import {
   type Answers,
@@ -34,10 +34,12 @@ import {
   ownedDiff,
   passwordEntries,
   passwordNeeded,
+  readEnvText,
   readSettings,
   renderAppEnv,
   replaceGroups,
   type Settings,
+  signInOf,
 } from '../setup/appEnv.js';
 import { closingScreen, NO_SOURCE_TEXT, nextStep } from '../setup/closing.js';
 import { type DockerFacts, gatherDocker, judgeDocker } from '../setup/docker.js';
@@ -402,7 +404,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       );
     }
     // why: U8 (sec-b1-002): an operator may bind wider for a tunnel (docs section 3); said plainly, never refused
-    if (!isLoopback(settings.config.bindAddress))
+    if (!isLoopbackHost(settings.config.bindAddress))
       notes.push(
         `app.env binds BIND_ADDRESS=${settings.config.bindAddress}, so the app answers beyond this machine, over plain HTTP; setup keeps it. Use a tunnel or TLS (docs/setup.md section 3), or set it back to 127.0.0.1.`,
       );
@@ -660,7 +662,9 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       deps,
       'the browser provider’s step failed (above); pnpm gmt setup --reconfigure browser repeats it.',
     );
-  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: password !== null }));
+  // why: spec §4: the closing words follow the file as it now stands, by core's rule, never the mere absence of a line
+  const written = envText !== null ? readEnvText(envText) : (settings?.record ?? effective);
+  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written) }));
   await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';

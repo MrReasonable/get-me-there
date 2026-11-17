@@ -176,18 +176,45 @@ export function checkAppEnv(
 }
 
 /**
- * Whether settings need a password (spec §4): read without their sign-in lines, something other than this machine can
- * reach the app (core's rule) and ALLOW_UNAUTHENTICATED is not set. Settings that fail the app's check for another
- * reason need one too, as setup has always written one; the check then names that fault.
+ * Who can reach the app these settings describe, read without their sign-in lines (spec §4, core's rule): only this
+ * machine, something else, or settings the app's check refuses for another reason.
  */
-export function passwordNeeded(record: Readonly<Record<string, string>>): boolean {
+function reachWithoutPassword(record: Readonly<Record<string, string>>): 'local' | 'beyond' | 'invalid' {
   const without = Object.fromEntries(
     Object.entries(record).filter(([k]) => !GROUP_NAMES.password.some((n) => n === k)),
   );
   // why: ALLOW_UNAUTHENTICATED bypasses the rule in the app, so it is forced here to read the config the rule judges
   const r = parseConfig({ ...without, ALLOW_UNAUTHENTICATED: 'true' }, { realpath: (p) => p });
-  if (!r.ok) return true;
-  return record.ALLOW_UNAUTHENTICATED !== 'true' && !onlyThisMachine(r.config);
+  if (!r.ok) return 'invalid';
+  return onlyThisMachine(r.config) ? 'local' : 'beyond';
+}
+
+/**
+ * Whether settings need a password (spec §4): read without their sign-in lines, something other than this machine can
+ * reach the app (core's rule) and ALLOW_UNAUTHENTICATED is not set. Settings that fail the app's check for another
+ * reason need one too, as setup has always written one; the check then names that fault.
+ */
+export function passwordNeeded(record: Readonly<Record<string, string>>): boolean {
+  const reach = reachWithoutPassword(record);
+  return reach === 'invalid' || (reach === 'beyond' && record.ALLOW_UNAUTHENTICATED !== 'true');
+}
+
+/**
+ * How the app these settings describe signs people in (spec §4), so every sentence about it says what is true: a
+ * password; none, because only this machine can reach it; none, because ALLOW_UNAUTHENTICATED is set; none although
+ * something else can reach it (the app refuses to start); or settings the app refuses for another reason.
+ */
+export type SignIn =
+  | 'password'
+  | 'only-this-machine'
+  | 'allow-unauthenticated'
+  | 'needs-password'
+  | 'invalid';
+export function signInOf(record: Readonly<Record<string, string>>): SignIn {
+  if (GROUP_NAMES.password.every((n) => (record[n] ?? '') !== '')) return 'password';
+  const reach = reachWithoutPassword(record);
+  if (reach !== 'beyond') return reach === 'local' ? 'only-this-machine' : 'invalid';
+  return record.ALLOW_UNAUTHENTICATED === 'true' ? 'allow-unauthenticated' : 'needs-password';
 }
 
 /** The wizard-owned names whose values differ between the file and the plan. */

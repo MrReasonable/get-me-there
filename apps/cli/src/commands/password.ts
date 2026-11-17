@@ -1,8 +1,8 @@
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { appEnvPath } from '../services/specs.js';
-import { readEnvText } from '../setup/appEnv.js';
-import { NO_PASSWORD_TEXT } from '../setup/closing.js';
+import { readEnvText, signInOf } from '../setup/appEnv.js';
+import { noPasswordText } from '../setup/closing.js';
 
 /**
  * `gmt password`: the app's password from app.env (read with parseEnv), to a terminal only, never to a pipe or log; with
@@ -20,11 +20,20 @@ export async function passwordCommand(_f: Flags, _p: string | null, deps: Deps):
     deps.io.err(`no password in ${appEnvPath(deps.platform.paths)}: run pnpm gmt setup first\n`);
     return EXIT.badConfig;
   }
-  const pass = readEnvText(text).APP_BASIC_AUTH_PASS;
+  const record = readEnvText(text);
+  const pass = record.APP_BASIC_AUTH_PASS;
   if (pass === undefined || pass === '') {
-    // why: spec §4: no password is the install's state while only this machine can reach the app, not a fault
-    deps.io.err(`${NO_PASSWORD_TEXT}\n`);
-    return EXIT.ok;
+    // why: spec §4: no password is the install's state while only this machine can reach the app (or with
+    // ALLOW_UNAUTHENTICATED), not a fault; settings that need one are, and the words say which, by core's rule
+    const signIn = signInOf(record);
+    if (signIn === 'invalid' || signIn === 'password') {
+      deps.io.err(
+        `no password in ${appEnvPath(deps.platform.paths)}, and it would not pass the app’s settings check: run pnpm gmt setup to see why\n`,
+      );
+      return EXIT.badConfig;
+    }
+    deps.io.err(`${noPasswordText(signIn)}\n`);
+    return signIn === 'needs-password' ? EXIT.badConfig : EXIT.ok;
   }
   deps.io.out(`${pass}\n`);
   return EXIT.ok;

@@ -183,7 +183,7 @@ describe('the closing screen (brief §6)', () => {
     expect(closing).not.toContain('The password is in');
     for (const s of [
       'http://127.0.0.1:3000',
-      'There is no password: only this machine can reach the app. Before another device or name reaches it (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.',
+      'There is no password: only this machine can reach the app, and that means every account on it. On a machine other people log in to, or before another device or name reaches the app (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.',
       'Only if you want to reach it from another device: an SSH tunnel (ssh -L 3000:127.0.0.1:3000 <this machine>)',
       'docs/setup.md section 3',
       'plain HTTP',
@@ -376,6 +376,11 @@ describe('--reconfigure <group>', () => {
   });
 });
 
+const ALLOW_TEXT =
+  'There is no password because ALLOW_UNAUTHENTICATED is set in app.env, so every device that reaches this machine can use the app (docs/setup.md section 3). To turn sign-in on: `pnpm gmt setup --reconfigure password`.';
+const NEEDS_TEXT =
+  'app.env has no password, but its settings let something other than this machine reach the app, so the app refuses to start: run `pnpm gmt setup --reconfigure password`.';
+
 describe('signing in (spec §4: no password while only this machine can reach the app)', () => {
   const GEN = Buffer.alloc(24, 9).toString('base64url');
   const turnOn = async (m: ReturnType<typeof machine>) => {
@@ -477,6 +482,27 @@ describe('signing in (spec §4: no password while only this machine can reach th
     });
   });
 
+  it('a re-run over an ALLOW_UNAUTHENTICATED file keeps it without a password and says why there is none', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}ALLOW_UNAUTHENTICATED=true\nALLOWED_HOSTS=localhost:3000,laptop.tail1234.ts.net\n`,
+      0o600,
+    );
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).not.toHaveProperty('APP_BASIC_AUTH_PASS');
+    expect(m.io.stdout).toContain(ALLOW_TEXT);
+    expect(m.io.stdout).not.toContain('only this machine can reach the app');
+  });
+
+  it('a TRUST_PROXY=true file gets a password written: a proxy is in front', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}TRUST_PROXY=true\n`, 0o600);
+    m.deps.randomBytes = (n) => Buffer.alloc(n, 9);
+    expect(await runCli(['setup'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '')).toMatchObject({ TRUST_PROXY: 'true', APP_BASIC_AUTH_PASS: GEN });
+  });
+
   it('a file with another fault is still refused, naming its fields', async () => {
     const m = await setUp();
     m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\nLOG_LEVEL=loud\n`, 0o600);
@@ -505,6 +531,28 @@ describe('password', () => {
     expect(none.io.stderr).toContain('run pnpm gmt setup first');
   });
 
+  it('with none and ALLOW_UNAUTHENTICATED=true says that, not that only this machine can reach the app', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}ALLOW_UNAUTHENTICATED=true\nALLOWED_HOSTS=localhost:3000,laptop.tail1234.ts.net\n`,
+      0o600,
+    );
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
+    expect(await runCli(['password'], m.deps)).toBe(0);
+    expect(tty.stderr).toBe(`${ALLOW_TEXT}\n`);
+  });
+
+  it('with none and settings that need one says the app refuses to start and names the fix (78)', async () => {
+    const m = await setUp();
+    m.fs.file(ENV, `${m.fs.read(ENV)}ALLOWED_HOSTS=flights.example.com\n`, 0o600);
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
+    expect(await runCli(['password'], m.deps)).toBe(78);
+    expect(tty.stderr).toBe(`${NEEDS_TEXT}\n`);
+  });
+
   it('with none set (spec §4) says why on stderr and how to turn sign-in on, and succeeds', async () => {
     const m = await setUp();
     const tty = testIo({ tty: true });
@@ -512,7 +560,7 @@ describe('password', () => {
     expect(await runCli(['password'], m.deps)).toBe(0);
     expect(tty.stdout).toBe('');
     expect(tty.stderr).toBe(
-      'There is no password: only this machine can reach the app. Before another device or name reaches it (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.\n',
+      'There is no password: only this machine can reach the app, and that means every account on it. On a machine other people log in to, or before another device or name reaches the app (docs/setup.md section 3), turn sign-in on with `pnpm gmt setup --reconfigure password`.\n',
     );
   });
 });

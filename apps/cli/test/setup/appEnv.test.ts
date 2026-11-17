@@ -11,6 +11,7 @@ import {
   passwordNeeded,
   renderAppEnv,
   replaceGroups,
+  signInOf,
 } from '../../src/setup/appEnv.js';
 
 const p = currentPlatform({ platform: 'darwin', arch: 'arm64', uid: 501, env: { HOME: '/Users/op' } });
@@ -193,6 +194,23 @@ describe('passwordNeeded (spec §4: none while only this machine can reach the a
     expect(
       passwordNeeded({ ...bare, ALLOWED_HOSTS: 'laptop.tail1234.ts.net', ALLOW_UNAUTHENTICATED: 'true' }),
     ).toBe(false);
+  });
+  it('TRUST_PROXY=true (a proxy in front) needs one', () => {
+    expect(passwordNeeded({ ...bare, TRUST_PROXY: 'true' })).toBe(true);
+  });
+  it.each([
+    ['the two lines', { APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: PASS }, 'password'],
+    ['none, loopback and this machine’s names', {}, 'only-this-machine'],
+    [
+      'none, ALLOW_UNAUTHENTICATED and a tailnet name',
+      { ALLOW_UNAUTHENTICATED: 'true', ALLOWED_HOSTS: 'laptop.tail1234.ts.net' },
+      'allow-unauthenticated',
+    ],
+    ['none, ALLOW_UNAUTHENTICATED on loopback', { ALLOW_UNAUTHENTICATED: 'true' }, 'only-this-machine'],
+    ['none and a public name', { ALLOWED_HOSTS: 'flights.example.com' }, 'needs-password'],
+    ['none and another fault', { LOG_LEVEL: 'loud' }, 'invalid'],
+  ] as const)('signInOf: %s is %s', (_l, over, want) => {
+    expect(signInOf({ ...bare, ...over })).toBe(want);
   });
   it('the password group owns both sign-in lines', () => {
     expect(GROUP_NAMES.password).toEqual(['APP_BASIC_AUTH_USER', 'APP_BASIC_AUTH_PASS']);

@@ -292,6 +292,24 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       expect(m.io.stdout).toContain('fix: publish 127.0.0.1:3000:3000 in docker-compose.yml');
     }
   });
+  it('Docker only, published beyond loopback with no password in .env (spec §4): a fail naming both fixes', async () => {
+    for (const published of ['0.0.0.0:3917', '[::]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      m.fs.file(DOT_ENV, 'TRAVELPAYOUTS_TOKEN=tp-token-0123456789\n', 0o600);
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(
+        /bind address +fail .*published beyond loopback with no password, so anyone who reaches it can use the app/,
+      );
+      expect(m.io.stdout).toContain(
+        'fix: publish 127.0.0.1:3000:3000 in docker-compose.yml (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
+      );
+    }
+    // why: on loopback no password is fine, and nothing is said
+    const { m } = dockerOnly('running', undefined, '127.0.0.1:3917');
+    m.fs.file(DOT_ENV, 'TRAVELPAYOUTS_TOKEN=tp-token-0123456789\n', 0o600);
+    expect(await runCli(['status'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('bind address');
+  });
   it.each([
     ['IPv4 loopback only', '127.0.0.1:3917', 'http://127.0.0.1:3917'],
     ['IPv4 wildcard only', '0.0.0.0:3917', 'http://127.0.0.1:3917'],

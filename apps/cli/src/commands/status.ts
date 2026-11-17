@@ -1,5 +1,6 @@
 import { join } from 'node:path/posix';
-import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
+import { BACKUP_MAX_AGE_MS, backupTimeOf, isLoopbackHost, START_REFUSAL_TEXT } from '@gmt/core';
+import { authFrom } from '../appClient.js';
 import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublications } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
@@ -7,7 +8,7 @@ import { apply } from '../plan/apply.js';
 import type { ServiceFacts } from '../platform/types.js';
 import { type Check, scheduleUnit, settingsChecks, staleChecks } from '../services/checks.js';
 import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
-import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
+import { appEnvPath, dailyBackupsDir } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
 import { COMPOSE_PROJECT } from '../setup/docker.js';
 import { finishStatus, nativeTarget, reportFlags, type StatusTarget } from '../statusReport.js';
@@ -183,7 +184,7 @@ function appEnvChecks(deps: Deps): Check[] {
         },
   ];
   const bind = env.BIND_ADDRESS;
-  if (bind !== undefined && bind !== '' && !isLoopback(bind))
+  if (bind !== undefined && bind !== '' && !isLoopbackHost(bind))
     out.push({
       name: 'bind address',
       level: 'warn',
@@ -195,7 +196,9 @@ function appEnvChecks(deps: Deps): Check[] {
 
 /**
  * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host address compose
- * publishes. Beyond loopback is the same warning as a native BIND_ADDRESS beyond loopback; loopback says nothing.
+ * publishes. Beyond loopback is the same warning as a native BIND_ADDRESS beyond loopback, and a fail when the
+ * checkout's .env has no password (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an
+ * override file leaves behind, so this is the one place the drift shows); loopback says nothing.
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
@@ -210,14 +213,27 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
         fix: 'docker compose port app 3000',
       },
     ];
-  return published
-    .filter((p) => !isLoopback(p.address))
-    .map((p) => ({
+  let noPassword: boolean;
+  try {
+    noPassword = authFrom(readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '')) === null;
+  } catch {
+    // why: an unreadable .env is the endpoint's own reason; the warning below still stands
+    noPassword = false;
+  }
+  const beyond = published.filter((p) => !isLoopbackHost(p.address));
+  if (noPassword)
+    return beyond.map((p) => ({
       name: 'bind address',
-      level: 'warn' as const,
-      detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
-      fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
+      level: 'fail' as const,
+      detail: `${p.address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
+      fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
     }));
+  return beyond.map((p) => ({
+    name: 'bind address',
+    level: 'warn' as const,
+    detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+    fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
+  }));
 }
 
 const workerUnit = (deps: Deps) => ({
