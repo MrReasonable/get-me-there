@@ -7,3 +7,12 @@ packages:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+# Security overrides for transitive dependencies whose parents have not yet moved to a patched
+# release. Each is scoped to the vulnerable range and stays on the dependent's own major line,
+# except glob and minimatch, where the patched release is the next major.
+overrides:
+  qs@<6.16.1: ">=6.16.1 <7"
+  fast-uri@<3.1.9: ">=3.1.9 <4"
+  glob@<14.0.2: ">=14.0.2 <15"
+  minimatch@<11.0.1: ">=11.0.1 <12"
+  esbuild@<0.25.0: ">=0.25.0 <0.26"
