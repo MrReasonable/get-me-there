@@ -5,10 +5,11 @@ describes. This page is the container path on a Mac with Docker Desktop:
 
 1. Open Docker Desktop and wait until it is running.
 2. Create `.env` next to `docker-compose.yml` if you do not have one yet
-   ([`setup.md`](setup.md) section 1 for basic auth, section 2 for the £0 three-line form).
+   ([`setup.md`](setup.md) section 2 for the £0 one-line form).
 3. Double-click `Start.command` in the project folder (or run `./Start.command` in Terminal).
-4. Open <http://127.0.0.1:3000> and sign in with `APP_BASIC_AUTH_USER` and
-   `APP_BASIC_AUTH_PASS` from that `.env` file.
+4. Open <http://127.0.0.1:3000>. No password is needed while you open it on this Mac. Before
+   another device or name reaches it, add `APP_BASIC_AUTH_USER` and `APP_BASIC_AUTH_PASS` to
+   `.env` ([`setup.md`](setup.md) section 1); then sign in with them.
 
 The launcher checks that Docker is up, refuses to print the resolved compose config (it holds
 credentials), builds and starts the `app` service, waits until it is healthy (up to 4

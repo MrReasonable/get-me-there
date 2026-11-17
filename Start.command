@@ -13,7 +13,7 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 if [ ! -f .env ]; then
-  echo 'Missing .env: follow the three-line configuration in docs/setup.md, section 2.' >&2
+  echo 'Missing .env: follow the one-line configuration in docs/setup.md, section 2.' >&2
   exit 1
 fi
 chmod 600 .env
@@ -23,4 +23,10 @@ APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 export APP_VERSION
 docker compose config --quiet
 docker compose up -d --build --wait --wait-timeout 240 app
-printf '\nFlight scanner ready: http://127.0.0.1:3000\nLogin: use APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS from your local .env file.\n'
+printf '\nFlight scanner ready: http://127.0.0.1:3000\n'
+# The sign-in lines are looked for, never printed: with them the app asks for that login, without them it has no password.
+if grep -Eq '^APP_BASIC_AUTH_PASS=.' .env; then
+  printf 'Login: use APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS from your local .env file.\n'
+else
+  printf 'No password: only this Mac can reach the app. Before another device or name reaches it, add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1).\n'
+fi

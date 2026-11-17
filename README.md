@@ -10,8 +10,9 @@ and later, which no longer include corepack, run `npm install --global corepack`
 [`docs/setup.md`](docs/setup.md) section 0 is the quick start, including how to get Node.
 
 **In a container (a VPS, or Docker Desktop on a Mac):** start with
-[`docs/setup.md`](docs/setup.md) section 1 — the app refuses to start without basic auth, and
-that section says which two lines to put in `.env`. On a Mac with Docker Desktop, double-click
+[`docs/setup.md`](docs/setup.md) section 1 — the app needs no password while you open it on
+this machine, and that section says which two lines to put in `.env` before another device or
+name reaches it. On a Mac with Docker Desktop, double-click
 `Start.command`, then open <http://127.0.0.1:3000>; see
 [the short Docker guide](docs/local-quickstart.md).
 

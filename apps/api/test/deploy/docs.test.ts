@@ -142,6 +142,44 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(section1).toContain(AUTH_MISSING);
   });
 
+  it('section 1 is Signing in: no password on this machine, the two lines before another device or name (spec §4)', () => {
+    const section1 = setup.slice(setup.indexOf('## 1.'), setup.indexOf('## 2.')).replace(/\s+/g, ' ');
+    expect(section1).toMatch(/^## 1\. Signing in /);
+    expect(section1).toContain('No password is needed while you open the app on this machine.');
+    expect(section1).toContain('Before another device or name reaches it, add two lines to `.env`.');
+    expect(section1).toContain('openssl rand -base64 24');
+    expect(section1).toContain('wrap it in single quotes');
+    expect(section1).toContain('treat membership of the `docker` group as root');
+    // why: the config accepts the container with no sign-in lines, as the section says
+    const open = parseConfig(
+      containerEnv({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '', PUBLISHED_ADDRESS: '127.0.0.1' }),
+      { realpath: identity },
+    );
+    expect(open.ok ? open.config.auth : 'refused').toBeNull();
+    expect(composeText).toContain('PUBLISHED_ADDRESS: "127.0.0.1"');
+    expect(composeText).not.toContain('Basic auth is always on');
+  });
+
+  it('section 3’s Tailscale and Caddy examples say to add the two auth lines, which their ALLOWED_HOSTS needs', () => {
+    const section3 = between(setup, '## 3.', '## 4.').replace(/\s+/g, ' ');
+    expect(section3).toContain(
+      'so add the two auth lines (section 1; natively, `pnpm gmt setup --reconfigure password`): without them the app refuses to start.',
+    );
+    expect(section3).toContain('Add the two auth lines too (section 1)');
+    for (const hosts of ['gmt-host.tail0000.ts.net,localhost:3000,127.0.0.1:3000', 'flights.example.com']) {
+      const refused = parseConfig(
+        containerEnv({
+          APP_BASIC_AUTH_USER: '',
+          APP_BASIC_AUTH_PASS: '',
+          PUBLISHED_ADDRESS: '127.0.0.1',
+          ALLOWED_HOSTS: hosts,
+        }),
+        { realpath: identity },
+      );
+      expect(refused.ok ? [] : refused.errors.map((e) => e.field)).toEqual(['ALLOWED_HOSTS']);
+    }
+  });
+
   it('explains that trial searches allow 0 billed calls and how to check a trip anyway (N3, ruling 9; stage 2: the Trip page’s check)', () => {
     expect(flat).toContain(
       'On the trial plan new searches allow 0 billed calls per run, so the Trip page\'s "Check with SearchApi" is unavailable until you raise the search\'s call cap in its Edit page → Limits and checks → Run budget (Max billed calls per run); 6 covers one cell.',
