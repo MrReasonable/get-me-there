@@ -430,13 +430,18 @@ Add them (section 1; natively, `pnpm gmt setup --reconfigure password`) before y
 Keep the port mapping on `127.0.0.1` and put `tailscale serve` or a reverse proxy in front.
 Changing it to `3000:3000` or `0.0.0.0:3000:3000` publishes the app to every network the host
 is on, past a host firewall such as ufw (Docker writes its own packet-filter rules). If the
-port is reachable, basic auth is the only barrier between a stranger and your API budget. To
-use another host port, change only the left side: `127.0.0.1:8080:3000`. The app cannot see the
-address it is published on, so `PUBLISHED_ADDRESS` beside the `ports:` line tells it; if you ever
-change the address there, change `PUBLISHED_ADDRESS` with it. Anything but loopback there needs
-the two sign-in lines of section 1, and so does a `docker-compose.override.yml` (which compose reads
-on its own) that adds a `ports:` mapping. `pnpm gmt status` fails when compose publishes the app
-beyond loopback and `.env` has no password.
+port is reachable, basic auth is the only barrier between a stranger and your API budget.
+
+To use another host port, change only the left side, for example to `127.0.0.1:8080:3000`, and set
+`ALLOWED_HOSTS=localhost:8080,127.0.0.1:8080` in `.env`, keeping any other names you use. Inside
+the container the app still listens on 3000, so its default names are for port 3000 and the
+browser's `Host: 127.0.0.1:8080` would be refused without them; keep `PUBLISHED_ADDRESS` at
+`127.0.0.1`. The app cannot see the address it is published on, so `PUBLISHED_ADDRESS` beside the
+`ports:` line tells it; if you ever change the address there, change `PUBLISHED_ADDRESS` with it.
+Anything but loopback there needs the two sign-in lines of section 1, and so does a
+`docker-compose.override.yml` (which compose reads on its own) that adds a `ports:` mapping.
+`pnpm gmt status` reads every mapping compose configures, overrides included, and fails when any
+publishes the app beyond loopback while `.env` has no password.
 
 **Tailscale** (the app stays off the public internet):
 

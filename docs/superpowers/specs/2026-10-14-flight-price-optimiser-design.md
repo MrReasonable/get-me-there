@@ -5307,7 +5307,7 @@ credentials, as every CLI read of an app with no password is); it prints the Doc
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when the address compose publishes is not loopback, and says nothing when it is; when the checkout's `.env` has no auth lines that is a `fail` naming both fixes (publish `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check.
+app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when an address compose publishes is not loopback, and says nothing when every one is. It judges every mapping: the effective configuration's (`docker compose config --format json`, every compose file and override included, parsed in process with only `services.app.ports` taken, a mapping with no `host_ip` being every interface) beside the running container's (`docker compose port app 3000`, which names one mapping only). When the checkout's `.env` has no auth lines and no `ALLOW_UNAUTHENTICATED=true`, a mapping beyond loopback is a `fail` naming both fixes (publish only `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
 unknown: a `fail` saying so, the worker's facts, and no native fix. Every
@@ -5636,7 +5636,15 @@ auth lines, which are now optional.
 - **Ruling (Ian, review): Docker before 28.0 on Linux.** Its release notes record the fix that stopped neighbour hosts
   reaching ports published on loopback; the docs say to update Docker or keep the password there.
 - **Ruling (Ian, review): every sentence about no password follows the rule**, not the absence of the lines: with
-  `ALLOW_UNAUTHENTICATED` it says so, and the CLI's own loopback test gives way to `core`'s.
+  `ALLOW_UNAUTHENTICATED` it says so, and the CLI's own loopback test gives way to `core`'s. The settings as the app
+  reads them decide first, so a half pair or an invalid `ALLOW_UNAUTHENTICATED` is a settings fault (`gmt password`
+  exits 78 and prints no password).
+- **Ruling (Ian, PR review): `gmt status` judges every publication compose configures**, overrides included, from
+  `docker compose config --format json` beside `docker compose port` (which names one mapping only); the app itself
+  never inspects client addresses. `ALLOW_UNAUTHENTICATED=true` in `.env` keeps the warning.
+- **Ruling (Ian, PR review): the CLI reads `PORT` by the app's rule** (`Number`, an integer from 1 to 65535, else the
+  default); a group's `--reconfigure` reads back the file's other lines as kept, so `--reconfigure password` repairs a
+  widened `BIND_ADDRESS`; the import's guard asks the Docker app on the loopback host and port `appEndpoint` chooses.
 
 ### Revision 70: the Trips and Search pages, the nav and the top bar (2026-11-15)
 

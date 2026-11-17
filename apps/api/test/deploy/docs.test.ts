@@ -185,6 +185,33 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     );
     expect(flat3).toContain('`docker-compose.override.yml`');
     expect(composeText).toContain('docker-compose.override.yml');
+    // why: gmt status reads every publication compose configures, overrides included, and says so where it is documented
+    expect(flat3).toContain(
+      '`pnpm gmt status` reads every mapping compose configures, overrides included, and fails when any publishes the app beyond loopback while `.env` has no password.',
+    );
+    expect(composeText.replace(/\n# /g, ' ')).toContain(
+      'pnpm gmt status reads every mapping, overrides included',
+    );
+  });
+
+  it('section 3: another host port also sets ALLOWED_HOSTS for it and keeps PUBLISHED_ADDRESS (CodeRabbit, PR #63)', () => {
+    const flat3 = between(setup, '## 3.', '## 4.').replace(/\s+/g, ' ');
+    expect(flat3).toContain(
+      'To use another host port, change only the left side, for example to `127.0.0.1:8080:3000`, and set `ALLOWED_HOSTS=localhost:8080,127.0.0.1:8080`',
+    );
+    expect(flat3).toContain('keep `PUBLISHED_ADDRESS` at `127.0.0.1`');
+    expect(flat3).not.toContain('change only the left side: `127.0.0.1:8080:3000`.');
+    // why: the app still listens on 3000 in the container, so its default names are for 3000; the stated ones pass
+    const c = parseConfig(
+      containerEnv({
+        APP_BASIC_AUTH_USER: '',
+        APP_BASIC_AUTH_PASS: '',
+        PUBLISHED_ADDRESS: '127.0.0.1',
+        ALLOWED_HOSTS: 'localhost:8080,127.0.0.1:8080',
+      }),
+      { realpath: identity },
+    );
+    expect(c.ok ? c.config.allowedHosts : []).toEqual(['localhost:8080', '127.0.0.1:8080']);
   });
 
   it('section 3’s Tailscale and Caddy examples say to add the two auth lines, which their ALLOWED_HOSTS needs', () => {
