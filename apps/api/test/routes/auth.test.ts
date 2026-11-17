@@ -191,6 +191,14 @@ describe('no password and a forwarded request (spec §4: a proxy or tunnel needs
     expect((await errorOf(res)).message).toBe(API_TEXT.proxiedWithoutPassword(AUTH_MISSING));
   });
 
+  it('header names match in any case, as a proxy writes them', async () => {
+    const x = await harness({ env: NO_AUTH });
+    for (const name of ['X-Forwarded-For', 'X-REAL-IP', 'Forwarded']) {
+      const res = await x.request('/api/providers', { auth: false, headers: { [name]: '198.51.100.7' } });
+      expect(res.status, name).toBe(403);
+    }
+  });
+
   it('with a password, or with ALLOW_UNAUTHENTICATED=true, a forwarded request is not refused for it', async () => {
     const withAuth = await harness();
     expect(

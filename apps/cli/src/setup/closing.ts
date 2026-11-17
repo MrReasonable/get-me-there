@@ -25,13 +25,19 @@ export const ALLOW_UNAUTHENTICATED_TEXT =
 export const NEEDS_PASSWORD_TEXT =
   'app.env has no password, but its settings let something other than this machine reach the app, so the app refuses to start: run `pnpm gmt setup --reconfigure password`.';
 
+/** No password, and settings that fail the app's check for some other reason: the fault is not reach, so say so. */
+export const invalidSettingsText = (appEnv: string): string =>
+  `no password in ${appEnv}, and it would not pass the app’s settings check: run pnpm gmt setup to see why`;
+
 /** The sentence for how the app signs people in, when it has no password. */
-export const noPasswordText = (s: Exclude<SignIn, 'password'>): string =>
+export const noPasswordText = (s: Exclude<SignIn, 'password'>, appEnv: string): string =>
   s === 'only-this-machine'
     ? NO_PASSWORD_TEXT
     : s === 'allow-unauthenticated'
       ? ALLOW_UNAUTHENTICATED_TEXT
-      : NEEDS_PASSWORD_TEXT;
+      : s === 'needs-password'
+        ? NEEDS_PASSWORD_TEXT
+        : invalidSettingsText(appEnv);
 
 /**
  * The closing screen (brief §6; U3, U6): never the password itself, only where it lives and how to show or replace it
@@ -58,7 +64,7 @@ export function closingScreen(x: {
           'User name: operator',
           `The password is in ${x.appEnv}; show it with \`pnpm gmt password\` (if scrollback or a shared screen may have kept it, \`pnpm gmt setup --reconfigure password\` replaces it).`,
         ]
-      : [noPasswordText(x.signIn)]),
+      : [noPasswordText(x.signIn, x.appEnv)]),
     nextStep(x.port),
     NO_SCHEDULE_TEXT,
     'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',

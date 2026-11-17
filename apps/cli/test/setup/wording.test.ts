@@ -67,6 +67,16 @@ describe('the closing screen (U3, U6)', () => {
     );
     expect(closing({ ...paid, linger: 'enable' }, { os: 'linux' })).not.toContain('stops when you log out');
   });
+  it('with no password, names the real reason: settings that fail for another fault are not blamed on reach', () => {
+    const text = closing(paid, { signIn: 'invalid' });
+    expect(text).toContain(
+      'no password in /h/app.env, and it would not pass the app’s settings check: run pnpm gmt setup to see why',
+    );
+    expect(text).not.toContain('let something other than this machine reach the app');
+    expect(closing(paid, { signIn: 'needs-password' })).toContain(
+      'let something other than this machine reach the app',
+    );
+  });
 });
 
 describe('the questions in plain words (U6)', () => {
