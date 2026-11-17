@@ -98,6 +98,35 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   return out.length === 0 ? null : out;
 }
 
+/** Where the Docker app may be asked on this machine, from what compose publishes, or why it may not be. */
+export type LoopbackPublication = { ok: true; port: number; host: string } | { ok: false; reason: string };
+
+/**
+ * The one choice of where to ask the Docker app (appEndpoint and the import's guard): its published port in the loopback
+ * family compose published (IPv4 first when both; 0.0.0.0 and :: include loopback), never another address.
+ */
+export function loopbackPublication(
+  published: ReadonlyArray<{ address: string; port: number }> | null,
+): LoopbackPublication {
+  const list = published ?? [];
+  // why: the basic auth is sent only to this machine's loopback, in the family compose published (IPv4 first when both):
+  // a port published on another address, or on a family that was not, could belong to another program on 127.0.0.1
+  const v4 = list.find((p) => V4_LOCAL.has(p.address));
+  const v6 = list.find((p) => V6_LOCAL.has(p.address));
+  const chosen = v4 ?? v6;
+  const unsaid = 'compose did not say which host port the Docker app publishes';
+  if (chosen === undefined)
+    return {
+      ok: false,
+      reason:
+        list[0] === undefined
+          ? unsaid
+          : `compose publishes the Docker app on ${list[0].address}, not on this machine’s loopback`,
+    };
+  if (chosen.port < 1 || chosen.port > 65535) return { ok: false, reason: unsaid };
+  return { ok: true, port: chosen.port, host: v4 === undefined ? '[::1]' : '127.0.0.1' };
+}
+
 /** The Docker app, given its compose state (read it with dockerAppState). */
 export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise<AppEndpoint> {
   if (state === 'unknown')
@@ -106,24 +135,9 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'there is no native install, and Docker’s compose state could not be read',
     };
   if (state !== 'running') return { kind: 'none', reason: 'the Docker app is not running' };
-  const published = (await dockerPublications(deps)) ?? [];
-  // why: the basic auth is sent only to this machine's loopback, in the family compose published (IPv4 first when both):
-  // a port published on another address, or on a family that was not, could belong to another program on 127.0.0.1
-  const v4 = published.find((p) => V4_LOCAL.has(p.address));
-  const v6 = published.find((p) => V6_LOCAL.has(p.address));
-  const chosen = v4 ?? v6;
-  if (chosen === undefined)
-    return {
-      kind: 'none',
-      reason:
-        published[0] === undefined
-          ? 'compose did not say which host port the Docker app publishes'
-          : `compose publishes the Docker app on ${published[0].address}, not on this machine’s loopback`,
-    };
-  const { port } = chosen;
-  if (port < 1 || port > 65535)
-    return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
-  const host = v4 === undefined ? '[::1]' : '127.0.0.1';
+  const where = loopbackPublication(await dockerPublications(deps));
+  if (!where.ok) return { kind: 'none', reason: where.reason };
+  const { port, host } = where;
   let text: string | null;
   try {
     text = deps.files.read(join(deps.checkout, '.env'));

@@ -1,6 +1,7 @@
 import { basename, join } from 'node:path/posix';
 import { MOVED_MARKER } from '@gmt/core';
 import { targetFrom } from '../appClient.js';
+import { dockerPublications, type LoopbackPublication, loopbackPublication } from '../appEndpoint.js';
 import type { Ask } from '../ask.js';
 import type { GuardTarget } from '../commands/guard.js';
 import type { Deps } from '../deps.js';
@@ -20,8 +21,8 @@ export interface ComposeFacts {
   /** The compose `.env` beside docker-compose.yml, read with parseEnv; null when there is none. */
   record: Record<string, string> | null;
   appRunning: boolean;
-  /** The container's published port on the host, when it is running. */
-  port: number | null;
+  /** Where the running container may be asked (appEndpoint's one rule), or why not; null when it is not running. */
+  endpoint: LoopbackPublication | null;
 }
 
 export async function composeFacts(deps: Deps): Promise<ComposeFacts> {
@@ -31,26 +32,27 @@ export async function composeFacts(deps: Deps): Promise<ComposeFacts> {
     timeoutMs: 20_000,
   });
   const appRunning = ps.code === 0 && appRunningIn(ps.stdout);
-  let port: number | null = null;
-  if (appRunning) {
-    const p = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
-    const m = /:(\d+)\s*$/.exec(p.stdout.trim());
-    port = p.code === 0 && m?.[1] !== undefined ? Number(m[1]) : null;
-  }
-  return { record: text === null ? null : readEnvText(text), appRunning, port };
+  // why: the same reader and choice appEndpoint uses, so [::1]:3917 is asked on [::1] and an address off this machine's
+  // loopback is never asked
+  const endpoint = appRunning ? loopbackPublication(await dockerPublications(deps)) : null;
+  return { record: text === null ? null : readEnvText(text), appRunning, endpoint };
 }
 
 /**
- * The Docker app as the active-run guard sees it: up while its container runs, reached on its published port with the
- * .env basic auth, or none when .env has no password (spec §4); it cannot be asked when its port is unknown.
+ * The Docker app as the active-run guard sees it: up while its container runs, reached on its published loopback host
+ * and port with the .env basic auth, or none when .env has no password (spec §4); it cannot be asked when compose does
+ * not say where, or publishes it off this machine's loopback.
  */
 export function dockerGuardTarget(f: ComposeFacts): GuardTarget {
+  const e = f.endpoint;
   return {
     label: 'the Docker app',
     up: f.appRunning,
-    app: f.port === null ? null : { ...targetFrom(f.record ?? {}), port: f.port },
+    app: e?.ok === true ? { ...targetFrom(f.record ?? {}), port: e.port, host: e.host } : null,
     autoResume: (f.record?.AUTO_RESUME ?? 'true') !== 'false',
-    ...(f.port === null ? { cannot: 'compose did not say which host port it publishes' } : {}),
+    ...(e?.ok === true
+      ? {}
+      : { cannot: e === null ? 'compose did not say which host port it publishes' : e.reason }),
   };
 }
 
