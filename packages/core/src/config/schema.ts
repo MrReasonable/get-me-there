@@ -386,12 +386,19 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     else auth = { user: authUser, pass: new Secret(authPass) };
   }
   const allowUnauthenticated = r.bool('ALLOW_UNAUTHENTICATED') ?? false;
+  const trustProxy = r.bool('TRUST_PROXY') ?? false;
   const inContainer = r.raw('IN_CONTAINER') !== undefined;
   const publishedAddress = r.str('PUBLISHED_ADDRESS') ?? null;
   // why: spec §4: no password only while nothing but this machine can reach the app; ALLOW_UNAUTHENTICATED (a
   // tailnet-only host) bypasses the rule. The refusal names the setting that lets others in and the fix for this mode.
   if (authUser === undefined && authPass === undefined && !allowUnauthenticated) {
-    const reach = reachBeyondThisMachine({ inContainer, bindAddress, publishedAddress, allowedHosts });
+    const reach = reachBeyondThisMachine({
+      inContainer,
+      bindAddress,
+      publishedAddress,
+      allowedHosts,
+      trustProxy,
+    });
     if (reach !== null) {
       const refusal = reachRefusal(reach, runModeOf({ inContainer, nodeEnv }));
       r.fail(refusal.field, refusal.message);
@@ -505,7 +512,6 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
   const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
-  const trustProxy = r.bool('TRUST_PROXY') ?? false;
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
 
   if (r.errors.length > 0) return { ok: false, errors: r.errors };

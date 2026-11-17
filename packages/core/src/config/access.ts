@@ -6,13 +6,16 @@
  * The app may run without a password exactly when only this machine can reach it:
  * 1. it is reachable only on loopback: natively its BIND_ADDRESS is loopback; in the container (which binds 0.0.0.0, so
  *    the app cannot see this itself) the address compose publishes it on, PUBLISHED_ADDRESS, is loopback; and
- * 2. it answers only to this machine's names: every ALLOWED_HOSTS entry is loopback. why: `tailscale serve` and a
+ * 2. no proxy is declared in front of it: TRUST_PROXY is not true; and
+ * 3. it answers only to this machine's names: every ALLOWED_HOSTS entry is loopback. why: `tailscale serve` and a
  *    reverse proxy forward to 127.0.0.1:3000, so a loopback address alone would leave a public proxy without a password.
+ * A proxy that rewrites Host to 127.0.0.1 (nginx's default) or a raw tunnel passes 2 and 3 unseen: the docs say any
+ * forwarder needs a password, and the auth gate refuses a request carrying a forwarding header while there is none.
  */
 
-const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
+const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost)$/;
 /** An ALLOWED_HOSTS entry naming this machine: `localhost`, 127.0.0.0/8 or `[::1]`, an optional `:port`, any case. */
-const LOOPBACK_HOST_ENTRY = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/i;
+const LOOPBACK_HOST_ENTRY = /^(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\])(:\d+)?$/i;
 
 /** Whether a bind or published address (or an SMTP host) is this machine's loopback. */
 export const isLoopbackHost = (host: string): boolean => LOOPBACK.test(host);
@@ -27,12 +30,15 @@ export interface ReachFacts {
   /** The host address compose publishes the container on (its `ports:` line); null when not stated. */
   publishedAddress: string | null;
   allowedHosts: readonly string[];
+  /** TRUST_PROXY: a proxy the operator controls forwards to the app. */
+  trustProxy: boolean;
 }
 
 /** Why something other than this machine can reach the app: the first reason found. */
 export type Reach =
   | { kind: 'bind'; address: string }
   | { kind: 'published'; address: string | null }
+  | { kind: 'proxy' }
   | { kind: 'host'; host: string };
 
 /** The reason another device or name can reach the app, or null when only this machine can. */
@@ -41,6 +47,7 @@ export function reachBeyondThisMachine(f: ReachFacts): Reach | null {
     // why: an unstated address is not a loopback one
     if (!isLoopbackHost(f.publishedAddress ?? '')) return { kind: 'published', address: f.publishedAddress };
   } else if (!isLoopbackHost(f.bindAddress)) return { kind: 'bind', address: f.bindAddress };
+  if (f.trustProxy) return { kind: 'proxy' };
   const host = f.allowedHosts.find((h) => !isLoopbackHostEntry(h));
   return host === undefined ? null : { kind: 'host', host };
 }
@@ -79,6 +86,11 @@ export function reachRefusal(r: Reach, mode: ReachMode): { field: string; messag
           r.address === null
             ? `not set, so the app cannot tell that only this machine reaches it, and it has no password: ${fix}`
             : `the app is published on ${r.address}, which other devices can reach, and has no password: ${fix}`,
+      };
+    case 'proxy':
+      return {
+        field: 'TRUST_PROXY',
+        message: `true says a proxy forwards other devices to the app, and it has no password: ${fix}`,
       };
     case 'host':
       return {

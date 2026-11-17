@@ -130,6 +130,20 @@ describe('parseConfig (spec §12)', () => {
       ).toContain(AUTH_MISSING);
     });
 
+    it('refuses TRUST_PROXY=true with no password, natively and in the container, naming it and the mode’s fix', () => {
+      expect(refusal({ ...nativeNoAuth, TRUST_PROXY: 'true' })).toEqual([
+        {
+          field: 'TRUST_PROXY',
+          message: `true says a proxy forwards other devices to the app, and it has no password: ${AUTH_MISSING_NATIVE}`,
+        },
+      ]);
+      expect(refusal({ ...containerNoAuth, TRUST_PROXY: 'true' })[0]?.message).toContain(AUTH_MISSING);
+      expect(ok({ ...nativeNoAuth, TRUST_PROXY: 'true', ALLOW_UNAUTHENTICATED: 'true' }).trustProxy).toBe(
+        true,
+      );
+      expect(ok({ ...minimal, TRUST_PROXY: 'true' }).trustProxy).toBe(true);
+    });
+
     it('ALLOW_UNAUTHENTICATED=true bypasses both checks (a tailnet-only host)', () => {
       const tailnet = { ALLOW_UNAUTHENTICATED: 'true', ALLOWED_HOSTS: 'laptop.tail1234.ts.net' };
       expect(ok({ ...nativeNoAuth, ...tailnet, BIND_ADDRESS: '0.0.0.0' }).allowUnauthenticated).toBe(true);

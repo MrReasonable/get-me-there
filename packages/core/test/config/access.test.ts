@@ -15,6 +15,7 @@ const native: ReachFacts = {
   bindAddress: '127.0.0.1',
   publishedAddress: null,
   allowedHosts: ['localhost:3000', '127.0.0.1:3000'],
+  trustProxy: false,
 };
 const container: ReachFacts = {
   ...native,
@@ -35,6 +36,10 @@ describe('who can reach the app (spec §4)', () => {
     ['localhost.example', false],
     ['x127.0.0.1', false],
     ['127.0.0.1x', false],
+    ['127.1234.0.1', false],
+    ['127.0.0', false],
+    ['128.0.0.1', false],
+    ['::', false],
   ])('isLoopbackHost(%s) is %s', (host, want) => {
     expect(isLoopbackHost(host)).toBe(want);
   });
@@ -57,6 +62,7 @@ describe('who can reach the app (spec §4)', () => {
     ['evil.localhost', false],
     ['127.0.0.1.example.com', false],
     ['192.168.1.4:3000', false],
+    ['127.1234.0.1:3000', false],
   ])('isLoopbackHostEntry(%s) is %s', (entry, want) => {
     expect(isLoopbackHostEntry(entry)).toBe(want);
   });
@@ -109,6 +115,18 @@ describe('who can reach the app (spec §4)', () => {
     expect(AUTH_MISSING_NATIVE).toBe('run pnpm gmt setup --reconfigure password, which turns sign-in on');
   });
 
+  it('TRUST_PROXY=true says a proxy is in front, so something else reaches the app (after the address, before the names)', () => {
+    expect(reachBeyondThisMachine({ ...native, trustProxy: true })).toEqual({ kind: 'proxy' });
+    expect(reachBeyondThisMachine({ ...container, trustProxy: true })).toEqual({ kind: 'proxy' });
+    expect(reachBeyondThisMachine({ ...native, trustProxy: true, bindAddress: '0.0.0.0' })).toEqual({
+      kind: 'bind',
+      address: '0.0.0.0',
+    });
+    expect(
+      reachBeyondThisMachine({ ...native, trustProxy: true, allowedHosts: ['flights.example.com'] }),
+    ).toEqual({ kind: 'proxy' });
+  });
+
   it('each refusal names its setting, the reason and the fix for its mode', () => {
     expect(reachRefusal({ kind: 'bind', address: '0.0.0.0' }, 'native')).toEqual({
       field: 'BIND_ADDRESS',
@@ -126,6 +144,11 @@ describe('who can reach the app (spec §4)', () => {
       field: 'ALLOWED_HOSTS',
       message: `flights.example.com is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING}`,
     });
+    expect(reachRefusal({ kind: 'proxy' }, 'native')).toEqual({
+      field: 'TRUST_PROXY',
+      message: `true says a proxy forwards other devices to the app, and it has no password: ${AUTH_MISSING_NATIVE}`,
+    });
+    expect(reachRefusal({ kind: 'proxy' }, 'container').message).toContain(AUTH_MISSING);
     expect(reachRefusal({ kind: 'host', host: 'flights.example.com' }, 'native').message).toContain(
       'pnpm gmt setup --reconfigure password',
     );

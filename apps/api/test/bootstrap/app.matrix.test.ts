@@ -210,6 +210,11 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
         { ...container, publishedAddress: '0.0.0.0' },
         `PUBLISHED_ADDRESS: the app is published on 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING}`,
       ],
+      [
+        'a native loopback bind behind a declared proxy',
+        { trustProxy: true },
+        `TRUST_PROXY: true says a proxy forwards other devices to the app, and it has no password: ${AUTH_MISSING_NATIVE}`,
+      ],
       ['no allowed host', { allowedHosts: [] }, 'ALLOWED_HOSTS is empty; refusing to serve'],
     ] satisfies Array<[string, Partial<Config>, string]>)('refuses %s', async (_label, over, message) => {
       await expect(boot(noAuth(over))).rejects.toMatchObject({ exitCode: 78, message });
