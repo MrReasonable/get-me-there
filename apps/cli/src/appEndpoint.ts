@@ -107,28 +107,26 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   return out.length === 0 ? null : out;
 }
 
-/** The part of `docker compose config --format json` read here: the app's `ports`, nothing else. */
+/** The part of `docker compose config --format json` read here: the app's `ports`, nothing else, each entry read alone. */
 const configPortsSchema = z.looseObject({
-  services: z.looseObject({
-    app: z.looseObject({
-      ports: z
-        .array(
-          z.looseObject({
-            host_ip: z.string().optional(),
-            published: z.union([z.string(), z.number()]).optional(),
-          }),
-        )
-        .optional(),
-    }),
-  }),
+  services: z.looseObject({ app: z.looseObject({ ports: z.array(z.unknown()).optional() }) }),
 });
+/** One `ports` entry (long syntax): its host address and published port; a null host address is every interface. */
+const configPortSchema = z.looseObject({
+  host_ip: z.string().nullish(),
+  published: z.union([z.string(), z.number()]).nullish(),
+});
+
+/** How status names a `ports` entry it could not read; never any of the config's own text. */
+export const UNREADABLE_PORTS_ENTRY = 'an unreadable ports entry';
 
 /**
  * Every host address the app is published on by compose's effective configuration, every compose file and override
  * included (spec §4: the app trusts PUBLISHED_ADDRESS, which an extra `ports:` mapping leaves behind), or null when
- * compose does not say. The JSON holds the interpolated environment, secrets included, so it is parsed here, in process,
- * and only `ports` is taken; it is never printed, logged or written. A mapping with no host address publishes on every
- * interface (0.0.0.0).
+ * the configuration cannot be read. The JSON holds the interpolated environment, secrets included, so it is parsed
+ * here, in process, and only `ports` is taken; it is never printed, logged or written. A mapping with no host address
+ * (missing, empty or null) publishes on every interface (0.0.0.0). Each entry is read alone: one that cannot be read is
+ * kept as UNREADABLE_PORTS_ENTRY, which is no loopback address, so it is judged beyond loopback (fail-safe).
  */
 export async function composeConfigPublications(
   deps: Deps,
@@ -144,10 +142,17 @@ export async function composeConfigPublications(
   const parsed = configPortsSchema.safeParse(json);
   if (!parsed.success) return null;
   const out: { address: string; port: number }[] = [];
-  for (const p of parsed.data.services.app.ports ?? []) {
-    const address = p.host_ip === undefined || p.host_ip === '' ? '0.0.0.0' : ipAddress(p.host_ip);
-    // why: a host address that is no IP (a name) is not loopback, so it is judged as written
-    out.push({ address: address ?? p.host_ip ?? '', port: Number(p.published ?? 0) });
+  for (const entry of parsed.data.services.app.ports ?? []) {
+    const p = configPortSchema.safeParse(entry);
+    if (!p.success) {
+      out.push({ address: UNREADABLE_PORTS_ENTRY, port: 0 });
+      continue;
+    }
+    const hostIp = p.data.host_ip ?? '';
+    const address = hostIp === '' ? '0.0.0.0' : ipAddress(hostIp);
+    // why: a host address that is no IP (a name) is not loopback, so it is judged as written; a range's port is NaN,
+    // which only labels the mapping
+    out.push({ address: address ?? hostIp, port: Number(p.data.published ?? 0) });
   }
   return out;
 }

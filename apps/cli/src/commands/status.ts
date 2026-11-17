@@ -206,7 +206,8 @@ function appEnvChecks(deps: Deps): Check[] {
  * the running container (`docker compose port`, which names one mapping only). Beyond loopback is the same warning as
  * a native BIND_ADDRESS beyond loopback, and a fail when the checkout's .env has no password and no
  * ALLOW_UNAUTHENTICATED=true (spec §4: the app trusts PUBLISHED_ADDRESS, which an edited `ports:` line or an override
- * file leaves behind, so this is the one place the drift shows); loopback says nothing.
+ * file leaves behind, so this is the one place the drift shows); loopback says nothing. When the configuration cannot
+ * be read, a warning says only the running mapping was checked.
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
@@ -233,19 +234,38 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
   }
   const addresses = [...new Set([...(running ?? []), ...(configured ?? [])].map((p) => p.address))];
   const beyond = addresses.filter((a) => !isLoopbackHost(a));
+  // why: compose port names one mapping only, so without the configuration an override's mapping goes unseen: say so,
+  // never with any of the configuration's text
+  const partial: Check[] =
+    configured === null
+      ? [
+          {
+            name: 'bind address',
+            level: 'warn',
+            detail: 'compose’s configuration could not be read, so only the running mapping was checked',
+            fix: 'docker compose config --quiet',
+          },
+        ]
+      : [];
   if (noPassword)
-    return beyond.map((address) => ({
+    return [
+      ...partial,
+      ...beyond.map((address) => ({
+        name: 'bind address',
+        level: 'fail' as const,
+        detail: `${address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
+        fix: 'publish only 127.0.0.1 in docker-compose.yml and any override file (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
+      })),
+    ];
+  return [
+    ...partial,
+    ...beyond.map((address) => ({
       name: 'bind address',
-      level: 'fail' as const,
-      detail: `${address}: published beyond loopback with no password, so anyone who reaches it can use the app`,
-      fix: 'publish only 127.0.0.1 in docker-compose.yml and any override file (PUBLISHED_ADDRESS stays 127.0.0.1), or add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env (docs/setup.md section 1); then docker compose up -d',
-    }));
-  return beyond.map((address) => ({
-    name: 'bind address',
-    level: 'warn' as const,
-    detail: `${address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
-    fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
-  }));
+      level: 'warn' as const,
+      detail: `${address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+      fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
+    })),
+  ];
 }
 
 const workerUnit = (deps: Deps) => ({
