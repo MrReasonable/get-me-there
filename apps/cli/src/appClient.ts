@@ -37,9 +37,14 @@ export function authFrom(r: Readonly<Record<string, string | undefined>>): AppAu
   return { user, pass };
 }
 
-/** The app a settings record describes: its PORT (else `portDefault`) and its basic auth, if any. */
+/**
+ * The app a settings record describes: its PORT (else `portDefault`) and its basic auth, if any. PORT is read by the
+ * app's own rule (core's parseConfig: `Number` coercion, an integer from 1 to 65535, empty = unset), so `3917.0` is
+ * 3917 here as it is in the app.
+ */
 export function targetFrom(r: Readonly<Record<string, string | undefined>>, portDefault = 3000): AppTarget {
-  const port = r.PORT !== undefined && /^\d+$/.test(r.PORT) ? Number(r.PORT) : portDefault;
+  const n = r.PORT === undefined || r.PORT === '' ? Number.NaN : Number(r.PORT);
+  const port = Number.isInteger(n) && n >= 1 && n <= 65535 ? n : portDefault;
   return { port, auth: authFrom(r) };
 }
 
