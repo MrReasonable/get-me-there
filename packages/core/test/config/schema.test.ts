@@ -92,9 +92,7 @@ describe('parseConfig (spec §12)', () => {
     });
 
     it('refuses a native loopback bind with a tailnet name, naming the setup fix', () => {
-      expect(
-        refusal({ ...nativeNoAuth, ALLOWED_HOSTS: 'localhost:3000,laptop.tail1234.ts.net' }),
-      ).toEqual([
+      expect(refusal({ ...nativeNoAuth, ALLOWED_HOSTS: 'localhost:3000,laptop.tail1234.ts.net' })).toEqual([
         {
           field: 'ALLOWED_HOSTS',
           message: `laptop.tail1234.ts.net is not this machine, so the app answers to another name, and it has no password: ${AUTH_MISSING_NATIVE}`,
@@ -127,9 +125,9 @@ describe('parseConfig (spec §12)', () => {
           message: `the app binds 0.0.0.0, which other devices can reach, and has no password: ${AUTH_MISSING_NATIVE}`,
         },
       ]);
-      expect(refusal({ ...nativeNoAuth, BIND_ADDRESS: '0.0.0.0', NODE_ENV: 'development' })[0]?.message).toContain(
-        AUTH_MISSING,
-      );
+      expect(
+        refusal({ ...nativeNoAuth, BIND_ADDRESS: '0.0.0.0', NODE_ENV: 'development' })[0]?.message,
+      ).toContain(AUTH_MISSING);
     });
 
     it('ALLOW_UNAUTHENTICATED=true bypasses both checks (a tailnet-only host)', () => {
@@ -145,7 +143,9 @@ describe('parseConfig (spec §12)', () => {
     });
 
     it('a half-set pair is only the pair’s error, not a reach refusal too', () => {
-      expect(errors({ ...noAuth, APP_BASIC_AUTH_PASS: 'correct-horse-battery' })).toEqual(['APP_BASIC_AUTH_USER']);
+      expect(errors({ ...noAuth, APP_BASIC_AUTH_PASS: 'correct-horse-battery' })).toEqual([
+        'APP_BASIC_AUTH_USER',
+      ]);
       expect(errors({ ...noAuth, APP_BASIC_AUTH_USER: 'ian' })).toEqual(['APP_BASIC_AUTH_PASS']);
     });
   });

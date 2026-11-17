@@ -93,7 +93,10 @@ const CASES: Case[] = [
     row: 'app',
     state: 'ok',
     id: 'app',
-    facts: healthyFacts({ mode: 'container', app: { ...healthyFacts().app, authOn: false, loopback: false } }),
+    facts: healthyFacts({
+      mode: 'container',
+      app: { ...healthyFacts().app, authOn: false, loopback: false },
+    }),
     has: ['container mode, no password: only this machine can reach the app'],
   },
   {
@@ -108,7 +111,10 @@ const CASES: Case[] = [
     row: 'app',
     state: 'ok',
     id: 'app',
-    facts: healthyFacts({ mode: 'dev', app: { ...healthyFacts().app, authOn: false, onlyThisMachine: false } }),
+    facts: healthyFacts({
+      mode: 'dev',
+      app: { ...healthyFacts().app, authOn: false, onlyThisMachine: false },
+    }),
     has: ['sign-in off for development'],
   },
   { row: 'database', state: 'ok', id: 'database', facts: healthyFacts(), has: ['5.0 MB'] },

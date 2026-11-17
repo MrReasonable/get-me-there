@@ -6,8 +6,8 @@ import type { Context } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { FailedAuthLimiter } from '../../src/middleware/auth.js';
-import { API_TEXT } from '../../src/text.js';
 import type { AppEnv } from '../../src/routes/types.js';
+import { API_TEXT } from '../../src/text.js';
 import { errorOf } from '../helpers/contract.js';
 import { SENTINEL_AUTH } from '../helpers/env.js';
 import { AUTH_USER, basic, createHarness, type Harness, T0 } from '../helpers/harness.js';
@@ -49,7 +49,10 @@ describe('basic auth gate (spec §4)', () => {
     const x = await harness({ env: { APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' } });
     expect((await x.request('/api/providers', { auth: false })).status).toBe(200);
     // why: spec §4: with no password the Host allowlist is what stops a page reaching the app through DNS rebinding
-    const loopbackHost = await x.request('/api/providers', { auth: false, headers: { host: '127.0.0.1:3000' } });
+    const loopbackHost = await x.request('/api/providers', {
+      auth: false,
+      headers: { host: '127.0.0.1:3000' },
+    });
     expect(loopbackHost.status).toBe(200);
     const rebound = await x.request('/api/providers', { auth: false, headers: { host: 'evil.example' } });
     expect(rebound.status).toBe(403);

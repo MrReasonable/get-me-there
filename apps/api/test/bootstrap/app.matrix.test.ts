@@ -223,19 +223,29 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
 
     it.each([
       ['a native loopback bind', {}],
-      ['[::1]:3000, 127.0.0.2 and LOCALHOST:3000', { allowedHosts: ['[::1]:3000', '127.0.0.2', 'LOCALHOST:3000'] }],
+      [
+        '[::1]:3000, 127.0.0.2 and LOCALHOST:3000',
+        { allowedHosts: ['[::1]:3000', '127.0.0.2', 'LOCALHOST:3000'] },
+      ],
       ['a container published on loopback', container],
-    ] satisfies Array<[string, Partial<Config>]>)('boots with no password and no warning on %s', async (_label, over) => {
-      const lines: string[] = [];
-      const running = await boot(noAuth(over), lines);
-      await running.close();
-      expect(lines.join('')).not.toContain('ALLOW_UNAUTHENTICATED');
-    });
+    ] satisfies Array<[string, Partial<Config>]>)(
+      'boots with no password and no warning on %s',
+      async (_label, over) => {
+        const lines: string[] = [];
+        const running = await boot(noAuth(over), lines);
+        await running.close();
+        expect(lines.join('')).not.toContain('ALLOW_UNAUTHENTICATED');
+      },
+    );
 
     it('ALLOW_UNAUTHENTICATED bypasses both checks with a warning (a tailnet-only host)', async () => {
       const lines: string[] = [];
       const running = await boot(
-        noAuth({ bindAddress: '0.0.0.0', allowedHosts: ['laptop.tail1234.ts.net'], allowUnauthenticated: true }),
+        noAuth({
+          bindAddress: '0.0.0.0',
+          allowedHosts: ['laptop.tail1234.ts.net'],
+          allowUnauthenticated: true,
+        }),
         lines,
       );
       await running.close();

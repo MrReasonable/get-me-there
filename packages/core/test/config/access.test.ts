@@ -16,7 +16,12 @@ const native: ReachFacts = {
   publishedAddress: null,
   allowedHosts: ['localhost:3000', '127.0.0.1:3000'],
 };
-const container: ReachFacts = { ...native, bindAddress: '0.0.0.0', inContainer: true, publishedAddress: '127.0.0.1' };
+const container: ReachFacts = {
+  ...native,
+  bindAddress: '0.0.0.0',
+  inContainer: true,
+  publishedAddress: '127.0.0.1',
+};
 
 describe('who can reach the app (spec §4)', () => {
   it.each([
