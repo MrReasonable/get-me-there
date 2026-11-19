@@ -24,6 +24,8 @@ const START_STATUS: Record<Refusal['code'], ContentfulStatusCode> = {
   'firing-taken': 409,
   // why: a request that arrives while the app is stopping is refused rather than started into a closing database
   'shutting-down': 503,
+  // why: settings plan ruling 6 — a save waits for the restart in place; the engine's words say to try again shortly
+  'reload-pending': 503,
 };
 
 /** Spec §10: 409 on an active execution or a cap breach naming the cap; 422 for a zero-cell window. */

@@ -1,8 +1,9 @@
 /** Shared types of the route table (spec §10). */
-import type { apiContract, CreateAndStartResponse, IsoDateTime } from '@gmt/core';
-import type { Engine } from '@gmt/engine';
+import type { apiContract, CreateAndStartResponse, IsoDateTime, Secret } from '@gmt/core';
+import type { Engine, TestSendLimit, TransportFactory } from '@gmt/engine';
 import type { Context } from 'hono';
 import type { z } from 'zod';
+import type { ReloadPort } from '../bootstrap/reload.js';
 import type { StatusEnv } from '../read/statusSources.js';
 import type { Ports } from '../wiring.js';
 
@@ -54,6 +55,21 @@ export interface RouteContext {
    * from the moment it arrives, the last 100 kept and a rejected one evicted, so a repeat creates nothing more.
    */
   creates: Map<string, Promise<CreateAndStartResponse>>;
+  /** Settings plan ruling 6: random per pass of the app (`GET /api/health` `bootId`). */
+  bootId: string;
+  /** Settings plan ruling 6: the restart in place a save asks for; null in an app built without the bootstrap (tests). */
+  reload: ReloadPort | null;
+  /** The environment the stored settings are laid over (settings plan ruling 2): a save is checked against it. */
+  settingsEnv: Record<string, string | undefined>;
+  /**
+   * Global Constraints: a secret arriving in a request body joins the scrub lists (the log's and the ports') before
+   * anything can fail.
+   */
+  scrub(more: readonly Secret[]): void;
+  /** Settings plan ruling 11: the test-send limit the Settings test shares with `/alerts/test-email`. */
+  testSendLimit: TestSendLimit;
+  /** The Settings test's mail transport; nodemailer's unless a test passes a double. */
+  emailTransport: TransportFactory | undefined;
 }
 /**
  * One route's handler with the schemas it validates against: the ROUTES entry's own `request` and `query` objects

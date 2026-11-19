@@ -51,6 +51,7 @@ export function healthDetail(ctx: RouteContext): HealthDetail {
   const s = ctx.engine.status();
   return {
     ...base,
+    bootId: ctx.bootId,
     db: { ok: base.ok, sizeBytes: dbSizeBytes(ctx.ports.config.databasePath) },
     // why: `healthy` would need a provider call; health never spends or waits, so it reports null (not checked).
     providers: ctx.ports.providers.map((p) => ({ providerId: p.id, configured: true, healthy: null })),

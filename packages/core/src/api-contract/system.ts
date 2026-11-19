@@ -17,6 +17,8 @@ export const healthPublicSchema = z.strictObject({ ok: z.boolean(), degraded: z.
 export const healthDetailSchema = z.object({
   ok: z.boolean(),
   degraded: z.boolean(),
+  /** Settings plan ruling 6: random per pass of the app, so the page sees a restart in place has finished. */
+  bootId: z.string(),
   db: z.object({ ok: z.boolean(), sizeBytes: count }),
   providers: z.array(
     z.object({ providerId: providerIdSchema, configured: z.boolean(), healthy: z.boolean().nullable() }),

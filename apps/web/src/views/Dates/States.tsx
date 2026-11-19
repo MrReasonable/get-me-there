@@ -77,8 +77,8 @@ export function TooManyCells({ cells, bound }: { cells: number; bound: number })
  * A refused Search now on the new search's page (`refused=<code>`; spec rev 55 §11, Review Focus 1, ruling A24), in
  * words from the code alone, never the engine's: `disabled` with the fix "Set up a price source (Providers)"; `confirm`
  * with the estimate asked again and its sentence inline beside "Search again · about £X"; `cap` with the day the month's
- * limit resets when the press's answer named one (a reload has only the code); `window` with Edit; `shutting-down`;
- * `failed` with Search again.
+ * limit resets when the press's answer named one (a reload has only the code); `window` with Edit; `shutting-down`,
+ * `reload-pending` (a saved setting waits for the app to restart) and `failed` with Search again.
  */
 export function Refused({ definitionId, code }: { definitionId: string; code: StartRefusalCode }) {
   const R = REFUSED_COPY;
@@ -115,7 +115,7 @@ export function Refused({ definitionId, code }: { definitionId: string; code: St
           {R.edit}
         </a>
       ) : null}
-      {code === 'failed' || code === 'shutting-down' ? (
+      {code === 'failed' || code === 'shutting-down' || code === 'reload-pending' ? (
         <SearchAgainButton definitionId={definitionId} />
       ) : null}
     </div>

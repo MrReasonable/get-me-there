@@ -10,6 +10,8 @@ export const REFUSED_COPY = {
   cap: 'A spending limit stops this search from starting',
   window: 'Nothing to search: the dates have passed',
   'shutting-down': 'The app is restarting; try again in a moment',
+  // why: settings plan ruling 6 — a saved setting waits for the runs in flight before the app restarts
+  'reload-pending': 'Applying new settings: try again in a minute',
   failed: 'The search was saved but could not start',
   confirm: 'Check the estimate, then search again',
   edit: 'Edit',

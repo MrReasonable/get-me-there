@@ -185,46 +185,88 @@ export function loadConfig(env: Env, db: Db, opts: { clock: Clock; writeImports:
   const repo = new SettingsRepo(db);
   const run = (): LoadedConfig => {
     const rows = repo.all();
-    const layered = layerSettings(env, rows);
-    const refused = new Set<OwnedName>();
-    const leftOut = new Set<OwnedName>();
-    for (;;) {
-      const merged: Env = { ...layered.merged };
-      for (const name of leftOut) merged[name] = undefined;
-      const result = parseWith(parseConfig, merged);
-      if (result.ok) {
-        const imported = opts.writeImports ? layered.imports.filter((n) => !leftOut.has(n)) : [];
-        const importedRows = imported.map((name) => ({ name, value: layered.merged[name] ?? '' }));
-        if (importedRows.length > 0) repo.write(importedRows, opts.clock.now());
-        return {
-          config: result.config,
-          warnings: result.warnings,
-          secrets: collectSecrets(result.config, [...rows, ...importedRows]),
-          imported,
-          envIgnored: layered.envIgnored,
-          setAside: OWNED_NAMES.filter((n) => refused.has(n)),
-        };
-      }
-      const owned = result.errors.flatMap((e) => (isOwnedName(e.field) ? [e.field] : []));
-      if (owned.length < result.errors.length) throw new InvalidConfigError(result.errors);
-      const fresh = owned.filter((n) => !leftOut.has(n));
-      if (fresh.length > 0) {
-        for (const name of fresh) {
-          refused.add(name);
-          leftOut.add(name);
-        }
-        continue;
-      }
-      // why: a name already left out is refused again only by email's all-or-nothing rule (an unset member of a set
-      // group), so the rest of email is left out with it; anything else would loop, and fails boot instead
-      if (owned.every((n) => EMAIL_NAMES.includes(n)) && EMAIL_NAMES.some((n) => !leftOut.has(n))) {
-        for (const name of EMAIL_NAMES) leftOut.add(name);
-        continue;
-      }
-      throw new InvalidConfigError(result.errors);
-    }
+    const parsed = parseLayered(env, rows, new Set());
+    if (!parsed.ok) throw new InvalidConfigError(parsed.errors);
+    const { layered, leftOut } = parsed;
+    const imported = opts.writeImports ? layered.imports.filter((n) => !leftOut.has(n)) : [];
+    const importedRows = imported.map((name) => ({ name, value: layered.merged[name] ?? '' }));
+    if (importedRows.length > 0) repo.write(importedRows, opts.clock.now());
+    return {
+      config: parsed.config,
+      warnings: parsed.warnings,
+      secrets: collectSecrets(parsed.config, [...rows, ...importedRows]),
+      imported,
+      envIgnored: layered.envIgnored,
+      setAside: parsed.setAside,
+    };
   };
   return opts.writeImports ? db.immediateTransaction(run) : run();
+}
+
+/** parseLayered's answer: the config and what was set aside, or the refusals of names a save keeps. */
+export type LayeredParse =
+  | {
+      ok: true;
+      config: Config;
+      warnings: ConfigError[];
+      layered: ReturnType<typeof layerSettings>;
+      /** Names whose value the schema refused, set aside for this config (SETTINGS_NAMES order). */
+      setAside: OwnedName[];
+      /** Every name left out: those set aside, and the rest of email when its all-or-nothing rule needed it. */
+      leftOut: ReadonlySet<OwnedName>;
+    }
+  | { ok: false; errors: ConfigError[] };
+
+/**
+ * Settings plan rulings 2, 3 and 5: `rows` laid over the environment (core layerSettings) and parsed through the one
+ * core schema. A field the schema refuses that is an owned name has its value set aside (left unset, so its default
+ * applies) and the parse is retried, at most once per name; when only email's all-or-nothing rule still refuses names
+ * already set aside, the rest of email is left out too (email is off). A refusal of a name in `keep` (the names a save
+ * changes) is never set aside: the parse answers its refusals instead, and so does email's rule when `keep` holds an
+ * email name. A refusal of a name the page does not own throws InvalidConfigError.
+ */
+export function parseLayered(
+  env: Env,
+  rows: readonly SettingRow[],
+  keep: ReadonlySet<OwnedName>,
+): LayeredParse {
+  const layered = layerSettings(env, rows);
+  const refused = new Set<OwnedName>();
+  const leftOut = new Set<OwnedName>();
+  for (;;) {
+    const merged: Env = { ...layered.merged };
+    for (const name of leftOut) merged[name] = undefined;
+    const result = parseWith(parseConfig, merged);
+    if (result.ok)
+      return {
+        ok: true,
+        config: result.config,
+        warnings: result.warnings,
+        layered,
+        setAside: OWNED_NAMES.filter((n) => refused.has(n)),
+        leftOut,
+      };
+    const owned = result.errors.flatMap((e) => (isOwnedName(e.field) ? [e.field] : []));
+    if (owned.length < result.errors.length) throw new InvalidConfigError(result.errors);
+    if (owned.some((n) => keep.has(n))) return { ok: false, errors: result.errors };
+    const fresh = owned.filter((n) => !leftOut.has(n));
+    if (fresh.length > 0) {
+      for (const name of fresh) {
+        refused.add(name);
+        leftOut.add(name);
+      }
+      continue;
+    }
+    // why: a name already left out is refused again only by email's all-or-nothing rule (an unset member of a set
+    // group), so the rest of email is left out with it, unless a save changes email, whose refusals are then answered;
+    // anything else would loop, and fails instead
+    if (owned.every((n) => EMAIL_NAMES.includes(n)) && EMAIL_NAMES.some((n) => !leftOut.has(n))) {
+      if (EMAIL_NAMES.some((n) => keep.has(n))) return { ok: false, errors: result.errors };
+      for (const name of EMAIL_NAMES) leftOut.add(name);
+      continue;
+    }
+    throw new InvalidConfigError(result.errors);
+  }
 }
 
 /** Everything an entrypoint needs, built once (plan "Wiring and bootstraps"). */

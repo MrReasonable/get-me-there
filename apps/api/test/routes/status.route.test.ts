@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { apiContract, FIXTURE_OPT_IN_PHRASE, fixedClock, Secret } from '@gmt/core';
-import { EmailNotifier } from '@gmt/engine';
+import { EmailNotifier, TestSendLimit } from '@gmt/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modeOf as modeOfConfig } from '../../src/read/statusSources.js';
 import { API_TEXT } from '../../src/text.js';
@@ -575,6 +575,8 @@ describe('POST /api/alerts/test-email (spec §10)', () => {
       log: silentLog,
       clock,
       maxPerHour: o.maxPerHour ?? 20,
+      // why: settings plan ruling 11 — the process holds one test limit; each test here starts with its own
+      testLimit: new TestSendLimit(),
       createTransport: () => ({
         sendMail: async (m) => {
           await o.gate;

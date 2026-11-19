@@ -10,6 +10,7 @@
  * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
  * it and stops the heartbeat before the database closes.
  */
+import { randomUUID } from 'node:crypto';
 import {
   type Clock,
   type Config,
@@ -27,7 +28,7 @@ import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
-import { planOf, providerBudget, zeroCapBlocks } from '../read/usage.js';
+import { planOf, providerBudget, spendWarnings } from '../read/usage.js';
 import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
@@ -50,6 +51,7 @@ import { BootError } from './errors.js';
 import { waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
 import { backupBeforeMigrations, dataDirRefusal, movedDatabaseRefusal } from './preflight.js';
+import { createReloader } from './reload.js';
 import { seedIfNeeded } from './seed.js';
 import { readVersion } from './version.js';
 
@@ -94,6 +96,11 @@ export interface BootDeps {
   version?: string;
   /** Injected by tests to advance a fixed clock instead of waiting for app_lock. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Settings plan ruling 6: false on a pass after a restart in place, whose own close released the lock: the lock is
+   * then taken without the read-only wait for another holder (a holder found is refused, as always). Default true.
+   */
+  lockWait?: boolean;
 }
 
 export interface RunningApp {
@@ -101,6 +108,14 @@ export interface RunningApp {
   ports: Ports;
   engine: Engine;
   port: number | null;
+  /** Settings plan ruling 6: random per pass (`GET /api/health` `bootId`). */
+  bootId: string;
+  /**
+   * Settings plan ruling 6: settles once the app has closed, `'reload'` when a save closed it for the next pass of
+   * `main`, `'stopped'` when `close()` did (a signal); rejects with the close's own failure.
+   */
+  closed: Promise<'reload' | 'stopped'>;
+  /** Closes the app for good (spec §7 shutdown order); a second call answers the close already in progress. */
   close(): Promise<void>;
 }
 
@@ -150,16 +165,17 @@ export function logProvidersConfigured(ports: Pick<Ports, 'config' | 'providers'
     },
     'providers configured',
   );
-  const blocked = ports.providers.filter((p) => zeroCapBlocks(config, p.id)).map((p) => p.id);
-  if (blocked.length > 0) log.warn({ providers: blocked }, API_TEXT.zeroCapBootWarning);
   // why: cost-006: the same fee sum budgetFit and GET /budget use (the guard's own entries), against the global cap.
-  const fees = ports.providers
-    .map((p) => providerBudget(config, p.id))
-    .reduce((a, b) => a + (b.billable ? b.planFixedMicroGbp : 0), 0);
-  if (fees > 0 && config.spend.monthlyCapMicroGbp < fees)
+  const warn = spendWarnings(
+    config,
+    ports.providers.map((p) => p.id),
+  );
+  if (warn.zeroCapBlocked.length > 0)
+    log.warn({ providers: warn.zeroCapBlocked }, API_TEXT.zeroCapBootWarning);
+  if (warn.belowFees !== null)
     log.warn(
       { field: 'MONTHLY_SPEND_CAP_PENCE' },
-      API_TEXT.spendCapBelowFees(microGbpToPence(config.spend.monthlyCapMicroGbp), microGbpToPence(fees)),
+      API_TEXT.spendCapBelowFees(warn.belowFees.capPence, warn.belowFees.feesPence),
     );
 }
 
@@ -199,13 +215,14 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   assertAuthInvariants(config, log);
   const dataDir = dataDirRefusal(config.databasePath);
   if (dataDir !== null) throw new BootError(dataDir, EXIT.preflightImpossible);
-  await waitForLockFree({
-    databasePath: config.databasePath,
-    clock,
-    sleep: deps.sleep ?? realSleep,
-    log,
-    secrets,
-  });
+  if (deps.lockWait !== false)
+    await waitForLockFree({
+      databasePath: config.databasePath,
+      clock,
+      sleep: deps.sleep ?? realSleep,
+      log,
+      secrets,
+    });
   const backup = backupBeforeMigrations(config.databasePath, deps.assets.migrationsDir, clock, secrets);
   if (!backup.ok) throw new BootError(backup.message, backup.code);
   if (backup.line !== null) log.info({}, backup.line);
@@ -268,12 +285,30 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     // why: spec §8.1, §8.3 — WP11's alert runner as the alerts step, the notifiers config asks for (engine.ts).
     const home = deps.home ?? null;
     const notifiers = buildNotifiers(ports.config, log, ports.clock);
-    const engine = engineFor(ports, log, { notifiers, home });
+    // why: settings plan ruling 6 — a save restarts the app in place once nothing is in flight; the engine tells the
+    // reloader of each run's and each flight read's end. Both refer to each other, so the engine is bound once built.
+    let engineRef: Engine | null = null;
+    let close: (why: 'reload' | 'stopped') => Promise<void> = () => Promise.resolve();
+    const reloader = createReloader({
+      idle: () =>
+        ports.repos.executions.oldestInFlight() === null &&
+        (engineRef?.flightReadInFlight() ?? null) === null,
+      hold: () => engineRef?.holdForReload(),
+      reload: () => {
+        // why: the close's own failure is answered through `closed`, which main awaits
+        close('reload').catch(() => undefined);
+      },
+      log,
+      secrets,
+    });
+    const engine = engineFor(ports, log, { notifiers, home, runWatch: reloader.watch });
+    engineRef = engine;
     booted = engine;
     await engine.boot();
     logProvidersConfigured(ports, log);
     // why: spec §10 /alerts/test-email goes through the same email notifier (and its hourly ceiling) as every alert
     const email = notifiers.find((n) => n instanceof EmailNotifier);
+    const bootId = randomUUID();
     const app = createApp(ports, engine, {
       webRoot: deps.assets.webRoot,
       tools: deps.tools?.(ports) ?? {},
@@ -284,55 +319,91 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         migrationsDir: deps.assets.migrationsDir,
       },
       ...(email === undefined ? {} : { email }),
+      bootId,
+      reload: reloader,
+      settingsEnv: deps.env,
+      // why: a request's secret joins the log's list (this boot's) and the ports' (http-kit, the error handler)
+      scrub: (more) => {
+        addSecrets(secrets, more);
+        addSecrets(ports.secrets, more);
+      },
     });
     const bound = deps.listen ? await listen(app, ports.config) : null;
     const beat = heartbeat;
-    let closed = false;
+    let closing: Promise<void> | null = null;
+    let reason: 'reload' | 'stopped' = 'stopped';
+    let settle: { resolve: (why: 'reload' | 'stopped') => void; reject: (e: unknown) => void } = {
+      resolve: () => undefined,
+      reject: () => undefined,
+    };
+    const closed = new Promise<'reload' | 'stopped'>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    // why: a caller that only calls close() (tests, the tool paths) never awaits `closed`; its failure is close()'s own
+    closed.catch(() => undefined);
+    close = (why) => {
+      if (closing !== null) return closing;
+      reason = why;
+      // why: a signal's close stops any restart a save was waiting for; a restart's own close is the one in progress
+      reloader.stop();
+      closing = closeApp().then(
+        () => settle.resolve(reason),
+        (e: unknown) => {
+          settle.reject(e);
+          throw e;
+        },
+      );
+      return closing;
+    };
+    const closeApp = async (): Promise<void> => {
+      clearInterval(beat);
+      // why: review arch Minor: a shutdown or checkpoint that throws must still release the lock and close the
+      // handle, or the next start waits out APP_LOCK_WAIT_MS on a lock nobody holds.
+      // why: review devops M4 — a hang in server.close or engine.shutdown would otherwise run into compose's SIGKILL
+      // at 30 s and cost the next start a 90 s stale-lock wait; past the deadline we give up, release the lock
+      // ourselves and let the caller exit non-zero. unref: the timer alone never keeps the process alive.
+      let deadline: NodeJS.Timeout | undefined;
+      const timedOut = new Promise<never>((_, reject) => {
+        deadline = setTimeout(() => {
+          log.error(
+            { deadlineMs: SHUTDOWN_DEADLINE_MS },
+            'shutdown timed out; releasing the app_lock and exiting',
+          );
+          reject(new ShutdownTimeoutError());
+        }, SHUTDOWN_DEADLINE_MS);
+        deadline.unref();
+      });
+      try {
+        await Promise.race([
+          (async () => {
+            await closeServer(bound?.server ?? null); // stop accepting
+            await engine.shutdown();
+            // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
+            db.checkpoint();
+          })(),
+          timedOut,
+        ]);
+      } finally {
+        clearTimeout(deadline);
+        // why: review T12 — past the deadline the engine's own wait may still be running; marked closed first, a job
+        // that finishes after this writes nothing to the handle closed below
+        engine.markClosed();
+        lock.release();
+        db.close();
+      }
+      log.info(
+        {},
+        reason === 'reload' ? 'closed for a restart with the saved settings' : 'shutdown complete',
+      );
+    };
     return {
       app,
       ports,
       engine,
       port: bound?.port ?? null,
-      close: async () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(beat);
-        // why: review arch Minor: a shutdown or checkpoint that throws must still release the lock and close the
-        // handle, or the next start waits out APP_LOCK_WAIT_MS on a lock nobody holds.
-        // why: review devops M4 — a hang in server.close or engine.shutdown would otherwise run into compose's SIGKILL
-        // at 30 s and cost the next start a 90 s stale-lock wait; past the deadline we give up, release the lock
-        // ourselves and let the caller exit non-zero. unref: the timer alone never keeps the process alive.
-        let deadline: NodeJS.Timeout | undefined;
-        const timedOut = new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => {
-            log.error(
-              { deadlineMs: SHUTDOWN_DEADLINE_MS },
-              'shutdown timed out; releasing the app_lock and exiting',
-            );
-            reject(new ShutdownTimeoutError());
-          }, SHUTDOWN_DEADLINE_MS);
-          deadline.unref();
-        });
-        try {
-          await Promise.race([
-            (async () => {
-              await closeServer(bound?.server ?? null); // stop accepting
-              await engine.shutdown();
-              // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
-              db.checkpoint();
-            })(),
-            timedOut,
-          ]);
-        } finally {
-          clearTimeout(deadline);
-          // why: review T12 — past the deadline the engine's own wait may still be running; marked closed first, a job
-          // that finishes after this writes nothing to the handle closed below
-          engine.markClosed();
-          lock.release();
-          db.close();
-        }
-        log.info({}, 'shutdown complete');
-      },
+      bootId,
+      closed,
+      close: () => close('stopped'),
     };
   } catch (err) {
     // why: review arch-008: a boot that failed after the lock was taken must not leave it fresh for 90 s or a heartbeat
@@ -410,11 +481,32 @@ export function shutdownHandler(
   };
 }
 
+/** What `main` takes besides the environment: seams for the tests that drive several passes in one process. */
+export interface MainOptions {
+  /** Ends the process (process.exit). */
+  exit?: (code: number) => void;
+  /** Where SIGTERM and SIGINT are listened for (the process). */
+  signals?: Pick<NodeJS.EventEmitter, 'once' | 'removeListener'>;
+  /** Overrides of each pass's boot: no listening, a fixed clock, the assets. */
+  boot?: Partial<Pick<BootDeps, 'listen' | 'clock' | 'assets'>>;
+  /** The log's destination (stdout). */
+  logDestination?: NodeJS.WritableStream;
+  /** Each pass's boot (bootApp); a test wraps it to act between passes. */
+  bootApp?: (deps: BootDeps) => Promise<RunningApp>;
+  /** Told of each pass once it serves. */
+  onPass?: (running: RunningApp) => void;
+}
+
 /**
- * The app entrypoint: the environment parsed without the Settings page's names (settings plan ruling 3), boot (which
- * lays the stored settings over it under the lock), signals. Throws on refusal; start.ts exits with its code.
+ * The app entrypoint: the environment parsed without the Settings page's names (settings plan ruling 3), then passes of
+ * boot and serve (ruling 6): SIGTERM and SIGINT are listened for once; each pass boots (laying the stored settings over
+ * the environment under the lock) and serves until it closes. A pass a save closed (`closed` = 'reload') is followed by
+ * the next, which takes the lock without the other-holder wait; a signal at any point (during a pass's boot, its
+ * serving or its close) ends the loop through `shutdownHandler`, which exits 0 once the close is done. A boot that
+ * throws ends the loop with today's boot-failure log and code (main rethrows it; start.ts exits with its code); a
+ * restart's close that fails exits EXIT.failed.
  */
-export async function main(env: NodeJS.ProcessEnv): Promise<void> {
+export async function main(env: NodeJS.ProcessEnv, opts: MainOptions = {}): Promise<void> {
   let config: Config;
   try {
     config = loadBootConfig(env);
@@ -422,30 +514,73 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
     if (err instanceof InvalidConfigError) throw new BootError(err.message, EXIT.badConfig);
     throw err;
   }
-  // why: one list the logger and every scrub below read; boot adds the stored secrets to it once it has read them
+  // why: one list the logger and every scrub below read; each boot adds the stored secrets to it once it has read them
   const secrets = bootSecrets(config, env);
-  const log = createLogger(config, { secrets });
-  let running: RunningApp;
+  const log = createLogger(config, {
+    secrets,
+    ...(opts.logDestination === undefined ? {} : { destination: opts.logDestination }),
+  });
+  const exit = opts.exit ?? ((code: number) => process.exit(code));
+  const signals = opts.signals ?? process;
+  const boot = opts.bootApp ?? bootApp;
+  let current: RunningApp | null = null;
+  let stopping: string | null = null;
+  const onSignal = (signal: string): void => {
+    if (stopping !== null) return;
+    stopping = signal;
+    // why: a pass still booting is stopped as soon as it serves (below); a pass serving or closing is stopped now
+    if (current !== null) shutdownHandler(current, log, secrets, exit)(signal);
+  };
+  const onTerm = (): void => onSignal('SIGTERM');
+  const onInt = (): void => onSignal('SIGINT');
+  signals.once('SIGTERM', onTerm);
+  signals.once('SIGINT', onInt);
   try {
-    running = await bootApp({
-      config,
-      env,
-      log,
-      logSecrets: secrets,
-      listen: true,
-      assets: assetPaths(),
-      home: env.HOME ?? null,
-      version: readVersion(),
-      tools: (p) => inProcessTools(p),
-    });
-  } catch (err) {
-    const message = safeMessage(err, secrets);
-    log.error({ err: { message } }, 'boot failed');
-    // why: start.ts prints this error's message to stderr (the container log), so it is rethrown already scrubbed.
-    throw new BootError(message, err instanceof BootError ? err.exitCode : EXIT.failed);
+    for (let pass = 1; ; pass += 1) {
+      let running: RunningApp;
+      try {
+        running = await boot({
+          config,
+          env,
+          log,
+          logSecrets: secrets,
+          listen: true,
+          assets: assetPaths(),
+          home: env.HOME ?? null,
+          version: readVersion(),
+          tools: (p) => inProcessTools(p),
+          lockWait: pass === 1,
+          ...opts.boot,
+        });
+      } catch (err) {
+        const message = safeMessage(err, secrets);
+        log.error({ err: { message } }, 'boot failed');
+        // why: start.ts prints this error's message to stderr (the container log), so it is rethrown already scrubbed.
+        throw new BootError(message, err instanceof BootError ? err.exitCode : EXIT.failed);
+      }
+      current = running;
+      log.info({ port: running.port, bindAddress: running.ports.config.bindAddress }, 'listening');
+      opts.onPass?.(running);
+      if (stopping !== null) shutdownHandler(running, log, secrets, exit)(stopping);
+      let why: 'reload' | 'stopped';
+      try {
+        why = await running.closed;
+      } catch (err) {
+        // why: a signal's close reports its own failure through shutdownHandler; this is a restart's close that failed
+        if (stopping === null) {
+          if (!(err instanceof ShutdownTimeoutError))
+            log.error({ err: { message: safeMessage(err, secrets) } }, 'shutdown failed');
+          exit(EXIT.failed);
+        }
+        return;
+      }
+      current = null;
+      // why: a signal's close (or one that arrived during a restart's close) exits through shutdownHandler
+      if (why === 'stopped' || stopping !== null) return;
+      log.info({ pass: pass + 1 }, 'restarting with the saved settings');
+    }
+  } finally {
+    signals.removeListener('SIGTERM', onTerm);
+    signals.removeListener('SIGINT', onInt);
   }
-  log.info({ port: running.port, bindAddress: running.ports.config.bindAddress }, 'listening');
-  const stop = shutdownHandler(running, log, secrets);
-  process.once('SIGTERM', () => stop('SIGTERM'));
-  process.once('SIGINT', () => stop('SIGINT'));
 }

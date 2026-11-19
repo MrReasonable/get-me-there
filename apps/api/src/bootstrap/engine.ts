@@ -4,7 +4,7 @@
  * maintenance tick's consent notice, and the board's ranking for the flight-list step (spec revision 55 §8.1). WP8's bootApp calls it, so the production wiring has a test of its own (review TS-6).
  */
 import type { Logger, Notifier } from '@gmt/core';
-import { buildNotifiers, createEngine, type Engine, runAlerts } from '@gmt/engine';
+import { buildNotifiers, createEngine, type Engine, type RunWatch, runAlerts } from '@gmt/engine';
 import { rankedPairsFor } from '../read/ranked.js';
 import { consentCheckFor } from '../read/statusSources.js';
 import type { Ports } from '../wiring.js';
@@ -12,7 +12,7 @@ import type { Ports } from '../wiring.js';
 export function engineFor(
   ports: Ports,
   log: Logger,
-  extra: { notifiers?: Notifier[]; home?: string | null } = {},
+  extra: { notifiers?: Notifier[]; home?: string | null; runWatch?: RunWatch } = {},
 ): Engine {
   const notifiers = extra.notifiers ?? buildNotifiers(ports.config, log, ports.clock);
   return createEngine(
@@ -23,6 +23,8 @@ export function engineFor(
       // why: spec revision 55 §8.1 — the flight-list step and the on-demand read rank date pairs as the board does; the
       // api passes its ranking in, so the engine never imports the api
       rankedDatePairs: (q) => rankedPairsFor(ports, q),
+      // why: settings plan ruling 6 — the restart in place a save asks for follows the last run's end
+      ...(extra.runWatch === undefined ? {} : { runWatch: extra.runWatch }),
     },
   );
 }

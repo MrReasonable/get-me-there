@@ -60,7 +60,8 @@ function refusalOf(
     r.code === 'confirm' ||
     r.code === 'window' ||
     r.code === 'disabled' ||
-    r.code === 'shutting-down'
+    r.code === 'shutting-down' ||
+    r.code === 'reload-pending'
       ? r.code
       : 'failed';
   const confirm = code === 'confirm' ? confirmDetails.safeParse(r.details) : null;

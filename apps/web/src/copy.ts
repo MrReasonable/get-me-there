@@ -557,6 +557,7 @@ export const COPY = {
         'No price source is set up, so nothing was searched. Set up a price source (Settings → Price sources).',
       window: 'None of the dates in this search are still ahead. Change the dates in Edit.',
       'shutting-down': 'The app is shutting down, so nothing was started.',
+      'reload-pending': 'Applying new settings: try again in a minute.',
       not_found: 'This search no longer exists.',
     } satisfies Record<string, string>,
   },

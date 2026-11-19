@@ -102,9 +102,17 @@ export interface EngineContext {
    * start, resume or verification asked for after it is refused and the minute job takes no further definition;
    * `closed` once the engine has handed the database back (review S2): a scheduler job still running past the
    * shutdown's bound then writes nothing more (notifyOperator logs the notice it sent and skips its row), and `abort`
-   * (aborted at the same moment) ends a system job's network call.
+   * (aborted at the same moment) ends a system job's network call. `reloadPending` (settings plan ruling 6, controller
+   * ruling R3) is set once a saved setting waits for the app to restart in place: a start, resume, verification,
+   * catch-up, tick or flight read asked after it is refused (or left to the catch-up after the restart), while the runs
+   * in flight carry on to their end; unlike `closing`, it never stops a run or the scheduler.
    */
-  readonly lifecycle: { closing: boolean; closed: boolean; readonly abort: AbortController };
+  readonly lifecycle: {
+    closing: boolean;
+    closed: boolean;
+    reloadPending: boolean;
+    readonly abort: AbortController;
+  };
   /**
    * Spec revision 55 §8.1: the browser worker's one in-flight slot, held by the on-demand flight read; every browser
    * page of a pass awaits it. Shared by every copy of the context (one per engine).
@@ -176,7 +184,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     };
   };
   for (const id of providers.keys()) limitsOf(id); // why: a missing limit is a wiring bug; fail at construction, not mid-run
-  const lifecycle = { closing: false, closed: false, abort: new AbortController() };
+  const lifecycle = { closing: false, closed: false, reloadPending: false, abort: new AbortController() };
   return {
     deps,
     config,

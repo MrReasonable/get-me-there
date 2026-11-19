@@ -46,6 +46,13 @@ import {
   searchCardsResponseSchema,
 } from './searches.js';
 import {
+  settingsEmailTestRequestSchema,
+  settingsEmailTestResponseSchema,
+  settingsUpdateRequestSchema,
+  settingsUpdateResponseSchema,
+  settingsViewSchema,
+} from './settings.js';
+import {
   budgetResponseSchema,
   healthResponseSchema,
   providersResponseSchema,
@@ -69,6 +76,7 @@ export * from './executions.js';
 export * from './flights.js';
 export * from './results.js';
 export * from './searches.js';
+export * from './settings.js';
 export * from './stopCause.js';
 export * from './system.js';
 export * from './trip.js';
@@ -162,4 +170,10 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/budget', budgetResponseSchema),
   route('GET', '/status', statusResponseSchema),
   route('POST', '/alerts/test-email', testEmailResponseSchema),
+  // why: settings plan rulings 5, 6, 11 — the Settings page reads, saves (restarting the app in place) and tests email
+  route('GET', '/settings', settingsViewSchema),
+  route('PUT', '/settings', settingsUpdateResponseSchema, { request: settingsUpdateRequestSchema }),
+  route('POST', '/settings/email-test', settingsEmailTestResponseSchema, {
+    request: settingsEmailTestRequestSchema,
+  }),
 ];

@@ -141,7 +141,8 @@ export async function createHarness(
   const engine =
     opts.wired === true ? engineFor(ports, log, { notifiers }) : createEngine({ ...ports, notifiers });
   await engine.boot();
-  const app = createApp(ports, engine, { webRoot: null, ...opts.app });
+  // why: settings plan ruling 5 — a save is checked against the environment the harness config was parsed from
+  const app = createApp(ports, engine, { webRoot: null, settingsEnv: harnessEnv(opts.env), ...opts.app });
   let closed = false;
   const harness: Harness = {
     ports,

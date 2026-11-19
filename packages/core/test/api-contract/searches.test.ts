@@ -372,8 +372,16 @@ describe('createAndStartRequestSchema (spec rev 55 §10 POST /definitions/create
 });
 
 describe('createAndStartResponseSchema', () => {
-  it('has the six refusal codes', () => {
-    expect(startRefusalCodes).toEqual(['cap', 'confirm', 'window', 'disabled', 'shutting-down', 'failed']);
+  it('has the seven refusal codes', () => {
+    expect(startRefusalCodes).toEqual([
+      'cap',
+      'confirm',
+      'window',
+      'disabled',
+      'shutting-down',
+      'reload-pending',
+      'failed',
+    ]);
   });
 
   it('parses a started run and a refused one', () => {

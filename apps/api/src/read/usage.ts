@@ -48,6 +48,26 @@ export function zeroCapBlocks(config: Config, id: ProviderId): boolean {
   return b.billable && b.costPerCallMicroGbp > 0 && config.spend.monthlyCapMicroGbp === 0;
 }
 
+/**
+ * The two spend warnings a config raises (cost-006, ruling 5), read once for the boot's log and a save's answer
+ * (settings plan ruling 5): the billed providers a zero spend cap stops, and the cap and the fees it counts when the
+ * cap is below the subscription fees (the guard's own entries, the sum budgetFit and GET /budget use), else null.
+ */
+export function spendWarnings(
+  config: Config,
+  providerIds: readonly ProviderId[],
+): { zeroCapBlocked: ProviderId[]; belowFees: { capPence: number; feesPence: number } | null } {
+  const fees = providerIds
+    .map((id) => providerBudget(config, id))
+    .reduce((a, b) => a + (b.billable ? b.planFixedMicroGbp : 0), 0);
+  const cap = config.spend.monthlyCapMicroGbp;
+  return {
+    zeroCapBlocked: providerIds.filter((id) => zeroCapBlocks(config, id)),
+    belowFees:
+      fees > 0 && cap < fees ? { capPence: microGbpToPence(cap), feesPence: microGbpToPence(fees) } : null,
+  };
+}
+
 export type PlanName = 'trial' | '40usd' | 'free' | 'synthetic';
 
 /** The plan a provider runs under, in the providers contract's words (spec §10, §12). */

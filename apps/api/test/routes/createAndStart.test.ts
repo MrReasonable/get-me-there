@@ -161,6 +161,17 @@ describe('POST /definitions/create-and-start (revision 55 §10)', () => {
     expect(JSON.stringify(thrown.body)).not.toContain('SQLITE_FULL');
   });
 
+  it('a start held for a restart in place answers refusal reload-pending with the search saved (settings plan ruling 6)', async () => {
+    h = await createHarness();
+    const x = h;
+    x.engine.holdForReload();
+    const def = input();
+    const r = await press(x, { ...def, confirmCostPence: 0, confirmCalls: 0, requestKey: randomUUID() });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ executionId: null, refusal: { code: 'reload-pending' } });
+    expect(definitions(x)).toHaveLength(1);
+  });
+
   it('a body that turns a schedule on with figures short of the shown totals is 409 confirm with no figures and writes nothing; covering figures save it (final review ruling)', async () => {
     h = await createHarness();
     const x = h;

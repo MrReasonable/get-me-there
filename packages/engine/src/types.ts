@@ -31,6 +31,7 @@ import type { HttpKit } from '@gmt/providers';
 // why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
 import type { AskedPairs, BilledCalls } from './estimate.js';
 import type { DatePairAsk, FlightReadMark, FlightReadStart } from './flightRead.js';
+import type { RunWatch } from './registry.js';
 
 /** What the estimate response states beside the estimate (spec §10). */
 export interface EstimateAsk extends AskedPairs {
@@ -99,6 +100,11 @@ export interface EngineOptions {
    * so the engine never imports the api. Absent: the step reads nothing and an on-demand read finds no figure.
    */
   rankedDatePairs?: RankedDatePairsReader;
+  /**
+   * Settings plan ruling 6: a second observer beside the keep-awake lease, told when each run and each on-demand flight
+   * read starts and when it settles (after its row is written). The app's restart in place waits on it for the last end.
+   */
+  runWatch?: RunWatch;
 }
 
 /**
@@ -174,7 +180,8 @@ export type StartResult =
         | 'not_found'
         | 'disabled'
         | 'firing-taken'
-        | 'shutting-down';
+        | 'shutting-down'
+        | 'reload-pending';
       message: string;
       details: unknown;
     };
@@ -198,6 +205,12 @@ export interface Engine {
    * whatever happened, so a shutdown cut off by the app's deadline never leaves a job writing to a closed handle.
    */
   markClosed(): void;
+  /**
+   * Settings plan ruling 6 (controller ruling R3): a saved setting waits for the app to restart in place. From now on a
+   * start, resume, verification or flight read is refused `reload-pending`, and a tick or the minute catch-up leaves its
+   * firing to the catch-up after the restart; the runs and the read in flight carry on to their end.
+   */
+  holdForReload(): void;
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Revision 55 §8.1: the cancel's cause is stored (`cancelled` from the HTTP cancel, `superseded 'remove'` from DELETE). */

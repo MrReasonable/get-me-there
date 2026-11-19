@@ -216,12 +216,13 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
 });
 
 describe('POST /definitions/:id/flight-lists', () => {
-  it('its refusals are exactly the five codes: busy, not_available, outside_space, not_found, shutting-down', () => {
+  it('its refusals are exactly the six codes: busy, not_available, outside_space, not_found, shutting-down, reload-pending', () => {
     expect(Object.keys(FLIGHT_READ_REFUSALS).sort()).toEqual([
       'busy',
       'not_available',
       'not_found',
       'outside_space',
+      'reload-pending',
       'shutting-down',
     ]);
   });
@@ -269,6 +270,7 @@ describe('POST /definitions/:id/flight-lists', () => {
     [{ ok: false, code: 'outside_space' }, 422, 'outside_space'],
     [{ ok: false, code: 'not_found' }, 404, 'definition_not_found'],
     [{ ok: false, code: 'shutting-down' }, 503, 'shutting-down'],
+    [{ ok: false, code: 'reload-pending' }, 503, 'reload-pending'],
   ] as const)('%o is %i %s', async (refusal, status, code) => {
     const { x, def } = await setup();
     vi.spyOn(x.engine, 'readFlightList').mockResolvedValue(refusal);

@@ -59,6 +59,55 @@ function waitForLine(child: ChildProcess, pattern: RegExp, timeoutMs: number): P
   });
 }
 
+/** Resolves once `pattern` has matched `count` output lines in all; rejects with all output if the child exits first. */
+function waitForLines(child: ChildProcess, pattern: RegExp, count: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let out = '';
+    const timer = setTimeout(
+      () => reject(new Error(`timed out waiting for ${count} × ${pattern}:\n${out}`)),
+      timeoutMs,
+    );
+    const onData = (chunk: Buffer) => {
+      out += chunk.toString('utf8');
+      if (out.split('\n').filter((l) => pattern.test(l)).length >= count) {
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`bootstrap exited with ${code} before ${count} × ${pattern}:\n${out}`));
+    });
+  });
+}
+
+/** A request to the spawned app from a separate node process (see `probe`), with a JSON body when one is given. */
+function send(
+  url: string,
+  authorization: string,
+  method: 'PUT',
+  body: unknown,
+): { status: number; body: unknown } {
+  const init = {
+    method,
+    headers: {
+      authorization,
+      'content-type': 'application/json',
+      'x-requested-with': 'get-me-there',
+    },
+    body: JSON.stringify(body),
+  };
+  const script = `const r = await fetch(${JSON.stringify(url)}, ${JSON.stringify(init)}); process.stdout.write(JSON.stringify({ status: r.status, body: await r.json() }));`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { PATH: process.env.PATH ?? '' },
+    encoding: 'utf8',
+    timeout: PROBE_TIMEOUT_MS,
+  });
+  return z.object({ status: z.number(), body: z.unknown() }).parse(JSON.parse(r.stdout));
+}
+
 /**
  * GET from the spawned app in a separate node process. why: this process's fetch is answered by WP4's network guards
  * (every request is a stray), so the probe runs where nothing is intercepted, on a numeric loopback address.
@@ -158,6 +207,48 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
       }
     },
     BOOT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'a save restarts the real process in place: the next pass listens on the same port with a new boot id and the saved value (settings plan ruling 6)',
+    async () => {
+      const dir = tempDir('gmt-spawn-');
+      const port = await freePort();
+      const env = cleanEnv({
+        PATH: process.env.PATH ?? '',
+        NODE_ENV: 'production',
+        DATABASE_PATH: join(dir, 'reload.db'),
+        PORT: String(port),
+        BIND_ADDRESS: '127.0.0.1',
+        ALLOWED_HOSTS: `127.0.0.1:${port}`,
+        APP_BASIC_AUTH_USER: 'operator',
+        APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
+        LOG_LEVEL: 'info',
+      });
+      const child = spawn(process.execPath, ENTRY, { cwd: apiRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const auth = `Basic ${Buffer.from(`operator:${SENTINEL_AUTH}`).toString('base64')}`;
+      const base = `http://127.0.0.1:${port}/api`;
+      const health = z.object({ bootId: z.string() });
+      const twice = waitForLines(child, /"msg":"listening"/, 2, LISTEN_TIMEOUT_MS * 2);
+      // why: awaited below; a failure before then must not also surface as an unhandled rejection when the child exits
+      twice.catch(() => undefined);
+      try {
+        await waitForLine(child, /"msg":"listening"/, LISTEN_TIMEOUT_MS);
+        const before = health.parse(probe(`${base}/health`, auth).body).bootId;
+        const saved = send(`${base}/settings`, auth, 'PUT', { changes: { FLIGHT_READ_PATIENCE: '20' } });
+        expect(saved).toEqual({ status: 200, body: { warnings: [], applies: 'now' } });
+        await twice;
+        const after = probe(`${base}/health`, auth);
+        expect(after.status).toBe(200);
+        expect(health.parse(after.body).bootId).not.toBe(before);
+        const view = apiContract.settingsViewSchema.parse(probe(`${base}/settings`, auth).body);
+        expect(view.values.FLIGHT_READ_PATIENCE).toBe('20');
+      } finally {
+        child.kill('SIGTERM');
+      }
+      expect(await waitForExit(child)).toBe(0);
+    },
+    BOOT_TEST_TIMEOUT_MS * 2,
   );
 
   it(

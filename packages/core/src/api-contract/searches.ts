@@ -257,7 +257,16 @@ export const createAndStartRequestSchema = z
 export type CreateAndStartRequest = z.infer<typeof createAndStartRequestSchema>;
 
 /** Why a start was refused; the web words each code (no message travels with it). */
-export const startRefusalCodes = ['cap', 'confirm', 'window', 'disabled', 'shutting-down', 'failed'] as const;
+export const startRefusalCodes = [
+  'cap',
+  'confirm',
+  'window',
+  'disabled',
+  'shutting-down',
+  // why: settings plan ruling 6 — a saved setting waits for the app to restart in place, so nothing new starts
+  'reload-pending',
+  'failed',
+] as const;
 export type StartRefusalCode = (typeof startRefusalCodes)[number];
 
 /**

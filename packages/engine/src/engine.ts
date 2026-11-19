@@ -113,9 +113,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
   // why: the other schedules' monthly loads an estimate read for its reservations, so its estimateAsk (the same route,
   // the same moment) sets the same reservations aside without planning every other schedule again
   const loadsOf = new WeakMap<Estimate, ScheduleLoads>();
-  const orch = createOrchestrator(ctx);
+  const orch = createOrchestrator(ctx, options.runWatch);
   // why: revision 55 §8.1 — one on-demand flight read at a time, through the context's one browser lease
-  const flights = createFlightReader(ctx);
+  const flights = createFlightReader(ctx, options.runWatch);
   const sched = createScheduler(
     {
       onTick: (id) => orch.tick(id),
@@ -175,6 +175,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       ctx.log.info({}, 'engine: shut down');
     },
     markClosed,
+    holdForReload: () => {
+      ctx.lifecycle.reloadPending = true;
+    },
     start: (id, opts) => orch.start(id, opts),
     resume: (id, opts) => orch.resume(id, opts),
     cancel: (id, cause) => orch.cancel(id, cause),
