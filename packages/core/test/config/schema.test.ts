@@ -426,3 +426,52 @@ describe('parseConfig (spec §12)', () => {
     expect(errors({ ...minimal, SCHEDULER_TIMEZONE: 'Mars/Olympus' })).toContain('SCHEDULER_TIMEZONE');
   });
 });
+
+describe('the settings that shape runs and new searches (settings plan ruling 7)', () => {
+  it('defaults: patience 12, refresh 7 days, no stored source lists', () => {
+    const c = ok(minimal);
+    expect(c.flightReadPatience).toBe(12);
+    expect(c.discoveryRefreshDays).toBe(7);
+    expect(c.newSearchSources).toEqual({ discovery: null, verification: null });
+  });
+  it('reads FLIGHT_READ_PATIENCE and DISCOVERY_REFRESH_DAYS within their bounds', () => {
+    expect(ok({ ...minimal, FLIGHT_READ_PATIENCE: '3' }).flightReadPatience).toBe(3);
+    expect(ok({ ...minimal, FLIGHT_READ_PATIENCE: '50' }).flightReadPatience).toBe(50);
+    expect(ok({ ...minimal, DISCOVERY_REFRESH_DAYS: '1' }).discoveryRefreshDays).toBe(1);
+    expect(ok({ ...minimal, DISCOVERY_REFRESH_DAYS: '30' }).discoveryRefreshDays).toBe(30);
+  });
+  it.each([
+    ['FLIGHT_READ_PATIENCE', '2'],
+    ['FLIGHT_READ_PATIENCE', '51'],
+    ['FLIGHT_READ_PATIENCE', '4.5'],
+    ['FLIGHT_READ_PATIENCE', 'many'],
+    ['DISCOVERY_REFRESH_DAYS', '0'],
+    ['DISCOVERY_REFRESH_DAYS', '31'],
+    ['DISCOVERY_REFRESH_DAYS', 'weekly'],
+  ])('refuses %s=%s naming the field', (name, value) => {
+    expect(errors({ ...minimal, [name]: value })).toEqual([name]);
+  });
+  it('reads source lists as provider ids, `none` as an empty list, and trims and drops repeats', () => {
+    const c = ok({
+      ...minimal,
+      NEW_SEARCH_DISCOVERY: 'travelpayouts, camoufox,travelpayouts',
+      NEW_SEARCH_VERIFICATION: 'none',
+    });
+    expect(c.newSearchSources).toEqual({ discovery: ['travelpayouts', 'camoufox'], verification: [] });
+  });
+  it('refuses an unknown provider id naming it, and `none` mixed with ids, and an empty entry', () => {
+    const r = parseConfig({ ...minimal, NEW_SEARCH_DISCOVERY: 'travelpayouts,skyscanner' }, { realpath });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors).toEqual([
+        { field: 'NEW_SEARCH_DISCOVERY', message: expect.stringContaining('skyscanner') },
+      ]);
+    }
+    expect(errors({ ...minimal, NEW_SEARCH_VERIFICATION: 'none,searchapi' })).toEqual([
+      'NEW_SEARCH_VERIFICATION',
+    ]);
+    expect(errors({ ...minimal, NEW_SEARCH_DISCOVERY: 'travelpayouts,,camoufox' })).toEqual([
+      'NEW_SEARCH_DISCOVERY',
+    ]);
+  });
+});

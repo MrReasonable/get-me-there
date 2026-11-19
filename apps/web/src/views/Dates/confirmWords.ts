@@ -1,4 +1,9 @@
-import { CONFIRM_PATIENCE, CONFIRM_TARGET, type ConfirmSummary, stopDetailClause } from '@gmt/core';
+import {
+  CONFIRM_TARGET,
+  type ConfirmSummary,
+  DEFAULT_FLIGHT_READ_PATIENCE,
+  stopDetailClause,
+} from '@gmt/core';
 import type { ExecutionResponse } from '../../api/types.js';
 import type { PageCopy } from './stateLines.js';
 
@@ -83,8 +88,9 @@ export function confirmLineText(i: ConfirmLineInput, c: PageCopy): string | null
   const head = `${D.checked(dates, unread)}; ${trips}`;
   if (few) return left === 0 ? `${head}.` : `${head}: ${D.fewTrips}. ${D.unchecked(left)}`;
   // why: Ruling 22 (mockup 02): with no early end and the queue not empty the step's own patience ended it (the one
-  // stop left), said in words once the five cheapest stood
+  // stop left), said in words once the five cheapest stood; the patience is the run's own, recorded when it started
+  // (a run stored before the setting read as 12)
   const which = i.theseFive ? D.theseTrips(CONFIRM_TARGET) : D.cheapestTrips(CONFIRM_TARGET);
-  const rule = `${head}. ${D.patience(CONFIRM_PATIENCE, which)}`;
+  const rule = `${head}. ${D.patience(k.patience ?? DEFAULT_FLIGHT_READ_PATIENCE, which)}`;
   return left === 0 ? rule : `${rule} ${D.cheaperUnchecked(left)}`;
 }

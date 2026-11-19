@@ -25,26 +25,15 @@ const IDS = sentenceIds('new-search');
 const N = COPY.newSearch;
 
 /**
- * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the plan preset's sources, policy and
- * budget without SearchApi (design §8 question 2: it is ticked per search) and without the test source when a real one
- * is left, no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave from and Leave
- * by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
+ * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the api's presets (`/providers`), whose
+ * sources are the ones its single rule gives (`newSearchSourcesFor`: the Settings page's lists, or today's draft:
+ * every configured free source, SearchApi unticked, the test source only when nothing real is left), so this page
+ * decides none of that; no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave
+ * from and Leave by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
  */
 export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
-  const d = defaultDraft(presets);
-  const off = (ids: readonly Draft['providers']['discovery'][number][]) =>
-    ids.filter((id) => id !== 'searchapi');
-  const discovery = off(d.providers.discovery);
-  // why: Task 7 minor: in fixture mode beside a real source a new search starts on the real ones; the test source is
-  // ticked only when it is the only source left, so a search is never started with none
-  const real = discovery.filter((id) => id !== 'fixture');
   return {
-    ...d,
-    providers: {
-      ...d.providers,
-      discovery: real.length > 0 ? real : discovery,
-      verification: off(d.providers.verification),
-    },
+    ...defaultDraft(presets),
     window: EMPTY_ABSOLUTE,
     scheduleCron: null,
     enabled: false,

@@ -484,9 +484,10 @@ export function providersResponse(
     presets: {
       policy: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true },
       providers: {
-        discovery: ['travelpayouts', 'searchapi'],
-        verification: ['searchapi'],
-        discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 },
+        // why: what the api gives with no stored lists: SearchApi is ticked nowhere (settings plan ruling 7)
+        discovery: ['travelpayouts'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168 },
       },
       budget: { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 },
       discoveryRefreshHours: 168,

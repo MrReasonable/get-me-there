@@ -26,6 +26,8 @@ export const confirmSummarySchema = z.strictObject({
   unread: count,
   uncheckedCheaper: count,
   stop: z.enum(CONFIRM_STOPS).nullable(),
+  // why: absent on a run stored before FLIGHT_READ_PATIENCE, read as 12
+  patience: count.exactOptional(),
 });
 
 /**

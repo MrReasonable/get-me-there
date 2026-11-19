@@ -169,6 +169,31 @@ describe('SETTING_LABELS and settingRefusal (the page and the 422 share them)', 
     }
   });
 
+  it("a value the schema refuses for each new setting comes out in that setting's own words, never its env name", () => {
+    const base = {
+      NODE_ENV: 'production',
+      DATABASE_PATH: ':memory:',
+      APP_BASIC_AUTH_USER: 'a',
+      APP_BASIC_AUTH_PASS: 'correct-horse-battery',
+      IN_CONTAINER: '1',
+    };
+    const words = (name: OwnedName, value: string): string => {
+      const r = parseConfig({ ...base, [name]: value }, { realpath: (p) => p });
+      if (r.ok) throw new Error('expected a refusal');
+      const error = r.errors.find((e) => e.field === name);
+      if (error === undefined) throw new Error('expected the refusal to name the field');
+      return settingRefusal(name, error);
+    };
+    expect(words('FLIGHT_READ_PATIENCE', '2')).toBe('Choose a whole number of reads from 3 to 50.');
+    expect(words('DISCOVERY_REFRESH_DAYS', '31')).toBe('Choose a whole number of days from 1 to 30.');
+    expect(words('NEW_SEARCH_DISCOVERY', 'skyscanner')).toBe(
+      'Choose calendar sources this app has set up, or none.',
+    );
+    expect(words('NEW_SEARCH_VERIFICATION', 'none,searchapi')).toBe(
+      'Choose trip check sources this app has set up, or none.',
+    );
+  });
+
   it('a mail setting missing from a half-set group says email needs it, naming its label', () => {
     expect(settingRefusal('ALERT_EMAIL_TO', { field: 'ALERT_EMAIL_TO', message: SMTP_ALL_OR_NOTHING })).toBe(
       `Email needs ${SETTING_LABELS.ALERT_EMAIL_TO.toLowerCase()} too: fill it in, or remove email.`,

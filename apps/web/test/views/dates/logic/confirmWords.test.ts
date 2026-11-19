@@ -35,6 +35,14 @@ describe('confirmLineText, rule A (patience)', () => {
     );
   });
 
+  it("says the run's own patience: 3 for a summary of 3 (whatever the setting is now), 12 for one without", () => {
+    expect(line(summary({ patience: 3 }))).toContain(
+      'Reading stopped after 3 reads in a row found nothing cheaper than the five cheapest.',
+    );
+    expect(line(summary({ patience: 50 }))).toContain('Reading stopped after 50 reads in a row');
+    expect(line(summary())).toContain(PATIENT);
+  });
+
   it('adds how many could not be read to the checked count', () => {
     expect(line(summary({ unread: 2 }))).toBe(
       `Checked 18 dates, 2 couldn't be read; 7 trips with flights read. ${PATIENT} 31 dates look cheaper on the calendar but weren't checked.`,

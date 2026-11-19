@@ -11,7 +11,7 @@ import { cheapestPairing, pairingOffer, pairingPrice } from './pairing.js';
 /** Design §4.4: how many confirmed trips the operator wants. */
 export const CONFIRM_TARGET = 5;
 /** Design §4.4: how many finished reads in a row may fail to improve the standings before the step stops. */
-export const CONFIRM_PATIENCE = 12;
+export const DEFAULT_FLIGHT_READ_PATIENCE = 12;
 
 /** The confirmed trips so far (ascending pence) and the finished reads since one last improved them (§4.3, §4.4). */
 export interface Standings {
@@ -49,9 +49,12 @@ export function applyCheck(s: Standings, c: Check, by: 'read' | 'reuse'): Standi
   return { prices, sinceImprovement: better ? 0 : s.sinceImprovement + 1 };
 }
 
-/** §4.4: the step starts no new read once the last `CONFIRM_PATIENCE` finished reads held no improvement. */
-export function patienceSpent(s: Standings): boolean {
-  return s.sinceImprovement >= CONFIRM_PATIENCE;
+/**
+ * §4.4: the step starts no new read once the last `patience` finished reads held no improvement. `patience` is the
+ * run's own (FLIGHT_READ_PATIENCE when it started, recorded in its summary), so a later change never moves a running step.
+ */
+export function patienceSpent(s: Standings, patience: number): boolean {
+  return s.sinceImprovement >= patience;
 }
 
 /**

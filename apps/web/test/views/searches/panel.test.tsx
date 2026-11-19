@@ -33,7 +33,10 @@ const W = COPY.repeatWeekly;
 
 beforeEach(() => window.localStorage.clear());
 
-/** Every install source set up: the Aviasales cache and SearchApi (the fixture's), and the browser. */
+/**
+ * Every install source set up: the Aviasales cache and SearchApi (the fixture's), and the browser. The presets are what
+ * the api gives with no stored lists: SearchApi ticked nowhere (the page takes the presets as they are).
+ */
 function allSources(): ProvidersResponse {
   const base = providersResponse();
   const browser = freeProviders().providers.find((p) => p.providerId === 'camoufox');
@@ -43,9 +46,9 @@ function allSources(): ProvidersResponse {
     presets: {
       ...base.presets,
       providers: {
-        discovery: ['travelpayouts', 'camoufox', 'searchapi'],
-        verification: ['searchapi'],
-        discoveryRefreshHours: { travelpayouts: 168, camoufox: 168, searchapi: 168 },
+        discovery: ['travelpayouts', 'camoufox'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168, camoufox: 168 },
       },
     },
   });
@@ -527,9 +530,9 @@ describe('a source the search uses with no checkbox of its own (fix round 2)', (
   });
 });
 
-// Task 7 minor: an install in fixture mode beside real sources starts a new search on the real ones; the test source is
-// ticked on a new panel only when it is the only source the presets leave
-describe('the test source on a new panel', () => {
+// The rule that an install in fixture mode beside real sources starts a new search on the real ones is the api's
+// (`newSearchSourcesFor`, tested there); the panel ticks what the presets name
+describe('the sources on a new panel', () => {
   const withFixture = (discovery: Array<'fixture' | 'travelpayouts' | 'searchapi'>): ProvidersResponse => {
     const free = freeProviders();
     const first = free.providers[0];
@@ -549,25 +552,32 @@ describe('the test source on a new panel', () => {
   };
   const testSource = () => screen.queryByRole('checkbox', { name: `The test source · ${N.sourceInSearch}` });
 
-  it('is left out beside a real source', async () => {
-    const { estimates, creates } = serve();
-    const { user } = renderPanel(withFixture(['fixture', 'travelpayouts']));
-    expect(testSource()).toBeNull();
+  it('follows the presets exactly: the test source and SearchApi are ticked when the api names them', () => {
+    serve();
+    const first = renderPanel(withFixture(['fixture', 'travelpayouts']));
+    expect(testSource()).toBeChecked();
     expect(source(CACHE)).toBeChecked();
-    await fill(user);
-    await waitFor(() =>
-      expect(estimates.at(-1)).toMatchObject({ providers: { discovery: ['travelpayouts'] } }),
-    );
-    expect(creates).toEqual([]);
+    first.unmount();
+    const base = allSources();
+    renderPanel({
+      ...base,
+      presets: {
+        ...base.presets,
+        providers: {
+          discovery: ['travelpayouts', 'searchapi'],
+          verification: ['searchapi'],
+          discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 },
+        },
+      },
+    });
+    expect(source(SEARCHAPI)).toBeChecked();
   });
 
-  it('is ticked when it is the only source the presets leave (SearchApi starts unticked)', () => {
+  it('an empty list from the api ticks nothing (the Settings page set it to none)', () => {
     serve();
-    const first = renderPanel(withFixture(['fixture', 'searchapi']));
-    expect(testSource()).toBeChecked();
-    first.unmount();
-    renderPanel(withFixture(['fixture']));
-    expect(testSource()).toBeChecked();
+    renderPanel(withFixture([]));
+    expect(source(CACHE)).not.toBeChecked();
+    expect(testSource()).toBeNull();
   });
 });
 

@@ -212,7 +212,9 @@ export const CONFIRM_STOPS = ['patience', 'queue-empty', 'returns-stopped'] as c
  * when no flags had been read when the step planned), `confirmed` the trips in the standings ("trips with flights read"
  * to the operator), `unread` the reads that learnt nothing about their flights (§4.3), `uncheckedCheaper` the queue's
  * pairs left unread whose calendar price is below the 5th confirmed price (every one with fewer than 5, §4.5), and
- * `stop` the rule-A stop that ended the step (null while it runs, or when another stop ended it: see `ended`).
+ * `stop` the rule-A stop that ended the step (null while it runs, or when another stop ended it: see `ended`), and
+ * `patience` the reads in a row without a cheaper trip that rule A allowed when the run started (FLIGHT_READ_PATIENCE
+ * then; absent on a run stored before the setting, read as 12).
  */
 export interface ConfirmSummary {
   mode: (typeof CONFIRM_MODES)[number];
@@ -220,6 +222,7 @@ export interface ConfirmSummary {
   unread: number;
   uncheckedCheaper: number;
   stop: (typeof CONFIRM_STOPS)[number] | null;
+  patience?: number;
 }
 
 /** Spec §7 `search_executions` as read back. */

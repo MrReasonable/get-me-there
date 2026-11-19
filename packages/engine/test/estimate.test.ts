@@ -849,7 +849,7 @@ describe('the estimate flight line is a range over the confirm queue (design 202
     expect(est.flightLists?.pagesMax).toBe(590);
   }, 15_000);
 
-  it('the first 25 all reusable: typically CONFIRM_PATIENCE (12) reads, ceil(12 / 4) × 25 = 75 s', () => {
+  it('the first 25 all reusable: typically the patience (12) reads, ceil(12 / 4) × 25 = 75 s', () => {
     const { est } = queued(
       300,
       Array.from({ length: 25 }, (_, i) => i + 1),
@@ -857,6 +857,32 @@ describe('the estimate flight line is a range over the confirm queue (design 202
     expect(est.flightLists).toMatchObject({ pairs: 12, seconds: 75, returns: true });
     expect(est.flightLists?.pagesMax).toBe(550);
   }, 15_000);
+
+  it('the patience setting moves the typical figure: 3 → max(min(300, 3), min(300, 5 + 3 + 8)) = 16 reads; 25 at 12', () => {
+    const three = queued(300, [], BOTH, { ...AT_ONCE_4, FLIGHT_READ_PATIENCE: '3' }).est.flightLists;
+    expect(three).toMatchObject({ pairs: 16, returns: true });
+    expect(queued(300, []).est.flightLists).toMatchObject({ pairs: 25, returns: true });
+    // why: the typical figure is the patience's own, and "at most" is the whole queue whatever the patience
+    expect(three?.pagesMax).toBe(queued(300, []).est.flightLists?.pagesMax);
+  });
+
+  it('a resumed run is estimated at its own recorded patience, not the setting now (absent = 12)', async () => {
+    const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], {
+      rankedDatePairs: rankedPairs(300),
+      env: AT_ONCE_4,
+    });
+    e.ctx.workerFlags.set('camoufox', BOTH);
+    const done = await e.runToEnd();
+    const plan = done.flightLists;
+    if (plan === null || plan.confirm === null) throw new Error('a stored confirm-mode plan');
+    const confirm = { ...plan.confirm, stop: null, patience: 3 };
+    const { patience: _recorded, ...older } = confirm;
+    const at = (c: typeof confirm | typeof older) =>
+      estimateRemainingFor(e.ctx, { ...done, flightLists: { ...plan, ended: null, confirm: c } }, true);
+    // why: the setting is 12 now; the run recorded 3, so its typical figure is the 3-patience one (16); an older run is 12
+    expect(at(confirm).flightLists?.pairs).toBe(16);
+    expect(at(older).flightLists?.pairs).toBe(25);
+  });
 
   it('a queue of 7 reads 7 typically and at most', () => {
     const { est } = queued(7, []);

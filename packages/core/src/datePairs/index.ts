@@ -6,9 +6,9 @@ export { foldNights, MAX_NIGHT_BANDS, type NightsBand } from './bands.js';
 export {
   applyCheck,
   type Check,
-  CONFIRM_PATIENCE,
   CONFIRM_TARGET,
   checkOfRead,
+  DEFAULT_FLIGHT_READ_PATIENCE,
   EMPTY_STANDINGS,
   improves,
   patienceSpent,

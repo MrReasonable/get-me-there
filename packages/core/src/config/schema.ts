@@ -7,7 +7,9 @@ import {
   sharedMode,
   sharedSettingMessage,
 } from '../camoufox/settings.js';
+import { DEFAULT_FLIGHT_READ_PATIENCE } from '../datePairs/confirm.js';
 import { DEFAULT_MAX_CELLS } from '../space/limits.js';
+import { type ProviderId, providerIdSchema } from '../types/provenance.js';
 import { isLoopbackHost, reachBeyondThisMachine, reachRefusal } from './access.js';
 import {
   type CappedProviderLimits,
@@ -58,6 +60,15 @@ export interface Config {
    * App side only (the engine decides), so not a shared worker setting; a catch-up loads none either way.
    */
   camoufoxBrowserWindow: 'scheduled' | 'any';
+  /** FLIGHT_READ_PATIENCE (settings plan ruling 7): reads in a row without a cheaper trip before a run stops (3–50). */
+  flightReadPatience: number;
+  /** DISCOVERY_REFRESH_DAYS (ruling 7): new searches' calendar refresh, in days (1–30); × 24 is their hours. */
+  discoveryRefreshDays: number;
+  /**
+   * NEW_SEARCH_DISCOVERY / NEW_SEARCH_VERIFICATION (ruling 7): the provider ids new searches start with; `null` when
+   * unset (the install's default draft), `[]` for `none`. A listed source that is not configured drops out at use.
+   */
+  newSearchSources: { discovery: ProviderId[] | null; verification: ProviderId[] | null };
   spend: {
     monthlyCapMicroGbp: number;
     globalBillingDay: number;
@@ -197,6 +208,31 @@ class Reader {
   pence(name: string): number | undefined {
     const v = this.int(name, 0);
     return v === undefined ? undefined : v * PENCE_TO_MICRO;
+  }
+  /**
+   * A comma list of provider ids, or `none` for an empty list; undefined when unset. An unknown id is refused naming it,
+   * and so is `none` beside others or an empty entry. Repeats are dropped, order kept.
+   */
+  sourceList(name: string): ProviderId[] | undefined {
+    const v = this.raw(name);
+    if (v === undefined) return undefined;
+    const parts = v.split(',').map((p) => p.trim());
+    if (parts.length === 1 && parts[0] === 'none') return [];
+    const ids: ProviderId[] = [];
+    for (const part of parts) {
+      const id = providerIdSchema.safeParse(part);
+      if (!id.success) {
+        this.fail(
+          name,
+          part === ''
+            ? `${name} has an empty entry`
+            : `${name} names an unknown provider: ${part} (use ${providerIdSchema.options.join(', ')}, or none alone)`,
+        );
+        return undefined;
+      }
+      if (!ids.includes(id.data)) ids.push(id.data);
+    }
+    return ids;
   }
   fail(field: string, message: string): void {
     this.errors.push({ field, message });
@@ -519,6 +555,12 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
   const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
+  const flightReadPatience = r.int('FLIGHT_READ_PATIENCE', 3, 50) ?? DEFAULT_FLIGHT_READ_PATIENCE;
+  const discoveryRefreshDays = r.int('DISCOVERY_REFRESH_DAYS', 1, 30) ?? 7;
+  const newSearchSources = {
+    discovery: r.sourceList('NEW_SEARCH_DISCOVERY') ?? null,
+    verification: r.sourceList('NEW_SEARCH_VERIFICATION') ?? null,
+  };
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
 
   if (r.errors.length > 0) return { ok: false, errors: r.errors };
@@ -551,6 +593,9 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       estimateRetryFactor,
       fxMaxRateAgeDays,
       camoufoxBrowserWindow,
+      flightReadPatience,
+      discoveryRefreshDays,
+      newSearchSources,
       spend,
       providers: { travelpayouts, searchapi, camoufox, fixture },
       alertEmailMaxPerHour,

@@ -209,6 +209,7 @@ describe('one pass of the step, its plan and its pages', () => {
             unread: 2,
             uncheckedCheaper: 13,
             stop: 'returns-stopped',
+            patience: 12,
           },
         },
       ],

@@ -155,6 +155,25 @@ describe('loadConfig (settings plan ruling 3)', () => {
     expect(rowsOf(db)).toContainEqual({ name: 'SEARCHAPI_BILLING_DAY', value: '31' });
   });
 
+  it.each([
+    ['FLIGHT_READ_PATIENCE', '2', (c: Config) => c.flightReadPatience, 12],
+    ['FLIGHT_READ_PATIENCE', '51', (c: Config) => c.flightReadPatience, 12],
+    ['DISCOVERY_REFRESH_DAYS', '0', (c: Config) => c.discoveryRefreshDays, 7],
+    ['DISCOVERY_REFRESH_DAYS', '31', (c: Config) => c.discoveryRefreshDays, 7],
+    ['NEW_SEARCH_DISCOVERY', 'travelpayouts,skyscanner', (c: Config) => c.newSearchSources.discovery, null],
+    ['NEW_SEARCH_VERIFICATION', 'none,searchapi', (c: Config) => c.newSearchSources.verification, null],
+  ])(
+    'a stored %s of %s is set aside, the default used, boot continues, the row kept',
+    (name, value, read, dflt) => {
+      const db = migrated();
+      db.raw.prepare('INSERT INTO settings (name, value, updated_at) VALUES (?, ?, ?)').run(name, value, T0);
+      const loaded = loadConfig(envWith(), db, { clock, writeImports: true });
+      expect(loaded.setAside).toEqual([name]);
+      expect(read(loaded.config)).toEqual(dflt);
+      expect(rowsOf(db)).toContainEqual({ name, value });
+    },
+  );
+
   it('a stored mail value refused turns email off for the boot (all or nothing), naming only the refused name', () => {
     const db = migrated();
     new SettingsRepo(db).write(

@@ -1,6 +1,6 @@
 /** Spec §10 system routes: health, airports, providers, budget, scheduler jobs. */
 import { statSync } from 'node:fs';
-import { apiContract, DEFAULT_DISCOVERY_REFRESH_HOURS, microGbpToPence, type ProviderId } from '@gmt/core';
+import { apiContract, microGbpToPence, type ProviderId } from '@gmt/core';
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
 import { hostAllowed } from '../middleware/hardening.js';
@@ -80,7 +80,7 @@ function capNoteOf(ctx: RouteContext, id: ProviderId): string | null {
 
 /**
  * Spec §10 `GET /providers`: config + capabilities + usage only (there is no providers table, plan decision 15), the
- * zero-cap notice, the plan presets (`discoveryRefreshHours` is core's DEFAULT_DISCOVERY_REFRESH_HOURS, decision 21).
+ * zero-cap notice, the plan presets (`discoveryRefreshHours` is DISCOVERY_REFRESH_DAYS × 24, settings plan ruling 7).
  */
 export function providersResponse(ctx: RouteContext): ProvidersResponse {
   const { config } = ctx.ports;
@@ -108,7 +108,7 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
       },
       providers: preset.providers,
       budget: preset.budget,
-      discoveryRefreshHours: DEFAULT_DISCOVERY_REFRESH_HOURS,
+      discoveryRefreshHours: config.discoveryRefreshDays * 24,
       schedulerTimezone: config.schedulerTimezone,
     },
     pointOfSale: config.pointOfSale,

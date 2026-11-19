@@ -4963,6 +4963,11 @@ MAX_WAIT_SECONDS=3900                    # limiter queue deadline and Retry-Afte
 REQUEST_TIMEOUT_SECONDS=60
 ESTIMATE_RETRY_FACTOR=1.2
 FX_MAX_RATE_AGE_DAYS=3
+# --- runs and new searches (the Settings page owns these after the first start) ---
+FLIGHT_READ_PATIENCE=12                  # 3–50: a run stops reading flights after this many reads in a row without a cheaper trip; each run keeps the value it started with
+DISCOVERY_REFRESH_DAYS=7                 # 1–30: how many days before a new search reads a date's calendar price again
+NEW_SEARCH_DISCOVERY=                    # calendar sources a new search starts with: provider ids separated by commas (travelpayouts, camoufox, searchapi) or none; empty = every configured free source
+NEW_SEARCH_VERIFICATION=                 # trip check sources a new search starts with: provider ids separated by commas or none; empty = none (SearchApi is ticked per search)
 # --- spend (operator writes pence; code holds micro-GBP) ---
 MONTHLY_SPEND_CAP_PENCE=                 # total monthly spend incl. subscription fees; empty = preset default (0 with no billed provider, 3500 on 40usd); 0 = no billable calls; free providers still run
 GLOBAL_BILLING_DAY=1                     # 1–28

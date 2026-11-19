@@ -307,6 +307,7 @@ describe('rule A ends the step (design 2026-11-08 §4.4)', () => {
       // why: fewer than 5 confirmed, so every pair not started could still have made it
       uncheckedCheaper: 25,
       stop: 'patience',
+      patience: 12,
     });
     const first = flightRows(e, id).find((r) => r.departureDate === ranked[0]?.departureDate);
     expect(first?.status).toBe('read');
@@ -345,6 +346,7 @@ describe('rule A ends the step (design 2026-11-08 §4.4)', () => {
       unread: 0,
       uncheckedCheaper: 28,
       stop: 'patience',
+      patience: 12,
     });
   }, 15_000);
 
@@ -406,6 +408,26 @@ describe('rule A ends the step (design 2026-11-08 §4.4)', () => {
       bookingStopped: 'more-options:not-settled',
       confirm: { confirmed: 3, unread: 0, stop: 'queue-empty' },
     });
+  }, 15_000);
+});
+
+describe('the stopping rule follows FLIGHT_READ_PATIENCE and the run records it (settings plan ruling 7)', () => {
+  it('patience 3: the step stops after 3 reads in a row that do not improve, and the summary records 3', async () => {
+    const { e, cam } = confirming({
+      ranked: pairs(40, (i) => 30_000 + i),
+      reply: () => NO_OUTBOUND,
+      env: { FLIGHT_READ_PATIENCE: '3' },
+    });
+    const done = await e.settled(await start(e));
+    expect(cam.flightCalls).toHaveLength(3);
+    expect(done.flightLists?.confirm).toMatchObject({ stop: 'patience', patience: 3 });
+  }, 15_000);
+
+  it('the default is 12: 12 reads, and the summary records 12', async () => {
+    const { e, cam } = confirming({ ranked: pairs(40, (i) => 30_000 + i), reply: () => NO_OUTBOUND });
+    const done = await e.settled(await start(e));
+    expect(cam.flightCalls).toHaveLength(12);
+    expect(done.flightLists?.confirm).toMatchObject({ stop: 'patience', patience: 12 });
   }, 15_000);
 });
 
