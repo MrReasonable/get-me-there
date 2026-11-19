@@ -7,7 +7,7 @@ import { Limits } from '../../../src/components/TopBar.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
-import { searchApiCallsLeft } from '../../../src/lib/searchApiCallsLeft.js';
+import { searchApiCreditsLine } from '../../../src/lib/searchApiCreditsLine.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
 import {
@@ -108,14 +108,14 @@ const more = () => {
 const source = (name: RegExp) => screen.getByRole('checkbox', { name });
 const BROWSER = /^Google Flights, in your browser · free, takes a while$/;
 const CACHE = /^Aviasales cache · free, prices from other people's searches, often days old$/;
-const SEARCHAPI = /^SearchApi · uses calls/;
+const SEARCHAPI = /^SearchApi · uses credits/;
 
 describe('the panel: what is in view (Ruling 13)', () => {
   it('outside More options only From, To, Leave from, Leave by, Stay, Where to look and Search', async () => {
     serve();
     renderPanel();
-    // the calls left arrive with the budget read
-    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName(/9,385 left$/));
+    // the credits left arrive with the budget read
+    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName(/9,385 left \(this app's count\)$/));
     const form = press().closest('form');
     if (form === null) throw new Error('no form');
     const fold = more();
@@ -136,7 +136,7 @@ describe('the panel: what is in view (Ruling 13)', () => {
       PLAN_COPY.longest,
       `${N.source.camoufox} · ${N.sourceNote.camoufox}`,
       `${N.source.travelpayouts} · ${N.sourceNote.travelpayouts}`,
-      expect.stringMatching(/^SearchApi · uses calls, 9,385 left$/),
+      expect.stringMatching(/^SearchApi · uses credits, 9,385 left \(this app's count\)$/),
       N.search,
     ]);
     expect(fold).not.toHaveAttribute('open');
@@ -198,12 +198,47 @@ describe('the panel: what is in view (Ruling 13)', () => {
         <NewSearchForm providers={allSources()} debounceMs={0} />
       </>,
     );
-    const left = searchApiCallsLeft(searchApiMonth(), allSources());
+    const left = searchApiCreditsLine(null, searchApiMonth(), allSources());
     expect(left?.left).toBe(9385);
     const bar = await screen.findByRole('region', { name: COPY.topBar.limitsLabel });
     // the same figure, grouped alike in both
-    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9,385 of 10,000 calls left this month'));
-    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · uses calls, 9,385 left'));
+    await waitFor(() =>
+      expect(bar).toHaveTextContent("SearchApi: 9,385 of 10,000 credits left (this app's count)"),
+    );
+    await waitFor(() =>
+      expect(source(SEARCHAPI)).toHaveAccessibleName(
+        "SearchApi · uses credits, 9,385 left (this app's count)",
+      ),
+    );
+  });
+});
+
+describe('the panel and the top bar say SearchApi’s own balance alike (settings plan ruling 10)', () => {
+  it('both show its credits and its reset day, and Where to look uses credits, not calls', async () => {
+    serve();
+    server.use(
+      http.get(`${API}/searchapi/account`, () =>
+        HttpResponse.json({
+          account: {
+            remaining: 9_988,
+            monthlyAllowance: 10_000,
+            periodEnd: '2026-12-01',
+            fetchedAt: new Date().toISOString(),
+          },
+        }),
+      ),
+    );
+    renderWithProviders(
+      <>
+        <Limits />
+        <NewSearchForm providers={allSources()} debounceMs={0} />
+      </>,
+    );
+    const bar = await screen.findByRole('region', { name: COPY.topBar.limitsLabel });
+    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9,988 credits left · resets 1 Dec'));
+    await waitFor(() =>
+      expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · uses credits, 9,988 left · resets 1 Dec'),
+    );
   });
 });
 

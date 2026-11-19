@@ -181,6 +181,15 @@ export function useBudget() {
   return useQuery({ queryKey: ['budget'] as const, queryFn: () => api.budget(), refetchInterval: 60_000 });
 }
 
+/** SearchApi's own balance (GET /searchapi/account): the api caches it ten minutes, so a minute's poll is cheap. */
+export function useSearchApiAccount() {
+  return useQuery({
+    queryKey: ['searchapi-account'] as const,
+    queryFn: () => api.searchApiAccount(),
+    refetchInterval: 60_000,
+  });
+}
+
 export function useDefinitions() {
   return useQuery({ queryKey: qk.definitions, queryFn: () => api.definitions() });
 }

@@ -53,7 +53,8 @@ export {
   type ParamsAllowlist,
   ParamsNotAllowedError,
 } from './params/allowlist.js';
-export { searchApiHttpLimits } from './searchapi/limits.js'; // WP5: apps/api httpLimitsFor
+export { searchApiAccount } from './searchapi/account.js'; // settings plan ruling 10: the api's balance route
+export { searchApiAccountHttpLimits, searchApiHttpLimits } from './searchapi/limits.js'; // WP5: apps/api httpLimitsFor
 export { SEARCHAPI_PARAMS } from './searchapi/params.js'; // WP5: apps/api providersFor
 export { searchApiProvider } from './searchapi/provider.js'; // WP5: apps/api providersFor
 export { travelpayoutsHttpLimits } from './travelpayouts/limits.js'; // WP6: apps/api httpLimitsFor

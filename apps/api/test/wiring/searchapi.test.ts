@@ -26,6 +26,16 @@ const clock = fixedClock(asIsoDateTime('2026-10-14T12:00:00.000Z'));
 const deps = { http, log, clock, appInstance: 'test-instance' };
 
 describe('wiring: SearchApi (plan "Wiring and bootstraps")', () => {
+  it('adds the unledgered account id beside it, and only when SEARCHAPI_KEY is set (settings plan ruling 10)', () => {
+    expect(httpLimitsFor(loadConfigFromEnv(base))['searchapi-account']).toBeUndefined();
+    expect(httpLimitsFor(loadConfigFromEnv(withKey))['searchapi-account']).toMatchObject({
+      hosts: ['www.searchapi.io'],
+      billable: 'never',
+      costPerCallMicroGbp: 0,
+      requestTimeoutSeconds: 10,
+    });
+  });
+
   it('adds searchapi http limits when SEARCHAPI_KEY is set', () => {
     const l = httpLimitsFor(loadConfigFromEnv(withKey)).searchapi;
     expect(l).toMatchObject({

@@ -11,6 +11,7 @@ import { envelope, notFound, onError } from './errors.js';
 import { basicAuthGate, clientIpFrom, FailedAuthLimiter } from './middleware/auth.js';
 import { hostAllowlist, mutatingRequestCheck, noStore, originCheck } from './middleware/hardening.js';
 import { securityHeaders } from './middleware/headers.js';
+import { type SearchApiAccountPort, searchApiAccountFor } from './read/searchApiAccount.js';
 import type { StatusEnv } from './read/statusSources.js';
 import { NO_INPUT } from './routes/define.js';
 import { HANDLERS } from './routes/index.js';
@@ -57,6 +58,8 @@ export interface AppOptions {
    * `ports.secrets` only.
    */
   scrub?: (more: readonly Secret[]) => void;
+  /** SearchApi's balance cache (settings plan ruling 10); the bootstrap builds it to tell it of each run's end. */
+  searchApiAccount?: SearchApiAccountPort;
   /** The test-send limit (settings plan ruling 11); the process's one when absent. */
   testSendLimit?: TestSendLimit;
   /** The Settings test's mail transport; nodemailer's when absent. */
@@ -111,6 +114,7 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
       if (options.scrub === undefined) addSecrets(ports.secrets, kept);
       else options.scrub(kept);
     },
+    searchApiAccount: options.searchApiAccount ?? searchApiAccountFor(ports),
     testSendLimit: options.testSendLimit ?? TEST_SEND_LIMIT,
     emailTransport: options.emailTransport,
   };

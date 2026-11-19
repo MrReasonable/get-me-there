@@ -28,6 +28,7 @@ import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
+import { searchApiAccountFor } from '../read/searchApiAccount.js';
 import { planOf, providerBudget, spendWarnings } from '../read/usage.js';
 import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
@@ -301,7 +302,20 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       log,
       secrets,
     });
-    const engine = engineFor(ports, log, { notifiers, home, runWatch: reloader.watch });
+    // why: settings plan ruling 10 — SearchApi's balance is read again after a run that called SearchApi, so the cache is
+    // told of each run's end beside the reloader
+    const searchApiAccount = searchApiAccountFor(ports);
+    const engine = engineFor(ports, log, {
+      notifiers,
+      home,
+      runWatch: {
+        started: () => reloader.watch.started(),
+        ended: () => {
+          searchApiAccount.runEnded();
+          reloader.watch.ended();
+        },
+      },
+    });
     engineRef = engine;
     booted = engine;
     await engine.boot();
@@ -321,6 +335,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       ...(email === undefined ? {} : { email }),
       bootId,
       reload: reloader,
+      searchApiAccount,
       settingsEnv: deps.env,
       // why: a request's secret joins the log's list (this boot's) and the ports' (http-kit, the error handler)
       scrub: (more) => {
@@ -377,6 +392,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         await Promise.race([
           (async () => {
             await closeServer(bound?.server ?? null); // stop accepting
+            searchApiAccount.close();
             await engine.shutdown();
             // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
             db.checkpoint();

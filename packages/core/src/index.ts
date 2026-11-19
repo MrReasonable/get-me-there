@@ -19,6 +19,7 @@ export type {
   ResultRow,
   RouteSeriesPoint,
   SchedulerJob,
+  SearchApiAccount,
   SearchCard,
   SearchCardsResponse,
   StartRefusalCode,

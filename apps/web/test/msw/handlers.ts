@@ -55,6 +55,8 @@ export const handlers = [
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
   http.get(url('/api/budget'), () => HttpResponse.json(budgetResponse())),
+  // settings plan ruling 10: SearchApi's own balance could not be read, so the views say this app's count
+  http.get(url('/api/searchapi/account'), () => HttpResponse.json({ account: null })),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
   // WP18: a clean report, so the status bar's link shows nothing unless a test says otherwise
   http.get(url('/api/status'), () => HttpResponse.json(statusReport())),

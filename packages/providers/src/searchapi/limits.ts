@@ -77,3 +77,22 @@ export function searchApiHttpLimits(
     classifyError: classifySearchApiError,
   };
 }
+
+/**
+ * The account read's limits (settings plan ruling 10): the same host, never ledgered (`billable: 'never'` and the
+ * unledgered id), no response cache, its own limiter, so it takes no reservation, writes no row and still works once the
+ * local cap is spent. A 10 s timeout; the vendor states the read costs no credit (measured 2026-11-19: two reads left
+ * the month's usage and the hour's searches at 0), and the web asks at most every 10 minutes through the api's cache.
+ */
+export function searchApiAccountHttpLimits(cfg: Pick<Config, 'maxWaitSeconds'>): ProviderHttpLimits {
+  return {
+    hosts: [SEARCHAPI_HOST],
+    ratePerMinute: 6,
+    ratePerHour: 60,
+    concurrency: 1,
+    billable: 'never',
+    costPerCallMicroGbp: 0,
+    maxWaitSeconds: cfg.maxWaitSeconds,
+    requestTimeoutSeconds: 10,
+  };
+}

@@ -57,6 +57,7 @@ import {
   healthResponseSchema,
   providersResponseSchema,
   schedulerJobsResponseSchema,
+  searchApiAccountResponseSchema,
   smokePlanResponseSchema,
   statusResponseSchema,
   testEmailResponseSchema,
@@ -168,6 +169,8 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/alerts/events', alertEventSchema.array(), { query: alertEventsQuerySchema }),
   route('GET', '/scheduler/jobs', schedulerJobsResponseSchema),
   route('GET', '/budget', budgetResponseSchema),
+  // why: settings plan ruling 10 — SearchApi's own balance, cached 10 minutes, null when there is no key or no answer
+  route('GET', '/searchapi/account', searchApiAccountResponseSchema),
   route('GET', '/status', statusResponseSchema),
   route('POST', '/alerts/test-email', testEmailResponseSchema),
   // why: settings plan rulings 5, 6, 11 — the Settings page reads, saves (restarting the app in place) and tests email

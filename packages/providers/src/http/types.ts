@@ -12,26 +12,30 @@ import type {
 /**
  * Every id http-kit serves: the providers plus the never-ledgered FX refresh (spec §4, §5.3) and the camoufox worker's
  * status and keep-awake routes (`camoufox-status`, spec §5.3: the unledgered preflight's GET /v1/status and the lease's
- * POST /v1/awake only).
+ * POST /v1/awake only), and SearchApi's own account read (`searchapi-account`, settings plan ruling 10: GET /api/v1/me).
  */
-export type HttpProviderId = ProviderId | 'fx' | 'camoufox-status';
+export type HttpProviderId = ProviderId | 'fx' | 'camoufox-status' | 'searchapi-account';
+type UnledgeredId = 'fx' | 'camoufox-status' | 'searchapi-account';
 /** The ids http-kit never ledgers: no reservation, no cache-hit row, no hourly seed from the ledger. */
-export const UNLEDGERED_IDS: ReadonlySet<HttpProviderId> = new Set<'fx' | 'camoufox-status'>([
+export const UNLEDGERED_IDS: ReadonlySet<HttpProviderId> = new Set<UnledgeredId>([
   'fx',
   'camoufox-status',
+  'searchapi-account',
 ]);
 /**
- * The id a ProviderError carries (core's port knows the providers and 'fx'): the worker's status route is camoufox's.
+ * The id a ProviderError carries (core's port knows the providers and 'fx'): the worker's status route is camoufox's,
+ * and SearchApi's account read is SearchApi's.
  */
 export function errorProviderId(id: HttpProviderId): ProviderId | 'fx' {
-  return id === 'camoufox-status' ? 'camoufox' : id;
+  if (id === 'camoufox-status') return 'camoufox';
+  return id === 'searchapi-account' ? 'searchapi' : id;
 }
 /** Narrows an id to a ledgered ProviderId: every id but UNLEDGERED_IDS (fix round 1, arch M6: the one list). */
 export function ledgeredId(id: HttpProviderId): ProviderId | null {
   return isUnledgered(id) ? null : id;
 }
-/** The type guard over UNLEDGERED_IDS (the set's members are exactly these two ids). */
-function isUnledgered(id: HttpProviderId): id is 'fx' | 'camoufox-status' {
+/** The type guard over UNLEDGERED_IDS (the set's members are exactly these ids). */
+function isUnledgered(id: HttpProviderId): id is UnledgeredId {
   return UNLEDGERED_IDS.has(id);
 }
 

@@ -3,15 +3,18 @@
 import {
   AUTH_MISSING_NATIVE,
   apiContract,
+  asIsoDateTime,
   BANNED_WORD_ALLOWLIST,
   decodeDatePairs,
   findBannedWords,
   TRUNCATED_NOTE,
 } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
+import type { HttpKit } from '@gmt/providers';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from '../../src/app.js';
+import { type SearchApiAccountPort, searchApiAccountFor } from '../../src/read/searchApiAccount.js';
 import { API_TEXT } from '../../src/text.js';
 import { expectEnvelopeOrContract } from '../helpers/contract.js';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
@@ -327,11 +330,36 @@ describe('banned words in API strings (spec §11, §8.3)', () => {
 
 describe('sentinel secrets never reach a body or a log line (spec §5.3)', () => {
   it('provider keys and the auth password stay out of every response and log', async () => {
-    const x = await harness({
-      TRAVELPAYOUTS_TOKEN: SENTINEL_TP,
-      SEARCHAPI_KEY: SENTINEL_SA,
-      SEARCHAPI_PLAN: '40usd',
+    // why: settings plan ruling 10 — the balance route asks SearchApi; here a vendor that echoes the key in its answer
+    // (SYNTHETIC body, the documented account shape plus an echo) through the real cache, over a double of the http kit
+    const account: { port: SearchApiAccountPort | null } = { port: null };
+    h = await createHarness({
+      env: { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd' },
+      app: {
+        searchApiAccount: {
+          read: () => account.port?.read() ?? Promise.resolve(null),
+          runEnded: () => undefined,
+          close: () => undefined,
+        },
+      },
     });
+    const x = h;
+    const echoingKit: HttpKit = {
+      request: () =>
+        Promise.resolve({
+          status: 200,
+          body: {
+            account: { remaining_searches: 38, monthly_allowance: 0, echo: SENTINEL_SA },
+            echo: SENTINEL_TP,
+          },
+          fetchedAt: asIsoDateTime('2026-11-19T14:00:00.000Z'),
+          fromCache: false,
+          cacheKey: 'k',
+        }),
+      stats: () => ({ inFlight: 0 }),
+      holdUntil: () => undefined,
+    };
+    account.port = searchApiAccountFor({ ...x.ports, http: echoingKit });
     const ids = seedWorld(x);
     const bodies: string[] = [];
     for (const route of mounted.filter((r) => r.method === 'GET'))

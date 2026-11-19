@@ -2,11 +2,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
-import { useBudget } from '../../api/queries.js';
 import type { DefinitionResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
-import { searchApiCallsLeft } from '../../lib/searchApiCallsLeft.js';
+import { useSearchApiCredits } from '../../lib/searchApiCreditsLine.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { SentenceButton, SentenceRegion, sentenceIds, sentenceOf } from '../Searches/EstimateSentence.js';
@@ -70,7 +69,7 @@ export function DefinitionForm({
   const qc = useQueryClient();
   const [initial] = useState(() => definitionToDraft(existing));
   const form = useSearchForm(initial, { nameTouched: true, debounceMs, definitionId: existing.id });
-  const budget = useBudget();
+  const credits = useSearchApiCredits(providers);
   const { draft } = form;
   const [saved, setSaved] = useState<DefinitionResponse>(existing);
   const [notice, setNotice] = useState<string | null>(null);
@@ -181,7 +180,7 @@ export function DefinitionForm({
         <SearchFields
           form={form}
           providers={providers}
-          callsLeft={budget.data === undefined ? null : searchApiCallsLeft(budget.data, providers)}
+          credits={credits}
           edit
           budgetFit={form.estimate.estimate?.budgetFit ?? null}
           extra={<CoverageCheck draft={draft} available={travelpayouts} />}

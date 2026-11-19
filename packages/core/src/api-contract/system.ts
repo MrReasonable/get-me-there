@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
-import { iataSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
+import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
 import {
   capabilityInfoSchema,
   cronSchema,
@@ -72,6 +72,19 @@ export const budgetResponseSchema = z.object({
   fixedFeesMicroGbp: microGbpSchema,
   ceilingNote: z.string(),
 });
+/**
+ * SearchApi's own account balance (settings plan ruling 10): credits left, the plan's monthly allowance (0 on the trial)
+ * and the day the period ends as a date in SCHEDULER_TIMEZONE (null on the trial, which has no subscription).
+ */
+export const searchApiAccountSchema = z.object({
+  remaining: count,
+  monthlyAllowance: count,
+  periodEnd: isoDateSchema.nullable(),
+  fetchedAt: isoDateTimeSchema,
+});
+/** `GET /searchapi/account`: the balance, or null with no key set or when SearchApi could not be asked. */
+export const searchApiAccountResponseSchema = z.object({ account: searchApiAccountSchema.nullable() });
+export type SearchApiAccount = z.output<typeof searchApiAccountSchema>;
 export const schedulerJobSchema = z.object({
   id: z.string(),
   kind: z.enum(['definition', 'resume']),

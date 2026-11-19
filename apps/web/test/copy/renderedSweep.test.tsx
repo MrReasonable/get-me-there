@@ -156,7 +156,7 @@ describe('the main path in the shell says no set-up term (spec rev 55 §3, §11;
 });
 
 describe('the top bar and run progress say no banned word, no set-up term and no "£" outside a cost (Task 4)', () => {
-  it('the health line with problems, SearchApi’s calls left, the spend and a running search', async () => {
+  it('the health line with problems, SearchApi’s credits left, the spend and a running search', async () => {
     server.use(
       http.get(`${API}/status`, () =>
         HttpResponse.json(
@@ -180,12 +180,36 @@ describe('the top bar and run progress say no banned word, no set-up term and no
     );
     renderWithProviders(<App />, { search: '?view=settings' });
     await screen.findByRole('link', { name: '2 things need you · fix' });
-    await screen.findByText('SearchApi: 51 of 100 calls left this month');
+    await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)");
     await screen.findByText('Spent £32 of £35 this month');
     await screen.findByRole('link', { name: 'Searching: Worked example' });
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    // why: settings plan ruling 10 — SearchApi's unit is credits; "searches left" is never its words
+    expect(renderedCopy()).not.toMatch(/searches left/i);
     expect(jargonIn(mainPathWords())).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
+  });
+
+  it('SearchApi’s own balance, with its reset day, says credits and no banned word', async () => {
+    server.use(
+      http.get(`${API}/budget`, () =>
+        HttpResponse.json(budgetResponse({ scopes: [usage('global-month', 0, 35_000_000, 0)] })),
+      ),
+      http.get(`${API}/searchapi/account`, () =>
+        HttpResponse.json({
+          account: {
+            remaining: 9_988,
+            monthlyAllowance: 10_000,
+            periodEnd: '2026-12-01',
+            fetchedAt: new Date().toISOString(),
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=settings' });
+    await screen.findByText('SearchApi: 9,988 credits left · resets 1 Dec');
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/searches left/i);
   });
 
   it.each<[string, RunProgressRun]>([

@@ -168,5 +168,9 @@ export const systemHandlers: HandlerTable = {
   ),
   'GET /api/providers': plain((c, _input, ctx) => c.json(providersResponse(ctx))),
   'GET /api/budget': plain((c, _input, ctx) => c.json(budgetResponse(ctx))),
+  // why: settings plan ruling 10 — never rejects; null is "no key or no answer", which the page words
+  'GET /api/searchapi/account': plain(async (c, _input, ctx) =>
+    c.json({ account: await ctx.searchApiAccount.read() }),
+  ),
   'GET /api/scheduler/jobs': plain((c, _input, ctx) => c.json({ jobs: ctx.engine.scheduler.jobs() })),
 };

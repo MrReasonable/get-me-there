@@ -57,6 +57,7 @@ import {
   type HttpKit,
   type HttpKitDeps,
   SEARCHAPI_PARAMS,
+  searchApiAccountHttpLimits,
   searchApiHttpLimits,
   searchApiProvider,
   TRAVELPAYOUTS_PARAMS,
@@ -338,9 +339,14 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
     // WP5: SearchApi, only when SEARCHAPI_KEY is set (spec §2, §5.3).
+    // settings plan ruling 10: its balance read is its own unledgered id, so it needs no reservation and works once the
+    // local cap is spent
     ...(config.providers.searchapi === null
       ? {}
-      : { searchapi: searchApiHttpLimits(config.providers.searchapi.limits, timing) }),
+      : {
+          searchapi: searchApiHttpLimits(config.providers.searchapi.limits, timing),
+          'searchapi-account': searchApiAccountHttpLimits(config),
+        }),
     // WP6: Travelpayouts, only when configured (spec §2, §5.3).
     ...(config.providers.travelpayouts === null
       ? {}

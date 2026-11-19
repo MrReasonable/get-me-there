@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type Ref, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
-import { qk, useBudget } from '../../api/queries.js';
+import { qk } from '../../api/queries.js';
 import type {
   BudgetFit,
   CreateAndStartBody,
@@ -12,7 +12,7 @@ import type {
 } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { newRequestKey } from '../../lib/requestKey.js';
-import { searchApiCallsLeft } from '../../lib/searchApiCallsLeft.js';
+import { useSearchApiCredits } from '../../lib/searchApiCreditsLine.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { type Draft, defaultDraft, EMPTY_ABSOLUTE } from '../Definitions/draft.js';
@@ -67,9 +67,8 @@ export function NewSearchForm({
   const qc = useQueryClient();
   const [initial] = useState(() => newSearchDraft(providers.presets));
   const form = useSearchForm(initial, { nameTouched: false, debounceMs });
-  const budget = useBudget();
   // why: Ruling 13 — the panel's "M left" is the top bar's figure, from the one helper
-  const callsLeft = budget.data === undefined ? null : searchApiCallsLeft(budget.data, providers);
+  const credits = useSearchApiCredits(providers);
   const est = form.estimate;
   const { draft } = form;
   const repeats = draft.enabled && draft.scheduleCron !== null;
@@ -125,7 +124,7 @@ export function NewSearchForm({
       <SearchFields
         form={form}
         providers={providers}
-        callsLeft={callsLeft}
+        credits={credits}
         edit={false}
         budgetFit={null}
         {...(fromRef === undefined ? {} : { fromRef })}

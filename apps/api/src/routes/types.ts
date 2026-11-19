@@ -4,6 +4,7 @@ import type { Engine, TestSendLimit, TransportFactory } from '@gmt/engine';
 import type { Context } from 'hono';
 import type { z } from 'zod';
 import type { ReloadPort } from '../bootstrap/reload.js';
+import type { SearchApiAccountPort } from '../read/searchApiAccount.js';
 import type { StatusEnv } from '../read/statusSources.js';
 import type { Ports } from '../wiring.js';
 
@@ -66,6 +67,8 @@ export interface RouteContext {
    * anything can fail; a value shorter than MIN_SECRET_LENGTH is left out (the route keeps it for its own errors).
    */
   scrub(more: readonly Secret[]): void;
+  /** Settings plan ruling 10: SearchApi's own balance, cached for this pass of the app. */
+  searchApiAccount: SearchApiAccountPort;
   /** Settings plan ruling 11: the test-send limit the Settings test shares with `/alerts/test-email`. */
   testSendLimit: TestSendLimit;
   /** The Settings test's mail transport; nodemailer's unless a test passes a double. */

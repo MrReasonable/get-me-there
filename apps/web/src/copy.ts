@@ -231,11 +231,19 @@ export const COPY = {
     /** The link's tail: the Status page says what to do (the System page of Settings). */
     fix: 'fix',
     limitsLabel: 'Limits',
-    /** The window in use: a monthly plan's month, or a trial's one-off allowance (`searchApiCallsLeft`). */
-    callsLeftMonth: (left: number, cap: number) =>
-      `SearchApi: ${thousands(left)} of ${thousands(cap)} ${noun(cap, 'call', 'calls')} left this month`,
-    callsLeftTrial: (left: number, cap: number) =>
-      `SearchApi: ${thousands(left)} of ${thousands(cap)} trial ${noun(cap, 'call', 'calls')} left`,
+    /**
+     * SearchApi's credits left (settings plan ruling 10, `searchApiCreditsLine`): its own balance ("SearchApi: 38 credits
+     * left"), or, when it could not be asked, this app's count of the window in use ("51 of 100", with the tail below
+     * saying whose count it is). The unit is credits, never searches.
+     */
+    creditsLeft: (left: number, cap: number | null) =>
+      `SearchApi: ${thousands(left)}${cap === null ? '' : ` of ${thousands(cap)}`} ${noun(cap ?? left, 'credit', 'credits')} left`,
+    /** What follows the figure when it is this app's own count, not SearchApi's balance. */
+    creditsLocalTail: "(this app's count)",
+    /** What follows SearchApi's own balance: the day the period ends (a monthly plan; the trial has none). */
+    creditsResets: (date: string) => `resets ${date}`,
+    /** What follows a balance read more than ten minutes ago, with the time it was read. */
+    creditsAsOf: (time: string) => `as of ${time}`,
     spent: (used: string, cap: string) => `Spent ${used} of ${cap} this month`,
     spentNoCap: (used: string) => `Spent ${used} this month`,
     nearCap: 'near cap',
@@ -576,7 +584,9 @@ export const COPY = {
       travelpayouts: "free, prices from other people's searches, often days old",
     },
     // why: fix round 1 — the run budget's cap is not what a run uses; the sentence states the run's own calls once ticked
-    searchapiNote: (left: number | null) => `uses calls${left === null ? '' : `, ${thousands(left)} left`}`,
+    // why: settings plan ruling 10 — the same figure and tail as the top bar's line (`searchApiCreditsLine`)
+    searchapiNote: (left: number | null, tail: string) =>
+      `uses credits${left === null ? '' : `, ${thousands(left)} left${tail === '' ? '' : ` ${tail}`}`}`,
     /** A source not set up on this install, by the name the sentence gives it (lower case: the sentence capitalises). */
     sourceUnset: {
       camoufox: 'the browser',

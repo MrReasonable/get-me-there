@@ -23,6 +23,8 @@ export const api = {
   status: () => call(c.statusResponseSchema, 'GET', '/api/status'),
   // spec §10: the month's spend and each provider's window, for the status bar's always-on month line
   budget: () => call(c.budgetResponseSchema, 'GET', '/api/budget'),
+  // settings plan ruling 10: SearchApi's own balance (cached ten minutes by the api), null when it could not be read
+  searchApiAccount: () => call(c.searchApiAccountResponseSchema, 'GET', '/api/searchapi/account'),
   testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
   // WP20 (spec §10): the first screen's cards in the order the api owns; remove (soft delete, then cancel) and undo
