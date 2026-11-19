@@ -19,6 +19,8 @@ beforeEach(() => {
 const TAG = '0012_wp21_return_leg';
 // why: 0013 adds flight_lists.booking_url after this one; a world at 0011 gets it too, NULL on every row
 const NEXT = '0013_booking_url';
+// why: 0014 adds the settings table after these; a world at 0011 gets it too, empty
+const SETTINGS = '0014_settings';
 const SEEDED = [
   'search_definitions',
   'search_executions',
@@ -164,7 +166,7 @@ function refusal(fn: () => unknown): string | null {
 /** A database at 0011 with a definition, a completed run, a read list of two flights, a failed list and a camoufox ledger row. */
 function seedAt0011(): Db {
   const db = openTracked(tmpDbPath());
-  applyMigrations(db, migrationsWithout([TAG, NEXT]));
+  applyMigrations(db, migrationsWithout([TAG, NEXT, SETTINGS]));
   db.raw.prepare(DEFINITION).run({ at: T0 });
   db.raw
     .prepare(
@@ -244,7 +246,7 @@ describe('migration 0012 (spec revision 56 §7)', () => {
   it('keeps every row of a world seeded at 0011 byte-equal on its old columns, every new column NULL, and no new row', () => {
     const db = seedAt0011();
     const before = rowsOf(db);
-    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, NEXT]);
+    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, NEXT, SETTINGS]);
     const after = rowsOf(db);
     for (const t of SEEDED) {
       expect(after[t]?.length, t).toBe(before[t]?.length);

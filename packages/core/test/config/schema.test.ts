@@ -163,19 +163,24 @@ describe('parseConfig (spec §12)', () => {
       expect(errors({ ...noAuth, APP_BASIC_AUTH_USER: 'ian' })).toEqual(['APP_BASIC_AUTH_PASS']);
     });
   });
-  it('refuses SEARCHAPI_TRIAL_USED on a monthly plan, naming both fields: it would be silently ignored (cost-007)', () => {
+  it('ignores SEARCHAPI_TRIAL_USED on a monthly plan with a warning naming both fields, so a plan saved in Settings never stops boot (cost-007; settings plan ruling 1)', () => {
     const sa = { ...minimal, SEARCHAPI_KEY: 'k'.repeat(32) };
-    expect(errors({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' })).toEqual([
-      'SEARCHAPI_TRIAL_USED',
-    ]);
     const r = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
-    expect(r.ok ? '' : r.errors[0]?.message).toContain('SEARCHAPI_PLAN');
-    expect(
-      ok({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }).providers.searchapi?.trialUsed,
-    ).toBe(0);
-    expect(
-      ok({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }).providers.searchapi?.trialUsed,
-    ).toBe(9);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.config.providers.searchapi?.trialUsed).toBe(0);
+    expect(r.warnings).toEqual([
+      {
+        field: 'SEARCHAPI_TRIAL_USED',
+        message:
+          "applies only to the trial's lifetime window; SEARCHAPI_PLAN=40usd counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0",
+      },
+    ]);
+    const zero = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }, { realpath });
+    expect(zero.ok && zero.warnings).toEqual([]);
+    expect(zero.ok && zero.config.providers.searchapi?.trialUsed).toBe(0);
+    const trial = parseConfig({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
+    expect(trial.ok && trial.warnings).toEqual([]);
+    expect(trial.ok && trial.config.providers.searchapi?.trialUsed).toBe(9);
   });
   it('fills the 40usd preset and lets variables override', () => {
     const c = ok({ ...minimal, SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });

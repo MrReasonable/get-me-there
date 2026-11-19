@@ -7,10 +7,11 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
+import { type Clock, type Config, type Logger, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
   AIRPORTS_DATA_DIR,
   AppLock,
+  type Db,
   HEARTBEAT_INTERVAL_MS,
   MIGRATIONS_DIR,
   readOnlyLockState,
@@ -25,7 +26,19 @@ import { runSmokeTool } from '../tools/smoke.js';
 import { parseSmokeArgs, type SmokeCli, smokeFixtureTarget } from '../tools/smokeArgs.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
-import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+import {
+  addSecrets,
+  bootSecrets,
+  buildFromDb,
+  collectSecrets,
+  InvalidConfigError,
+  type LoadedConfig,
+  loadBootConfig,
+  loadConfig,
+  logSettingsLoaded,
+  openDatabase,
+  type Ports,
+} from '../wiring.js';
 import { backupBeforeMigrations, dataDirRefusal, movedDatabaseRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
 
@@ -103,7 +116,8 @@ export function recordingTarget(
 type Prepared =
   | {
       ok: true;
-      precheck: string | null;
+      /** The configuration precheck, run on the full config once the stored settings are read (settings plan ruling 3). */
+      precheck: ((config: Config) => string | null) | null;
       target: RecordingTarget;
       run(ports: Ports, ctx: ToolContext): Promise<number>;
     }
@@ -132,7 +146,7 @@ function prepare(
       }
       return {
         ok: true,
-        precheck: recordPrecheck(config),
+        precheck: recordPrecheck,
         target,
         run: (ports, ctx) => runners.record(ports, parsed.value, ctx),
       };
@@ -168,11 +182,12 @@ function prepare(
 
 /**
  * Runs one tool and returns its exit code; every failure after the config parse maps to a code with a scrubbed
- * message, so nothing reaches the entry point's catch (sec2-001). Order (spec §5.5, §7, plan decision 20): config →
- * refuse NODE_ENV=test → refuse an open synthetic gate → refuse a database moved to a native install (spec §13) →
- * arguments and recording target → precheck → data directory
- * writable → app_lock read-only → backup when migrations are pending → buildPorts (migrations) → app_lock('tool') →
- * seed airports → heartbeat → run → release on every path.
+ * message, so nothing reaches the entry point's catch (sec2-001). Order (spec §5.5, §7, plan decision 20; settings plan
+ * ruling 3): boot config (the environment without the Settings page's names) → refuse NODE_ENV=test → refuse an open
+ * synthetic gate → refuse a database moved to a native install (spec §13) → arguments and recording target → data
+ * directory writable → app_lock read-only → backup when migrations are pending → openDatabase (migrations) →
+ * app_lock('tool') → the stored settings laid over the environment, nothing written (loadConfig) → precheck →
+ * buildFromDb → seed airports → heartbeat → run → release on every path.
  */
 export async function runTool(name: ToolName, argv: string[], opts: RunToolOptions = {}): Promise<number> {
   const err = opts.err ?? ((line: string) => void process.stderr.write(`${line}\n`));
@@ -195,11 +210,11 @@ async function runToolSteps(
   knowSecrets: (s: readonly Secret[]) => void,
 ): Promise<number> {
   const out = opts.out ?? ((line: string) => void process.stdout.write(`${line}\n`));
-  // why: the single process.env read (plan decision 9); NODE_ENV is read only through loadConfigFromEnv (sec-005)
+  // why: the single process.env read (plan decision 9); NODE_ENV is read only through loadBootConfig (sec-005)
   const env = opts.env ?? process.env;
   let config: Config;
   try {
-    config = loadConfigFromEnv(env);
+    config = loadBootConfig(env);
   } catch (e) {
     if (e instanceof InvalidConfigError) {
       err(e.message);
@@ -207,7 +222,8 @@ async function runToolSteps(
     }
     throw e;
   }
-  const secrets = collectSecrets(config);
+  // why: one list every scrub below reads (the logger's included); the stored secrets join it once read
+  const secrets = bootSecrets(config, env);
   knowSecrets(secrets);
   if (config.nodeEnv === 'test') {
     err('tool bootstrap refuses NODE_ENV=test (spec §5.5)');
@@ -228,10 +244,6 @@ async function runToolSteps(
   }
   const prepared = prepare(name, argv, config, { ...DEFAULT_RUNNERS, ...opts.runners }, opts.recording, err);
   if (!prepared.ok) return prepared.code;
-  if (prepared.precheck !== null) {
-    err(prepared.precheck);
-    return EXIT.badConfig;
-  }
   const clock = opts.clock ?? systemClock;
   const migrationsDir = opts.migrationsDir ?? MIGRATIONS_DIR;
 
@@ -267,19 +279,19 @@ async function runToolSteps(
     ...(opts.logDestination === undefined ? {} : { destination: opts.logDestination }),
   }).child({ tool: name });
   out(`database: ${config.databasePath}`);
-  let ports: Ports;
+  let db: Db;
   try {
-    ports = buildPorts(config, { log, clock, migrationsDir });
+    db = openDatabase(config.databasePath, migrationsDir);
   } catch (e) {
     err(`tool failed while opening the database: ${safeMessage(e, secrets)}`);
     return EXIT.failed;
   }
   try {
-    const lock = new AppLock(ports.db, 'tool', ports.clock, log);
+    const lock = new AppLock(db, 'tool', clock, log);
     // why: waitMs 0 — a tool never queues behind the app; the operator uses POST /api/tools/* instead (spec §7). Only a
     // process that took the lock between the read-only check and here reaches the refusal (AppLock's own tests cover it).
     if (lock.acquire({ waitMs: 0 }) === 'refused') {
-      const now = AppLock.inspect(ports.db);
+      const now = AppLock.inspect(db);
       err(
         `app_lock is held by ${now?.holder ?? 'another process'} (heartbeat ${now?.heartbeatAt ?? 'unknown'}); stop it, or use POST /api/tools/${name} while the app runs (spec §7)`,
       );
@@ -309,6 +321,12 @@ async function runToolSteps(
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
     try {
+      // why: settings plan ruling 3: the tool reads the config the app would (the stored settings over the environment)
+      // and writes nothing; the precheck needs it, so it runs here, under the lock released below
+      const ready = prepareConfig(env, db, clock, log, prepared.precheck, err, secrets);
+      if (!ready.ok) return ready.code;
+      const ports = buildFromDb(ready.config, db, { log, clock });
+      addSecrets(secrets, ports.secrets);
       seedIfNeeded(ports, AIRPORTS_DATA_DIR, out);
       const code = await prepared.run(ports, {
         signal: ac.signal,
@@ -329,8 +347,42 @@ async function runToolSteps(
       out('tool lock released');
     }
   } finally {
-    ports.db.close();
+    db.close();
   }
+}
+
+/**
+ * The tool's full config (settings plan ruling 3): loadConfig with nothing written, its names logged as the app logs
+ * them, its secrets added to `secrets`, then the tool's precheck. A refused name the page does not own, or a precheck
+ * refusal, is a configuration fault (78).
+ */
+function prepareConfig(
+  env: NodeJS.ProcessEnv,
+  db: Db,
+  clock: Clock,
+  log: Logger,
+  precheck: ((config: Config) => string | null) | null,
+  err: (line: string) => void,
+  secrets: Secret[],
+): { ok: true; config: Config } | { ok: false; code: number } {
+  let loaded: LoadedConfig;
+  try {
+    loaded = loadConfig(env, db, { clock, writeImports: false });
+  } catch (e) {
+    if (e instanceof InvalidConfigError) {
+      err(e.message);
+      return { ok: false, code: EXIT.badConfig };
+    }
+    throw e;
+  }
+  addSecrets(secrets, collectSecrets(loaded.config));
+  logSettingsLoaded(loaded, log);
+  const refusal = precheck?.(loaded.config) ?? null;
+  if (refusal !== null) {
+    err(refusal);
+    return { ok: false, code: EXIT.badConfig };
+  }
+  return { ok: true, config: loaded.config };
 }
 
 /**

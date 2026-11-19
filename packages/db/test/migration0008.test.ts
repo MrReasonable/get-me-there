@@ -21,6 +21,7 @@ describe('migration 0008', () => {
         '0011_wp20_flight_lists',
         '0012_wp21_return_leg',
         '0013_booking_url',
+        '0014_settings',
       ]),
     );
     db.raw
@@ -42,6 +43,7 @@ describe('migration 0008', () => {
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]);
     expect(db.raw.prepare('SELECT error_kind AS k FROM provider_requests').all()).toEqual([{ k: null }]);
     db.raw.prepare(`UPDATE provider_requests SET error_kind = 'quota'`).run();

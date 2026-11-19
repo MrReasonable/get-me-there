@@ -54,6 +54,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -70,6 +71,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
         '0011_wp20_flight_lists',
         '0012_wp21_return_leg',
         '0013_booking_url',
+        '0014_settings',
       ],
     });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({

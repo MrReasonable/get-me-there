@@ -42,6 +42,7 @@ export * from './config/access.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';
+export * from './config/settings.js';
 export * from './config/synthetic.js';
 export { evaluateConstraints } from './constraints/evaluate.js';
 export { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from './constraints/labels.js';

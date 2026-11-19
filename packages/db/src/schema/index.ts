@@ -21,3 +21,4 @@ export * from './searchCells.js';
 export * from './searchDefinitions.js';
 export * from './searchExecutions.js';
 export * from './segments.js';
+export * from './settings.js';

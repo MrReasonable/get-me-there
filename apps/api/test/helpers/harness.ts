@@ -2,7 +2,7 @@
 // syntheticAllowed admits), the engine, and the fixture provider reached through http-kit's gated inProcessHosts seam
 // (buildPorts wires it), so no request leaves the process and no msw is imported here.
 import { Writable } from 'node:stream';
-import { asIsoDateTime, fixedClock } from '@gmt/core';
+import { asIsoDateTime, type Config, fixedClock } from '@gmt/core';
 import {
   AIRPORTS_DATA_DIR,
   type AirportsDataset,
@@ -17,13 +17,27 @@ import { type AppOptions, createApp } from '../../src/app.js';
 import { engineFor } from '../../src/bootstrap/engine.js';
 import { createLogger } from '../../src/logger.js';
 import type { AppEnv } from '../../src/routes/types.js';
-import { buildPorts, collectSecrets, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
+import {
+  buildPorts,
+  collectSecrets,
+  loadBootConfig,
+  loadConfigFromEnv,
+  type Ports,
+} from '../../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH } from './env.js';
 
 /** The harness clock starts here; every seeded timestamp is relative to it. */
 export const T0 = asIsoDateTime('2026-10-14T09:00:00.000Z');
 export const HOST = 'localhost:3000';
 export const AUTH_USER = 'operator';
+
+/**
+ * What bootApp takes from an environment, as main() builds it (settings plan ruling 3): the boot config, without the
+ * Settings page's names, and the environment the stored settings are laid over.
+ */
+export function bootEnv(env: Record<string, string>): { config: Config; env: Record<string, string> } {
+  return { config: loadBootConfig(env), env };
+}
 
 /** A stream that appends every written chunk to `lines` (the logger's destination in tests). */
 export function captureLines(lines: string[]): Writable {

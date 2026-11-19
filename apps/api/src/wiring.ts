@@ -12,13 +12,23 @@ import {
   type Clock,
   type Config,
   type ConfigError,
+  type ConfigResult,
   type FlightProvider,
   flightRequestSeconds,
+  isOwnedName,
   type Logger,
+  layerSettings,
   listRequestSeconds,
+  OWNED_NAMES,
+  type OwnedName,
+  type ParseConfigOptions,
+  parseBootConfig,
   parseConfig,
   type ResponseCache,
-  type Secret,
+  SETTINGS_NAMES,
+  Secret,
+  type SettingRow,
+  type SettingsReport,
   syntheticAllowed,
   systemClock,
 } from '@gmt/core';
@@ -27,8 +37,9 @@ import {
   budgetConfigFromConfig,
   createRepos,
   type Db,
-  openDatabase,
+  openDatabase as openSqlite,
   type Repos,
+  SettingsRepo,
   SqliteBudgetGuard,
   SqliteResponseCache,
 } from '@gmt/db';
@@ -91,14 +102,12 @@ export function tolerantRealpath(p: string): string {
   }
 }
 
-/**
- * Parses the environment once through the core schema (spec §12). Throws InvalidConfigError naming
- * every bad field; a DATABASE_PATH that cannot be resolved is reported as that field, never a value.
- */
-export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config {
-  let result: ReturnType<typeof parseConfig>;
+type Env = Record<string, string | undefined>;
+
+/** One parse through a core schema entry; a DATABASE_PATH that cannot be resolved is reported as that field, never a value. */
+function parseWith(parse: (env: Env, opts: ParseConfigOptions) => ConfigResult, env: Env): ConfigResult {
   try {
-    result = parseConfig(env, { realpath: tolerantRealpath });
+    return parse(env, { realpath: tolerantRealpath });
   } catch (e) {
     throw new InvalidConfigError([
       {
@@ -107,8 +116,124 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config {
       },
     ]);
   }
+}
+
+/**
+ * The environment alone, every name included, through the core schema (spec §12): the config a process with no stored
+ * settings runs on. The bootstraps parse with loadBootConfig and then loadConfig instead (settings plan ruling 3); this
+ * serves callers with no database to read (the route-test harness, the wiring tests). Throws InvalidConfigError naming
+ * every bad field, never a value.
+ */
+export function loadConfigFromEnv(env: Env): Config {
+  const result = parseWith(parseConfig, env);
   if (!result.ok) throw new InvalidConfigError(result.errors);
   return result.config;
+}
+
+/**
+ * Settings plan ruling 3: the first parse at boot, the environment with every owned name left out (core
+ * parseBootConfig). The refusals, the lock wait, the backup and the migrations run on it; the full config comes from
+ * loadConfig under the lock. Throws InvalidConfigError naming every bad field, never a value.
+ */
+export function loadBootConfig(env: Env): Config {
+  const result = parseWith(parseBootConfig, env);
+  if (!result.ok) throw new InvalidConfigError(result.errors);
+  return result.config;
+}
+
+/**
+ * The full config of a boot and what it did with the owned names (`imported`: the rows it wrote, none without
+ * `writeImports`); `warnings` are variables ignored, logged by name.
+ */
+export interface LoadedConfig extends SettingsReport {
+  config: Config;
+  warnings: ConfigError[];
+}
+
+/** Each secret of `more` not already in `into`, by value, appended to it (the lists scrub by value). */
+export function addSecrets(into: Secret[], more: readonly Secret[]): void {
+  for (const s of more) if (!into.some((t) => t.reveal() === s.reveal())) into.push(s);
+}
+
+/**
+ * Settings plan ruling 3: one line per list a boot's settings produced, names only, never a value: the env lines
+ * imported, those ignored because Settings holds the name, the stored values set aside, and each variable ignored.
+ */
+export function logSettingsLoaded(loaded: LoadedConfig, log: Logger): void {
+  if (loaded.imported.length > 0)
+    log.info({ names: loaded.imported }, 'settings imported from the environment');
+  if (loaded.envIgnored.length > 0)
+    log.warn({ names: loaded.envIgnored }, 'lines in .env ignored: Settings holds these names');
+  if (loaded.setAside.length > 0)
+    log.warn({ names: loaded.setAside }, 'stored settings set aside for this boot');
+  for (const w of loaded.warnings) log.warn({ field: w.field }, w.message);
+}
+
+/** Spec §8.3: email's settings are all or nothing, so one of them left out of a boot can leave out the rest. */
+const EMAIL_NAMES: readonly OwnedName[] = [
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_TLS',
+  'SMTP_USER',
+  'SMTP_PASS',
+  'ALERT_EMAIL_TO',
+  'ALERT_EMAIL_FROM',
+];
+
+/**
+ * Settings plan rulings 2 and 3, run under the app lock: the stored settings laid over the environment
+ * (core layerSettings) and parsed through the one core schema. A field the schema refuses that is an owned name has its
+ * stored or imported value set aside for this boot (left unset, so its default applies) and the parse is retried, at
+ * most once per name; when only email's all-or-nothing rule still refuses a name already set aside, the rest of email
+ * is left out too (email is off for the boot). A refusal of a name the page does not own fails as before
+ * (InvalidConfigError). With `writeImports`, the env lines of names with no row are written as rows once the parse
+ * succeeds, never one set aside, in the same immediate transaction as the read (the tool bootstrap writes nothing).
+ */
+export function loadConfig(env: Env, db: Db, opts: { clock: Clock; writeImports: boolean }): LoadedConfig {
+  const repo = new SettingsRepo(db);
+  const run = (): LoadedConfig => {
+    const layered = layerSettings(env, repo.all());
+    const refused = new Set<OwnedName>();
+    const leftOut = new Set<OwnedName>();
+    for (;;) {
+      const merged: Env = { ...layered.merged };
+      for (const name of leftOut) merged[name] = undefined;
+      const result = parseWith(parseConfig, merged);
+      if (result.ok) {
+        const imported = opts.writeImports ? layered.imports.filter((n) => !leftOut.has(n)) : [];
+        if (imported.length > 0)
+          repo.write(
+            imported.map((name) => ({ name, value: layered.merged[name] ?? '' })),
+            opts.clock.now(),
+          );
+        return {
+          config: result.config,
+          warnings: result.warnings,
+          imported,
+          envIgnored: layered.envIgnored,
+          setAside: OWNED_NAMES.filter((n) => refused.has(n)),
+        };
+      }
+      const owned = result.errors.flatMap((e) => (isOwnedName(e.field) ? [e.field] : []));
+      if (owned.length < result.errors.length) throw new InvalidConfigError(result.errors);
+      const fresh = owned.filter((n) => !leftOut.has(n));
+      if (fresh.length > 0) {
+        for (const name of fresh) {
+          refused.add(name);
+          leftOut.add(name);
+        }
+        continue;
+      }
+      // why: a name already left out is refused again only by email's all-or-nothing rule (an unset member of a set
+      // group), so the rest of email is left out with it; anything else would loop, and fails boot instead
+      if (owned.every((n) => EMAIL_NAMES.includes(n)) && EMAIL_NAMES.some((n) => !leftOut.has(n))) {
+        for (const name of EMAIL_NAMES) leftOut.add(name);
+        continue;
+      }
+      throw new InvalidConfigError(result.errors);
+    }
+  };
+  return opts.writeImports ? db.immediateTransaction(run) : run();
 }
 
 /** Everything an entrypoint needs, built once (plan "Wiring and bootstraps"). */
@@ -125,10 +250,18 @@ export interface Ports {
   secrets: Secret[];
   recorder: FixtureRecorder | null;
   fixtureRoot: string | null;
+  /** Controller ruling R1: what this boot did with the Settings page's names, read by Status and Settings. */
+  settingsReport: SettingsReport;
 }
 
-/** Every configured secret, for http-kit and recorder scrubbing (spec §5.3). */
-export function collectSecrets(config: Config): Secret[] {
+const SECRET_NAMES: readonly OwnedName[] = SETTINGS_NAMES.filter((s) => s.secret).map((s) => s.name);
+
+/**
+ * Every configured secret, for http-kit, recorder and log scrubbing (spec §5.3), and every stored secret setting beside
+ * them (Global Constraints: every stored secret joins the boot's secrets list, used by this config or not), each value
+ * once.
+ */
+export function collectSecrets(config: Config, stored: readonly SettingRow[] = []): Secret[] {
   const out: Secret[] = [];
   if (config.providers.travelpayouts !== null) out.push(config.providers.travelpayouts.token);
   if (config.providers.searchapi !== null) out.push(config.providers.searchapi.key);
@@ -136,6 +269,9 @@ export function collectSecrets(config: Config): Secret[] {
   if (config.auth !== null) out.push(config.auth.pass);
   // WP14: the camoufox worker key (spec §2), scrubbed like every other credential.
   if (config.providers.camoufox !== null) out.push(config.providers.camoufox.key);
+  for (const row of stored)
+    if (SECRET_NAMES.includes(row.name) && row.value !== '' && !out.some((s) => s.reveal() === row.value))
+      out.push(new Secret(row.value));
   return out;
 }
 
@@ -268,9 +404,97 @@ export function providersFor(
 }
 
 /**
- * Opens the DB, applies migrations (callers run the backup preflight first), then builds repos,
- * guard, cache, http-kit and providers (plan "Wiring and bootstraps"). The in-process fixture host
- * is passed only under syntheticAllowed (plan decision 7: the only transport seam, gated).
+ * Opens the database and applies migrations (callers run the backup preflight first; settings plan ruling 3: the
+ * bootstraps then take the lock and load the config before buildFromDb). A failed migration closes the handle.
+ */
+export function openDatabase(databasePath: string, migrationsDir: string): Db {
+  const db = openSqlite(databasePath);
+  try {
+    applyMigrations(db, migrationsDir);
+    return db;
+  } catch (e) {
+    db.close(); // why: never leave a half-built handle holding the WAL
+    throw e;
+  }
+}
+
+/**
+ * The boot's first scrub list (settings plan ruling 3): the boot config's secrets and the environment's lines for the
+ * Settings page's secret names, which the boot config leaves out but a refusal before the lock could still quote.
+ */
+export function bootSecrets(config: Config, env: Env): Secret[] {
+  return collectSecrets(
+    config,
+    SECRET_NAMES.flatMap((name) => {
+      const value = env[name];
+      return value === undefined ? [] : [{ name, value }];
+    }),
+  );
+}
+
+/**
+ * Builds repos, guard, cache, http-kit and providers over an open, migrated database for `config` (plan "Wiring and
+ * bootstraps"). The caller owns the handle and closes it on failure. The in-process fixture host is passed only under
+ * syntheticAllowed (plan decision 7: the only transport seam, gated). Every stored secret joins `secrets`.
+ */
+export function buildFromDb(
+  config: Config,
+  db: Db,
+  opts: {
+    log: Logger;
+    clock?: Clock;
+    recorder?: FixtureRecorder;
+    fixtureRoot?: string;
+    settingsReport?: SettingsReport;
+  },
+): Ports {
+  const clock = opts.clock ?? systemClock;
+  const allowSynthetic = syntheticAllowed(config);
+  const repos = createRepos(db, clock, { allowSynthetic });
+  const budget = new SqliteBudgetGuard(db, budgetConfigFromConfig(config), clock);
+  const cache = new SqliteResponseCache(db, clock);
+  const secrets = collectSecrets(config, repos.settings.all());
+  const fixtureRoot = allowSynthetic ? (opts.fixtureRoot ?? defaultFixtureRoot()) : null;
+  const router = fixtureRoot === null ? null : fixtureRouter(fixtureRoot, config);
+  const http = createHttpKit({
+    budget,
+    cache,
+    limits: httpLimitsFor(config),
+    clock,
+    log: opts.log,
+    secrets,
+    syntheticAllowed: allowSynthetic,
+    ...(opts.recorder !== undefined ? { recorder: opts.recorder } : {}),
+    ...(router !== null
+      ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } }
+      : {}),
+  });
+  const providers = providersFor(config, {
+    http,
+    log: opts.log,
+    clock,
+    appInstance: repos.meta.appInstanceId(),
+  });
+  return {
+    config,
+    db,
+    repos,
+    budget,
+    cache,
+    http,
+    providers,
+    clock,
+    log: opts.log,
+    secrets,
+    recorder: opts.recorder ?? null,
+    fixtureRoot,
+    settingsReport: opts.settingsReport ?? { imported: [], envIgnored: [], setAside: [] },
+  };
+}
+
+/**
+ * openDatabase and buildFromDb for a config already in hand, with no stored settings laid over it (the route-test
+ * harness and the tool tests, whose config comes from loadConfigFromEnv); the bootstraps use loadConfig between them.
  */
 export function buildPorts(
   config: Config,
@@ -282,50 +506,9 @@ export function buildPorts(
     fixtureRoot?: string;
   },
 ): Ports {
-  const clock = opts.clock ?? systemClock;
-  const db = openDatabase(config.databasePath);
+  const db = openDatabase(config.databasePath, opts.migrationsDir);
   try {
-    applyMigrations(db, opts.migrationsDir);
-    const allowSynthetic = syntheticAllowed(config);
-    const repos = createRepos(db, clock, { allowSynthetic });
-    const budget = new SqliteBudgetGuard(db, budgetConfigFromConfig(config), clock);
-    const cache = new SqliteResponseCache(db, clock);
-    const secrets = collectSecrets(config);
-    const fixtureRoot = allowSynthetic ? (opts.fixtureRoot ?? defaultFixtureRoot()) : null;
-    const router = fixtureRoot === null ? null : fixtureRouter(fixtureRoot, config);
-    const http = createHttpKit({
-      budget,
-      cache,
-      limits: httpLimitsFor(config),
-      clock,
-      log: opts.log,
-      secrets,
-      syntheticAllowed: allowSynthetic,
-      ...(opts.recorder !== undefined ? { recorder: opts.recorder } : {}),
-      ...(router !== null
-        ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } }
-        : {}),
-    });
-    const providers = providersFor(config, {
-      http,
-      log: opts.log,
-      clock,
-      appInstance: repos.meta.appInstanceId(),
-    });
-    return {
-      config,
-      db,
-      repos,
-      budget,
-      cache,
-      http,
-      providers,
-      clock,
-      log: opts.log,
-      secrets,
-      recorder: opts.recorder ?? null,
-      fixtureRoot,
-    };
+    return buildFromDb(config, db, opts);
   } catch (e) {
     db.close(); // why: never leave a half-built handle holding the WAL
     throw e;

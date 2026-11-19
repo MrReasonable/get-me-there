@@ -8,6 +8,7 @@
   "incrementalFile": "reports/stryker-incremental.json",
   "mutate": [
     "src/config/access.ts",
+    "src/config/settings.ts",
     "src/config/synthetic.ts",
     "src/labels/age.ts",
     "src/labels/mainPath.ts",

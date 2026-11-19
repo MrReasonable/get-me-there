@@ -6,9 +6,8 @@ import { EmailNotifier } from '@gmt/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH, SENTINEL_SMTP, silentLog } from '../helpers/env.js';
-import { basic } from '../helpers/harness.js';
+import { basic, bootEnv } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 const BOOT_TIMEOUT_MS = 30_000;
@@ -16,7 +15,7 @@ afterEach(() => vi.restoreAllMocks());
 
 async function boot(extra: Record<string, string>, version?: string): Promise<RunningApp> {
   return bootApp({
-    config: loadConfigFromEnv(
+    ...bootEnv(
       cleanEnv({
         NODE_ENV: 'production',
         DATABASE_PATH: join(tempDir('gmt-status-'), 's.fixture.db'),

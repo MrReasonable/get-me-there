@@ -75,6 +75,7 @@ export function seedEveryRebuiltTableAt0004(): {
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}): void => {

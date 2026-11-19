@@ -35,6 +35,7 @@ export {
   type RouteHistoryTrip,
   RoutePriceHistoryRepo,
 } from './repositories/routePriceHistory.js';
+export { SettingsRepo } from './repositories/settings.js';
 export { SqliteResponseCache } from './responseCache.js';
 export {
   AIRPORTS_MIN_ROWS,

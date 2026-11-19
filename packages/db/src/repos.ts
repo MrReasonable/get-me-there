@@ -13,6 +13,7 @@ import { LedgerRepo } from './repositories/ledger.js';
 import { MetaRepo } from './repositories/meta.js';
 import { NotificationsRepo } from './repositories/notifications.js';
 import { RoutePriceHistoryRepo } from './repositories/routePriceHistory.js';
+import { SettingsRepo } from './repositories/settings.js';
 import type { RepoOptions } from './types.js';
 
 /** Every repository over one database (plan "Database" contract: `Repos` lives in @gmt/db, not in engine). */
@@ -30,6 +31,7 @@ export interface Repos {
   notifications: NotificationsRepo;
   routeHistory: RoutePriceHistoryRepo;
   meta: MetaRepo;
+  settings: SettingsRepo;
 }
 
 /**
@@ -51,5 +53,6 @@ export function createRepos(db: Db, clock: Clock, opts: RepoOptions): Repos {
     notifications: new NotificationsRepo(db, clock),
     routeHistory: new RoutePriceHistoryRepo(db, opts),
     meta: new MetaRepo(db),
+    settings: new SettingsRepo(db),
   };
 }

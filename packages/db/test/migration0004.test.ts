@@ -17,6 +17,7 @@ const AIRPORT_KIND = '0010_airport_kind';
 const FLIGHT_LISTS = '0011_wp20_flight_lists';
 const RETURN_LEG = '0012_wp21_return_leg';
 const BOOKING_URL = '0013_booking_url';
+const SETTINGS = '0014_settings';
 
 /** A copy of the migrations folder that stops before 0004, as an install made before this migration has it. */
 function before0004(): string {
@@ -33,15 +34,26 @@ function before0004(): string {
     FLIGHT_LISTS,
     RETURN_LEG,
     BOOKING_URL,
+    SETTINGS,
   ])
     rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
   journal.entries = journal.entries.filter(
     (e) =>
-      ![TAG, LATER, NEWEST, LAST, FINAL, WP19, AIRPORT_KIND, FLIGHT_LISTS, RETURN_LEG, BOOKING_URL].includes(
-        e.tag,
-      ),
+      ![
+        TAG,
+        LATER,
+        NEWEST,
+        LAST,
+        FINAL,
+        WP19,
+        AIRPORT_KIND,
+        FLIGHT_LISTS,
+        RETURN_LEG,
+        BOOKING_URL,
+        SETTINGS,
+      ].includes(e.tag),
   );
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
@@ -83,6 +95,7 @@ describe('migration 0004: route price-history points carry their point of sale (
       FLIGHT_LISTS,
       RETURN_LEG,
       BOOKING_URL,
+      SETTINGS,
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });

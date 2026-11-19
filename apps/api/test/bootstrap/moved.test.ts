@@ -12,9 +12,8 @@ import { assetPaths } from '../../src/bootstrap/paths.js';
 import { movedDatabaseRefusal } from '../../src/bootstrap/preflight.js';
 import { EXIT, runTool } from '../../src/bootstrap/tool.js';
 import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH, toolEnv } from '../helpers/env.js';
-import { captureLines } from '../helpers/harness.js';
+import { bootEnv, captureLines } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 beforeEach(() => {
@@ -129,7 +128,7 @@ describe('the app bootstrap honours the marker (spec §13)', { timeout: 30_000 }
       db.close();
       const lines: string[] = [];
       const err = await bootApp({
-        config: loadConfigFromEnv(appEnv(m.db, extra)),
+        ...bootEnv(appEnv(m.db, extra)),
         log: createLogger({ logLevel: 'debug' }, { destination: captureLines(lines) }),
         listen: false,
         assets: assetPaths(),
@@ -157,7 +156,7 @@ describe('the app bootstrap honours the marker (spec §13)', { timeout: 30_000 }
     const m = marked();
     await expect(
       bootApp({
-        config: loadConfigFromEnv(appEnv(m.db)),
+        ...bootEnv(appEnv(m.db)),
         log: createLogger({ logLevel: 'error' }),
         listen: false,
         assets: assetPaths(),

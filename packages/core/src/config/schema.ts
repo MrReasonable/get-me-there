@@ -18,6 +18,7 @@ import {
   TRAVELPAYOUTS_DEFAULTS,
 } from './presets.js';
 import { Secret } from './secret.js';
+import { OWNED_NAMES, SMTP_ALL_OR_NOTHING } from './settings.js';
 
 /**
  * Parsed configuration. Spec §12: parsed once in the api bootstrap; empty = unset; invalid or
@@ -119,7 +120,13 @@ export interface ParseConfigOptions {
   realpath: (p: string) => string;
 }
 export type ConfigError = { field: string; message: string };
-export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: ConfigError[] };
+/**
+ * `warnings`: a variable that cannot apply and is ignored rather than failing boot (settings plan ruling 1), named with
+ * the words the boot logs; never a value.
+ */
+export type ConfigResult =
+  | { ok: true; config: Config; warnings: ConfigError[] }
+  | { ok: false; errors: ConfigError[] };
 
 type Env = Record<string, string | undefined>;
 /**
@@ -152,6 +159,7 @@ const smtpTuple = z.tuple([z.string(), z.string(), z.string(), z.string(), z.str
 /** Field readers: each validates one variable, records an error under its name, and returns undefined when unset. */
 class Reader {
   readonly errors: ConfigError[] = [];
+  readonly warnings: ConfigError[] = [];
   constructor(private readonly env: Env) {}
 
   /** Empty string means unset (spec §12). */
@@ -192,6 +200,9 @@ class Reader {
   }
   fail(field: string, message: string): void {
     this.errors.push({ field, message });
+  }
+  warn(field: string, message: string): void {
+    this.warnings.push({ field, message });
   }
   /** A variable that must be set; records the error and returns '' so parsing can continue and report every field. */
   required(name: string): string {
@@ -423,26 +434,29 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const saKey = r.str('SEARCHAPI_KEY');
   const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
   const preset = PLAN_PRESETS[plan];
+  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
+  // switch to the subscription would be silently ignored; it is named in a warning instead. Settings plan ruling 1: the
+  // plan is the Settings page's now, and a plan saved there never stops boot over an env-only line, so this warns.
+  const trialUsedRead = saKey === undefined ? 0 : (r.int('SEARCHAPI_TRIAL_USED', 0) ?? 0);
+  const trialUsedIgnored = preset.window === 'month' && trialUsedRead > 0;
+  if (trialUsedIgnored)
+    r.warn(
+      'SEARCHAPI_TRIAL_USED',
+      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
+    );
   const searchapi =
     saKey === undefined
       ? null
       : {
           key: new Secret(saKey),
           plan,
-          trialUsed: r.int('SEARCHAPI_TRIAL_USED', 0) ?? 0,
+          trialUsed: trialUsedIgnored ? 0 : trialUsedRead,
           limits: {
             ...providerLimits(r, 'SEARCHAPI', preset),
             costPerCallMicroGbp: r.int('SEARCHAPI_COST_PER_CALL_MICRO_GBP', 0) ?? preset.costPerCallMicroGbp,
             planFixedMicroGbp: r.pence('SEARCHAPI_PLAN_FIXED_PENCE') ?? preset.planFixedMicroGbp,
           },
         };
-  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
-  // switch to the subscription would be silently ignored; spec §12: a variable that cannot apply fails boot, named.
-  if (searchapi !== null && searchapi.limits.window === 'month' && searchapi.trialUsed > 0)
-    r.fail(
-      'SEARCHAPI_TRIAL_USED',
-      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
-    );
   const billedPreset = searchapi === null ? null : preset;
   const camoufox = camoufoxConfig(r, shared);
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
@@ -462,7 +476,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   let smtp: Config['smtp'] = null;
   if (smtpSetCount > 0 && smtpSetCount < smtpNames.length) {
     smtpNames.forEach((n, i) => {
-      if (smtpValues[i] === undefined) r.fail(n, 'SMTP settings are all or nothing');
+      if (smtpValues[i] === undefined) r.fail(n, SMTP_ALL_OR_NOTHING);
     });
   } else if (smtpSetCount === smtpNames.length) {
     // why: every value is known set here; the tuple parse gives typed strings without defaulted branches.
@@ -515,6 +529,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
 
   if (r.errors.length > 0) return { ok: false, errors: r.errors };
+  const warnings = r.warnings;
   const databasePath = databasePathRaw === ':memory:' ? ':memory:' : opts.realpath(databasePathRaw);
   return {
     ok: true,
@@ -550,5 +565,17 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       inContainer,
       allowFixtureProvider,
     },
+    warnings,
   };
+}
+
+/**
+ * Settings plan ruling 3: the first parse at boot, of the environment with every name the Settings page owns left out,
+ * so the refusals, the lock wait, the backup and the migrations run on what the environment alone fixes; the full
+ * config is parsed under the lock, with the stored settings laid over the environment (layerSettings).
+ */
+export function parseBootConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
+  const bootEnv: Env = { ...env };
+  for (const name of OWNED_NAMES) delete bootEnv[name];
+  return parseConfig(bootEnv, opts);
 }

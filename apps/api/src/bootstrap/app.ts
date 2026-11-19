@@ -3,8 +3,10 @@
  * Order (plan "Wiring and bootstraps", decisions 53, 58): refuse NODE_ENV=test → refuse a database moved to a native
  * install (spec §13, the MOVED-TO-NATIVE marker) → re-assert the auth invariants → data
  * directory writable → `app_lock` read-only, waiting while it is fresh → backup preflight when migrations are pending
- * (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → `AppLock('app')` and the 30 s heartbeat → seed +
- * airport sanity check under the lock (as the tool bootstrap seeds) → createEngine → engine.boot() → serve. Shutdown: stop accepting → engine.shutdown() →
+ * (WP4b's preflight.ts, decision 32) → openDatabase (migrations) → `AppLock('app')` and the 30 s heartbeat → the stored
+ * settings laid over the environment and imports written (settings plan ruling 3, loadConfig) → buildFromDb → seed +
+ * airport sanity check under the lock (as the tool bootstrap seeds) → createEngine → engine.boot() → serve. Everything
+ * before the lock runs on the boot config, the environment with the owned names left out. Shutdown: stop accepting → engine.shutdown() →
  * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
  * it and stops the heartbeat before the database closes.
  */
@@ -19,7 +21,7 @@ import {
   type Secret,
   systemClock,
 } from '@gmt/core';
-import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports, WalUnavailableError } from '@gmt/db';
+import { AppLock, type Db, HEARTBEAT_INTERVAL_MS, sanityCheckAirports, WalUnavailableError } from '@gmt/db';
 import { buildNotifiers, EmailNotifier, type Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
@@ -31,7 +33,18 @@ import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
 import { inProcessTools } from '../tools/inProcess.js';
 import { EXIT } from '../tools/types.js';
-import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+import {
+  addSecrets,
+  bootSecrets,
+  buildFromDb,
+  InvalidConfigError,
+  type LoadedConfig,
+  loadBootConfig,
+  loadConfig,
+  logSettingsLoaded,
+  openDatabase,
+  type Ports,
+} from '../wiring.js';
 import { engineFor } from './engine.js';
 import { BootError } from './errors.js';
 import { waitForLockFree } from './lock.js';
@@ -56,8 +69,19 @@ export class ShutdownTimeoutError extends Error {
 }
 
 export interface BootDeps {
+  /**
+   * The boot config (settings plan ruling 3): the environment with the Settings page's names left out
+   * (loadBootConfig). The refusals, the lock wait, the backup and the migrations read it; tests inject one.
+   */
   config: Config;
+  /** The environment the stored settings are laid over under the lock (loadConfig); the full config comes from both. */
+  env: Record<string, string | undefined>;
   log: Logger;
+  /**
+   * The list `log` scrubs (createLogger's `secrets`), which the boot extends with every secret of the full config and
+   * every stored secret, so a line logged after the lock never carries one. Absent in tests that log nowhere real.
+   */
+  logSecrets?: Secret[];
   clock?: Clock;
   /** false in tests that drive the app with `app.request()`. */
   listen: boolean;
@@ -162,7 +186,9 @@ const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(reso
 export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const { config, log } = deps;
   const clock = deps.clock ?? systemClock;
-  const secrets: readonly Secret[] = collectSecrets(config);
+  // why: one list for every scrub this boot does; the full config's and the stored secrets join it under the lock
+  const secrets: Secret[] = deps.logSecrets ?? [];
+  addSecrets(secrets, bootSecrets(config, deps.env));
   // why: spec §5.5: both bootstraps refuse NODE_ENV=test, so a test config can never serve traffic.
   if (config.nodeEnv === 'test')
     throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5)', EXIT.refusedTestEnv);
@@ -183,15 +209,15 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const backup = backupBeforeMigrations(config.databasePath, deps.assets.migrationsDir, clock, secrets);
   if (!backup.ok) throw new BootError(backup.message, backup.code);
   if (backup.line !== null) log.info({}, backup.line);
-  let ports: Ports;
+  let db: Db;
   try {
-    ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir });
+    db = openDatabase(config.databasePath, deps.assets.migrationsDir);
   } catch (e) {
     // why: dm-003: a data directory whose file system refuses WAL is a preflight refusal (73), named, not a crash.
     if (e instanceof WalUnavailableError) throw new BootError(e.message, EXIT.preflightImpossible);
     throw e;
   }
-  const lock = new AppLock(ports.db, 'app', clock, log);
+  const lock = new AppLock(db, 'app', clock, log);
   let heartbeat: NodeJS.Timeout | null = null;
   let booted: Engine | null = null;
   try {
@@ -211,6 +237,27 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       }
     }, HEARTBEAT_INTERVAL_MS);
     heartbeat.unref();
+    // why: settings plan ruling 3: the stored settings are read, laid over the environment and imported under the lock,
+    // so the guard, providers and notifier below are built from the full config; a refusal of a name Settings does not
+    // own is a configuration fault (78), as the first parse's is
+    let loaded: LoadedConfig;
+    try {
+      loaded = loadConfig(deps.env, db, { clock, writeImports: true });
+    } catch (e) {
+      if (e instanceof InvalidConfigError) throw new BootError(e.message, EXIT.badConfig);
+      throw e;
+    }
+    const ports = buildFromDb(loaded.config, db, {
+      log,
+      clock,
+      settingsReport: {
+        imported: loaded.imported,
+        envIgnored: loaded.envIgnored,
+        setAside: loaded.setAside,
+      },
+    });
+    addSecrets(secrets, ports.secrets);
+    logSettingsLoaded(loaded, log);
     seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
     // Spec §7 (revision 55): at least 5,000 airports with tz, and every airport a live (not soft-deleted) definition
     // references exists, scheduled or not: a manual run of an unscheduled search reads its airports too.
@@ -237,7 +284,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       },
       ...(email === undefined ? {} : { email }),
     });
-    const bound = deps.listen ? await listen(app, config) : null;
+    const bound = deps.listen ? await listen(app, ports.config) : null;
     const beat = heartbeat;
     let closed = false;
     return {
@@ -271,7 +318,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
               await closeServer(bound?.server ?? null); // stop accepting
               await engine.shutdown();
               // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
-              ports.db.checkpoint();
+              db.checkpoint();
             })(),
             timedOut,
           ]);
@@ -281,7 +328,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
           // that finishes after this writes nothing to the handle closed below
           engine.markClosed();
           lock.release();
-          ports.db.close();
+          db.close();
         }
         log.info({}, 'shutdown complete');
       },
@@ -296,7 +343,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     if (booted !== null) await shutdownAfterFailedBoot(booted, log, secrets);
     // why: WP3's release deletes only the row this AppLock acquired, so a refused acquire leaves the holder's lock alone.
     lock.release();
-    ports.db.close();
+    db.close();
     throw err;
   }
 }
@@ -362,22 +409,28 @@ export function shutdownHandler(
   };
 }
 
-/** The app entrypoint: env parsed once (spec §12), boot, signals. Throws on refusal; start.ts exits with its code. */
+/**
+ * The app entrypoint: the environment parsed without the Settings page's names (settings plan ruling 3), boot (which
+ * lays the stored settings over it under the lock), signals. Throws on refusal; start.ts exits with its code.
+ */
 export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   let config: Config;
   try {
-    config = loadConfigFromEnv(env);
+    config = loadBootConfig(env);
   } catch (err) {
     if (err instanceof InvalidConfigError) throw new BootError(err.message, EXIT.badConfig);
     throw err;
   }
-  const secrets = collectSecrets(config);
+  // why: one list the logger and every scrub below read; boot adds the stored secrets to it once it has read them
+  const secrets = bootSecrets(config, env);
   const log = createLogger(config, { secrets });
   let running: RunningApp;
   try {
     running = await bootApp({
       config,
+      env,
       log,
+      logSecrets: secrets,
       listen: true,
       assets: assetPaths(),
       home: env.HOME ?? null,
@@ -390,7 +443,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
     // why: start.ts prints this error's message to stderr (the container log), so it is rethrown already scrubbed.
     throw new BootError(message, err instanceof BootError ? err.exitCode : EXIT.failed);
   }
-  log.info({ port: running.port, bindAddress: config.bindAddress }, 'listening');
+  log.info({ port: running.port, bindAddress: running.ports.config.bindAddress }, 'listening');
   const stop = shutdownHandler(running, log, secrets);
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));
