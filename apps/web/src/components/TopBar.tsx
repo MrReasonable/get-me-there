@@ -8,6 +8,7 @@ import { formatMicroGbp } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { useSearchApiCredits } from '../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../state/urlState.js';
+import { settingsPatch } from '../state/view.js';
 
 const T = COPY.topBar;
 const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
@@ -33,9 +34,9 @@ function subjectWords(subject: NonNullable<ReturnType<typeof apiContract.barSumm
 /**
  * The health line (Ruling 10): one line from the same query as the Status page and core's `barSummary`. All working
  * with a dot; one problem "<name> needs attention · fix" (amber) or "<name> failing · fix" (red); several "N things need
- * you · fix" (red when any fails); `off` checks never count. The line links to the Status page. After a failed refresh
- * it says the report is stale and how old; with no report, that the app is not answering, was refused or failed: never a
- * clean state from old data. Nothing while the first answer is awaited.
+ * you · fix" (red when any fails); `off` checks never count. The line links to Settings › System (settings plan ruling
+ * 14). After a failed refresh it says the report is stale and how old; with no report, that the app is not answering,
+ * was refused or failed: never a clean state from old data. Nothing while the first answer is awaited.
  */
 export function HealthLine() {
   const q = useStatus();
@@ -87,8 +88,8 @@ export function HealthLine() {
         <span className="health-words">{words}</span>
       ) : (
         <a
-          href={hrefWith({ view: 'status' })}
-          onClick={navigateTo({ view: 'status' })}
+          href={hrefWith(settingsPatch('system'))}
+          onClick={navigateTo(settingsPatch('system'))}
           className={`health-words ${toneClass}`}
         >
           {words}

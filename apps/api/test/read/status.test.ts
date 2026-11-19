@@ -377,6 +377,17 @@ describe('the checks table (brief WP18 §6)', () => {
     expect(buildStatus(f)).toMatchObject({ mode: 'native', version: 'abc1234', generatedAt: NOW });
     expect(apiContract.statusResponseSchema.safeParse(buildStatus(f)).success).toBe(true);
   });
+
+  it("gives the worker's pages at once when it reported them, and leaves the field out otherwise (settings ruling 9)", () => {
+    const worker = (pagesAtOnce: number | null) =>
+      healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ pagesAtOnce }) } });
+    expect(buildStatus(healthyFacts({ worker: worker(3) })).pagesAtOnce).toBe(3);
+    expect(buildStatus(healthyFacts({ worker: worker(null) }))).not.toHaveProperty('pagesAtOnce');
+    for (const read of [{ kind: 'unreachable' }, { kind: 'disabled' }] as const)
+      expect(buildStatus(healthyFacts({ worker: healthyWorker({ read }) }))).not.toHaveProperty(
+        'pagesAtOnce',
+      );
+  });
 });
 
 describe('agreement of the card and the bar', () => {

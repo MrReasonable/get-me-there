@@ -12,10 +12,12 @@ export const CREDITS_FRESH_MS = 10 * 60 * 1000;
 /**
  * SearchApi's credits left, worded once for every caller (settings plan ruling 10): the top bar, the new-search panel's
  * "Where to look", the search form's field. `line` is the whole sentence ("SearchApi: 38 credits left · resets 1 Dec");
- * `left` and `tail` are its figure and what follows it, for a caller that words the figure in its own sentence.
+ * `left` and `tail` are its figure and what follows it, for a caller that words the figure in its own sentence; `cap` is
+ * the local cap the figure counts against when it is this app's own count, null for SearchApi's balance.
  */
 export interface CreditsLine {
   left: number;
+  cap: number | null;
   tail: string;
   line: string;
 }
@@ -59,7 +61,7 @@ export function searchApiCreditsLine(
 
 function wording(left: number, cap: number | null, tail: string): CreditsLine {
   const head = T.creditsLeft(left, cap);
-  return { left, tail, line: tail === '' ? head : `${head} ${tail}` };
+  return { left, cap, tail, line: tail === '' ? head : `${head} ${tail}` };
 }
 
 /**

@@ -19,6 +19,7 @@ import {
 import type { z } from 'zod';
 import { DAY_PLURAL, listText } from './copy/setup.js';
 import { EXAMPLE_PAIR_CELLS } from './example.js';
+import type { SettingsSection } from './state/view.js';
 
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
@@ -45,6 +46,9 @@ const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))
 /** A small count in words ("five"), as mockup 02 says the trips the reading stopped at; digits past ten. */
 const SMALL_NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const countWord = (n: number): string => SMALL_NUMBERS[n] ?? thousands(n);
+/** SearchApi's credits left as a figure ("51 of 100 credits left"): the top bar's line and Settings' balance share it. */
+const creditsFigure = (left: number, cap: number | null): string =>
+  `${thousands(left)}${cap === null ? '' : ` of ${thousands(cap)}`} ${noun(cap ?? left, 'credit', 'credits')} left`;
 /** Review Focus 3's first sentence, said alone where flight lists can't be read for the search (Task 8 fix round 1). */
 const NO_TRIP_LEAD = 'No flights read yet for these dates.';
 
@@ -211,14 +215,102 @@ export const COPY = {
   stageName: { discovery: 'discovery', verification: 'itinerary search' } satisfies Record<Stage, string>,
 
   // --- The interim Settings page (design 2026-11-08 Ruling 9; stage 3 replaces it) ---
+  // --- The Settings page (UX redesign stage 3, settings plan rulings 8, 9, 10 and 14); field labels are core's
+  // SETTING_LABELS, the one copy the api's refusals share ---
   settingsView: {
     heading: 'Settings',
-    lede: 'Where prices come from, who gets emails, and whether everything is working.',
     sectionsLabel: 'Settings sections',
-    priceSources:
-      'Where prices come from: the browser, the Aviasales cache and SearchApi, and what each has left.',
-    alerts: 'The emails sent when a price you are watching drops.',
-    system: 'Whether everything is working, and what to do when something is not.',
+    section: {
+      sources: 'Price sources',
+      limits: 'Limits',
+      email: 'Email and alerts',
+      system: 'System',
+    } satisfies Record<SettingsSection, string>,
+    /** Beside a section link whose section holds edits not saved yet (said in words, never by a mark alone). */
+    unsaved: 'unsaved',
+    lede: {
+      sources:
+        "New searches use the sources switched on here. Existing searches keep their own choice; change it on a search's Edit form.",
+      limits: 'Hard stops. A search stops before it would pass one, and says so on the Trips page.',
+      email: 'Alerts email you when a search finds a trip, with flights read, under your price.',
+      system: "Only needs you when something isn't working; the top bar says so too.",
+    } satisfies Record<SettingsSection, string>,
+    /** The sections that are not on this page yet keep their own pages until then. */
+    notHereYet: 'Not on this page yet.',
+    openAlerts: 'Open Alerts',
+    openStatus: 'Open the status report',
+    // the source switches (ruling 8)
+    switchOn: 'New searches use it',
+    switchOff: 'Off for new searches',
+    switchLabel: (source: string) => `Use ${source} for new searches`,
+    // the browser (ruling 9)
+    browserMeta:
+      "Free. Reads Google's calendar and flight lists on this machine; a full search takes a while.",
+    browserNotSetUp: "The browser isn't set up on this install. Set it up from the app's folder with",
+    browserSetUpDoc: '(docs/setup.md §14).',
+    browserCommand: 'pnpm gmt setup --reconfigure browser',
+    browserReady: 'Browser ready',
+    browserState: (state: string, summary: string) => `Browser ${state}: ${summary}`,
+    browserUnknown: "The browser's state couldn't be read.",
+    consentLine: (summary: string) => `Cookie choice: ${summary}`,
+    pagesAtOnce: (n: number) => `Pages at once: ${n}`,
+    pagesAtOnceUnknown: "Pages at once: not known (the browser worker didn't say)",
+    changeWith: 'change with',
+    patienceBefore: 'Read flights for the cheapest dates until',
+    patienceAfter: (target: number) => `reads in a row don't improve the ${countWord(target)} cheapest trips`,
+    mayRun: 'May run',
+    browserWindow: { scheduled: 'only during scheduled searches', any: 'any time' } satisfies Record<
+      'scheduled' | 'any',
+      string
+    >,
+    advanced: 'Advanced',
+    refreshBefore: "Read a date's calendar price again after",
+    refreshAfter: 'days (new searches)',
+    // SearchApi (ruling 10)
+    searchapiMeta: 'Paid. Checks the cheapest trips with real sellers and their booking links.',
+    credits: (left: number, cap: number | null) => creditsFigure(left, cap),
+    balanceUnread: "SearchApi's balance couldn't be read, and this app has no count of its own to show.",
+    searchapiNoKey: 'No key saved. Add one to use SearchApi.',
+    plan: { trial: 'Free trial', '40usd': '$40 a month' } satisfies Record<'trial' | '40usd', string>,
+    verificationBox: 'Check the cheapest trips each search finds',
+    discoveryBox: 'Also use it for the calendar',
+    discoveryBoxNote: '(many credits per search)',
+    creditsPerSearch: 'Credits per search are set under',
+    needsKey: 'Save a key first to switch it on.',
+    // the Aviasales cache
+    travelpayoutsMeta:
+      'Free. Prices other people saw on Aviasales, often days old; quick, patchy on less busy routes.',
+    travelpayoutsNoKey: 'No token saved. Add one to use the Aviasales cache.',
+    callsThisMonth: (calls: number, cap: number | null) =>
+      `${thousands(calls)} ${noun(calls, 'call', 'calls')} this month${cap === null ? '' : ` (limit ${thousands(cap)})`}`,
+    // a key field: write-only (ruling 14)
+    secretSaved: 'saved',
+    secretEnds: (last4: string) => `saved · ends ${last4}`,
+    secretNotSet: 'not set',
+    secretSetAside: "The saved one can't be used any more: paste it again.",
+    secretHint: 'Keys are never shown again once saved.',
+    replace: 'Replace',
+    remove: 'Remove',
+    cancel: 'Cancel',
+    confirmRemove: (label: string) =>
+      `Remove the saved ${label}? New searches can't use it until you add one again.`,
+    confirmRemoveYes: 'Remove it',
+    confirmRemoveNo: 'Keep it',
+    removing: 'Removing…',
+    /** A stored value the app set aside at boot (it no longer passes), so the default is used until it is set again. */
+    valueSetAside: "The saved value isn't valid any more, so the default is used: set it again.",
+    // saving (ruling 14)
+    save: (section: string) => `Save ${section.toLowerCase()}`,
+    saving: 'Saving…',
+    restarting: 'Saved. Restarting the app…',
+    restarted: 'Saved. The app restarted with the new settings.',
+    notBack: "The app didn't come back: run pnpm gmt status",
+    appliesAfter: (names: readonly string[]) =>
+      `Saved. Applies when ${names.length === 0 ? 'the running searches' : listText(names)} finish; new searches wait until then.`,
+    unchanged: 'Nothing changed, so nothing was saved.',
+    refused: 'Nothing was saved: fix the marked fields.',
+    notSaved: (message: string) => `Not saved: ${message}`,
+    noAnswer: "Not saved: the app didn't answer.",
   },
 
   // --- The top bar and run progress (design 2026-11-08 Rulings 10 and 11); main-path words only ---
@@ -236,8 +328,7 @@ export const COPY = {
      * left"), or, when it could not be asked, this app's count of the window in use ("51 of 100", with the tail below
      * saying whose count it is). The unit is credits, never searches.
      */
-    creditsLeft: (left: number, cap: number | null) =>
-      `SearchApi: ${thousands(left)}${cap === null ? '' : ` of ${thousands(cap)}`} ${noun(cap ?? left, 'credit', 'credits')} left`,
+    creditsLeft: (left: number, cap: number | null) => `SearchApi: ${creditsFigure(left, cap)}`,
     /** What follows the figure when it is this app's own count, not SearchApi's balance. */
     creditsLocalTail: "(this app's count)",
     /** What follows SearchApi's own balance: the day the period ends (a monthly plan; the trial has none). */

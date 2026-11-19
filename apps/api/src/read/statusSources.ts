@@ -17,6 +17,7 @@ import {
   isLoopbackHost,
   isScheduled,
   onlyThisMachine,
+  PAGES_AT_ONCE_MAX,
   type ProviderId,
   runModeOf,
   type SearchDefinition,
@@ -288,6 +289,12 @@ function readRefusal(home: string | null): RefusalRead {
   }
 }
 
+/** The worker's reported pages at once as a number, by the shared rule's own bound; null when it reported none it could. */
+function pagesAtOnceOf(shared: Readonly<Partial<Record<string, string>>> | undefined): number | null {
+  const n = Number(shared?.CAMOUFOX_PAGES_AT_ONCE);
+  return Number.isInteger(n) && n >= 1 && n <= PAGES_AT_ONCE_MAX ? n : null;
+}
+
 async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
   const cf = ports.config.providers.camoufox;
   if (cf === null) return { kind: 'disabled' };
@@ -336,6 +343,7 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
               },
         socsCapturedAt: st.socsCapturedAt,
         awakeUntil: st.awake?.until ?? null,
+        pagesAtOnce: pagesAtOnceOf(st.sharedSettings),
       },
     };
   } catch {

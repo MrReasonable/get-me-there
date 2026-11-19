@@ -26,6 +26,12 @@ export const api = {
   // settings plan ruling 10: SearchApi's own balance (cached ten minutes by the api), null when it could not be read
   searchApiAccount: () => call(c.searchApiAccountResponseSchema, 'GET', '/api/searchapi/account'),
   testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
+  // settings plan ruling 6: the page reads the app's boot id before a save and until a new one answers (the restart)
+  health: () => call(c.healthResponseSchema, 'GET', '/api/health'),
+  // settings plan rulings 5, 8 and 14: the Settings page's read and its save of only the names the operator changed
+  settings: () => call(c.settingsViewSchema, 'GET', '/api/settings'),
+  saveSettings: (changes: c.SettingChanges) =>
+    call(c.settingsUpdateResponseSchema, 'PUT', '/api/settings', { body: { changes } }),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
   // WP20 (spec §10): the first screen's cards in the order the api owns; remove (soft delete, then cancel) and undo
   cards: () => call(c.searchCardsResponseSchema, 'GET', '/api/definitions/cards'),

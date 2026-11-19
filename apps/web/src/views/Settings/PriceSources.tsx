@@ -1,0 +1,425 @@
+import {
+  type apiContract,
+  budgetScopeLabel,
+  CONFIRM_TARGET,
+  type OwnedName,
+  type ProviderId,
+  SETTING_LABELS,
+} from '@gmt/core';
+import type { ReactNode } from 'react';
+import { useBudget, useProviders, useSearchApiAccount } from '../../api/queries.js';
+import { useStatus } from '../../api/statusQuery.js';
+import type { ProvidersResponse } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import { searchApiCreditsLine } from '../../lib/searchApiCreditsLine.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { settingsPatch } from '../../state/view.js';
+import { FieldError, fieldIds, NumberInput, SelectInput, SetAsideNote } from './fields.js';
+import { SecretField } from './SecretField.js';
+import type { SettingsForm, SourceRole } from './useSettingsForm.js';
+
+const S = COPY.settingsView;
+const NAME = COPY.newSearch.source;
+
+type View = apiContract.SettingsView;
+type StatusCheck = apiContract.StatusCheck;
+
+/** A state in words and a glyph, so a line never says it by colour alone. */
+const GLYPH: Readonly<Record<StatusCheck['state'], string>> = { ok: '●', warn: '▲', fail: '✕', off: '○' };
+
+/**
+ * A source's switch (settings plan ruling 8): it sets whether new searches start with the source, and says so in words,
+ * "New searches use it" or "Off for new searches"; its name stays the source's.
+ */
+function SourceSwitch({
+  source,
+  on,
+  disabled,
+  onChange,
+  describedBy,
+}: {
+  source: string;
+  on: boolean;
+  disabled: boolean;
+  onChange: (on: boolean) => void;
+  describedBy?: string | undefined;
+}) {
+  return (
+    <label className="st-switch">
+      <input
+        type="checkbox"
+        role="switch"
+        checked={on}
+        aria-checked={on}
+        disabled={disabled}
+        aria-label={S.switchLabel(source)}
+        aria-describedby={describedBy}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>{on ? S.switchOn : S.switchOff}</span>
+    </label>
+  );
+}
+
+/** One source's card: its name, what it is, its switch, then its own fields. */
+function SourceCard({
+  id,
+  title,
+  meta,
+  control,
+  children,
+}: {
+  id: ProviderId;
+  title: string;
+  meta: string;
+  control: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="st-card st-src" aria-labelledby={`source-${id}`}>
+      <div className="st-src-head">
+        <div>
+          <h3 id={`source-${id}`}>{title}</h3>
+          <p className="st-meta">{meta}</p>
+        </div>
+        {control}
+      </div>
+      <div className="st-src-body">{children}</div>
+    </section>
+  );
+}
+
+/** A set-up command, shown as code. */
+const Command = ({ text }: { text: string }) => <code className="st-cmd">{text}</code>;
+
+/** The browser's state from `/status` (ruling 9): the worker's line, then the consent record's, each in words. */
+function BrowserStatus() {
+  const status = useStatus();
+  if (status.data === undefined)
+    return status.error === null ? null : <p className="st-kv">{S.browserUnknown}</p>;
+  const worker = status.data.checks.find((c) => c.id === 'worker');
+  const consent = status.data.checks.find((c) => c.id === 'consent');
+  const line = (c: StatusCheck, words: string) => (
+    <p className="st-kv" key={c.id}>
+      <span aria-hidden="true" className={`st-glyph st-${c.state}`}>
+        {GLYPH[c.state]}
+      </span>
+      {words}
+    </p>
+  );
+  return (
+    <>
+      {worker === undefined
+        ? null
+        : line(
+            worker,
+            worker.state === 'ok'
+              ? S.browserReady
+              : S.browserState(COPY.statusView.state[worker.state], worker.summary),
+          )}
+      {consent === undefined ? null : line(consent, S.consentLine(consent.summary))}
+      <p className="st-kv">
+        {status.data.pagesAtOnce === undefined
+          ? S.pagesAtOnceUnknown
+          : S.pagesAtOnce(status.data.pagesAtOnce)}
+        <span className="st-muted">
+          {' · '}
+          {S.changeWith} <Command text={S.browserCommand} />
+        </span>
+      </p>
+    </>
+  );
+}
+
+/** Google Flights in the browser (ruling 9): set-up words when it is off, else its state and its settings. */
+function Browser({
+  view,
+  form,
+  toggle,
+}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+  const aside = (name: OwnedName) => view.setAside.includes(name);
+  if (!view.envOnly.camoufoxEnabled)
+    return (
+      <SourceCard id="camoufox" title={NAME.camoufox} meta={S.browserMeta} control={null}>
+        <p>
+          {S.browserNotSetUp} <Command text={S.browserCommand} /> {S.browserSetUpDoc}
+        </p>
+      </SourceCard>
+    );
+  const on = form.list('discovery').includes('camoufox');
+  return (
+    <SourceCard
+      id="camoufox"
+      title={NAME.camoufox}
+      meta={S.browserMeta}
+      control={
+        <SourceSwitch
+          source={NAME.camoufox}
+          on={on}
+          disabled={false}
+          onChange={(v) => toggle('discovery', 'camoufox', v)}
+        />
+      }
+    >
+      <BrowserStatus />
+      <div className="st-field">
+        <p className="st-inline">
+          {S.patienceBefore}{' '}
+          <NumberInput
+            name="FLIGHT_READ_PATIENCE"
+            form={form}
+            min={3}
+            max={50}
+            setAside={aside('FLIGHT_READ_PATIENCE')}
+          />{' '}
+          {S.patienceAfter(CONFIRM_TARGET)}
+        </p>
+        <SetAsideNote name="FLIGHT_READ_PATIENCE" setAside={aside('FLIGHT_READ_PATIENCE')} />
+        <FieldError name="FLIGHT_READ_PATIENCE" form={form} />
+      </div>
+      <div className="st-field">
+        <p className="st-inline">
+          {S.mayRun}{' '}
+          <SelectInput
+            name="CAMOUFOX_BROWSER_WINDOW"
+            form={form}
+            options={S.browserWindow}
+            setAside={aside('CAMOUFOX_BROWSER_WINDOW')}
+          />
+        </p>
+        <SetAsideNote name="CAMOUFOX_BROWSER_WINDOW" setAside={aside('CAMOUFOX_BROWSER_WINDOW')} />
+        <FieldError name="CAMOUFOX_BROWSER_WINDOW" form={form} />
+      </div>
+      <details
+        className="st-more"
+        open={
+          form.error('DISCOVERY_REFRESH_DAYS') !== null || aside('DISCOVERY_REFRESH_DAYS') ? true : undefined
+        }
+      >
+        <summary>{S.advanced}</summary>
+        <div className="st-field">
+          <p className="st-inline">
+            {S.refreshBefore}{' '}
+            <NumberInput
+              name="DISCOVERY_REFRESH_DAYS"
+              form={form}
+              min={1}
+              max={30}
+              setAside={aside('DISCOVERY_REFRESH_DAYS')}
+            />{' '}
+            {S.refreshAfter}
+          </p>
+          <SetAsideNote name="DISCOVERY_REFRESH_DAYS" setAside={aside('DISCOVERY_REFRESH_DAYS')} />
+          <FieldError name="DISCOVERY_REFRESH_DAYS" form={form} />
+        </div>
+      </details>
+    </SourceCard>
+  );
+}
+
+/**
+ * SearchApi's balance (ruling 10), told apart from every other state: its own figure ("0 credits left" included), this
+ * app's count when SearchApi could not be asked, or that it could not be read at all. Nothing while it is asked.
+ */
+function Balance({ providers }: { providers: ProvidersResponse | undefined }) {
+  const budget = useBudget();
+  const account = useSearchApiAccount();
+  if (providers === undefined || budget.data === undefined || account.isPending) return null;
+  const line = searchApiCreditsLine(account.data?.account ?? null, budget.data, providers);
+  if (line === null) return <p className="st-kv st-muted">{S.balanceUnread}</p>;
+  return (
+    <p className="st-kv">
+      <b>{S.credits(line.left, line.cap)}</b>
+      {line.tail === '' ? null : (
+        <>
+          {' '}
+          <span className="st-muted">{line.tail}</span>
+        </>
+      )}
+    </p>
+  );
+}
+
+function SearchApi({
+  view,
+  form,
+  toggle,
+}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+  const providers = useProviders();
+  const aside = (name: OwnedName) => view.setAside.includes(name);
+  const key = view.secrets.SEARCHAPI_KEY;
+  const keySaved = key.set && !aside('SEARCHAPI_KEY');
+  const typed = form.shown('SEARCHAPI_KEY');
+  // why: a source with no key cannot be used, so it is switched on only with a key saved or typed (and not removed)
+  const canUse = form.edited('SEARCHAPI_KEY') ? typed !== null : keySaved;
+  const verification = form.list('verification').includes('searchapi');
+  const discovery = form.list('discovery').includes('searchapi');
+  const on = verification || discovery;
+  const plan = form.shown('SEARCHAPI_PLAN');
+  const needsKey = canUse ? undefined : fieldIds('SEARCHAPI_KEY').hint;
+  return (
+    <SourceCard
+      id="searchapi"
+      title={NAME.searchapi}
+      meta={S.searchapiMeta}
+      control={
+        <SourceSwitch
+          source={NAME.searchapi}
+          on={on}
+          disabled={!canUse && !on}
+          describedBy={needsKey}
+          onChange={(v) => {
+            // why: ruling 8 — On ticks the first box; Off unticks both (an emptied list is stored as none)
+            if (v) toggle('verification', 'searchapi', true);
+            else {
+              toggle('verification', 'searchapi', false);
+              toggle('discovery', 'searchapi', false);
+            }
+          }}
+        />
+      }
+    >
+      {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers.data} /> : null}
+      {!key.set ? <p className="st-kv st-muted">{S.searchapiNoKey}</p> : null}
+      <SecretField
+        name="SEARCHAPI_KEY"
+        form={form}
+        secret={key}
+        setAside={aside('SEARCHAPI_KEY')}
+        onRemove={() => void form.save('sources', { SEARCHAPI_KEY: null })}
+      />
+      <div className="st-row">
+        <div className="st-field">
+          <label className="st-lab" htmlFor={fieldIds('SEARCHAPI_PLAN').input}>
+            {SETTING_LABELS.SEARCHAPI_PLAN}
+          </label>
+          <SelectInput
+            name="SEARCHAPI_PLAN"
+            form={form}
+            options={S.plan}
+            setAside={aside('SEARCHAPI_PLAN')}
+            labelled
+          />
+          <SetAsideNote name="SEARCHAPI_PLAN" setAside={aside('SEARCHAPI_PLAN')} />
+          <FieldError name="SEARCHAPI_PLAN" form={form} />
+        </div>
+        {plan === '40usd' ? (
+          <div className="st-field">
+            <label className="st-lab" htmlFor={fieldIds('SEARCHAPI_BILLING_DAY').input}>
+              {SETTING_LABELS.SEARCHAPI_BILLING_DAY}
+            </label>
+            <NumberInput
+              name="SEARCHAPI_BILLING_DAY"
+              form={form}
+              min={1}
+              max={28}
+              setAside={aside('SEARCHAPI_BILLING_DAY')}
+            />
+            <SetAsideNote name="SEARCHAPI_BILLING_DAY" setAside={aside('SEARCHAPI_BILLING_DAY')} />
+            <FieldError name="SEARCHAPI_BILLING_DAY" form={form} />
+          </div>
+        ) : null}
+      </div>
+      <label className="st-check">
+        <input
+          type="checkbox"
+          checked={verification}
+          disabled={!canUse && !verification}
+          onChange={(e) => toggle('verification', 'searchapi', e.target.checked)}
+        />
+        <span>{S.verificationBox}</span>
+      </label>
+      <label className="st-check">
+        <input
+          type="checkbox"
+          checked={discovery}
+          disabled={!canUse && !discovery}
+          onChange={(e) => toggle('discovery', 'searchapi', e.target.checked)}
+        />
+        <span>
+          {S.discoveryBox} <span className="st-muted">{S.discoveryBoxNote}</span>
+        </span>
+      </label>
+      {canUse ? null : <p className="st-hint">{S.needsKey}</p>}
+      <p className="st-hint">
+        {S.creditsPerSearch}{' '}
+        <a href={hrefWith(settingsPatch('limits'))} onClick={navigateTo(settingsPatch('limits'))}>
+          {S.section.limits}
+        </a>
+        .
+      </p>
+    </SourceCard>
+  );
+}
+
+function Travelpayouts({
+  view,
+  form,
+  toggle,
+}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+  const providers = useProviders();
+  const token = view.secrets.TRAVELPAYOUTS_TOKEN;
+  const aside = view.setAside.includes('TRAVELPAYOUTS_TOKEN');
+  const saved = token.set && !aside;
+  const canUse = form.edited('TRAVELPAYOUTS_TOKEN') ? form.shown('TRAVELPAYOUTS_TOKEN') !== null : saved;
+  const on = form.list('discovery').includes('travelpayouts');
+  const month = providers.data?.providers
+    .find((p) => p.providerId === 'travelpayouts')
+    ?.usage.find(
+      (u) => u.scope === budgetScopeLabel({ kind: 'provider-month', providerId: 'travelpayouts' }),
+    );
+  return (
+    <SourceCard
+      id="travelpayouts"
+      title={NAME.travelpayouts}
+      meta={S.travelpayoutsMeta}
+      control={
+        <SourceSwitch
+          source={NAME.travelpayouts}
+          on={on}
+          disabled={!canUse && !on}
+          onChange={(v) => toggle('discovery', 'travelpayouts', v)}
+        />
+      }
+    >
+      {!token.set ? <p className="st-kv st-muted">{S.travelpayoutsNoKey}</p> : null}
+      <SecretField
+        name="TRAVELPAYOUTS_TOKEN"
+        form={form}
+        secret={token}
+        setAside={aside}
+        onRemove={() => void form.save('sources', { TRAVELPAYOUTS_TOKEN: null })}
+      />
+      {saved && month !== undefined ? (
+        <p className="st-kv st-muted">{S.callsThisMonth(month.calls, month.cap)}</p>
+      ) : null}
+      {canUse ? null : <p className="st-hint">{S.needsKey}</p>}
+    </SourceCard>
+  );
+}
+
+interface Props {
+  view: View;
+  form: SettingsForm;
+}
+
+/**
+ * Settings › Price sources (settings plan rulings 8, 9 and 10): the browser, SearchApi and the Aviasales cache, each
+ * with its switch for new searches and its own settings. A refused source list is said above the cards, tied to the
+ * switches.
+ */
+export function PriceSources({ view, form }: Props) {
+  const toggle = (role: SourceRole, id: ProviderId, on: boolean) => {
+    const now = form.list(role);
+    form.setList(role, on ? [...now.filter((x) => x !== id), id] : now.filter((x) => x !== id));
+  };
+  return (
+    <div className="st-sources">
+      <FieldError name="NEW_SEARCH_DISCOVERY" form={form} />
+      <FieldError name="NEW_SEARCH_VERIFICATION" form={form} />
+      <Browser view={view} form={form} toggle={toggle} />
+      <SearchApi view={view} form={form} toggle={toggle} />
+      <Travelpayouts view={view} form={form} toggle={toggle} />
+    </div>
+  );
+}

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PAGES_AT_ONCE_MAX } from '../camoufox/settings.js';
 import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
 import {
@@ -197,6 +198,11 @@ export const statusResponseSchema = z.strictObject({
   mode: z.enum(['native', 'container', 'dev']),
   version: z.string(),
   checks: z.array(statusCheckSchema),
+  /**
+   * Settings plan ruling 9: the pages the browser worker loads at once, as its own status reported them; absent when the
+   * worker was not read, did not answer or reported no shared settings. The Settings page shows it; setup changes it.
+   */
+  pagesAtOnce: z.number().int().min(1).max(PAGES_AT_ONCE_MAX).exactOptional(),
 });
 /** Spec §10 `POST /api/alerts/test-email`: the class of the send (a refusal at the hourly ceiling is a 429, not this). */
 export const testEmailResponseSchema = z.strictObject({

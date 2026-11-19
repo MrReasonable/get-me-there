@@ -702,3 +702,41 @@ export function datePairFigure(
     ...over,
   });
 }
+
+// --- The Settings page (settings plan rulings 5, 6, 8, 14) ---
+
+/**
+ * `GET /settings`: nothing stored (every plain value null), the two API keys saved (SearchApi's ends "3f2a", the
+ * Travelpayouts token's "91c0"), the browser set up, and the new-search lists the api gives with nothing stored:
+ * the Aviasales cache and the browser for the calendar, SearchApi ticked nowhere. No restart waiting.
+ */
+export function settingsView(
+  over: Partial<In<typeof apiContract.settingsViewSchema>> = {},
+): z.output<typeof apiContract.settingsViewSchema> {
+  return apiContract.settingsViewSchema.parse({
+    values: Object.fromEntries(apiContract.PLAIN_SETTING_NAMES.map((n) => [n, null])),
+    secrets: {
+      TRAVELPAYOUTS_TOKEN: { set: true, last4: '91c0' },
+      SEARCHAPI_KEY: { set: true, last4: '3f2a' },
+      SMTP_PASS: { set: false, last4: null },
+    },
+    newSearchSources: { discovery: ['travelpayouts', 'camoufox'], verification: [] },
+    envOnly: { camoufoxEnabled: true, searchApiTrialUsed: 0 },
+    envIgnored: [],
+    setAside: [],
+    pending: null,
+    ...over,
+  });
+}
+
+/** `GET /health` as a signed-in page gets it: its boot id names the pass of the app that answered (ruling 6). */
+export function healthDetail(bootId: string): z.output<typeof apiContract.healthResponseSchema> {
+  return apiContract.healthResponseSchema.parse({
+    ok: true,
+    degraded: false,
+    bootId,
+    db: { ok: true, sizeBytes: 1024 },
+    providers: [],
+    scheduler: { jobCount: 0, nextRun: null, lastExecutionAt: null, degraded: false, blockedSince: null },
+  });
+}

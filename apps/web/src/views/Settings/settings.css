@@ -1,0 +1,443 @@
+/* =====================================================================================================================
+   The Settings page (UX redesign stage 3, mockup 04-settings.html; settings plan ruling 14): plain cards on the shared
+   tokens (styles/theme.css), light and dark. A side list of sections beside the open one at a desktop; one row of links
+   above it on a phone. Spec §4's CSP blocks inline styles: everything is set here.
+   ===================================================================================================================== */
+
+.settings {
+  color-scheme: light;
+  color: var(--t-ink);
+  background: var(--t-bg);
+  border-radius: 10px;
+  padding: 20px var(--t-gutter) 32px;
+  margin: 20px auto 0;
+  font: 400 15px / 1.45 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  max-width: 1120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (prefers-color-scheme: dark) {
+  .settings {
+    color-scheme: dark;
+  }
+}
+.settings a {
+  color: var(--t-accent);
+  text-decoration: none;
+}
+.settings a:hover {
+  text-decoration: underline;
+}
+.settings :is(a, button, summary, input, select):focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+.settings h2,
+.settings h3,
+.settings p {
+  margin: 0;
+}
+.settings h2 {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.settings h3 {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.st-title {
+  margin: 0 0 18px;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.settings .st-pending {
+  margin: -6px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--t-line);
+  border-radius: 8px;
+  background: var(--t-surface);
+}
+
+/* The layout: the side list and the open section */
+.st-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.st-side {
+  position: sticky;
+  top: 16px;
+}
+.st-side ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.st-side a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--t-muted);
+  font-weight: 550;
+}
+.st-side a[aria-current="page"] {
+  color: var(--t-ink);
+  background: var(--t-surface);
+  border-color: var(--t-line);
+}
+.st-unsaved {
+  color: var(--t-warn);
+  font-weight: 600;
+  font-size: 13px;
+}
+.st-section > h2 {
+  margin-bottom: 4px;
+}
+.settings .st-lede {
+  margin-bottom: 12px;
+  color: var(--t-muted);
+  font-size: 13.5px;
+}
+
+/* Cards: one per source */
+.st-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
+  border-radius: 10px;
+}
+.st-card + .st-card {
+  margin-top: 16px;
+}
+.st-src {
+  padding: 16px 18px;
+}
+.st-src-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.st-src-head > div {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+.settings .st-meta {
+  margin-top: 3px;
+  color: var(--t-muted);
+  font-size: 13.5px;
+}
+.st-src-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  min-width: 0;
+}
+
+/* The switch: a checkbox drawn as a track and knob, its state also in words beside it */
+.st-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.st-switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--t-line);
+  border: 1px solid var(--t-muted);
+  cursor: pointer;
+}
+.st-switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--t-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  transition: left 0.15s;
+}
+.st-switch input:checked {
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+}
+.st-switch input:checked::after {
+  left: 18px;
+}
+.st-switch input:disabled {
+  cursor: not-allowed;
+  border-style: dashed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-switch input::after {
+    transition: none;
+  }
+}
+
+/* Lines, fields and notes */
+/* a line of facts: plain inline text, so a glyph stays beside its first word when the line wraps */
+.st-kv {
+  font-size: 14px;
+}
+.st-kv b {
+  font-weight: 650;
+}
+.st-muted {
+  color: var(--t-muted);
+}
+.st-glyph {
+  margin-right: 6px;
+  font-size: 12px;
+}
+.st-ok {
+  color: var(--t-ok);
+}
+.st-warn {
+  color: var(--t-warn);
+}
+.st-bad,
+.st-fail {
+  color: var(--t-bad);
+}
+.st-off {
+  color: var(--t-muted);
+}
+.st-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.st-lab {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.st-hint {
+  color: var(--t-muted);
+  font-size: 12.5px;
+}
+.st-note {
+  font-size: 13.5px;
+}
+.st-sources > .st-note {
+  margin-bottom: 12px;
+}
+/* a sentence with a field in it ("until [12] reads in a row…"): it wraps as text, the field sitting in the line */
+.st-inline {
+  font-size: 14px;
+  line-height: 2.9;
+}
+.st-inline :is(input, select) {
+  vertical-align: middle;
+  margin: 0 4px;
+}
+.st-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 240px));
+}
+.settings input[type="number"],
+.settings input[type="password"],
+.settings select {
+  max-width: 100%;
+  font: inherit;
+  color: var(--t-ink);
+  background: var(--t-surface);
+  border: 1px solid var(--t-muted);
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+}
+.settings input[type="password"] {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 360px;
+}
+.st-num {
+  width: 72px;
+}
+.settings [aria-invalid="true"] {
+  border-color: var(--t-bad);
+  border-width: 2px;
+}
+.st-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+}
+.st-check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--t-accent);
+}
+.st-secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.st-saved,
+.st-cmd {
+  font:
+    13px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  background: var(--t-sunk);
+  border: 1px solid var(--t-line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.st-saved {
+  padding: 6px 10px;
+}
+.st-cmd {
+  padding: 1px 6px;
+}
+.st-confirm {
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--t-line);
+  border-radius: 8px;
+  background: var(--t-sunk);
+  font-size: 14px;
+}
+.st-row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.st-more > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--t-accent);
+}
+.st-more[open] > summary {
+  margin-bottom: 6px;
+}
+
+/* Buttons */
+.st-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--t-line);
+  border-radius: 8px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: 600 14px / 1.1 var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.st-btn:hover {
+  border-color: var(--t-muted);
+}
+.st-btn-sm {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13.5px;
+}
+.st-btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--t-accent);
+}
+.st-btn-danger {
+  color: var(--t-bad);
+  border-color: var(--t-bad);
+}
+.st-btn-primary {
+  color: var(--t-accent-ink);
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+}
+.st-btn-primary:hover {
+  background: var(--t-accent-hover);
+  border-color: var(--t-accent-hover);
+}
+.st-btn:disabled {
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/* The section's Save and its live region */
+.st-savebar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 16px;
+}
+.st-result {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-size: 14px;
+}
+.st-result p + p {
+  margin-top: 4px;
+}
+
+/* A phone: one row of section links above the section */
+@media (max-width: 800px) {
+  .st-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .st-side {
+    position: static;
+    min-width: 0;
+  }
+  .st-side ul {
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .st-side a {
+    white-space: nowrap;
+  }
+}
+
+.st-confirm > legend {
+  float: left;
+  padding: 0;
+}

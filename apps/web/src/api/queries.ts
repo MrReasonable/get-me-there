@@ -181,6 +181,19 @@ export function useBudget() {
   return useQuery({ queryKey: ['budget'] as const, queryFn: () => api.budget(), refetchInterval: 60_000 });
 }
 
+/** The Settings page's read (GET /settings, settings plan rulings 5, 6, 8). */
+export const SETTINGS_KEY = ['settings'] as const;
+/** While a save waits for running searches (`pending`), the page reads again this often, so it sees the restart. */
+export const SETTINGS_PENDING_POLL_MS = 5_000;
+
+export function useSettings() {
+  return useQuery({
+    queryKey: SETTINGS_KEY,
+    queryFn: () => api.settings(),
+    refetchInterval: (q) => (q.state.data?.pending == null ? false : SETTINGS_PENDING_POLL_MS),
+  });
+}
+
 /** SearchApi's own balance (GET /searchapi/account): the api caches it ten minutes, so a minute's poll is cheap. */
 export function useSearchApiAccount() {
   return useQuery({

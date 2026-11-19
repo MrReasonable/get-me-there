@@ -787,5 +787,14 @@ export function buildChecks(f: StatusFacts): StatusCheck[] {
 }
 
 export function buildStatus(f: StatusFacts): StatusResponse {
-  return { generatedAt: f.now, mode: f.mode, version: f.version, checks: buildChecks(f) };
+  const r = f.worker.read;
+  // why: settings plan ruling 9 — the Settings page's "Pages at once", only as the worker itself reported it
+  const pagesAtOnce = r.kind === 'ok' ? r.status.pagesAtOnce : null;
+  return {
+    generatedAt: f.now,
+    mode: f.mode,
+    version: f.version,
+    checks: buildChecks(f),
+    ...(pagesAtOnce === null ? {} : { pagesAtOnce }),
+  };
 }

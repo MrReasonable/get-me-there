@@ -7,8 +7,8 @@ import { TRIP_PAIR_PARAMS } from './resultsState.js';
  * Trips) and the landing for every URL
  * that names no usable view; `dates` is a search's page (`def=`), `trip` one pair of dates of it (design
  * 2026-11-08 §6.1; an old `view=results` link lands there) and `definitions` the Edit page (`edit=`). These are
- * opened from a card, a board row or an alert email, never from the nav. `settings` is the interim page whose three
- * sections are `providers`, `alerts` and `status`.
+ * opened from a card, a board row or an alert email, never from the nav. `settings` is the Settings page, its section
+ * named by `section=` (settings plan ruling 14); the older `providers`, `alerts` and `status` views keep their URLs.
  */
 export type ViewId =
   | 'searches'
@@ -61,10 +61,23 @@ export function parseView(v: string | null): ViewId {
   return v !== null && isView(v) ? v : 'searches';
 }
 
+/** The Settings page's sections, in the side list's order (settings plan ruling 14). */
+export type SettingsSection = 'sources' | 'limits' | 'email' | 'system';
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['sources', 'limits', 'email', 'system'];
+/** `?section=` on the Settings page. */
+export const SECTION_PARAM = 'section';
+const isSettingsSection = oneOf(SETTINGS_SECTIONS);
+
+/** `?section=`; anything unknown or absent is Price sources, the first section. */
+export function parseSettingsSection(v: string | null): SettingsSection {
+  return v !== null && isSettingsSection(v) ? v : 'sources';
+}
+
 /**
  * A nav link's patch: the view, with the detail's date pair, its airport pair and row dropped (they name one trip and
- * mean nothing to another view); every filter (`d.*`, `f.*`, the sort, `def=`) is kept, so the filters travel with
- * every nav link (spec §11; WP19 Task 19.7).
+ * mean nothing to another view), and the Settings section (it means nothing to another view, and the nav's Settings
+ * opens its first section); every filter (`d.*`, `f.*`, the sort, `def=`) is kept, so the filters travel with every
+ * nav link (spec §11; WP19 Task 19.7).
  */
 export function navPatch(view: ViewId): Record<string, string | null> {
   return {
@@ -74,5 +87,11 @@ export function navPatch(view: ViewId): Record<string, string | null> {
     [DETAIL_LINK_PARAMS.row]: null,
     [TRIP_PAIR_PARAMS.from]: null,
     [TRIP_PAIR_PARAMS.to]: null,
+    [SECTION_PARAM]: null,
   };
+}
+
+/** The patch of a link to one Settings section: the Settings page with `section=` naming it. */
+export function settingsPatch(section: SettingsSection): Record<string, string | null> {
+  return { ...navPatch('settings'), [SECTION_PARAM]: section };
 }

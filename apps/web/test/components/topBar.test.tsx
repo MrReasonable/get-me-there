@@ -52,7 +52,7 @@ describe('the health line (Ruling 10)', () => {
     const link = await screen.findByRole('link', { name: 'Backups needs attention · fix' });
     expect(link).toHaveClass('health-link-warn');
     expect(link).not.toHaveClass('health-link-bad');
-    expect(link).toHaveAttribute('href', expect.stringContaining('view=status'));
+    expect(link).toHaveAttribute('href', '/?view=settings&section=system');
   });
 
   it('one failure is red "<name> failing · fix"', async () => {
@@ -110,11 +110,11 @@ describe('the health line (Ruling 10)', () => {
     expect(link.textContent).toContain('✕');
   });
 
-  it('goes to the Status view when clicked', async () => {
+  it('goes to Settings › System when clicked (settings plan ruling 14)', async () => {
     serve(statusReport([failing('app')]));
     const { user } = renderWithProviders(<HealthLine />);
     await user.click(await screen.findByRole('link', { name: 'App failing · fix' }));
-    expect(window.location.search).toContain('view=status');
+    expect(window.location.search).toBe('?view=settings&section=system');
   });
 
   it('after a failed refresh it says the report is stale and how old, even when the old report was clean', async () => {

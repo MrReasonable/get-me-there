@@ -8,7 +8,7 @@ import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
 import { TripRow } from '../../src/components/rows/TripRow.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
-import { VIEWS } from '../../src/state/view.js';
+import { SETTINGS_SECTIONS, VIEWS } from '../../src/state/view.js';
 import {
   at,
   calendarFig,
@@ -156,6 +156,39 @@ describe('the main path in the shell says no set-up term (spec rev 55 §3, §11;
 });
 
 afterEach(() => vi.useRealTimers());
+
+// Global Constraints: the rendered sweep covers each Settings section and bans "searches left" (settings plan ruling 10)
+describe('each Settings section says no banned word, no "searches left" and no "£" outside a cost', () => {
+  it.each([...SETTINGS_SECTIONS])('section=%s', async (section) => {
+    server.use(
+      http.get(`${API}/status`, () =>
+        HttpResponse.json(
+          statusReport(
+            [
+              { id: 'worker', area: 'worker', providerId: 'camoufox', summary: 'ready' },
+              { id: 'consent', area: 'consent', summary: 'consent rejected, expires 18 Nov 2027 (cookie)' },
+            ],
+            { pagesAtOnce: 2 },
+          ),
+        ),
+      ),
+      http.get(`${API}/budget`, () =>
+        HttpResponse.json(budgetResponse({ scopes: [usage('provider-month:searchapi', 49, 100)] })),
+      ),
+    );
+    renderWithProviders(<App />, { search: `?view=settings&section=${section}` });
+    await screen.findByRole('heading', { level: 2, name: COPY.settingsView.section[section] });
+    if (section === 'sources') {
+      await screen.findByText(COPY.settingsView.browserReady);
+      await screen.findByText(COPY.settingsView.credits(51, 100));
+    }
+    // why: the top bar's limits are in (on Settings › Limits the section shares their name)
+    await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)");
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/searches left/i);
+    expect(poundsOutsidePrices()).toEqual([]);
+  });
+});
 
 describe('the top bar and run progress say no banned word, no set-up term and no "£" outside a cost (Task 4)', () => {
   it('the health line with problems, SearchApi’s credits left, the spend and a running search', async () => {

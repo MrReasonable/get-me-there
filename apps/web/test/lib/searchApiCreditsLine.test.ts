@@ -36,6 +36,7 @@ describe('searchApiCreditsLine: SearchApi’s own balance', () => {
   it('words the trial’s balance with nothing after it', () => {
     expect(searchApiCreditsLine(account(), both, providers('trial'), readAt)).toEqual({
       left: 38,
+      cap: null,
       tail: '',
       line: 'SearchApi: 38 credits left',
     });
@@ -49,6 +50,7 @@ describe('searchApiCreditsLine: SearchApi’s own balance', () => {
     );
     expect(got).toEqual({
       left: 9_988,
+      cap: null,
       tail: '· resets 1 Dec',
       line: 'SearchApi: 9,988 credits left · resets 1 Dec',
     });
@@ -92,6 +94,7 @@ describe('searchApiCreditsLine: this app’s count, when SearchApi could not be 
   it('reads the month on the $40 plan, from the two windows', () => {
     expect(searchApiCreditsLine(null, both, providers('40usd'))).toEqual({
       left: 51,
+      cap: 100,
       tail: "(this app's count)",
       line: "SearchApi: 51 of 100 credits left (this app's count)",
     });

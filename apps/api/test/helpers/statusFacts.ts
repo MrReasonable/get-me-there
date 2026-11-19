@@ -49,6 +49,7 @@ export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerSta
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture', mark: 'reject' },
     socsCapturedAt: ago(10 * DAY),
     awakeUntil: null,
+    pagesAtOnce: 1,
     ...over,
   };
 }

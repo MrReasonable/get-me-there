@@ -405,32 +405,33 @@ describe('every page has one h1, its own heading; the logo is a link, not a head
 });
 
 describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
-  it('?view=settings is the Settings page: three linked sections, each with its line, and no definition needed', async () => {
+  it('?view=settings is the Settings page: four section links, Price sources open, and no definition needed', async () => {
+    // why: settings plan ruling 14 — the page's sections are links (`section=`); the older views keep their own URLs
     renderWithProviders(<App />, { search: '?view=settings' });
-    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    const list = screen.getByRole('list', { name: COPY.settingsView.sectionsLabel });
-    const sections = within(list).getAllByRole('region');
-    expect(sections.map((s) => s.getAttribute('aria-labelledby'))).toHaveLength(3);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: COPY.settingsView.sectionsLabel });
     expect(
-      within(list)
+      within(nav)
         .getAllByRole('link')
         .map((l) => [l.textContent, l.getAttribute('href')]),
     ).toEqual([
-      ['Price sources', '/?view=providers'],
-      ['Alerts', '/?view=alerts'],
-      ['System', '/?view=status'],
+      ['Price sources', '/?view=settings&section=sources'],
+      ['Limits', '/?view=settings&section=limits'],
+      ['Email and alerts', '/?view=settings&section=email'],
+      ['System', '/?view=settings&section=system'],
     ]);
-    const lines = [COPY.settingsView.priceSources, COPY.settingsView.alerts, COPY.settingsView.system];
-    for (const line of lines) expect(within(list).getByText(line)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Price sources' })).toBeInTheDocument();
     // Settings is the top of its trail, so it has none of its own
     expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
   });
 
-  it('a section link opens that view under its new heading', async () => {
+  it('a section link opens that section on the same page', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=settings' });
-    await user.click(await screen.findByRole('link', { name: 'Price sources' }));
-    expect(await screen.findByRole('heading', { name: 'Price sources' })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get('view')).toBe('providers');
+    const nav = await screen.findByRole('navigation', { name: COPY.settingsView.sectionsLabel });
+    await user.click(within(nav).getByRole('link', { name: 'System' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'System' })).toBeInTheDocument();
+    const url = new URLSearchParams(window.location.search);
+    expect([url.get('view'), url.get('section')]).toEqual(['settings', 'system']);
   });
 
   it.each([
