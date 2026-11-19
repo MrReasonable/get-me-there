@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { DEFAULT_DISCOVERY_REFRESH_DAYS } from '../alerts/evaluate.js';
 import {
   readSharedSettings,
   SHARED_WORKER_SETTINGS,
@@ -21,7 +20,12 @@ import {
   TRAVELPAYOUTS_DEFAULTS,
 } from './presets.js';
 import { Secret } from './secret.js';
-import { OWNED_NAMES, SMTP_ALL_OR_NOTHING, SMTP_REQUIRED_NAMES } from './settings.js';
+import {
+  DEFAULT_DISCOVERY_REFRESH_DAYS,
+  OWNED_NAMES,
+  SMTP_ALL_OR_NOTHING,
+  SMTP_REQUIRED_NAMES,
+} from './settings.js';
 
 /**
  * Parsed configuration. Spec §12: parsed once in the api bootstrap; empty = unset; invalid or

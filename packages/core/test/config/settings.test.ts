@@ -3,6 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseBootConfig, parseConfig } from '../../src/config/schema.js';
 import {
+  DEFAULT_DISCOVERY_REFRESH_DAYS,
+  DEFAULT_DISCOVERY_REFRESH_HOURS,
   EMAIL_NAMES,
   isOwnedName,
   layerSettings,
@@ -123,6 +125,13 @@ describe('layerSettings (ruling 2: one owner per name)', () => {
       TRAVELPAYOUTS_TOKEN: 'tp',
       SEARCHAPI_PLAN: '40usd',
     });
+  });
+});
+
+describe('the refresh defaults', () => {
+  it('7 days, which is 168 hours', () => {
+    expect(DEFAULT_DISCOVERY_REFRESH_DAYS).toBe(7);
+    expect(DEFAULT_DISCOVERY_REFRESH_HOURS).toBe(168);
   });
 });
 

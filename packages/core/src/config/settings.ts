@@ -108,6 +108,14 @@ export const SMTP_REQUIRED_NAMES = [
 /** Every owned mail setting: the all-or-nothing ones and SMTP_TLS, which has a default. Email is off without them. */
 export const EMAIL_NAMES: readonly OwnedName[] = [...SMTP_REQUIRED_NAMES, 'SMTP_TLS'];
 
+/** DISCOVERY_REFRESH_DAYS's default (settings plan ruling 7): the days before a date's calendar price is read again. */
+export const DEFAULT_DISCOVERY_REFRESH_DAYS = 7;
+/**
+ * Spec §7: `discoveryRefreshHours` defaults to this per provider when the definition omits it (the default days in
+ * hours, 168). The one owner of the default: the alert rules and the engine's reuse cutoff import it from `@gmt/core`.
+ */
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = DEFAULT_DISCOVERY_REFRESH_DAYS * 24;
+
 /** The page's label for each owned name: the one copy, read by the page and by the api's 422. */
 export const SETTING_LABELS: Readonly<Record<OwnedName, string>> = {
   TRAVELPAYOUTS_TOKEN: 'Travelpayouts token',
