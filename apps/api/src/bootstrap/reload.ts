@@ -18,6 +18,11 @@ export interface ReloadPort {
   request(): 'now' | 'after-runs';
   /** True while a save waits for the runs in flight (`GET /api/settings` `pending`). */
   pending(): boolean;
+  /**
+   * True from the first save until this pass closes: the engine is held and nothing new may start, including once the
+   * restart has begun (when `pending` is already false).
+   */
+  held(): boolean;
   /** A tool run inside the app began; `label` names it while the restart waits for it. */
   toolStarted(label: string): void;
   /** That tool run ended, however it ended: the restart may go now. */
@@ -72,6 +77,7 @@ export function createReloader(o: {
       return fired ? 'now' : 'after-runs';
     },
     pending: () => requested && !fired && !stopped,
+    held: () => requested,
     toolStarted: (label) => {
       tools.push(label);
     },

@@ -25,8 +25,9 @@ async function runInProcess<A>(
   args: A,
 ): Promise<Response> {
   if (runner === undefined) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable(name));
-  // why: settings plan ruling 6 — while a saved setting waits for the restart in place nothing new starts, tools included
-  if (ctx.reload?.pending() === true) throw new ApiError(503, 'reload-pending', API_TEXT.applyingSettings);
+  // why: settings plan ruling 6 — from a save until this pass closes nothing new starts, tools included; `held`, not
+  // `pending`, so a tool asked after the restart has begun (pending already false) is refused too
+  if (ctx.reload?.held() === true) throw new ApiError(503, 'reload-pending', API_TEXT.applyingSettings);
   return oneAtATime(
     ctx,
     TOOL_KEY,

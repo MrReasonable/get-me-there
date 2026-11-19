@@ -421,6 +421,54 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
     await d.done;
   });
 
+  it('a tool asked after the restart has begun, while the pass still closes, is refused in the words and never runs', async () => {
+    let ran = 0;
+    const d = drive(devEnv(seededDb()), (deps) =>
+      bootApp({
+        ...deps,
+        tools: () => ({
+          smoke: async () => {
+            ran += 1;
+            return {
+              exitCode: 0,
+              summary: 'done',
+              lines: [],
+              fixturesWritten: [],
+              searchApiCreditsLedgered: null,
+            };
+          },
+        }),
+      }),
+    );
+    const first = await d.pass(1);
+    const gate = deferred<void>();
+    const shutdown = first.engine.shutdown.bind(first.engine);
+    vi.spyOn(first.engine, 'shutdown').mockImplementation(async () => {
+      await gate.promise;
+      await shutdown();
+    });
+    expect(await save(first, { FLIGHT_READ_PATIENCE: '20' })).toEqual({ warnings: [], applies: 'now' });
+    // why: the restart has begun (its close waits on the gate); nothing waits for runs any more, yet the pass is held
+    const view = apiContract.settingsViewSchema.parse(await (await request(first, '/api/settings')).json());
+    expect(view.pending).toBeNull();
+    const late = await request(first, '/api/tools/smoke', 'POST', {
+      origin: 'LHR',
+      destination: 'JFK',
+      budget: 2,
+    });
+    expect(late.status).toBe(503);
+    expect(await late.json()).toMatchObject({
+      error: { code: 'reload-pending', message: RELOAD_PENDING_TEXT },
+    });
+    expect(ran).toBe(0);
+    gate.resolve();
+    expect(await first.closed).toBe('reload');
+    await d.pass(2);
+    d.signals.emit('SIGTERM');
+    expect(await d.exited).toBe(EXIT.ok);
+    await d.done;
+  });
+
   it('no secret reaches the log across a restart (expectNoSecrets)', async () => {
     const d = drive(devEnv(seededDb(), { SMTP_PASS: '' }));
     const first = await d.pass(1);

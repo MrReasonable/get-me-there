@@ -66,6 +66,11 @@ describe('the settings contract', () => {
     expect(settingsUpdateResponseSchema.safeParse({ warnings: [], applies: 'after-runs' }).success).toBe(
       false,
     );
+    expect(settingsUpdateResponseSchema.safeParse({ warnings: [], applies: 'unchanged' }).success).toBe(true);
+    // why: an unchanged save restarts nothing, so it names no runs to wait for
+    expect(
+      settingsUpdateResponseSchema.safeParse({ warnings: [], applies: 'unchanged', running: [] }).success,
+    ).toBe(false);
   });
 
   it("a refusal is the envelope's field and message: the owned name and the words, nothing else", () => {

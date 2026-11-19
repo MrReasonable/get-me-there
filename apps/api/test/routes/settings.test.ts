@@ -217,6 +217,7 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
         return 'after-runs';
       },
       pending: () => pending,
+      held: () => pending,
       toolStarted: () => undefined,
       toolEnded: () => undefined,
       tools: () => ['Smoke test'],
@@ -270,10 +271,11 @@ const emailForm = {
 const emailTest = (x: Harness, body: object) =>
   x.request('/api/settings/email-test', { method: 'POST', json: body });
 
-/** A ReloadPort that records what it was told; `pending` and `tools` answer as set. */
-function fakeReload(o: { pending?: boolean; answer?: 'now' | 'after-runs' } = {}) {
+/** A ReloadPort that records what it was told; `pending`, `held` and `tools` answer as set. */
+function fakeReload(o: { pending?: boolean; held?: boolean; answer?: 'now' | 'after-runs' } = {}) {
   const told: string[] = [];
   let pending = o.pending ?? false;
+  const held = o.held ?? pending;
   const tools: string[] = [];
   const port: ReloadPort = {
     request: () => {
@@ -282,6 +284,7 @@ function fakeReload(o: { pending?: boolean; answer?: 'now' | 'after-runs' } = {}
       return o.answer ?? 'now';
     },
     pending: () => pending,
+    held: () => held || told.includes('request'),
     toolStarted: (label) => {
       told.push(`started:${label}`);
       tools.push(label);
@@ -402,6 +405,14 @@ describe('the tools while a restart in place waits (settings plan ruling 6)', ()
     expect(refusedRun.status).toBe(503);
     expect(await errorOf(refusedRun)).toEqual({ code: 'reload-pending', message: API_TEXT.applyingSettings });
     expect(held.told).toEqual([]);
+
+    // why: once the restart has begun `pending` is false, but the pass is still held until it closes
+    const firing = fakeReload({ pending: false, held: true });
+    const w = await harness({}, { reload: firing.port, tools: { smoke: async () => smokeOk } });
+    const late = await w.request('/api/tools/smoke', { method: 'POST', json: SMOKE_BODY });
+    expect(late.status).toBe(503);
+    expect(await errorOf(late)).toEqual({ code: 'reload-pending', message: API_TEXT.applyingSettings });
+    expect(firing.told).toEqual([]);
 
     const idle = fakeReload();
     const y = await harness({}, { reload: idle.port, tools: { smoke: async () => smokeOk } });

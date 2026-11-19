@@ -30,10 +30,14 @@ describe('createReloader (settings plan ruling 6)', () => {
   it('idle: answers now, holds the engine and restarts once, after the caller has answered', async () => {
     const { reloader, calls, setBusy } = setup();
     setBusy(false);
+    expect(reloader.held()).toBe(false);
     expect(reloader.request()).toBe('now');
     expect(calls).toEqual(['hold']);
     await turn();
     expect(calls).toEqual(['hold', 'reload']);
+    // why: the restart has begun, so nothing waits any more, but the pass stays held until it closes
+    expect(reloader.pending()).toBe(false);
+    expect(reloader.held()).toBe(true);
     expect(reloader.request()).toBe('now');
     reloader.watch.ended();
     await turn();
@@ -71,6 +75,7 @@ describe('createReloader (settings plan ruling 6)', () => {
     expect(reloader.request()).toBe('after-runs');
     reloader.stop();
     expect(reloader.pending()).toBe(false);
+    expect(reloader.held()).toBe(true);
     setBusy(false);
     reloader.watch.ended();
     await turn();
