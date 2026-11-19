@@ -25,14 +25,18 @@ export interface NewSearchSources {
 export function newSearchSourcesFor(config: Config, providers: readonly FlightProvider[]): NewSearchSources {
   const configured = new Set(providers.map((p) => p.id));
   const { discovery: listedDiscovery, verification: listedVerification } = config.newSearchSources;
-  const listed = (ids: readonly ProviderId[]): ProviderId[] => ids.filter((id) => configured.has(id));
+  // why: a listed source drops out when it is not configured, and when it lacks the role's capability (a stored
+  // NEW_SEARCH_VERIFICATION naming Travelpayouts would tick a trip check source that cannot check trips)
+  const listed = (ids: readonly ProviderId[], role: 'discovery' | 'verification'): ProviderId[] =>
+    ids.filter((id) => providers.some((p) => p.id === id && p[role] !== undefined));
   const free: ProviderId[] = [];
   if (configured.has('travelpayouts')) free.push('travelpayouts');
   if (configured.has('camoufox')) free.push('camoufox');
   const fixture: ProviderId[] = configured.has('fixture') ? ['fixture'] : [];
   return {
-    discovery: listedDiscovery === null ? (free.length > 0 ? free : fixture) : listed(listedDiscovery),
-    verification: listedVerification === null ? fixture : listed(listedVerification),
+    discovery:
+      listedDiscovery === null ? (free.length > 0 ? free : fixture) : listed(listedDiscovery, 'discovery'),
+    verification: listedVerification === null ? fixture : listed(listedVerification, 'verification'),
   };
 }
 

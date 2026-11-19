@@ -1,5 +1,11 @@
 // Spec §8.2 plan preset and §11 form defaults.
-import type { FlightProvider, ProviderId } from '@gmt/core';
+import type {
+  CapabilityInfo,
+  DiscoveryCapability,
+  FlightProvider,
+  ProviderId,
+  VerificationCapability,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { defaultDefinitionInput, newSearchSourcesFor } from '../src/defaults.js';
 import { loadConfigFromEnv } from '../src/wiring.js';
@@ -16,13 +22,32 @@ const config = (env: Record<string, string>) =>
       ...env,
     }),
   );
-const stub = (id: ProviderId): FlightProvider => ({
-  id,
-  displayName: id,
-  suppliedFields: [],
-  cabins: ['economy'],
-  healthcheck: async () => ({ ok: true, detail: '' }),
-});
+const INFO: CapabilityInfo = { sourceKind: 'scraped-aggregate', provenanceNote: 'test', maxAgeHours: 24 };
+const refuse = (): never => {
+  throw new Error('not called');
+};
+const DISCOVERY: DiscoveryCapability = { info: INFO, plan: () => [], fetchTile: async () => refuse() };
+const VERIFICATION: VerificationCapability = { info: INFO, estimate: refuse, search: async () => refuse() };
+/** Which providers carry which role, as the real ones do: Travelpayouts and the browser discover; SearchApi both. */
+const ROLES: Record<ProviderId, readonly ('discovery' | 'verification')[]> = {
+  travelpayouts: ['discovery'],
+  camoufox: ['discovery'],
+  searchapi: ['discovery', 'verification'],
+  fixture: ['discovery', 'verification'],
+};
+const stub = (id: ProviderId): FlightProvider => {
+  const base = {
+    id,
+    displayName: id,
+    suppliedFields: [],
+    cabins: ['economy'] satisfies FlightProvider['cabins'],
+    healthcheck: async () => ({ ok: true, detail: '' }),
+  };
+  const roles = ROLES[id];
+  if (roles.includes('discovery') && roles.includes('verification'))
+    return { ...base, discovery: DISCOVERY, verification: VERIFICATION };
+  return roles.includes('discovery') ? { ...base, discovery: DISCOVERY } : base;
+};
 
 describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', () => {
   it('£0: Travelpayouts discovery only, no verification, the core refresh default', () => {
@@ -134,6 +159,13 @@ describe('new-search sources (NEW_SEARCH_DISCOVERY, NEW_SEARCH_VERIFICATION) and
       discovery: ['searchapi', 'travelpayouts'],
       verification: ['searchapi'],
     });
+  });
+  it("a listed source without the role's capability drops out: Travelpayouts and the browser cannot check trips", () => {
+    const c = config({
+      ...PAID,
+      NEW_SEARCH_VERIFICATION: 'travelpayouts,camoufox,searchapi',
+    });
+    expect(newSearchSourcesFor(c, ALL).verification).toEqual(['searchapi']);
   });
   it('`none` gives nothing for that role and leaves the other role alone', () => {
     const c = config({ ...PAID, NEW_SEARCH_DISCOVERY: 'none', NEW_SEARCH_VERIFICATION: 'searchapi' });

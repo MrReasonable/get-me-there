@@ -7,6 +7,7 @@ import {
   DEFAULT_FLIGHT_READ_PATIENCE,
   EMPTY_STANDINGS,
   improves,
+  patienceOf,
   patienceSpent,
   type Standings,
   uncheckedCheaper,
@@ -114,6 +115,15 @@ describe('patienceSpent follows the patience it is given', () => {
     }
     expect(at3.indexOf(true)).toBe(2);
     expect(at12.indexOf(true)).toBe(11);
+  });
+});
+
+describe('patienceOf', () => {
+  it("is the summary's own patience, and 12 for a summary without one, a missing summary or null", () => {
+    expect(patienceOf({ patience: 3 })).toBe(3);
+    expect(patienceOf({})).toBe(12);
+    expect(patienceOf(null)).toBe(12);
+    expect(patienceOf(undefined)).toBe(12);
   });
 });
 

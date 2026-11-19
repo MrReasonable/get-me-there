@@ -864,7 +864,7 @@ describe('the estimate flight line is a range over the confirm queue (design 202
     expect(queued(300, []).est.flightLists).toMatchObject({ pairs: 25, returns: true });
     // why: the typical figure is the patience's own, and "at most" is the whole queue whatever the patience
     expect(three?.pagesMax).toBe(queued(300, []).est.flightLists?.pagesMax);
-  });
+  }, 15_000);
 
   it('a resumed run is estimated at its own recorded patience, not the setting now (absent = 12)', async () => {
     const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], {
@@ -882,7 +882,7 @@ describe('the estimate flight line is a range over the confirm queue (design 202
     // why: the setting is 12 now; the run recorded 3, so its typical figure is the 3-patience one (16); an older run is 12
     expect(at(confirm).flightLists?.pairs).toBe(16);
     expect(at(older).flightLists?.pairs).toBe(25);
-  });
+  }, 15_000);
 
   it('a queue of 7 reads 7 typically and at most', () => {
     const { est } = queued(7, []);

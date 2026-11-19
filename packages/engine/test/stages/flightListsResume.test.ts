@@ -135,7 +135,7 @@ describe('a resumed flight-list step', () => {
     const p = restart(e, [cam2]);
     expect((await p.orch.resume(id, { manual: false })).ok).toBe(true);
     const done = await e.settled(id);
-    expect(cam2.flightCalls.length).toBeGreaterThan(3);
+    expect(cam2.flightCalls).toHaveLength(12);
     expect(done.flightLists?.confirm?.patience).toBe(12);
     await p.orch.shutdown();
   });

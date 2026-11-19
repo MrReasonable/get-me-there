@@ -49,6 +49,11 @@ export function applyCheck(s: Standings, c: Check, by: 'read' | 'reuse'): Standi
   return { prices, sinceImprovement: better ? 0 : s.sinceImprovement + 1 };
 }
 
+/** The patience a run was started with: its summary's own value, 12 for a run stored before the setting (or none). */
+export function patienceOf(summary: { patience?: number } | null | undefined): number {
+  return summary?.patience ?? DEFAULT_FLIGHT_READ_PATIENCE;
+}
+
 /**
  * §4.4: the step starts no new read once the last `patience` finished reads held no improvement. `patience` is the
  * run's own (FLIGHT_READ_PATIENCE when it started, recorded in its summary), so a later change never moves a running step.

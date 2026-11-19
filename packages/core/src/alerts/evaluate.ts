@@ -9,7 +9,8 @@ import { dedupKey, identityKey, isSuppressed, priceOf, type Suppression, span } 
  * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one
  * owner of the default: the engine imports it from `@gmt/core` for its reuse cutoff.
  */
-export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
+export const DEFAULT_DISCOVERY_REFRESH_DAYS = 7;
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = DEFAULT_DISCOVERY_REFRESH_DAYS * 24;
 
 /** Per-run context for `evaluateAlertRules` (the plan's inline ctx type, named). */
 export interface AlertEvalContext {

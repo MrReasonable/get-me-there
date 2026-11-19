@@ -28,7 +28,6 @@ import {
   cellKeyString,
   checkOfRead,
   cooldownNoticeKey,
-  DEFAULT_FLIGHT_READ_PATIENCE,
   EMPTY_STANDINGS,
   FLIGHT_LIST_COUNT,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
@@ -42,6 +41,7 @@ import {
   listFresh,
   ProviderError,
   type ProviderId,
+  patienceOf,
   patienceSpent,
   type ReturnRead,
   type Standings,
@@ -539,10 +539,7 @@ function confirmPlanOf(ctx: EngineContext, run: RunState, stored: FlightListsSta
       stop: null,
       // why: settings plan ruling 7: a run records the patience it started with and keeps it to its end; a resumed run
       // keeps the stored one, and a run stored before the setting read as 12
-      patience:
-        stored === null
-          ? ctx.config.flightReadPatience
-          : (stored.confirm?.patience ?? DEFAULT_FLIGHT_READ_PATIENCE),
+      patience: stored === null ? ctx.config.flightReadPatience : patienceOf(stored.confirm),
     },
   };
   ctx.repos.executions.patch(run.executionId, { flightLists: plan });
@@ -757,7 +754,7 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
         const now: ConfirmSummary['stop'] =
           plan.returnsStopped !== null
             ? 'returns-stopped'
-            : patienceSpent(standings, plan.confirm?.patience ?? DEFAULT_FLIGHT_READ_PATIENCE)
+            : patienceSpent(standings, patienceOf(plan.confirm))
               ? 'patience'
               : null;
         if (now !== null && !stopped) {

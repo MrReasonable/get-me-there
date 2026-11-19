@@ -11,6 +11,7 @@ export {
   DEFAULT_FLIGHT_READ_PATIENCE,
   EMPTY_STANDINGS,
   improves,
+  patienceOf,
   patienceSpent,
   type Standings,
   uncheckedCheaper,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_DISCOVERY_REFRESH_DAYS } from '../alerts/evaluate.js';
 import {
   readSharedSettings,
   SHARED_WORKER_SETTINGS,
@@ -556,7 +557,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
   const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
   const flightReadPatience = r.int('FLIGHT_READ_PATIENCE', 3, 50) ?? DEFAULT_FLIGHT_READ_PATIENCE;
-  const discoveryRefreshDays = r.int('DISCOVERY_REFRESH_DAYS', 1, 30) ?? 7;
+  const discoveryRefreshDays = r.int('DISCOVERY_REFRESH_DAYS', 1, 30) ?? DEFAULT_DISCOVERY_REFRESH_DAYS;
   const newSearchSources = {
     discovery: r.sourceList('NEW_SEARCH_DISCOVERY') ?? null,
     verification: r.sourceList('NEW_SEARCH_VERIFICATION') ?? null,

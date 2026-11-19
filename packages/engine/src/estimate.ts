@@ -3,7 +3,6 @@ import {
   type CellKey,
   CONFIRM_TARGET,
   cellKeyString,
-  DEFAULT_FLIGHT_READ_PATIENCE,
   type DefinitionSnapshot,
   type DiscoveryCapability,
   datePairCount,
@@ -14,6 +13,7 @@ import {
   flightLimitsOf,
   microGbpToPence,
   type ProviderId,
+  patienceOf,
   RETURN_SECOND_OUTBOUND_RATE,
   type SourceKind,
   type Stage,
@@ -652,14 +652,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   if (plan.returns) {
     const wanted = confirmFinished(plan)
       ? { typical: 0, max: 0 }
-      : flightPairsWanted(
-          ctx,
-          snapshot,
-          exec.definitionId,
-          phase,
-          plan.confirm?.patience ?? DEFAULT_FLIGHT_READ_PATIENCE,
-          done,
-        );
+      : flightPairsWanted(ctx, snapshot, exec.definitionId, phase, patienceOf(plan.confirm), done);
     return withFlights(ctx, est, wanted, phase);
   }
   const left = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
