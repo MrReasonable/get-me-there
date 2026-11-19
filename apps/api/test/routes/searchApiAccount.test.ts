@@ -49,8 +49,16 @@ describe('GET /api/searchapi/account', () => {
 
   it('with no SearchApi key set, the app’s own cache answers null and asks nothing', async () => {
     h = await createHarness();
+    // why: the harness's http kit is real; a request made would be the account read, recorded here
+    const asked: string[] = [];
+    const original = h.ports.http.request;
+    h.ports.http.request = (r) => {
+      asked.push(r.providerId);
+      return original(r);
+    };
     const res = await h.request('/api/searchapi/account');
     expect(await res.json()).toEqual({ account: null });
+    expect(asked).toEqual([]);
   });
 
   it('needs the basic-auth login', async () => {

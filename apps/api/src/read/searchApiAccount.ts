@@ -2,7 +2,8 @@
  * The api's view of SearchApi's own balance (settings plan ruling 10). `GET /api/searchapi/account` reads it through
  * this cache: a balance read is kept ten minutes on the injected clock, dropped when a run that called SearchApi ends
  * (the engine's run watch), and shared between reads made while one is out. A failure (no answer, a refused key, an
- * answer that cannot be read) is `null` and is kept a minute, so a page polling the route never queues a question per
+ * answer that cannot be read) is kept a minute and answered with the last good read, its own `fetchedAt` telling the page
+ * how old it is ("as of 14:05"), for up to 24 hours after that read; with no good read in that window it is `null`, so a page polling the route never queues a question per
  * poll against a SearchApi that is down. No key set: `null`, nothing asked.
  *
  * The cache lives in the pass of the app that built it: a save restarts the app in place (settings plan ruling 6), so a
@@ -17,6 +18,8 @@ import { providerScopes } from './usage.js';
 export const ACCOUNT_TTL_MS = 10 * 60 * 1000;
 /** How long a failed read is served as `null` before SearchApi is asked again. */
 export const ACCOUNT_FAILURE_TTL_MS = 60 * 1000;
+/** How long after its read the last good balance is still served when a refresh fails (controller ruling R10). */
+export const ACCOUNT_STALE_MAX_MS = 24 * 60 * 60 * 1000;
 
 export interface SearchApiAccountPort {
   /** The balance, or null with no key or no answer. Never rejects. */
@@ -37,6 +40,8 @@ export function createSearchApiAccount(o: {
   const stop = new AbortController();
   const now = (): number => Date.parse(o.clock.now());
   let kept: { value: SearchApiAccount | null; until: number; callsAtRead: number } | null = null;
+  // why: kept apart from `kept`, which a run's end drops: the last good read is what a failed refresh falls back on
+  let lastGood: SearchApiAccount | null = null;
   let inFlight: Promise<SearchApiAccount | null> | null = null;
 
   async function ask(fetchBalance: NonNullable<typeof o.fetch>): Promise<SearchApiAccount | null> {
@@ -48,8 +53,15 @@ export function createSearchApiAccount(o: {
       // why: a balance is a courtesy; the answer's reason is already in the provider's own log line
       value = null;
     }
-    kept = { value, until: now() + (value === null ? ACCOUNT_FAILURE_TTL_MS : ACCOUNT_TTL_MS), callsAtRead };
-    return value;
+    if (value !== null) lastGood = value;
+    const failed = value === null;
+    // why: controller ruling R10 — a failed refresh serves the last good read with its own fetchedAt, for up to 24 hours
+    const served =
+      failed && lastGood !== null && now() - Date.parse(lastGood.fetchedAt) <= ACCOUNT_STALE_MAX_MS
+        ? lastGood
+        : value;
+    kept = { value: served, until: now() + (failed ? ACCOUNT_FAILURE_TTL_MS : ACCOUNT_TTL_MS), callsAtRead };
+    return served;
   }
 
   return {
@@ -63,6 +75,7 @@ export function createSearchApiAccount(o: {
       return inFlight;
     },
     runEnded: () => {
+      // why: a billed call that lands while a read is in flight is not seen here; the next run's end or the TTL catches it
       if (kept !== null && o.callsMade() !== kept.callsAtRead) kept = null;
     },
     close: () => stop.abort(),

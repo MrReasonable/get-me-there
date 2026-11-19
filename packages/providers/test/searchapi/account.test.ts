@@ -102,10 +102,26 @@ describe('searchApiAccount (synthetic bodies)', () => {
     for (const line of k.log.lines) expect(line).not.toContain(KEY.reveal());
   });
 
-  it('a timeout gives null, with the key in no log line', async () => {
-    server.use(http.get(ME, ({ request }) => hangUntilAborted(request)));
-    const k = makeKit();
+  it('a timeout gives null after exactly one attempt, with the key in no log line', async () => {
+    let attempts = 0;
+    server.use(
+      http.get(ME, ({ request }) => {
+        attempts += 1;
+        return hangUntilAborted(request);
+      }),
+    );
+    // why: the limits as wired (10 s timeout, no transport retry), at rates that never queue
+    const k = makeKit({
+      limits: {
+        'searchapi-account': {
+          ...searchApiAccountHttpLimits({ maxWaitSeconds: 3900 }),
+          ratePerMinute: 600,
+          ratePerHour: 36_000,
+        },
+      },
+    });
     await expect(ask(k)).resolves.toBeNull();
+    expect(attempts).toBe(1);
     for (const line of k.log.lines) expect(line).not.toContain(KEY.reveal());
   }, 15_000);
 
@@ -156,7 +172,11 @@ describe('the account id (unledgered, its own limits)', () => {
       costPerCallMicroGbp: 0,
       requestTimeoutSeconds: 10,
       concurrency: 1,
+      retryTransport: false,
+      // why: never the shared hour-long wait: a read that cannot start within its timeout is dropped
+      maxWaitSeconds: 10,
     });
+    expect(searchApiAccountHttpLimits({ maxWaitSeconds: 3 }).maxWaitSeconds).toBe(3);
   });
   const req = (path: string, method: 'GET' | 'POST' = 'GET') => ({
     providerId: 'searchapi-account' as const,

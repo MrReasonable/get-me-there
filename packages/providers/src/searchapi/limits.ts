@@ -78,6 +78,9 @@ export function searchApiHttpLimits(
   };
 }
 
+/** The longest the account read waits for its limiter's slot. */
+export const ACCOUNT_MAX_WAIT_SECONDS = 10;
+
 /**
  * The account read's limits (settings plan ruling 10): the same host, never ledgered (`billable: 'never'` and the
  * unledgered id), no response cache, its own limiter, so it takes no reservation, writes no row and still works once the
@@ -92,7 +95,10 @@ export function searchApiAccountHttpLimits(cfg: Pick<Config, 'maxWaitSeconds'>):
     concurrency: 1,
     billable: 'never',
     costPerCallMicroGbp: 0,
-    maxWaitSeconds: cfg.maxWaitSeconds,
+    // why: a balance is a courtesy the top bar waits on: a read that cannot start within its own timeout is not worth
+    // queueing for the shared hour-long wait, and a timeout is not retried (one attempt, as the worker's status read)
+    maxWaitSeconds: Math.min(cfg.maxWaitSeconds, ACCOUNT_MAX_WAIT_SECONDS),
     requestTimeoutSeconds: 10,
+    retryTransport: false,
   };
 }

@@ -1,7 +1,7 @@
 import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
 import { RunProgress, type RunProgressRun } from '../../src/components/RunProgress.js';
 import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
@@ -155,6 +155,8 @@ describe('the main path in the shell says no set-up term (spec rev 55 §3, §11;
   }
 });
 
+afterEach(() => vi.useRealTimers());
+
 describe('the top bar and run progress say no banned word, no set-up term and no "£" outside a cost (Task 4)', () => {
   it('the health line with problems, SearchApi’s credits left, the spend and a running search', async () => {
     server.use(
@@ -191,6 +193,9 @@ describe('the top bar and run progress say no banned word, no set-up term and no
   });
 
   it('SearchApi’s own balance, with its reset day, says credits and no banned word', async () => {
+    // why: the age of a balance read is judged against the clock; pin it, never the wall
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
     server.use(
       http.get(`${API}/budget`, () =>
         HttpResponse.json(budgetResponse({ scopes: [usage('global-month', 0, 35_000_000, 0)] })),
@@ -201,7 +206,7 @@ describe('the top bar and run progress say no banned word, no set-up term and no
             remaining: 9_988,
             monthlyAllowance: 10_000,
             periodEnd: '2026-12-01',
-            fetchedAt: new Date().toISOString(),
+            fetchedAt: '2026-11-19T14:05:00.000Z',
           },
         }),
       ),

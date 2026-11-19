@@ -37,20 +37,25 @@ const SAMPLES: Record<string, unknown[][]> = {
     ['1', '1'],
   ],
   'estimate.billed': [
-    ['120', '9,880', 'SearchApi', 'month'],
-    ['12', '91', 'SearchApi', 'lifetime'],
+    ['120', '9,880', 'SearchApi', 'month', 'credits'],
+    ['12', '91', 'SearchApi', 'lifetime', 'credits'],
   ],
-  'estimate.billedNoCap': [['120', 'SearchApi']],
-  'estimate.callsTag': [['120', 'SearchApi']],
+  'estimate.billedNoCap': [['120', 'SearchApi', 'credits']],
+  'estimate.callsTag': [['120', 'SearchApi', 'credits']],
+  'estimate.unit': [
+    ['searchapi', '1'],
+    ['searchapi', '120'],
+    ['camoufox', '120'],
+  ],
   'estimate.withTag': [['Search now', 'about £1.20']],
   'estimate.notUsed': [
-    ['Google Flights via SearchApi', 'no calls left this month', '£3.40'],
+    ['Google Flights via SearchApi', 'no credits left this month', '£3.40'],
     ['The browser worker', 'over its page limit for one run', null],
   ],
   'estimate.softCost': [['£1.20', '£1.00', 'Search now']],
   'estimate.softShare': [
-    ['SearchApi', 'month', 'Search now'],
-    ['SearchApi', 'lifetime', 'Search again'],
+    ['SearchApi', 'month', 'Search now', 'credits'],
+    ['SearchApi', 'lifetime', 'Search again', 'credits'],
   ],
   'refused.capResets': [['1 Nov 2026']],
 };
@@ -104,12 +109,28 @@ describe('the estimate and refusal catalogues (spec §11 banned words)', () => {
   it('reads as the spec words it (spec rev 55 §11)', () => {
     const L = ESTIMATE_COPY;
     expect(L.withTag('Search now', 'about £1.20')).toBe('Search now · about £1.20');
-    expect(L.billed('120', '9,880', 'SearchApi', 'month')).toBe(
-      'uses about 120 of the 9,880 SearchApi calls left this month',
+    expect(L.billed('120', '9,880', 'SearchApi', 'month', 'credits')).toBe(
+      'uses about 120 of the 9,880 SearchApi credits left this month',
     );
-    expect(L.billed('12', '91', 'SearchApi', 'lifetime')).toBe(
-      'uses about 12 of the 91 SearchApi calls left on your trial',
+    expect(L.billed('12', '91', 'SearchApi', 'lifetime', 'credits')).toBe(
+      'uses about 12 of the 91 SearchApi credits left on your trial',
     );
+    // why: controller ruling R9 — SearchApi's unit is credits in every sentence; another source keeps its calls
+    expect(L.unit('searchapi', '1')).toBe('credit');
+    expect(L.unit('searchapi', '120')).toBe('credits');
+    expect(L.unit('camoufox', '120')).toBe('calls');
+    const searchApiSentences = [
+      L.billed('120', '9,880', 'SearchApi', 'month', 'credits'),
+      L.billed('12', '91', 'SearchApi', 'lifetime', 'credits'),
+      L.billedNoCap('300', 'SearchApi', 'credits'),
+      L.callsTag('120', 'SearchApi', 'credits'),
+      L.softShare('SearchApi', 'month', 'Search now', 'credits'),
+      L.softShare('SearchApi', 'lifetime', 'Search now', 'credits'),
+      L.notUsed('SearchApi', L.blockedWhySearchApi['provider-month'], null),
+      L.notUsed('SearchApi', L.blockedWhySearchApi['provider-lifetime'], null),
+    ];
+    for (const text of searchApiSentences) expect(text).not.toMatch(/\b(calls?|searches)\b/i);
+    expect(L.billed('9', '90', 'Aviasales', 'month', 'calls')).toContain('calls');
     expect(L.aboutHours(1, false)).toBe('about 1 hour');
     expect(L.aboutHours(1, true)).toBe('about 1½ hours');
     expect(L.nothingNew('1')).toBe('Nothing new to ask: 1 date kept from earlier searches');

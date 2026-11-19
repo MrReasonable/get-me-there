@@ -4,6 +4,7 @@ import { asIsoDate, asIsoDateTime, fixedClock, type SearchApiAccount } from '@gm
 import { describe, expect, it } from 'vitest';
 import {
   ACCOUNT_FAILURE_TTL_MS,
+  ACCOUNT_STALE_MAX_MS,
   ACCOUNT_TTL_MS,
   createSearchApiAccount,
 } from '../../src/read/searchApiAccount.js';
@@ -87,6 +88,43 @@ describe('createSearchApiAccount', () => {
     expect(await r.port.read()).toBeNull(); // a throw is a failure too
     r.clock.advance(ACCOUNT_FAILURE_TTL_MS);
     expect((await r.port.read())?.remaining).toBe(38);
+  });
+
+  it('a refresh that fails after a good read serves that read, with its own fetchedAt, for 24 hours', async () => {
+    const r = rig([account(38, T0), null, 'throws']);
+    expect((await r.port.read())?.remaining).toBe(38);
+    r.clock.advance(ACCOUNT_TTL_MS);
+    // the refresh fails: the last good read, still stamped with when it was read
+    expect(await r.port.read()).toEqual(account(38, T0));
+    r.clock.advance(ACCOUNT_FAILURE_TTL_MS);
+    expect(await r.port.read()).toEqual(account(38, T0)); // a throw falls back alike
+    expect(r.asked()).toBe(3);
+  });
+
+  it('a failed refresh serves a read made 24 hours ago, not one made longer ago', async () => {
+    const r = rig([account(38, T0), null, null]);
+    await r.port.read();
+    r.clock.advance(ACCOUNT_STALE_MAX_MS); // exactly 24 h after fetchedAt
+    expect(await r.port.read()).toEqual(account(38, T0));
+    r.clock.advance(ACCOUNT_FAILURE_TTL_MS); // now past 24 h
+    expect(await r.port.read()).toBeNull();
+  });
+
+  it('a run end drops the cache but not the last good read a failed refresh falls back on', async () => {
+    const r = rig([account(38, T0), null]);
+    await r.port.read();
+    r.ledger(2);
+    r.port.runEnded();
+    expect(await r.port.read()).toEqual(account(38, T0));
+  });
+
+  it('a later good read replaces the one kept', async () => {
+    const r = rig([account(38, T0), account(30, '2026-11-19T14:20:00.000Z'), null]);
+    await r.port.read();
+    r.clock.advance(ACCOUNT_TTL_MS);
+    await r.port.read();
+    r.clock.advance(ACCOUNT_TTL_MS);
+    expect((await r.port.read())?.remaining).toBe(30);
   });
 
   it('without a key it answers null and asks nothing', async () => {

@@ -310,9 +310,18 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       home,
       runWatch: {
         started: () => reloader.watch.started(),
+        // why: the restart check first, so a failure of the balance cache can never delay or lose it; the cache's own
+        // failure is logged and never thrown into the run registry's settle
         ended: () => {
-          searchApiAccount.runEnded();
           reloader.watch.ended();
+          try {
+            searchApiAccount.runEnded();
+          } catch (e) {
+            log.error(
+              { err: { message: safeMessage(e, secrets) } },
+              'the SearchApi balance cache check failed',
+            );
+          }
         },
       },
     });

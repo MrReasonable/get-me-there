@@ -272,20 +272,25 @@ describe('the limits (Ruling 10)', () => {
     server.use(http.get(`${API}/searchapi/account`, () => HttpResponse.json({ account })));
 
   it('SearchApi: its own balance, with the day a monthly plan resets', async () => {
+    // why: the age of a balance read is judged against the clock; pin it, never the wall
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
     serveLimits(bothWindows);
     serveAccount({
       remaining: 9_988,
       monthlyAllowance: 10_000,
       periodEnd: '2026-12-01',
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: '2026-11-19T14:05:00.000Z',
     });
     renderWithProviders(<Limits />);
     expect(await screen.findByText('SearchApi: 9,988 credits left · resets 1 Dec')).toBeInTheDocument();
   });
 
   it('SearchApi: a balance read more than ten minutes ago says when', async () => {
+    // why: eleven minutes after the read; London time is GMT in winter
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T14:16:00.000Z'));
     serveLimits(bothWindows, providers('trial'));
-    // why: 2026-11-19 is a day with an eleven-minute-old read at any moment the test runs; London time is GMT in winter
     serveAccount({
       remaining: 38,
       monthlyAllowance: 0,

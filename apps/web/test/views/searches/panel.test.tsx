@@ -1,7 +1,7 @@
 import { DEFAULT_CRON } from '@gmt/core';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DefinitionResponse, ProvidersResponse } from '../../../src/api/types.js';
 import { Limits } from '../../../src/components/TopBar.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
@@ -32,6 +32,7 @@ const N = COPY.newSearch;
 const W = COPY.repeatWeekly;
 
 beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.useRealTimers());
 
 /**
  * Every install source set up: the Aviasales cache and SearchApi (the fixture's), and the browser. The presets are what
@@ -215,6 +216,9 @@ describe('the panel: what is in view (Ruling 13)', () => {
 
 describe('the panel and the top bar say SearchApi’s own balance alike (settings plan ruling 10)', () => {
   it('both show its credits and its reset day, and Where to look uses credits, not calls', async () => {
+    // why: the age of a balance read is judged against the clock; pin it, never the wall
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
     serve();
     server.use(
       http.get(`${API}/searchapi/account`, () =>
@@ -223,7 +227,7 @@ describe('the panel and the top bar say SearchApi’s own balance alike (setting
             remaining: 9_988,
             monthlyAllowance: 10_000,
             periodEnd: '2026-12-01',
-            fetchedAt: new Date().toISOString(),
+            fetchedAt: '2026-11-19T14:05:00.000Z',
           },
         }),
       ),
@@ -513,9 +517,9 @@ describe('the sentence and the press (Ruling 13)', () => {
     await user.click(source(SEARCHAPI));
     await ready();
     expect(screen.getByRole('status', { name: N.estimateRegion })).toHaveTextContent(
-      'uses about 140 of the 9,385 SearchApi calls left this month',
+      'uses about 140 of the 9,385 SearchApi credits left this month',
     );
-    expect(press()).toHaveAccessibleName('Search · 140 SearchApi calls');
+    expect(press()).toHaveAccessibleName('Search · 140 SearchApi credits');
   });
 });
 
