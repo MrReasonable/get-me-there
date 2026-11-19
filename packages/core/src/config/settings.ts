@@ -95,6 +95,19 @@ export function layerSettings(
  */
 export const SMTP_ALL_OR_NOTHING = 'SMTP settings are all or nothing';
 
+/** Spec §8.3: the mail settings that are all or nothing, in the order the schema reads them. */
+export const SMTP_REQUIRED_NAMES = [
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASS',
+  'ALERT_EMAIL_TO',
+  'ALERT_EMAIL_FROM',
+] as const satisfies readonly OwnedName[];
+
+/** Every owned mail setting: the all-or-nothing ones and SMTP_TLS, which has a default. Email is off without them. */
+export const EMAIL_NAMES: readonly OwnedName[] = [...SMTP_REQUIRED_NAMES, 'SMTP_TLS'];
+
 /** The page's label for each owned name: the one copy, read by the page and by the api's 422. */
 export const SETTING_LABELS: Readonly<Record<OwnedName, string>> = {
   TRAVELPAYOUTS_TOKEN: 'Travelpayouts token',

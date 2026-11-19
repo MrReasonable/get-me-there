@@ -18,7 +18,7 @@ import {
   TRAVELPAYOUTS_DEFAULTS,
 } from './presets.js';
 import { Secret } from './secret.js';
-import { OWNED_NAMES, SMTP_ALL_OR_NOTHING } from './settings.js';
+import { OWNED_NAMES, SMTP_ALL_OR_NOTHING, SMTP_REQUIRED_NAMES } from './settings.js';
 
 /**
  * Parsed configuration. Spec §12: parsed once in the api bootstrap; empty = unset; invalid or
@@ -463,14 +463,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
 
   // smtp: all or nothing (spec §8.3)
-  const smtpNames = [
-    'SMTP_HOST',
-    'SMTP_PORT',
-    'SMTP_USER',
-    'SMTP_PASS',
-    'ALERT_EMAIL_TO',
-    'ALERT_EMAIL_FROM',
-  ] as const;
+  const smtpNames = SMTP_REQUIRED_NAMES;
   const smtpValues = smtpNames.map((n) => r.raw(n));
   const smtpSetCount = smtpValues.filter((v) => v !== undefined).length;
   let smtp: Config['smtp'] = null;

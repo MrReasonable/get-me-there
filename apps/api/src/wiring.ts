@@ -13,6 +13,7 @@ import {
   type Config,
   type ConfigError,
   type ConfigResult,
+  EMAIL_NAMES,
   type FlightProvider,
   flightRequestSeconds,
   isOwnedName,
@@ -143,11 +144,13 @@ export function loadBootConfig(env: Env): Config {
 
 /**
  * The full config of a boot and what it did with the owned names (`imported`: the rows it wrote, none without
- * `writeImports`); `warnings` are variables ignored, logged by name.
+ * `writeImports`); `warnings` are variables ignored, logged by name; `secrets`, the config's and every stored secret
+ * (collectSecrets), for the bootstraps' scrub lists before anything else is built.
  */
 export interface LoadedConfig extends SettingsReport {
   config: Config;
   warnings: ConfigError[];
+  secrets: Secret[];
 }
 
 /** Each secret of `more` not already in `into`, by value, appended to it (the lists scrub by value). */
@@ -169,17 +172,6 @@ export function logSettingsLoaded(loaded: LoadedConfig, log: Logger): void {
   for (const w of loaded.warnings) log.warn({ field: w.field }, w.message);
 }
 
-/** Spec §8.3: email's settings are all or nothing, so one of them left out of a boot can leave out the rest. */
-const EMAIL_NAMES: readonly OwnedName[] = [
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_TLS',
-  'SMTP_USER',
-  'SMTP_PASS',
-  'ALERT_EMAIL_TO',
-  'ALERT_EMAIL_FROM',
-];
-
 /**
  * Settings plan rulings 2 and 3, run under the app lock: the stored settings laid over the environment
  * (core layerSettings) and parsed through the one core schema. A field the schema refuses that is an owned name has its
@@ -192,7 +184,8 @@ const EMAIL_NAMES: readonly OwnedName[] = [
 export function loadConfig(env: Env, db: Db, opts: { clock: Clock; writeImports: boolean }): LoadedConfig {
   const repo = new SettingsRepo(db);
   const run = (): LoadedConfig => {
-    const layered = layerSettings(env, repo.all());
+    const rows = repo.all();
+    const layered = layerSettings(env, rows);
     const refused = new Set<OwnedName>();
     const leftOut = new Set<OwnedName>();
     for (;;) {
@@ -201,14 +194,12 @@ export function loadConfig(env: Env, db: Db, opts: { clock: Clock; writeImports:
       const result = parseWith(parseConfig, merged);
       if (result.ok) {
         const imported = opts.writeImports ? layered.imports.filter((n) => !leftOut.has(n)) : [];
-        if (imported.length > 0)
-          repo.write(
-            imported.map((name) => ({ name, value: layered.merged[name] ?? '' })),
-            opts.clock.now(),
-          );
+        const importedRows = imported.map((name) => ({ name, value: layered.merged[name] ?? '' }));
+        if (importedRows.length > 0) repo.write(importedRows, opts.clock.now());
         return {
           config: result.config,
           warnings: result.warnings,
+          secrets: collectSecrets(result.config, [...rows, ...importedRows]),
           imported,
           envIgnored: layered.envIgnored,
           setAside: OWNED_NAMES.filter((n) => refused.has(n)),

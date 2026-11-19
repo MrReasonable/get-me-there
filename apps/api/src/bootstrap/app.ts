@@ -247,6 +247,8 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       if (e instanceof InvalidConfigError) throw new BootError(e.message, EXIT.badConfig);
       throw e;
     }
+    // why: before anything else is built, so a failure from here on that quotes a stored key is scrubbed of it
+    addSecrets(secrets, loaded.secrets);
     const ports = buildFromDb(loaded.config, db, {
       log,
       clock,
@@ -256,7 +258,6 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         setAside: loaded.setAside,
       },
     });
-    addSecrets(secrets, ports.secrets);
     logSettingsLoaded(loaded, log);
     seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
     // Spec §7 (revision 55): at least 5,000 airports with tz, and every airport a live (not soft-deleted) definition

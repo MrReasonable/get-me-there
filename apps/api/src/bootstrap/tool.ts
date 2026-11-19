@@ -30,7 +30,6 @@ import {
   addSecrets,
   bootSecrets,
   buildFromDb,
-  collectSecrets,
   InvalidConfigError,
   type LoadedConfig,
   loadBootConfig,
@@ -326,7 +325,6 @@ async function runToolSteps(
       const ready = prepareConfig(env, db, clock, log, prepared.precheck, err, secrets);
       if (!ready.ok) return ready.code;
       const ports = buildFromDb(ready.config, db, { log, clock });
-      addSecrets(secrets, ports.secrets);
       seedIfNeeded(ports, AIRPORTS_DATA_DIR, out);
       const code = await prepared.run(ports, {
         signal: ac.signal,
@@ -375,7 +373,8 @@ function prepareConfig(
     }
     throw e;
   }
-  addSecrets(secrets, collectSecrets(loaded.config));
+  // why: before anything else is built, so a failure from here on that quotes a stored key is scrubbed of it
+  addSecrets(secrets, loaded.secrets);
   logSettingsLoaded(loaded, log);
   const refusal = precheck?.(loaded.config) ?? null;
   if (refusal !== null) {

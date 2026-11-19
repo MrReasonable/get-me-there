@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseBootConfig, parseConfig } from '../../src/config/schema.js';
 import {
+  EMAIL_NAMES,
   isOwnedName,
   layerSettings,
   OWNED_NAMES,
@@ -12,6 +13,7 @@ import {
   SETTING_LABELS,
   SETTINGS_NAMES,
   SMTP_ALL_OR_NOTHING,
+  SMTP_REQUIRED_NAMES,
   settingRefusal,
 } from '../../src/config/settings.js';
 import { findBannedWords } from '../../src/text/bannedWords.js';
@@ -51,6 +53,30 @@ describe('SETTINGS_NAMES (ruling 1)', () => {
     for (const n of ['SEARCHAPI_TRIAL_USED', 'CAMOUFOX_ENABLED', 'DATABASE_PATH', 'searchapi_key', ''])
       expect(isOwnedName(n), n).toBe(false);
     expect(ownedNameSchema.options).toEqual(OWNED_NAMES);
+  });
+});
+
+describe('the mail group (spec §8.3: all or nothing)', () => {
+  it('names the six settings email needs, in the schema’s order, and every mail setting with SMTP_TLS', () => {
+    expect(SMTP_REQUIRED_NAMES).toEqual([
+      'SMTP_HOST',
+      'SMTP_PORT',
+      'SMTP_USER',
+      'SMTP_PASS',
+      'ALERT_EMAIL_TO',
+      'ALERT_EMAIL_FROM',
+    ]);
+    expect([...EMAIL_NAMES].sort()).toEqual(
+      [
+        'SMTP_HOST',
+        'SMTP_PORT',
+        'SMTP_TLS',
+        'SMTP_USER',
+        'SMTP_PASS',
+        'ALERT_EMAIL_TO',
+        'ALERT_EMAIL_FROM',
+      ].sort(),
+    );
   });
 });
 

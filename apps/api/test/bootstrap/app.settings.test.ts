@@ -2,7 +2,7 @@
 // as before, then lay the stored settings over the environment under the lock. A first boot imports the owned lines and
 // logs their names only; a value the schema refuses is set aside and the app still boots; an env line the table owns is
 // reported, never applied; the refusals still come before any migration or import; the tool bootstrap writes nothing.
-import { copyFileSync, cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BudgetExceeded,
@@ -182,7 +182,8 @@ describe('the app boot lays the stored settings over the environment (settings p
   });
 
   it('a stored value refused after a bound change is set aside and reported; its row stays for Settings to fix', async () => {
-    const dbPath = seededDb([{ name: 'SEARCHAPI_BILLING_DAY', value: '31' }]);
+    // why: 2899 is out of the 1–28 bound and distinctive, so its absence from the log means something
+    const dbPath = seededDb([{ name: 'SEARCHAPI_BILLING_DAY', value: '2899' }]);
     const lines: string[] = [];
     const running = await boot(
       devEnv(dbPath, { SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd' }),
@@ -194,9 +195,13 @@ describe('the app boot lays the stored settings over the environment (settings p
     } finally {
       await running.close();
     }
-    expect(storedRows(dbPath)).toContainEqual({ name: 'SEARCHAPI_BILLING_DAY', value: '31' });
-    expect(lines.join('')).toContain('"names":["SEARCHAPI_BILLING_DAY"]');
-    expect(lines.join('')).not.toContain('"31"');
+    expect(storedRows(dbPath)).toContainEqual({ name: 'SEARCHAPI_BILLING_DAY', value: '2899' });
+    const setAside = recordsOf(lines).filter((r) => r.msg === 'stored settings set aside for this boot');
+    // why: the line carries the names and pino's own fields, nothing else, so no value can ride along
+    expect(setAside.map(({ level, time, pid, hostname, msg, ...rest }) => rest)).toEqual([
+      { names: ['SEARCHAPI_BILLING_DAY'] },
+    ]);
+    expect(lines.join('')).not.toContain('2899');
   });
 
   it('an env line that differs from a stored row is reported once, not applied', async () => {
@@ -316,6 +321,75 @@ describe('the refusals still come before any migration or import (settings plan 
       holder.release();
       db.close();
     }
+  });
+});
+
+describe('what is checked only once the stored settings are read comes after the backup and the migrations (ruling 3)', {
+  timeout: BOOT_TIMEOUT_MS,
+}, () => {
+  /** A database one migration behind (0014 to come), so a boot or a tool run backs it up and migrates it first. */
+  function behind(): { dir: string; dbPath: string } {
+    const dir = tempDir('gmt-settings-');
+    const dbPath = join(dir, 'old.db');
+    const db = openDatabase(dbPath);
+    applyMigrations(db, migrationsBefore0014());
+    db.close();
+    return { dir, dbPath };
+  }
+  function state(dbPath: string) {
+    const db = openDatabase(dbPath);
+    try {
+      return {
+        pending: pendingMigrations(db, MIGRATIONS_DIR),
+        rows: db.raw.prepare('SELECT COUNT(*) AS n FROM settings').get(),
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  it('a record run without a key: backed up, migrated, then refused with 78 naming both places a key lives', async () => {
+    const { dir, dbPath } = behind();
+    const out: string[] = [];
+    const errors: string[] = [];
+    const code = await runTool(
+      'record',
+      ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03', '--dry-run'],
+      {
+        env: toolEnv(dbPath, { SEARCHAPI_KEY: '' }),
+        out: (l) => out.push(l),
+        err: (l) => errors.push(l),
+        recording: testRecording().recording,
+      },
+    );
+    expect(code).toBe(EXIT.badConfig);
+    expect(errors).toEqual([
+      'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY, set in Settings or .env',
+    ]);
+    expect(out.slice(0, 3)).toEqual([
+      expect.stringMatching(/^backup before 1 migration\(s\)/),
+      `database: ${dbPath}`,
+      'tool lock acquired',
+    ]);
+    expect(out.at(-1)).toBe('tool lock released');
+    expect(readdirSync(join(dir, 'backups'))).toHaveLength(1);
+    expect(state(dbPath)).toEqual({ pending: [], rows: { n: 0 } });
+  });
+
+  it('a bad variable read only when a key is set fails the app boot with 78 after the migrations, importing nothing', async () => {
+    const { dir, dbPath } = behind();
+    const env = devEnv(dbPath, { SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_COST_PER_CALL_MICRO_GBP: '-1' });
+    const err = await boot(env).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({
+      exitCode: EXIT.badConfig,
+      message: expect.stringContaining('SEARCHAPI_COST_PER_CALL_MICRO_GBP'),
+    });
+    expect(String(err)).not.toContain(SENTINEL_SA);
+    expect(readdirSync(join(dir, 'backups'))).toHaveLength(1);
+    expect(state(dbPath)).toEqual({ pending: [], rows: { n: 0 } });
   });
 });
 
