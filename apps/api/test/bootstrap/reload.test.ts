@@ -93,4 +93,19 @@ describe('createReloader (settings plan ruling 6)', () => {
     expect(lines.join('')).toContain('restart check failed');
     expect(lines.join('')).not.toContain(secret.reveal());
   });
+
+  it('a tool run inside the app holds the restart like a run, is named while it waits, and its end restarts', async () => {
+    const { reloader, calls, setBusy } = setup();
+    setBusy(false);
+    reloader.toolStarted('Smoke test');
+    expect(reloader.request()).toBe('after-runs');
+    expect(reloader.tools()).toEqual(['Smoke test']);
+    reloader.watch.ended();
+    await turn();
+    expect(calls).toEqual(['hold']);
+    reloader.toolEnded();
+    await turn();
+    expect(calls).toEqual(['hold', 'reload']);
+    expect(reloader.tools()).toEqual([]);
+  });
 });

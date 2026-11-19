@@ -293,7 +293,7 @@ describe('parseConfig (spec §12)', () => {
       SMTP_HOST: 'smtp.example.com',
       SMTP_PORT: '465',
       SMTP_USER: 'u',
-      SMTP_PASS: 'p',
+      SMTP_PASS: 'p'.repeat(12),
       ALERT_EMAIL_TO: 'a@example.com',
       ALERT_EMAIL_FROM: 'x@example.com',
     };
@@ -349,7 +349,7 @@ describe('parseConfig (spec §12)', () => {
       SMTP_HOST: 'smtp.example.com',
       SMTP_PORT: 'abc',
       SMTP_USER: 'u',
-      SMTP_PASS: 'p',
+      SMTP_PASS: 'p'.repeat(12),
       ALERT_EMAIL_TO: 'a@example.com',
       ALERT_EMAIL_FROM: 'x@example.com',
     };

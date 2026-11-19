@@ -20,6 +20,7 @@ import {
   type Logger,
   layerSettings,
   listRequestSeconds,
+  MIN_SECRET_LENGTH,
   OWNED_NAMES,
   type OwnedName,
   type ParseConfigOptions,
@@ -292,7 +293,7 @@ const SECRET_NAMES: readonly OwnedName[] = SETTINGS_NAMES.filter((s) => s.secret
 /**
  * Every configured secret, for http-kit, recorder and log scrubbing (spec §5.3), and every stored secret setting beside
  * them (Global Constraints: every stored secret joins the boot's secrets list, used by this config or not), each value
- * once.
+ * once; a stored value shorter than MIN_SECRET_LENGTH is no secret the config can use (the schema refuses it).
  */
 export function collectSecrets(config: Config, stored: readonly SettingRow[] = []): Secret[] {
   const out: Secret[] = [];
@@ -302,8 +303,14 @@ export function collectSecrets(config: Config, stored: readonly SettingRow[] = [
   if (config.auth !== null) out.push(config.auth.pass);
   // WP14: the camoufox worker key (spec §2), scrubbed like every other credential.
   if (config.providers.camoufox !== null) out.push(config.providers.camoufox.key);
+  // why: a stored secret shorter than MIN_SECRET_LENGTH is refused by the schema (set aside, never used), and http-kit
+  // refuses to build with one in its list; scrubbing so short a value would rewrite every body that holds it
   for (const row of stored)
-    if (SECRET_NAMES.includes(row.name) && row.value !== '' && !out.some((s) => s.reveal() === row.value))
+    if (
+      SECRET_NAMES.includes(row.name) &&
+      row.value.length >= MIN_SECRET_LENGTH &&
+      !out.some((s) => s.reveal() === row.value)
+    )
       out.push(new Secret(row.value));
   return out;
 }

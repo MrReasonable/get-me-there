@@ -22,7 +22,9 @@ import {
 import { Secret } from './secret.js';
 import {
   DEFAULT_DISCOVERY_REFRESH_DAYS,
+  MIN_SECRET_LENGTH,
   OWNED_NAMES,
+  SECRET_TOO_SHORT,
   SMTP_ALL_OR_NOTHING,
   SMTP_REQUIRED_NAMES,
 } from './settings.js';
@@ -238,6 +240,15 @@ class Reader {
       if (!ids.includes(id.data)) ids.push(id.data);
     }
     return ids;
+  }
+  /**
+   * A secret setting: refused when it is shorter than MIN_SECRET_LENGTH (http-kit refuses to build with one, so a short
+   * stored secret would stop every boot; refused here, it is set aside instead), else as read.
+   */
+  secret(name: string): string | undefined {
+    const v = this.raw(name);
+    if (v !== undefined && v.length < MIN_SECRET_LENGTH) this.fail(name, SECRET_TOO_SHORT);
+    return v;
   }
   fail(field: string, message: string): void {
     this.errors.push({ field, message });
@@ -464,7 +475,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     r.fail('SCHEDULER_TIMEZONE', `unknown IANA time zone: ${schedulerTimezone}`);
 
   // providers
-  const tpToken = r.str('TRAVELPAYOUTS_TOKEN');
+  const tpToken = r.secret('TRAVELPAYOUTS_TOKEN');
   const travelpayouts =
     tpToken === undefined
       ? null
@@ -472,7 +483,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
           token: new Secret(tpToken),
           limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS, 48),
         };
-  const saKey = r.str('SEARCHAPI_KEY');
+  const saKey = r.secret('SEARCHAPI_KEY');
   const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
   const preset = PLAN_PRESETS[plan];
   // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
@@ -515,6 +526,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   } else if (smtpSetCount === smtpNames.length) {
     // why: every value is known set here; the tuple parse gives typed strings without defaulted branches.
     const [host, , user, pass, to, from] = smtpTuple.parse(smtpValues);
+    r.secret('SMTP_PASS');
     const smtpPort = r.int('SMTP_PORT', 1, 65535);
     const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? 'implicit';
     if (!isMailbox(to))

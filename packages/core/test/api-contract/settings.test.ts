@@ -57,7 +57,7 @@ describe('the settings contract', () => {
     expect(settingsUpdateRequestSchema.safeParse({ changes: {}, extra: 1 }).success).toBe(false);
   });
 
-  it("a save's answer applies now, or after the runs it names", () => {
+  it("a save's answer applies now, after the runs it names, or not at all when nothing changed", () => {
     expect(settingsUpdateResponseSchema.safeParse({ warnings: [], applies: 'now' }).success).toBe(true);
     expect(
       settingsUpdateResponseSchema.safeParse({ warnings: ['w'], applies: 'after-runs', running: ['A'] })
@@ -68,17 +68,11 @@ describe('the settings contract', () => {
     );
   });
 
-  it('a refusal names an owned setting, with its label and words beside the envelope field and message', () => {
-    const words = 'Choose a whole number of reads from 3 to 50.';
-    const one = {
-      field: 'FLIGHT_READ_PATIENCE',
-      message: words,
-      name: 'FLIGHT_READ_PATIENCE',
-      label: 'L',
-      words,
-    };
+  it("a refusal is the envelope's field and message: the owned name and the words, nothing else", () => {
+    const one = { field: 'FLIGHT_READ_PATIENCE', message: 'Choose a whole number of reads from 3 to 50.' };
     expect(settingRefusalSchema.safeParse(one).success).toBe(true);
-    expect(settingRefusalSchema.safeParse({ ...one, name: 'PORT' }).success).toBe(false);
+    expect(settingRefusalSchema.safeParse({ ...one, field: 'PORT' }).success).toBe(false);
+    expect(settingRefusalSchema.safeParse({ ...one, label: 'L' }).success).toBe(false);
   });
 
   it('the email test takes the form, with the password optional and the port a port', () => {

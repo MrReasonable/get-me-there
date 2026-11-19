@@ -8,10 +8,12 @@ import {
   EMAIL_NAMES,
   isOwnedName,
   layerSettings,
+  MIN_SECRET_LENGTH,
   OWNED_NAMES,
   type OwnedName,
   ownedNameSchema,
   poundsToPence,
+  SECRET_TOO_SHORT,
   SETTING_LABELS,
   SETTINGS_NAMES,
   SMTP_ALL_OR_NOTHING,
@@ -220,6 +222,42 @@ describe('SETTING_LABELS and settingRefusal (the page and the 422 share them)', 
     const all = OWNED_NAMES.flatMap((n) => [SETTING_LABELS[n], settingRefusal(n, { field: n, message: '' })]);
     expect(all.join(' ')).toContain('credits');
     expect(all.join(' ')).not.toMatch(/searches left|SearchApi searches/);
+  });
+
+  it('a secret shorter than the floor http-kit keeps is refused by the schema, in words naming its label', () => {
+    expect(MIN_SECRET_LENGTH).toBe(8);
+    const base = {
+      NODE_ENV: 'development',
+      DATABASE_PATH: ':memory:',
+      BIND_ADDRESS: '127.0.0.1',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '465',
+      SMTP_USER: 'alerts@example.com',
+      ALERT_EMAIL_TO: 'operator@example.com',
+      ALERT_EMAIL_FROM: 'alerts@example.com',
+    };
+    const short = 'x'.repeat(MIN_SECRET_LENGTH - 1);
+    const long = 'x'.repeat(MIN_SECRET_LENGTH);
+    const refused = parseConfig(
+      { ...base, TRAVELPAYOUTS_TOKEN: short, SEARCHAPI_KEY: short, SMTP_PASS: short },
+      { realpath: (p) => p },
+    );
+    expect(refused.ok ? [] : refused.errors).toEqual([
+      { field: 'TRAVELPAYOUTS_TOKEN', message: SECRET_TOO_SHORT },
+      { field: 'SEARCHAPI_KEY', message: SECRET_TOO_SHORT },
+      { field: 'SMTP_PASS', message: SECRET_TOO_SHORT },
+    ]);
+    const kept = parseConfig(
+      { ...base, TRAVELPAYOUTS_TOKEN: long, SEARCHAPI_KEY: long, SMTP_PASS: long },
+      { realpath: (p) => p },
+    );
+    expect(kept.ok).toBe(true);
+    expect(settingRefusal('SMTP_PASS', { field: 'SMTP_PASS', message: SECRET_TOO_SHORT })).toBe(
+      'Mail password is too short: it needs at least 8 characters.',
+    );
+    expect(settingRefusal('SEARCHAPI_KEY', { field: 'SEARCHAPI_KEY', message: SECRET_TOO_SHORT })).toBe(
+      'SearchApi key is too short: it needs at least 8 characters.',
+    );
   });
 
   it('the half-set mail rule in the schema uses the message settingRefusal recognises', () => {

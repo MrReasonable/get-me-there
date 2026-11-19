@@ -1,6 +1,6 @@
 /** The single HTTP surface of spec §10, mounted from `@gmt/core` api-contract ROUTES. */
 import { randomUUID } from 'node:crypto';
-import { apiContract, type Secret } from '@gmt/core';
+import { apiContract, MIN_SECRET_LENGTH, type Secret } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
 import { type Engine, TEST_SEND_LIMIT, type TestSendLimit, type TransportFactory } from '@gmt/engine';
 import { type Context, Hono } from 'hono';
@@ -52,7 +52,10 @@ export interface AppOptions {
   reload?: ReloadPort;
   /** The environment the stored settings are laid over (settings plan ruling 2); `{}` when absent. */
   settingsEnv?: Record<string, string | undefined>;
-  /** Adds a request's secrets to every scrub list; absent, they join `ports.secrets` only. */
+  /**
+   * Adds a request's secrets to every scrub list (only those of MIN_SECRET_LENGTH or more reach it); absent, they join
+   * `ports.secrets` only.
+   */
   scrub?: (more: readonly Secret[]) => void;
   /** The test-send limit (settings plan ruling 11); the process's one when absent. */
   testSendLimit?: TestSendLimit;
@@ -101,7 +104,13 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     bootId: options.bootId ?? randomUUID(),
     reload: options.reload ?? null,
     settingsEnv: options.settingsEnv ?? {},
-    scrub: options.scrub ?? ((more) => addSecrets(ports.secrets, more)),
+    // why: only a value as long as a secret can be (core MIN_SECRET_LENGTH, which the config refuses below) joins the
+    // shared lists: a shorter one would rewrite every provider body and log line that holds it, for good
+    scrub: (more) => {
+      const kept = more.filter((s) => s.reveal().length >= MIN_SECRET_LENGTH);
+      if (options.scrub === undefined) addSecrets(ports.secrets, kept);
+      else options.scrub(kept);
+    },
     testSendLimit: options.testSendLimit ?? TEST_SEND_LIMIT,
     emailTransport: options.emailTransport,
   };

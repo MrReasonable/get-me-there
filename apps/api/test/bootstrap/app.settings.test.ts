@@ -204,6 +204,35 @@ describe('the app boot lays the stored settings over the environment (settings p
     expect(lines.join('')).not.toContain('2899');
   });
 
+  it('a stored secret shorter than the floor is set aside, so the boot still builds http-kit and serves (fix round 1)', async () => {
+    // why: a row an earlier version could store; http-kit refuses to build with a secret under 8 characters, so before
+    // the schema refused it this row stopped every boot, and its env line could not replace it
+    const dbPath = seededDb([
+      { name: 'TRAVELPAYOUTS_TOKEN', value: 'tp-sh' },
+      { name: 'SMTP_HOST', value: 'smtp.example.com' },
+      { name: 'SMTP_PORT', value: '465' },
+      { name: 'SMTP_USER', value: 'alerts@example.com' },
+      { name: 'SMTP_PASS', value: 'pw-sh' },
+      { name: 'ALERT_EMAIL_TO', value: 'operator@example.com' },
+      { name: 'ALERT_EMAIL_FROM', value: 'alerts@example.com' },
+    ]);
+    const lines: string[] = [];
+    const running = await boot(devEnv(dbPath, { SEARCHAPI_KEY: 'sa-sh' }), lines);
+    try {
+      expect(running.ports.settingsReport.setAside).toEqual([
+        'TRAVELPAYOUTS_TOKEN',
+        'SEARCHAPI_KEY',
+        'SMTP_PASS',
+      ]);
+      expect(running.ports.settingsReport.imported).not.toContain('SEARCHAPI_KEY');
+      expect(running.ports.providers.map((p) => p.id)).toEqual([]);
+      expect(running.ports.config.smtp).toBeNull();
+    } finally {
+      await running.close();
+    }
+    expect(storedRows(dbPath).map((r) => r.name)).not.toContain('SEARCHAPI_KEY');
+  });
+
   it('an env line that differs from a stored row is reported once, not applied', async () => {
     const dbPath = seededDb([
       { name: 'SEARCHAPI_KEY', value: SENTINEL_SA },

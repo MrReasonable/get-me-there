@@ -1,4 +1,4 @@
-import { AWAKE_ENDPOINT_PATH, ProviderError, type Secret } from '@gmt/core';
+import { AWAKE_ENDPOINT_PATH, MIN_SECRET_LENGTH, ProviderError, type Secret } from '@gmt/core';
 import { FIXTURE_HOST } from '../fixture/constants.js';
 import { CREDENTIAL_HEADERS } from './cacheKey.js';
 import { containsSecret } from './scrub.js';
@@ -50,8 +50,8 @@ export function isCredentialParam(name: string): boolean {
     .split(/[^a-z]+/);
   return words.some((w) => CREDENTIAL_WORDS.has(w));
 }
-/** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). */
-export const MIN_SECRET_LENGTH = 8;
+/** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). Core owns it: its config refuses shorter. */
+export { MIN_SECRET_LENGTH };
 
 /**
  * Construction checks (ruling 7, sec-003): the in-process seam names fixture.local only; it and limits.fixture

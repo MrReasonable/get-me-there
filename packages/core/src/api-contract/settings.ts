@@ -50,9 +50,13 @@ export const settingsUpdateRequestSchema = z.strictObject({
   changes: z.partialRecord(ownedNameSchema, z.string().nullable()),
 });
 
-/** A save's answer: boot-style warnings, and whether the new settings apply now or after the runs in flight. */
+/**
+ * A save's answer: boot-style warnings, and whether the new settings apply now (the app restarts at once), after the
+ * runs in flight, or `unchanged`: the save changed nothing, so nothing was written and nothing restarts.
+ */
 export const settingsUpdateResponseSchema = z.discriminatedUnion('applies', [
   z.strictObject({ warnings: z.array(z.string()), applies: z.literal('now') }),
+  z.strictObject({ warnings: z.array(z.string()), applies: z.literal('unchanged') }),
   z.strictObject({
     warnings: z.array(z.string()),
     applies: z.literal('after-runs'),
@@ -61,16 +65,10 @@ export const settingsUpdateResponseSchema = z.discriminatedUnion('applies', [
 ]);
 
 /**
- * One refused setting in a 422's `error.details.fields` (ruling 5): its name, the page's label and the words to show
- * beside it. It also carries the envelope's own `field` (the name) and `message` (the words), so every 422 reads alike.
+ * One refused setting in a 422's `error.details.fields` (ruling 5), in the envelope's own shape: `field` is the owned
+ * name and `message` the words to show beside it (core settingRefusal); the page takes the label from SETTING_LABELS.
  */
-export const settingRefusalSchema = z.strictObject({
-  field: ownedNameSchema,
-  message: z.string(),
-  name: ownedNameSchema,
-  label: z.string(),
-  words: z.string(),
-});
+export const settingRefusalSchema = z.strictObject({ field: ownedNameSchema, message: z.string() });
 export const settingsRefusalDetailsSchema = z.strictObject({ fields: z.array(settingRefusalSchema) });
 
 /**

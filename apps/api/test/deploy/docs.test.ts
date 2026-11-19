@@ -302,7 +302,7 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
       SMTP_PORT: '1025',
       SMTP_TLS: 'none',
       SMTP_USER: 'dev',
-      SMTP_PASS: 'dev',
+      SMTP_PASS: 'dev-mailpit',
     };
     const to = { ALERT_EMAIL_TO: 'operator@example.com', ALERT_EMAIL_FROM: 'get-me-there@example.com' };
     expect(parseConfig(containerEnv({ ...mail, ...to }), { realpath: identity }).ok).toBe(true);

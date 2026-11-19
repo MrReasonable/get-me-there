@@ -63,7 +63,7 @@ export interface RouteContext {
   settingsEnv: Record<string, string | undefined>;
   /**
    * Global Constraints: a secret arriving in a request body joins the scrub lists (the log's and the ports') before
-   * anything can fail.
+   * anything can fail; a value shorter than MIN_SECRET_LENGTH is left out (the route keeps it for its own errors).
    */
   scrub(more: readonly Secret[]): void;
   /** Settings plan ruling 11: the test-send limit the Settings test shares with `/alerts/test-email`. */

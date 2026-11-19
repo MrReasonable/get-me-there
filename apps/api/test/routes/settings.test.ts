@@ -8,9 +8,10 @@ import {
   apiContract,
   asIsoDate,
   fixedClock,
+  MIN_SECRET_LENGTH,
   microGbpToPence,
   type OwnedName,
-  SETTING_LABELS,
+  SECRET_TOO_SHORT,
   Secret,
   SMTP_ALL_OR_NOTHING,
   settingRefusal,
@@ -65,13 +66,22 @@ const view = async (x: Harness) =>
 /** Every stored row as the table holds it, value and time, so "nothing written" means byte for byte. */
 const rawRows = (x: Harness) =>
   x.ports.db.raw.prepare('SELECT name, value, updated_at FROM settings ORDER BY name').all();
-/** The 422's refusals as the page reads them: name, label and words (the envelope's field and message repeat them). */
-const refused = z.object({ error: z.object({ details: apiContract.settingsRefusalDetailsSchema }) });
-const refusalsOf = async (res: Response) =>
-  refused.parse(await res.json()).error.details.fields.map((f) => {
-    expect({ field: f.field, message: f.message }).toEqual({ field: f.name, message: f.words });
-    return { name: f.name, label: f.label, words: f.words };
-  });
+/**
+ * The 422's refusals, one shape: the envelope's own `field` (the owned name) and `message` (the words). The strict
+ * schema proves nothing else is sent; the envelope parse (the web client's) keeps every field.
+ */
+const strictRefusal = z.object({ error: z.object({ details: apiContract.settingsRefusalDetailsSchema }) });
+const refusalsOf = async (res: Response) => {
+  const body: unknown = await res.json();
+  const fields = strictRefusal.parse(body).error.details.fields;
+  expect(apiContract.errorEnvelopeSchema.parse(body).error.details?.fields).toEqual(fields);
+  return fields;
+};
+/** The refusal of `name` in the words core gives for `message`. */
+const refusal = (name: OwnedName, message = '') => ({
+  field: name,
+  message: settingRefusal(name, { field: name, message }),
+});
 
 describe('GET /api/settings (settings plan ruling 5, 8)', () => {
   it('gives each plain value or null, each secret as set and last four (the two keys only), and the sources', async () => {
@@ -144,11 +154,7 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
     const res = await put(x, { FLIGHT_READ_PATIENCE: '2', DISCOVERY_REFRESH_DAYS: '5' });
     expect(res.status).toBe(422);
     expect(await refusalsOf(res)).toEqual([
-      {
-        name: 'FLIGHT_READ_PATIENCE',
-        label: SETTING_LABELS.FLIGHT_READ_PATIENCE,
-        words: 'Choose a whole number of reads from 3 to 50.',
-      },
+      { field: 'FLIGHT_READ_PATIENCE', message: 'Choose a whole number of reads from 3 to 50.' },
     ]);
     expect(rawRows(x)).toEqual(before);
   });
@@ -170,13 +176,7 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
     const text = await res.clone().text();
     expect(res.status).toBe(422);
     const missing = ['SMTP_PORT', 'SMTP_USER', 'ALERT_EMAIL_TO', 'ALERT_EMAIL_FROM'] as const;
-    expect(await refusalsOf(res)).toEqual(
-      missing.map((name) => ({
-        name,
-        label: SETTING_LABELS[name],
-        words: settingRefusal(name, { field: name, message: SMTP_ALL_OR_NOTHING }),
-      })),
-    );
+    expect(await refusalsOf(res)).toEqual(missing.map((name) => refusal(name, SMTP_ALL_OR_NOTHING)));
     expect(text).toContain('Email needs mail server port too: fill it in, or remove email.');
     expect(rawRows(x)).toEqual([]);
     expectNoSecrets(ALL_SECRETS, { 'PUT 422': text, log: x.logLines.join('') });
@@ -191,7 +191,7 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
     expect((await put(x, { FLIGHT_READ_PATIENCE: '20' })).status).toBe(200);
     const again = await put(x, { DISCOVERY_REFRESH_DAYS: '45' });
     expect(again.status).toBe(422);
-    expect((await refusalsOf(again)).map((f) => f.name)).toEqual(['DISCOVERY_REFRESH_DAYS']);
+    expect((await refusalsOf(again)).map((f) => f.field)).toEqual(['DISCOVERY_REFRESH_DAYS']);
     expect((await put(x, { DISCOVERY_REFRESH_DAYS: '14' })).status).toBe(200);
     expect((await view(x)).values.DISCOVERY_REFRESH_DAYS).toBe('14');
   });
@@ -217,6 +217,9 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
         return 'after-runs';
       },
       pending: () => pending,
+      toolStarted: () => undefined,
+      toolEnded: () => undefined,
+      tools: () => ['Smoke test'],
     };
     const x = await harness({}, { reload });
     const def = x.ports.repos.definitions.create({ ...exampleDefinitionInput(), name: 'Autumn trip' });
@@ -229,9 +232,9 @@ describe('PUT /api/settings (settings plan ruling 5)', () => {
     const res = await put(x, { FLIGHT_READ_PATIENCE: '20' });
     expect(
       await expectContract(res, 'PUT', '/api/settings', apiContract.settingsUpdateResponseSchema),
-    ).toEqual({ warnings: [], applies: 'after-runs', running: ['Autumn trip'] });
+    ).toEqual({ warnings: [], applies: 'after-runs', running: ['Autumn trip', 'Smoke test'] });
     expect(asks).toEqual(['request']);
-    expect((await view(x)).pending).toEqual({ running: ['Autumn trip'] });
+    expect((await view(x)).pending).toEqual({ running: ['Autumn trip', 'Smoke test'] });
   });
 });
 
@@ -267,6 +270,169 @@ const emailForm = {
 const emailTest = (x: Harness, body: object) =>
   x.request('/api/settings/email-test', { method: 'POST', json: body });
 
+/** A ReloadPort that records what it was told; `pending` and `tools` answer as set. */
+function fakeReload(o: { pending?: boolean; answer?: 'now' | 'after-runs' } = {}) {
+  const told: string[] = [];
+  let pending = o.pending ?? false;
+  const tools: string[] = [];
+  const port: ReloadPort = {
+    request: () => {
+      told.push('request');
+      if (o.answer === 'after-runs') pending = true;
+      return o.answer ?? 'now';
+    },
+    pending: () => pending,
+    toolStarted: (label) => {
+      told.push(`started:${label}`);
+      tools.push(label);
+    },
+    toolEnded: () => {
+      told.push('ended');
+      tools.shift();
+    },
+    tools: () => [...tools],
+  };
+  return { port, told };
+}
+
+/** A value under the secret floor, distinctive enough to search for. */
+const SHORT = 'q7Zk2';
+
+describe('PUT /api/settings: fix round 1 (secrets, refusals, unchanged saves, warnings)', () => {
+  it('a secret shorter than the floor is refused before it is stored, so no later boot can trip over it', async () => {
+    const x = await harness();
+    const res = await put(x, { ...EMAIL, SMTP_PASS: 'abc12' });
+    expect(res.status).toBe(422);
+    expect(await refusalsOf(res)).toEqual([refusal('SMTP_PASS', SECRET_TOO_SHORT)]);
+    expect(rawRows(x)).toEqual([]);
+    const keys = await put(x, {
+      TRAVELPAYOUTS_TOKEN: 'short',
+      SEARCHAPI_KEY: 'k'.repeat(MIN_SECRET_LENGTH - 1),
+    });
+    expect(await refusalsOf(keys)).toEqual([
+      refusal('TRAVELPAYOUTS_TOKEN', SECRET_TOO_SHORT),
+      refusal('SEARCHAPI_KEY', SECRET_TOO_SHORT),
+    ]);
+  });
+
+  it('a value shorter than any secret never joins the shared scrub lists; a secret does; an error quoting the short one is scrubbed', async () => {
+    const x = await harness();
+    const before = x.ports.secrets.length;
+    expect((await put(x, { SMTP_PASS: SHORT, ...{ SMTP_HOST: 'smtp.example.com' } })).status).toBe(422);
+    expect((await put(x, { NOT_A_SETTING: SHORT })).status).toBe(422);
+    expect((await emailTest(x, { ...emailForm, pass: SHORT, to: 'not a mailbox' })).status).toBe(422);
+    expect(x.ports.secrets).toHaveLength(before);
+    expect(x.ports.secrets.some((s) => s.reveal() === SHORT)).toBe(false);
+    expect((await put(x, { SEARCHAPI_KEY: S.SEARCHAPI_KEY })).status).toBe(200);
+    expect(x.ports.secrets.map((s) => s.reveal())).toContain(S.SEARCHAPI_KEY);
+    // why: the request's own short value is still kept out of its error's log line
+    vi.spyOn(x.ports.db, 'immediateTransaction').mockImplementation(() => {
+      throw new Error(`disk full while saving ${SHORT}`);
+    });
+    const failed = await put(x, { SMTP_PASS: SHORT });
+    expect(failed.status).toBe(500);
+    expect(x.logLines.join('')).toContain('disk full while saving');
+    expect(x.logLines.join('')).not.toContain(SHORT);
+  });
+
+  it('a 422 names only the changed settings, never a stored one the save leaves alone', async () => {
+    const x = await harness();
+    x.ports.db.raw
+      .prepare('INSERT INTO settings (name, value, updated_at) VALUES (?, ?, ?)')
+      .run('DISCOVERY_REFRESH_DAYS', '90', T0);
+    const res = await put(x, { FLIGHT_READ_PATIENCE: '2' });
+    expect(await refusalsOf(res)).toEqual([
+      { field: 'FLIGHT_READ_PATIENCE', message: 'Choose a whole number of reads from 3 to 50.' },
+    ]);
+  });
+
+  it('a save that changes nothing writes nothing and restarts nothing', async () => {
+    const reload = fakeReload();
+    const x = await harness({}, { reload: reload.port });
+    const unchanged = { warnings: [], applies: 'unchanged' };
+    expect(
+      await expectContract(
+        await put(x, {}),
+        'PUT',
+        '/api/settings',
+        apiContract.settingsUpdateResponseSchema,
+      ),
+    ).toEqual(unchanged);
+    expect(await (await put(x, { FLIGHT_READ_PATIENCE: '20' })).json()).toEqual({
+      warnings: [],
+      applies: 'now',
+    });
+    const rows = rawRows(x);
+    expect(await (await put(x, { FLIGHT_READ_PATIENCE: '20' })).json()).toEqual(unchanged);
+    expect(rawRows(x)).toEqual(rows);
+    expect(reload.told).toEqual(['request']);
+  });
+
+  it("passes on the config's own warnings in the page's words", async () => {
+    const x = await harness({ SEARCHAPI_KEY: S.SEARCHAPI_KEY, SEARCHAPI_TRIAL_USED: '9' });
+    const res = await put(x, { SEARCHAPI_PLAN: '40usd' });
+    const answer = await expectContract(
+      res,
+      'PUT',
+      '/api/settings',
+      apiContract.settingsUpdateResponseSchema,
+    );
+    expect(answer.warnings).toContain(API_TEXT.settingsTrialUsedIgnored);
+  });
+
+  it('GET shows the saved new-search sources while the restart waits, read from the same stored config as the values', async () => {
+    const reload = fakeReload({ answer: 'after-runs' });
+    const x = await harness({ TRAVELPAYOUTS_TOKEN: S.TRAVELPAYOUTS_TOKEN }, { reload: reload.port });
+    expect((await view(x)).newSearchSources.discovery).toEqual(['travelpayouts']);
+    expect((await put(x, { NEW_SEARCH_DISCOVERY: 'none' })).status).toBe(200);
+    const v = await view(x);
+    expect(v.values.NEW_SEARCH_DISCOVERY).toBe('none');
+    expect(v.newSearchSources.discovery).toEqual([]);
+    // why: the running app keeps its own until the restart
+    expect(x.ports.config.newSearchSources.discovery).toBeNull();
+    expect(v.pending).toEqual({ running: [] });
+  });
+});
+
+describe('the tools while a restart in place waits (settings plan ruling 6)', () => {
+  it('a tool run is refused in the words while a save waits; otherwise the restart is told of its start and end', async () => {
+    const held = fakeReload({ pending: true });
+    const x = await harness({}, { reload: held.port, tools: { smoke: async () => smokeOk } });
+    const refusedRun = await x.request('/api/tools/smoke', { method: 'POST', json: SMOKE_BODY });
+    expect(refusedRun.status).toBe(503);
+    expect(await errorOf(refusedRun)).toEqual({ code: 'reload-pending', message: API_TEXT.applyingSettings });
+    expect(held.told).toEqual([]);
+
+    const idle = fakeReload();
+    const y = await harness({}, { reload: idle.port, tools: { smoke: async () => smokeOk } });
+    expect((await y.request('/api/tools/smoke', { method: 'POST', json: SMOKE_BODY })).status).toBe(200);
+    expect(idle.told).toEqual([`started:${API_TEXT.toolRunLabel.smoke}`, 'ended']);
+    const failing = fakeReload();
+    const z2 = await harness(
+      {},
+      {
+        reload: failing.port,
+        tools: {
+          smoke: async () => {
+            throw new Error('boom');
+          },
+        },
+      },
+    );
+    expect((await z2.request('/api/tools/smoke', { method: 'POST', json: SMOKE_BODY })).status).toBe(500);
+    expect(failing.told).toEqual([`started:${API_TEXT.toolRunLabel.smoke}`, 'ended']);
+  });
+});
+
+const SMOKE_BODY = { origin: 'LHR', destination: 'JFK', budget: 2 };
+const smokeOk = {
+  exitCode: 0,
+  summary: 'done',
+  lines: [],
+  fixturesWritten: [],
+  searchApiCreditsLedgered: null,
+};
+
 describe('POST /api/settings/email-test (settings plan ruling 11)', () => {
   it('uses the stored password for the stored server, and sends the fixed test message', async () => {
     const mail = mailDouble();
@@ -297,13 +463,7 @@ describe('POST /api/settings/email-test (settings plan ruling 11)', () => {
     ]) {
       const res = await emailTest(x, { ...emailForm, ...changed });
       expect(res.status).toBe(422);
-      expect(await refusalsOf(res)).toEqual([
-        {
-          name: 'SMTP_PASS',
-          label: SETTING_LABELS.SMTP_PASS,
-          words: settingRefusal('SMTP_PASS', { field: 'SMTP_PASS', message: '' }),
-        },
-      ]);
+      expect(await refusalsOf(res)).toEqual([refusal('SMTP_PASS')]);
     }
     expect(mail.options).toEqual([]);
   });
@@ -318,8 +478,10 @@ describe('POST /api/settings/email-test (settings plan ruling 11)', () => {
       to: 'a@example.com\r\nBcc: b@example.com',
     });
     expect(res.status).toBe(422);
-    expect((await refusalsOf(res)).map((f) => f.name)).toEqual(['SMTP_TLS', 'ALERT_EMAIL_TO']);
+    const text = await res.clone().text();
+    expect((await refusalsOf(res)).map((f) => f.field)).toEqual(['SMTP_TLS', 'ALERT_EMAIL_TO']);
     expect(mail.options).toEqual([]);
+    expectNoSecrets(ALL_SECRETS, { 'email-test 422': text, log: x.logLines.join('') });
   });
 
   it('a server that echoes the credentials in its error gives fixed words, and no body or log line carries them', async () => {

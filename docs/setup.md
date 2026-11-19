@@ -893,7 +893,7 @@ Mailpit, export these in that shell, never in `.env`: the container would accept
 them (loopback host), but there loopback is the container itself, so mail fails when it is sent:
 
 ```bash
-export SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_TLS=none SMTP_USER=dev SMTP_PASS=dev
+export SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_TLS=none SMTP_USER=dev SMTP_PASS=dev-mailpit
 export ALERT_EMAIL_TO=operator@example.com ALERT_EMAIL_FROM=get-me-there@example.com
 ```
 

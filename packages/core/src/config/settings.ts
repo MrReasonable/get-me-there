@@ -95,6 +95,15 @@ export function layerSettings(
  */
 export const SMTP_ALL_OR_NOTHING = 'SMTP settings are all or nothing';
 
+/**
+ * The shortest secret the app keeps: http-kit refuses to build with a shorter one (sec-003), and scripts/secret-scan.mjs
+ * keeps the same floor. The one copy: providers import it from here.
+ */
+export const MIN_SECRET_LENGTH = 8;
+
+/** The schema's refusal of a secret setting shorter than MIN_SECRET_LENGTH (settingRefusal words it per name). */
+export const SECRET_TOO_SHORT = `must be at least ${MIN_SECRET_LENGTH} characters`;
+
 /** Spec §8.3: the mail settings that are all or nothing, in the order the schema reads them. */
 export const SMTP_REQUIRED_NAMES = [
   'SMTP_HOST',
@@ -171,6 +180,8 @@ const REFUSAL_WORDS: Readonly<Record<OwnedName, string>> = {
 export function settingRefusal(name: OwnedName, error: { field: string; message: string }): string {
   if (error.message === SMTP_ALL_OR_NOTHING)
     return `Email needs ${SETTING_LABELS[name].toLowerCase()} too: fill it in, or remove email.`;
+  if (error.message === SECRET_TOO_SHORT)
+    return `${SETTING_LABELS[name]} is too short: it needs at least ${MIN_SECRET_LENGTH} characters.`;
   return REFUSAL_WORDS[name];
 }
 

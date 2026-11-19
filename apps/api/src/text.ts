@@ -59,6 +59,13 @@ export const API_TEXT = {
     'With a monthly spend limit of £0, SearchApi checks that cost money will not run. Raise the limit for them to run.',
   settingsSpendBelowFees: (capPence: number, feesPence: number) =>
     `The monthly spend limit (${formatPence(capPence)}) is below the ${formatPence(feesPence)} of subscription fees it counts, so it cannot stop a check: SearchApi's credits are the hard stop.`,
+  // why: settings plan ruling 5 — the config's own warnings, in the page's words
+  settingsTrialUsedIgnored:
+    "SEARCHAPI_TRIAL_USED in .env counts only the free trial's credits, so it is ignored on the $40 plan: remove the line from .env.",
+  settingsEnvWarning: (name: string) =>
+    `${name} in .env is ignored with these settings: remove the line from .env.`,
+  // why: settings plan ruling 6 — a tool run the restart waits for, named as a search would be
+  toolRunLabel: { record: 'Fixture recording', smoke: 'Smoke test' },
   emailTestFailed: {
     refused: "The mail server couldn't be reached: check its name and port.",
     'timed-out': "The mail server didn't answer in time: check its name and port.",

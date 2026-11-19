@@ -23,6 +23,7 @@ import { captureLines, T0 } from '../helpers/harness.js';
 import { expectNoSecrets, SETTINGS_SECRETS as S } from '../helpers/secrets.js';
 import { seeder } from '../helpers/seed.js';
 import { fileTempDir, tempDir } from '../helpers/tmp.js';
+import { stubVendors } from '../helpers/vendors.js';
 
 /** Each boot reads the full airports table; a loaded runner may take longer than the default 5 s. */
 const TIMEOUT_MS = 60_000;
@@ -316,6 +317,108 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
     expect(lockRow(dbPath)?.holder).toBe('tool');
     other.lock?.release();
     expect(lockRow(dbPath)).toBeNull();
+  });
+
+  it('a real run cancelled through the app restarts it once the engine has written the end', async () => {
+    // why: the run's first Travelpayouts call never answers until the run is stopped, so it is in flight on its own
+    const reached = deferred<void>();
+    stubVendors({ failOn: () => 'hang', onRequest: () => reached.resolve() });
+    const d = drive(devEnv(seededDb()));
+    const first = await d.pass(1);
+    const def = search(first, 'Autumn trip');
+    const started = await request(first, `/api/definitions/${def.id}/executions`, 'POST', {});
+    expect(started.status).toBe(202);
+    const { executionId } = apiContract.startExecutionResponseSchema.parse(await started.json());
+    await reached.promise;
+    expect(await save(first, { FLIGHT_READ_PATIENCE: '20' })).toEqual({
+      warnings: [],
+      applies: 'after-runs',
+      running: ['Autumn trip'],
+    });
+    expect((await request(first, `/api/executions/${executionId}/cancel`, 'POST', {})).status).toBe(200);
+    expect(await first.closed).toBe('reload');
+    const second = await d.pass(2);
+    expect(second.ports.repos.executions.get(executionId)?.status).toBe('cancelled');
+    expect(second.ports.config.flightReadPatience).toBe(20);
+    d.signals.emit('SIGTERM');
+    expect(await d.exited).toBe(EXIT.ok);
+    await d.done;
+  });
+
+  it("a signal during a restart's close ends the loop: the close finishes, no next pass boots, exit 0 once", async () => {
+    const dbPath = seededDb();
+    const d = drive(devEnv(dbPath));
+    const first = await d.pass(1);
+    const gate = deferred<void>();
+    const shutdown = first.engine.shutdown.bind(first.engine);
+    vi.spyOn(first.engine, 'shutdown').mockImplementation(async () => {
+      await gate.promise;
+      await shutdown();
+    });
+    expect(await save(first, { FLIGHT_READ_PATIENCE: '20' })).toEqual({ warnings: [], applies: 'now' });
+    d.signals.emit('SIGTERM');
+    gate.resolve();
+    expect(await d.exited).toBe(EXIT.ok);
+    await d.done;
+    expect(await first.closed).toBe('reload');
+    expect(d.passes).toHaveLength(1);
+    expect(d.exitCodes).toEqual([EXIT.ok]);
+    expect(lockRow(dbPath)).toBeNull();
+    expect(messages(d.lines)).not.toContain('restarting with the saved settings');
+  });
+
+  it('a tool run inside the app holds the restart until it ends, is named meanwhile, and no tool starts while it waits', async () => {
+    const release = deferred<void>();
+    const running = deferred<void>();
+    const d = drive(devEnv(seededDb()), (deps, pass) =>
+      bootApp(
+        pass === 1
+          ? {
+              ...deps,
+              // why: a smoke that holds an execution row 'running' outside the engine, as the in-process tools do
+              tools: (ports) => ({
+                smoke: async () => {
+                  const def = ports.repos.definitions.create(
+                    exampleDefinitionInput({ name: 'hidden', enabled: false }),
+                  );
+                  const id = seeder(ports).execution('T1', { def, status: 'running', startedAt: T0 });
+                  running.resolve();
+                  await release.promise;
+                  ports.repos.executions.setStatus(id, 'completed', { finishedAt: T0 });
+                  return {
+                    exitCode: 0,
+                    summary: 'done',
+                    lines: [],
+                    fixturesWritten: [],
+                    searchApiCreditsLedgered: null,
+                  };
+                },
+              }),
+            }
+          : deps,
+      ),
+    );
+    const first = await d.pass(1);
+    const body = { origin: 'LHR', destination: 'JFK', budget: 2 };
+    const tool = request(first, '/api/tools/smoke', 'POST', body);
+    await running.promise;
+    expect(await save(first, { FLIGHT_READ_PATIENCE: '20' })).toEqual({
+      warnings: [],
+      applies: 'after-runs',
+      running: ['Smoke test'],
+    });
+    const second = await request(first, '/api/tools/smoke', 'POST', body);
+    expect(second.status).toBe(503);
+    expect(await second.json()).toMatchObject({
+      error: { code: 'reload-pending', message: RELOAD_PENDING_TEXT },
+    });
+    release.resolve();
+    expect((await tool).status).toBe(200);
+    expect(await first.closed).toBe('reload');
+    expect((await d.pass(2)).ports.config.flightReadPatience).toBe(20);
+    d.signals.emit('SIGTERM');
+    expect(await d.exited).toBe(EXIT.ok);
+    await d.done;
   });
 
   it('no secret reaches the log across a restart (expectNoSecrets)', async () => {
