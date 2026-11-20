@@ -100,5 +100,7 @@ export function searchApiAccountHttpLimits(cfg: Pick<Config, 'maxWaitSeconds'>):
     maxWaitSeconds: Math.min(cfg.maxWaitSeconds, ACCOUNT_MAX_WAIT_SECONDS),
     requestTimeoutSeconds: 10,
     retryTransport: false,
+    // why: the search route's classifier, so a 429 naming credits or quota is `quota` here too and never retried
+    classifyError: classifySearchApiError,
   };
 }

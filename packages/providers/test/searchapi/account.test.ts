@@ -125,6 +125,31 @@ describe('searchApiAccount (synthetic bodies)', () => {
     for (const line of k.log.lines) expect(line).not.toContain(KEY.reveal());
   }, 15_000);
 
+  it('a 429 naming its quota with a short Retry-After gives null after exactly one attempt (quota is never retried)', async () => {
+    let attempts = 0;
+    server.use(
+      http.get(ME, () => {
+        attempts += 1;
+        return new HttpResponse(JSON.stringify({ error: 'You have run out of credits.' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '2' },
+        });
+      }),
+    );
+    const k = makeKit({
+      limits: {
+        'searchapi-account': {
+          ...searchApiAccountHttpLimits({ maxWaitSeconds: 3900 }),
+          ratePerMinute: 600,
+          ratePerHour: 36_000,
+        },
+      },
+    });
+    await expect(ask(k)).resolves.toBeNull();
+    expect(attempts).toBe(1);
+    expect(k.log.lines.join('\n')).toContain('quota');
+  });
+
   it('an abort propagates, it is not an answer', async () => {
     server.use(http.get(ME, ({ request }) => hangUntilAborted(request)));
     const k = makeKit();
