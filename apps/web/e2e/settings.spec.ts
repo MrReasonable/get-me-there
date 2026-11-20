@@ -3,7 +3,12 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { z } from 'zod';
 import { COPY } from '../src/copy.js';
 import { expectNoSidewaysScroll } from './layout.js';
-import { showFullSettings, showLimitsAndEmail, showSystemChecks } from './settingsFixtures.js';
+import {
+  showFullSettings,
+  showLimitsAndEmail,
+  showSetAsideSettings,
+  showSystemChecks,
+} from './settingsFixtures.js';
 import { FIXTURE_SEARCH } from './tripFixtures.js';
 
 // Settings plan Task 5 (rulings 9, 10, 14; Global Constraints layout checks): the Settings page through the built SPA,
@@ -67,11 +72,54 @@ for (const width of [375, 1280] as const)
       // the switch's state in words beside it, not by colour alone
       const sa = page.getByRole('region', { name: COPY.newSearch.source.searchapi });
       await expect(sa.getByText(S.switchOn)).toBeVisible();
+      await expect(
+        page.getByRole('region', { name: S.everySource }).getByRole('link', { name: S.callsAndCapsLink }),
+      ).toBeVisible();
       await expectNoSidewaysScroll(page);
       await page.screenshot({
         path: `test-results/settings-shots/settings-${width}-${colorScheme}.png`,
         fullPage: true,
       });
+    });
+
+for (const width of [375, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const)
+    test(`Settings › Price sources at ${width}px, ${colorScheme}, with settings set aside and no browser: every one has its field, Every source links Calls and caps (review I1, I3)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showSetAsideSettings(page);
+      await page.goto('/?view=settings');
+      const browser = page.getByRole('region', { name: COPY.newSearch.source.camoufox });
+      await expect(browser).toContainText(S.browserNotSetUp);
+      for (const [where, role, name] of [
+        [browser, 'spinbutton', SETTING_LABELS.FLIGHT_READ_PATIENCE],
+        [browser, 'combobox', SETTING_LABELS.CAMOUFOX_BROWSER_WINDOW],
+        [
+          page.getByRole('region', { name: COPY.newSearch.source.searchapi }),
+          'spinbutton',
+          SETTING_LABELS.SEARCHAPI_BILLING_DAY,
+        ],
+        [
+          page.getByRole('region', { name: S.everySource }),
+          'spinbutton',
+          SETTING_LABELS.DISCOVERY_REFRESH_DAYS,
+        ],
+      ] as const)
+        await expect(where.getByRole(role, { name })).toBeVisible();
+      await expect(page.getByText(S.valueSetAside)).toHaveCount(4);
+      const link = page
+        .getByRole('region', { name: S.everySource })
+        .getByRole('link', { name: S.callsAndCapsLink });
+      await expect(link).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/settings-shots/settings-set-aside-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+      await link.click();
+      expect(new URL(page.url()).searchParams.get('view')).toBe('providers');
     });
 
 test('a key typed and saved is never left in the page: the PUT carries it, the page shows only its last four', async ({
@@ -215,7 +263,7 @@ for (const width of [375, 1280] as const)
       const list = page.getByRole('list', { name: S.systemLabel });
       await expect(list.getByRole('listitem').first()).toBeVisible();
       await expect(list).toContainText(`${S.sysState.off}: Can't be seen from inside the container.`);
-      await expect(list).toContainText(`${S.sysState.fail}: Saved Mail server port`);
+      await expect(list).toContainText(`${S.sysState.fail}: Mail server port isn't valid`);
       await expect(list).toContainText(`${S.sysState.warn}: SearchApi key in .env is ignored`);
       await expect(list.getByRole('link', { name: 'Open Settings › Email and alerts' })).toHaveAttribute(
         'href',

@@ -68,11 +68,11 @@ function noteOf(id: Source, credits: CreditsLine | null): string {
  * "Where to look" (design 2026-11-08 Ruling 13, mockup 01): one checkbox per source the install has set up, each with
  * its cost: "Google Flights, in your browser · free, takes a while", "Aviasales cache · free, prices from other
  * people's searches, often days old", "SearchApi · uses credits, M left" (M the top bar's figure from
- * `searchApiCreditsLine`; once it is ticked the estimate sentence states the run's own SearchApi calls). A source that is
- * not set up has no checkbox; one sentence names it and links to Settings. A source the search uses that has no
- * checkbox of its own (the test source, or one no longer set up) is listed ticked with why, so the search never reads
- * as having no source, and unticking it takes it out (Task 7 fix round 2). The new-search panel and Edit share it, so
- * Edit shows the search's own sources.
+ * `searchApiCreditsLine`; once it is ticked the estimate sentence states the run's own SearchApi credits). A source
+ * that is not set up has no checkbox; one sentence names it and links to Settings. A source the search uses that has
+ * no checkbox of its own (the test source, or one no longer set up) is listed ticked with why, so the search never
+ * reads as having no source, and unticking it takes it out (Task 7 fix round 2). The new-search panel and Edit share
+ * it, so Edit shows the search's own sources.
  */
 export function WhereToLook({
   draft,

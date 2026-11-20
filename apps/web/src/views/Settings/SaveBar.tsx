@@ -22,6 +22,8 @@ function resultWords(r: SaveResult): string {
       return S.unchanged;
     case 'refused':
       return S.refused;
+    case 'env-line':
+      return S.envLine(r.lines);
     case 'no-answer':
       return S.noAnswer;
     case 'failed':
@@ -51,7 +53,11 @@ export function SaveBar({
         {r === null ? null : (
           <p
             className={
-              r.kind === 'refused' || r.kind === 'failed' || r.kind === 'not-back' || r.kind === 'no-answer'
+              r.kind === 'refused' ||
+              r.kind === 'env-line' ||
+              r.kind === 'failed' ||
+              r.kind === 'not-back' ||
+              r.kind === 'no-answer'
                 ? 'st-bad'
                 : undefined
             }

@@ -302,6 +302,15 @@ describe('Settings › Email (ruling 11)', () => {
     expect(screen.queryByRole('textbox', { name: SETTING_LABELS.SMTP_HOST })).toBeNull();
   });
 
+  it('a Gmail server name the app set aside opens as Other mail server, where it has its field and the note (review I3)', async () => {
+    serveValues({ ...GMAIL, SMTP_PORT: '0' }, true, { setAside: ['SMTP_PORT'] });
+    open('email');
+    expect(await mode(E.modeOther)).toBeChecked();
+    expect(screen.getByRole('spinbutton', { name: SETTING_LABELS.SMTP_PORT })).toHaveAccessibleDescription(
+      S.valueSetAside,
+    );
+  });
+
   it('another stored server opens as Other mail server, each name in its field', async () => {
     serveValues(OTHER, true);
     open('email');

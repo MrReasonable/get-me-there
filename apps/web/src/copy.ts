@@ -273,6 +273,10 @@ export const COPY = {
       'scheduled' | 'any',
       string
     >,
+    // what applies to every source (review I1 and I3): the link to the Providers view, and how often prices are read
+    everySource: 'Every source',
+    callsAndCapsBefore: "Each source's calls this month, its caps and when its window reopens are on",
+    callsAndCapsLink: 'Calls and caps',
     advanced: 'Advanced',
     refreshBefore: "Read a date's calendar price again after",
     refreshAfter: 'days (new searches)',
@@ -297,7 +301,7 @@ export const COPY = {
     secretSaved: 'saved',
     secretEnds: (last4: string) => `saved · ends ${last4}`,
     secretNotSet: 'not set',
-    secretSetAside: "The saved one can't be used any more: paste it again.",
+    secretSetAside: "The one the app has can't be used: paste it again.",
     secretHint: 'Keys are never shown again once saved.',
     replace: 'Replace',
     remove: 'Remove',
@@ -307,8 +311,11 @@ export const COPY = {
     confirmRemoveYes: 'Remove it',
     confirmRemoveNo: 'Keep it',
     removing: 'Removing…',
-    /** A stored value the app set aside at boot (it no longer passes), so the default is used until it is set again. */
-    valueSetAside: "The saved value isn't valid any more, so the default is used: set it again.",
+    /**
+     * A value the app set aside at boot (saved, or an `.env` line it read: review M8), so the default is used until it
+     * is set here.
+     */
+    valueSetAside: "This value isn't valid, so the default is used: set it here.",
     // saving (ruling 14)
     /** Each section's one Save (System has none); Email's saves the mail settings only, the rules are changed in place. */
     saveLabel: {
@@ -324,6 +331,10 @@ export const COPY = {
       `Saved. Applies when ${names.length === 0 ? 'the running searches' : listText(names)} finish; new searches wait until then.`,
     unchanged: 'Nothing changed, so nothing was saved.',
     refused: 'Nothing was saved: fix the marked fields.',
+    envLine: (names: readonly string[]) =>
+      names.length === 0
+        ? "Nothing was saved: a line in .env isn't valid with these settings."
+        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env, then save again.`,
     failed: 'Not saved: the app answered with an error; its log has the cause.',
     noAnswer: "Not saved: the app didn't answer.",
     // Limits (rulings 5 and 14): sentences with a field in them; the money is typed in pounds and saved in pence

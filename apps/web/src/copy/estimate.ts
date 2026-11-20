@@ -14,7 +14,7 @@ import type { ProviderId } from '@gmt/core';
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
 
 export const ESTIMATE_COPY = {
-  /** Joins the cost tags of several billed sources on a button ("Search · 120 SearchApi calls · …"). */
+  /** Joins the cost tags of several billed sources on a button ("Search · 120 SearchApi credits · …"). */
   separator: ' · ',
   /** Joins the clauses of one sentence ("About 3 hours, about £1.20, asks about …"). */
   clause: ', ',

@@ -65,6 +65,7 @@ const sourceCard = (name: string) => screen.findByRole('region', { name });
 const browserCard = () => sourceCard(COPY.newSearch.source.camoufox);
 const searchApiCard = () => sourceCard(COPY.newSearch.source.searchapi);
 const cacheCard = () => sourceCard(COPY.newSearch.source.travelpayouts);
+const everyCard = () => sourceCard(S.everySource);
 const switchOf = (card: HTMLElement, source: string) =>
   within(card).getByRole('switch', { name: S.switchLabel(source) });
 const saveButton = () => screen.getByRole('button', { name: S.saveLabel.sources });
@@ -209,10 +210,11 @@ describe('the browser block, both ways (ruling 9)', () => {
         .getAllByRole('option')
         .map((o) => o.textContent),
     ).toEqual(['only during scheduled searches', 'any time']);
-    expect(within(card).getByText(S.advanced)).toBeInTheDocument();
-    expect(within(card).getByRole('spinbutton', { name: SETTING_LABELS.DISCOVERY_REFRESH_DAYS })).toHaveValue(
-      7,
-    );
+    // review I3 (ruling R21): how often a calendar price is read again is every source's, not the browser's
+    expect(within(card).queryByText(S.advanced)).toBeNull();
+    expect(
+      within(card).queryByRole('spinbutton', { name: SETTING_LABELS.DISCOVERY_REFRESH_DAYS }),
+    ).toBeNull();
     // spec revision 38: the pause after an unrecognised page is not a setting
     expect(card).not.toHaveTextContent(/unrecognised/i);
   });
@@ -379,6 +381,80 @@ describe('the source switches (ruling 8)', () => {
       'sk-test-0123456789abcdef',
     );
     expect(switchOf(sa, COPY.newSearch.source.searchapi)).toBeEnabled();
+  });
+});
+
+describe('every source, and a setting the app set aside always has its field (review I1 and I3, rulings R19 and R21)', () => {
+  it.each([true, false])(
+    'with the browser set up %s, Advanced holds the refresh days and Calls and caps links the Providers view',
+    async (camoufoxEnabled) => {
+      serveView({ envOnly: { camoufoxEnabled, searchApiTrialUsed: 0 } });
+      const { user } = open();
+      const card = await everyCard();
+      const link = within(card).getByRole('link', { name: S.callsAndCapsLink });
+      expect(link.closest('p')).toHaveTextContent(`${S.callsAndCapsBefore} ${S.callsAndCapsLink}.`);
+      const url = new URL(link.getAttribute('href') ?? '', 'http://localhost');
+      expect([url.searchParams.get('view'), url.searchParams.get('section')]).toEqual(['providers', null]);
+      await user.click(within(card).getByText(S.advanced));
+      expect(
+        within(card).getByRole('spinbutton', { name: SETTING_LABELS.DISCOVERY_REFRESH_DAYS }),
+      ).toHaveValue(7);
+    },
+  );
+
+  it('the refresh days the app set aside open Advanced with the note', async () => {
+    serveView({
+      setAside: ['DISCOVERY_REFRESH_DAYS'],
+      envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
+    });
+    open();
+    const card = await everyCard();
+    const field = within(card).getByRole('spinbutton', { name: SETTING_LABELS.DISCOVERY_REFRESH_DAYS });
+    expect(field).toBeVisible();
+    expect(field).toHaveAccessibleDescription(S.valueSetAside);
+  });
+
+  it('with the browser not set up, its own settings the app set aside still get their fields, and a save sends them', async () => {
+    const puts = capturePuts();
+    serveView({
+      setAside: ['FLIGHT_READ_PATIENCE', 'CAMOUFOX_BROWSER_WINDOW'],
+      values: { ...settingsView().values, FLIGHT_READ_PATIENCE: '99', CAMOUFOX_BROWSER_WINDOW: 'never' },
+      envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
+    });
+    const { user } = open();
+    const card = await browserCard();
+    expect(card).toHaveTextContent(S.browserNotSetUp);
+    expect(within(card).queryByRole('switch')).toBeNull();
+    const patienceField = within(card).getByRole('spinbutton', { name: SETTING_LABELS.FLIGHT_READ_PATIENCE });
+    expect(patienceField).toHaveAccessibleDescription(S.valueSetAside);
+    const when = within(card).getByRole('combobox', { name: SETTING_LABELS.CAMOUFOX_BROWSER_WINDOW });
+    expect(when).toHaveAccessibleDescription(S.valueSetAside);
+    await user.clear(patienceField);
+    await user.type(patienceField, '12');
+    await user.selectOptions(when, 'any');
+    await user.click(saveButton());
+    await screen.findByText(S.restarting);
+    expect(puts).toEqual([{ changes: { CAMOUFOX_BROWSER_WINDOW: 'any', FLIGHT_READ_PATIENCE: '12' } }]);
+  });
+
+  it('with the browser not set up and nothing set aside, its card has no field', async () => {
+    serveView({ setAside: ['SEARCHAPI_KEY'], envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 } });
+    open();
+    const card = await browserCard();
+    expect(within(card).queryByRole('spinbutton')).toBeNull();
+    expect(within(card).queryByRole('combobox')).toBeNull();
+  });
+
+  it('a billing day the app set aside has its field on the trial plan', async () => {
+    serveView({
+      setAside: ['SEARCHAPI_BILLING_DAY'],
+      values: { ...settingsView().values, SEARCHAPI_BILLING_DAY: '31' },
+    });
+    open();
+    const card = await searchApiCard();
+    expect(within(card).getByRole('combobox', { name: SETTING_LABELS.SEARCHAPI_PLAN })).toHaveValue('trial');
+    const day = within(card).getByRole('spinbutton', { name: SETTING_LABELS.SEARCHAPI_BILLING_DAY });
+    expect(day).toHaveAccessibleDescription(S.valueSetAside);
   });
 });
 
@@ -550,13 +626,11 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
     expect(m.pending()).toBe(0);
   });
 
-  it('a save the app holds for running searches says Restarted once its pending clears, and reads everything again', async () => {
+  it('a save the app holds for running searches says Restarted only once /api/health answers a new boot id, with no time limit; a settings read without pending is not the restart (review M6)', async () => {
     let pending: { running: string[] } | null = null;
     server.use(http.get(`${API}/settings`, () => HttpResponse.json(settingsView({ pending }))));
-    const puts: unknown[] = [];
     server.use(
-      http.put(`${API}/settings`, async ({ request }) => {
-        puts.push(await request.json());
+      http.put(`${API}/settings`, () => {
         pending = { running: ['London → New York'] };
         return HttpResponse.json({ warnings: [], applies: 'after-runs', running: ['London → New York'] });
       }),
@@ -568,24 +642,75 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
         return HttpResponse.json(providersResponse());
       }),
     );
-    const { user, client } = open();
+    // why: more polls than the 60 s the restart at once is given, all on the old boot id, then the new one
+    const polls = RESTART_LIMIT_MS / RESTART_POLL_MS + 2;
+    const health = serveHealth(Array<string>(polls + 2).fill('boot-1'));
+    const m = manualClock();
+    const { user, client } = renderWithProviders(
+      <RestartClockContext.Provider value={m.clock}>
+        <SettingsView />
+      </RestartClockContext.Provider>,
+      { search: '?view=settings' },
+    );
     const field = await patience();
     await user.clear(field);
     await user.type(field, '20');
     await user.click(saveButton());
     const waiting = 'Saved. Applies when London → New York finish; new searches wait until then.';
     expect(await screen.findByText(waiting)).toBeInTheDocument();
-    // the page's re-read after the save sees the restart waiting
-    await settled(client);
-    expect(screen.getByText(waiting)).toBeInTheDocument();
-    const before = providerReads;
-    // the runs end and the app restarts: the next read has no pending
+    const r0 = health.seen.reads;
+    // only the first poll is set: no limit
+    await m.scheduled(1);
+    expect(m.pending()).toBe(1);
+    // a settings read answered while the app closes has no pending: that is not the restart
     pending = null;
     await act(() => client.refetchQueries({ queryKey: SETTINGS_KEY }));
+    expect(screen.queryByText(S.restarted)).toBeNull();
+    expect(screen.getByText(waiting)).toBeInTheDocument();
+    for (let k = 1; k <= polls; k++) {
+      act(() => m.advance(RESTART_POLL_MS));
+      await health.read(r0 + k);
+      await m.scheduled(k + 1);
+    }
+    // past the restart's own 60 s, still waiting for the runs, never "didn't come back"
+    expect(screen.getByText(waiting)).toBeInTheDocument();
+    expect(screen.queryByText(S.notBack)).toBeNull();
+    const before = providerReads;
+    // the runs end and the app restarts: the next poll answers the new boot id
+    const back = serveHealth(['boot-2']);
+    act(() => m.advance(RESTART_POLL_MS));
+    await back.read(1);
     expect(await screen.findByText(S.restarted)).toBeInTheDocument();
     expect(screen.queryByText(waiting)).toBeNull();
+    expect(m.pending()).toBe(0);
     await settled(client);
     expect(providerReads).toBeGreaterThan(before);
+  });
+
+  it('a save that makes the app read a refused .env line names the line, and nothing is restarted (review M7)', async () => {
+    capturePuts(
+      {
+        error: {
+          code: 'invalid_env',
+          message: 'nothing was saved',
+          details: { lines: ['SEARCHAPI_MONTHLY_CALL_CAP'] },
+        },
+      },
+      422,
+    );
+    const health = serveHealth(['boot-1']);
+    const { user } = open();
+    const field = await patience();
+    await user.clear(field);
+    await user.type(field, '20');
+    await user.click(saveButton());
+    const words = S.envLine(['SEARCHAPI_MONTHLY_CALL_CAP']);
+    expect(words).toBe(
+      "Nothing was saved: SEARCHAPI_MONTHLY_CALL_CAP in .env isn't valid with these settings. Fix the line in .env, then save again.",
+    );
+    expect(await screen.findByText(words)).toHaveClass('st-bad');
+    expect(health.seen.reads).toBe(1);
+    expect(S.envLine([])).toBe("Nothing was saved: a line in .env isn't valid with these settings.");
   });
 
   it('a save the app holds for running searches names them; nothing restarts', async () => {

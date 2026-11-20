@@ -7,6 +7,38 @@ import type { Page } from '@playwright/test';
  * at once, the three sources listed, and SearchApi's own balance. The fixture-mode api has none of these, so the bodies
  * are the real ones with these fields laid over them, each parsed by its contract schema.
  */
+/**
+ * Review I3 (controller ruling R21): an install without the browser, on SearchApi's trial, whose stored patience, browser
+ * window, billing day and refresh days the app set aside at boot, so each must still have its field. Over the real
+ * api's answer, parsed by its contract schema.
+ */
+export async function showSetAsideSettings(page: Page): Promise<void> {
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const real = apiContract.settingsViewSchema.parse(await (await route.fetch()).json());
+    await route.fulfill({
+      json: apiContract.settingsViewSchema.parse({
+        ...real,
+        values: {
+          ...real.values,
+          SEARCHAPI_PLAN: 'trial',
+          SEARCHAPI_BILLING_DAY: '31',
+          FLIGHT_READ_PATIENCE: '99',
+          CAMOUFOX_BROWSER_WINDOW: 'never',
+          DISCOVERY_REFRESH_DAYS: '90',
+        },
+        envOnly: { ...real.envOnly, camoufoxEnabled: false },
+        setAside: [
+          'SEARCHAPI_BILLING_DAY',
+          'CAMOUFOX_BROWSER_WINDOW',
+          'FLIGHT_READ_PATIENCE',
+          'DISCOVERY_REFRESH_DAYS',
+        ],
+      }),
+    });
+  });
+}
+
 export async function showFullSettings(page: Page): Promise<void> {
   await page.route('**/api/settings', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
@@ -188,7 +220,7 @@ export async function showSystemChecks(page: Page): Promise<void> {
             id: 'settings-aside-smtp-port',
             area: 'settings',
             state: 'fail',
-            summary: "Saved Mail server port isn't valid any more: set it again in Settings",
+            summary: "Mail server port isn't valid: set it in Settings",
             label: 'Mail server port',
             fix: { text: 'Open Settings › Email and alerts', command: null, settings: 'email' },
           },

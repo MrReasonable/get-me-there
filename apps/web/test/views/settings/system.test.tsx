@@ -65,7 +65,7 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
           id: 'settings-aside-smtp-port',
           area: 'settings',
           state: 'fail',
-          summary: "Saved Mail server port isn't valid any more: set it again in Settings",
+          summary: "Mail server port isn't valid: set it in Settings",
           fix: { text: 'Open Settings › Email and alerts', command: null, settings: 'email' },
         },
         {

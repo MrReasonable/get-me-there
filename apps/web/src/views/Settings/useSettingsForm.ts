@@ -6,13 +6,13 @@ import {
   DEFAULT_SEARCHAPI_BILLING_DAY,
   DEFAULT_SEARCHAPI_PLAN,
   DEFAULT_SMTP_TLS,
-  EMAIL_NAMES,
   isOwnedName,
   type OwnedName,
   type ProviderId,
   poundsToPence,
   providerIdSchema,
   settingRefusal,
+  settingsInSection,
 } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useContext, useEffect, useRef, useState } from 'react';
@@ -28,22 +28,15 @@ type Changes = apiContract.SettingChanges;
 /** The operator's edits not saved yet: a name's new value, `null` to unset it; a name absent is unchanged. */
 type Draft = Partial<Record<OwnedName, string | null>>;
 
-/** The owned names each section saves (settings plan ruling 14: one Save per section, sending only its changes). */
+/**
+ * The owned names each section saves (settings plan ruling 14: one Save per section, sending only its changes), from
+ * core's one grouping (review M10); System saves none.
+ */
 export const SECTION_NAMES: Readonly<Record<SettingsSection, readonly OwnedName[]>> = {
-  sources: [
-    'TRAVELPAYOUTS_TOKEN',
-    'SEARCHAPI_KEY',
-    'SEARCHAPI_PLAN',
-    'SEARCHAPI_BILLING_DAY',
-    'CAMOUFOX_BROWSER_WINDOW',
-    'FLIGHT_READ_PATIENCE',
-    'DISCOVERY_REFRESH_DAYS',
-    'NEW_SEARCH_DISCOVERY',
-    'NEW_SEARCH_VERIFICATION',
-  ],
-  limits: ['MONTHLY_SPEND_CAP_PENCE', 'EXECUTION_MAX_CALLS'],
-  email: EMAIL_NAMES,
-  system: [],
+  sources: settingsInSection('sources'),
+  limits: settingsInSection('limits'),
+  email: settingsInSection('email'),
+  system: settingsInSection('system'),
 };
 
 /**
@@ -124,14 +117,15 @@ export const RESTART_LIMIT_MS = 60_000;
 
 /**
  * Asks `read` for the boot id every RESTART_POLL_MS on `clock` (a failed read is the app restarting, and is asked
- * again; the next ask waits for the last to settle) until it answers one other than `before` ("back"), or
- * RESTART_LIMIT_MS have passed ("not-back"). Returns the cancel.
+ * again; the next ask waits for the last to settle) until it answers one other than `before` ("back"), or `limitMs`
+ * have passed ("not-back"; RESTART_LIMIT_MS by default, never with null). Returns the cancel.
  */
 export function watchRestart(
   before: string,
   read: () => Promise<string | null>,
   done: (outcome: 'back' | 'not-back') => void,
   clock: RestartClock,
+  limitMs: number | null = RESTART_LIMIT_MS,
 ): () => void {
   let over = false;
   let cancelPoll: () => void = () => undefined;
@@ -145,7 +139,7 @@ export function watchRestart(
     stop();
     done(outcome);
   };
-  const cancelLimit = clock.after(RESTART_LIMIT_MS, () => finish('not-back'));
+  const cancelLimit = limitMs === null ? () => undefined : clock.after(limitMs, () => finish('not-back'));
   const tick = () => {
     read()
       .then(
@@ -163,6 +157,14 @@ export function watchRestart(
   return stop;
 }
 
+/** The `.env` lines a save's 422 `invalid_env` names (review M7): names only, each a variable's own spelling. */
+function envLines(e: ApiError): string[] {
+  const lines = e.details?.lines;
+  return Array.isArray(lines)
+    ? lines.filter((l): l is string => typeof l === 'string' && /^[A-Z][A-Z0-9_]*$/.test(l))
+    : [];
+}
+
 /** What the last save said, worded by the page (ruling 14). */
 export type SaveResult =
   | { kind: 'saving' }
@@ -172,6 +174,8 @@ export type SaveResult =
   | { kind: 'after-runs'; running: string[]; warnings: string[] }
   | { kind: 'unchanged'; warnings: string[] }
   | { kind: 'refused' }
+  /** Review M7: the save made the app read `.env` lines it refuses, named; nothing was saved. */
+  | { kind: 'env-line'; lines: string[] }
   | { kind: 'no-answer' }
   | { kind: 'failed' };
 
@@ -229,23 +233,6 @@ export function useSettingsForm(
       cancelWatch.current?.();
     };
   }, []);
-  // why: after a save that waited for running searches, the restart shows as `pending` going back to null; the page
-  // says so then and reads everything again, as a save that restarted at once does (fix round 1, minor 4)
-  const sawPending = useRef(false);
-  const pending = view?.pending ?? null;
-  useEffect(() => {
-    if (result?.kind !== 'after-runs') {
-      sawPending.current = false;
-      return;
-    }
-    if (pending !== null) sawPending.current = true;
-    else if (sawPending.current) {
-      sawPending.current = false;
-      setResult({ kind: 'restarted', warnings: result.warnings });
-      void qc.invalidateQueries();
-    }
-  }, [pending, result, qc]);
-
   const defaultOf = (name: OwnedName): string | null => inUseDefaults[name] ?? SETTING_DEFAULTS[name] ?? null;
   const inUse = (name: OwnedName): string | null =>
     view === undefined ? null : (originalOf(view, name) ?? defaultOf(name));
@@ -360,7 +347,9 @@ export function useSettingsForm(
         for (const f of refused) if (isOwnedName(f.field)) next[f.field] = f.message;
         setErrors(next);
         setResult({ kind: 'refused' });
-      } else if (e instanceof ApiError && e.code === 'network') setResult({ kind: 'no-answer' });
+      } else if (e instanceof ApiError && e.status === 422 && e.code === 'invalid_env')
+        setResult({ kind: 'env-line', lines: envLines(e) });
+      else if (e instanceof ApiError && e.code === 'network') setResult({ kind: 'no-answer' });
       // why: the api's own message is for its log; the page says it in its own words (fix round 1, minor 9)
       else setResult({ kind: 'failed' });
       return;
@@ -379,12 +368,13 @@ export function useSettingsForm(
       return;
     }
     setSaves((n) => n + 1);
+    const afterRuns = answer.applies === 'after-runs';
     if (answer.applies === 'after-runs') {
       setResult({ kind: 'after-runs', running: answer.running, warnings });
       void qc.invalidateQueries({ queryKey: SETTINGS_KEY });
-      return;
-    }
-    setResult({ kind: 'restarting', warnings });
+    } else setResult({ kind: 'restarting', warnings });
+    // why: review M6: the restart is told by a new boot id on both paths; one that waits for running searches has no
+    // limit (they may take hours), and a settings read answered while the app closes is never taken for it
     cancelWatch.current = watchRestart(
       before,
       async () => bootIdOf(await api.health()),
@@ -395,6 +385,7 @@ export function useSettingsForm(
         if (outcome === 'back') void qc.invalidateQueries();
       },
       clock,
+      afterRuns ? null : RESTART_LIMIT_MS,
     );
   };
 

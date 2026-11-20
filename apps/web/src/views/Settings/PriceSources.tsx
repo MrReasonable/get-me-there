@@ -14,7 +14,7 @@ import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { searchApiCreditsLine } from '../../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
-import { settingsPatch } from '../../state/view.js';
+import { navPatch, settingsPatch } from '../../state/view.js';
 import { FieldError, fieldIds, NumberInput, SelectInput, SetAsideNote } from './fields.js';
 import { SecretField } from './SecretField.js';
 import { LIST_NAME, type SettingsForm, type SourceRole } from './useSettingsForm.js';
@@ -192,7 +192,42 @@ function BrowserStatus() {
   );
 }
 
-/** Google Flights in the browser (ruling 9): set-up words when it is off, else its state and its settings. */
+/** The stopping rule for flight reads, a number inside its sentence. */
+function PatienceField({ view, form }: Omit<CardProps, 'toggle'>) {
+  const aside = view.setAside.includes('FLIGHT_READ_PATIENCE');
+  return (
+    <div className="st-field">
+      <p className="st-inline">
+        {S.patienceBefore}{' '}
+        <NumberInput name="FLIGHT_READ_PATIENCE" form={form} min={3} max={50} setAside={aside} />{' '}
+        {S.patienceAfter(CONFIRM_TARGET)}
+      </p>
+      <SetAsideNote name="FLIGHT_READ_PATIENCE" setAside={aside} />
+      <FieldError name="FLIGHT_READ_PATIENCE" form={form} />
+    </div>
+  );
+}
+
+/** When the browser may run. */
+function WindowField({ view, form }: Omit<CardProps, 'toggle'>) {
+  const aside = view.setAside.includes('CAMOUFOX_BROWSER_WINDOW');
+  return (
+    <div className="st-field">
+      <p className="st-inline">
+        {S.mayRun}{' '}
+        <SelectInput name="CAMOUFOX_BROWSER_WINDOW" form={form} options={S.browserWindow} setAside={aside} />
+      </p>
+      <SetAsideNote name="CAMOUFOX_BROWSER_WINDOW" setAside={aside} />
+      <FieldError name="CAMOUFOX_BROWSER_WINDOW" form={form} />
+    </div>
+  );
+}
+
+/**
+ * The browser's block (ruling 9): set-up words when it is off, else its state and its settings. Off, a
+ * setting of its own that the app set aside still gets its field (review I3, ruling R21), so the System line about it
+ * can be fixed here.
+ */
 function Browser({ view, form, toggle }: CardProps) {
   const aside = (name: OwnedName) => view.setAside.includes(name);
   if (!view.envOnly.camoufoxEnabled)
@@ -201,6 +236,8 @@ function Browser({ view, form, toggle }: CardProps) {
         <p>
           {S.browserNotSetUp} <Command text={S.browserCommand} /> {S.browserSetUpDoc}
         </p>
+        {aside('FLIGHT_READ_PATIENCE') ? <PatienceField view={view} form={form} /> : null}
+        {aside('CAMOUFOX_BROWSER_WINDOW') ? <WindowField view={view} form={form} /> : null}
       </SourceCard>
     );
   const on = form.list('discovery').includes('camoufox');
@@ -221,58 +258,48 @@ function Browser({ view, form, toggle }: CardProps) {
     >
       <ListErrors form={form} id="camoufox" roles={['discovery']} />
       <BrowserStatus />
-      <div className="st-field">
-        <p className="st-inline">
-          {S.patienceBefore}{' '}
-          <NumberInput
-            name="FLIGHT_READ_PATIENCE"
-            form={form}
-            min={3}
-            max={50}
-            setAside={aside('FLIGHT_READ_PATIENCE')}
-          />{' '}
-          {S.patienceAfter(CONFIRM_TARGET)}
-        </p>
-        <SetAsideNote name="FLIGHT_READ_PATIENCE" setAside={aside('FLIGHT_READ_PATIENCE')} />
-        <FieldError name="FLIGHT_READ_PATIENCE" form={form} />
-      </div>
-      <div className="st-field">
-        <p className="st-inline">
-          {S.mayRun}{' '}
-          <SelectInput
-            name="CAMOUFOX_BROWSER_WINDOW"
-            form={form}
-            options={S.browserWindow}
-            setAside={aside('CAMOUFOX_BROWSER_WINDOW')}
-          />
-        </p>
-        <SetAsideNote name="CAMOUFOX_BROWSER_WINDOW" setAside={aside('CAMOUFOX_BROWSER_WINDOW')} />
-        <FieldError name="CAMOUFOX_BROWSER_WINDOW" form={form} />
-      </div>
-      <details
-        className="st-more"
-        open={
-          form.error('DISCOVERY_REFRESH_DAYS') !== null || aside('DISCOVERY_REFRESH_DAYS') ? true : undefined
-        }
-      >
-        <summary>{S.advanced}</summary>
-        <div className="st-field">
-          <p className="st-inline">
-            {S.refreshBefore}{' '}
-            <NumberInput
-              name="DISCOVERY_REFRESH_DAYS"
-              form={form}
-              min={1}
-              max={30}
-              setAside={aside('DISCOVERY_REFRESH_DAYS')}
-            />{' '}
-            {S.refreshAfter}
-          </p>
-          <SetAsideNote name="DISCOVERY_REFRESH_DAYS" setAside={aside('DISCOVERY_REFRESH_DAYS')} />
-          <FieldError name="DISCOVERY_REFRESH_DAYS" form={form} />
-        </div>
-      </details>
+      <PatienceField view={view} form={form} />
+      <WindowField view={view} form={form} />
     </SourceCard>
+  );
+}
+
+/**
+ * What applies to every source (review I1 and I3, rulings R19 and R21): the link to Calls and caps (the Providers
+ * view: each source's calls, caps and windows, which this section does not show), and under Advanced how often a
+ * date's calendar price is read again, a setting of every calendar source, not the browser's alone.
+ */
+function EverySource({ view, form }: Omit<CardProps, 'toggle'>) {
+  const aside = view.setAside.includes('DISCOVERY_REFRESH_DAYS');
+  const providers = navPatch('providers');
+  return (
+    <section className="st-card st-src" aria-labelledby="sources-every">
+      <h3 id="sources-every">{S.everySource}</h3>
+      <div className="st-src-body">
+        <p className="st-hint">
+          {S.callsAndCapsBefore}{' '}
+          <a href={hrefWith(providers)} onClick={navigateTo(providers)}>
+            {S.callsAndCapsLink}
+          </a>
+          .
+        </p>
+        <details
+          className="st-more"
+          open={form.error('DISCOVERY_REFRESH_DAYS') !== null || aside ? true : undefined}
+        >
+          <summary>{S.advanced}</summary>
+          <div className="st-field">
+            <p className="st-inline">
+              {S.refreshBefore}{' '}
+              <NumberInput name="DISCOVERY_REFRESH_DAYS" form={form} min={1} max={30} setAside={aside} />{' '}
+              {S.refreshAfter}
+            </p>
+            <SetAsideNote name="DISCOVERY_REFRESH_DAYS" setAside={aside} />
+            <FieldError name="DISCOVERY_REFRESH_DAYS" form={form} />
+          </div>
+        </details>
+      </div>
+    </section>
   );
 }
 
@@ -358,7 +385,8 @@ function SearchApi({ view, form, toggle }: CardProps) {
           <SetAsideNote name="SEARCHAPI_PLAN" setAside={aside('SEARCHAPI_PLAN')} />
           <FieldError name="SEARCHAPI_PLAN" form={form} />
         </div>
-        {plan === '40usd' ? (
+        {/* why: review I3 (ruling R21): a billing day the app set aside keeps its field on any plan */}
+        {plan === '40usd' || aside('SEARCHAPI_BILLING_DAY') ? (
           <div className="st-field">
             <label className="st-lab" htmlFor={fieldIds('SEARCHAPI_BILLING_DAY').input}>
               {SETTING_LABELS.SEARCHAPI_BILLING_DAY}
@@ -463,8 +491,8 @@ function Travelpayouts({ view, form, toggle }: CardProps) {
 
 /**
  * Settings › Price sources (settings plan rulings 8, 9 and 10): the browser, SearchApi and the Aviasales cache, each
- * with its switch for new searches and its own settings. A refused source list is said inside each card whose switch
- * or box writes that list, and each of those controls is described by it.
+ * with its switch for new searches and its own settings, then what applies to every source. A refused source list is
+ * said inside each card whose switch or box writes that list, and each of those controls is described by it.
  */
 export function PriceSources({ view, form }: Omit<CardProps, 'toggle'>) {
   const toggle: Toggle = (role, id, on) => {
@@ -476,6 +504,7 @@ export function PriceSources({ view, form }: Omit<CardProps, 'toggle'>) {
       <Browser view={view} form={form} toggle={toggle} />
       <SearchApi view={view} form={form} toggle={toggle} />
       <Travelpayouts view={view} form={form} toggle={toggle} />
+      <EverySource view={view} form={form} />
     </div>
   );
 }

@@ -49,8 +49,15 @@ export interface EmailChoice {
 /** Gmail's server, as ruling 11 stores it: the address is both the user name and the sender. */
 const GMAIL = { host: 'smtp.gmail.com', port: '465', tls: 'implicit' } as const;
 
-/** A stored smtp.gmail.com opens as Gmail, another server as Other; with nothing stored, Gmail is offered first. */
+/** The server names the Gmail form fills itself and shows no field for. */
+const SERVER_NAMES = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS'] as const;
+
+/**
+ * A stored smtp.gmail.com opens as Gmail, another server as Other; with nothing stored, Gmail is offered first. A server
+ * name the app set aside opens as Other, where it has its field (review I3, ruling R21).
+ */
 export function storedEmailMode(view: View): EmailMode {
+  if (SERVER_NAMES.some((n) => view.setAside.includes(n))) return 'other';
   const host = view.values.SMTP_HOST;
   return host === null || host === GMAIL.host ? 'gmail' : 'other';
 }
@@ -179,7 +186,7 @@ export function EmailAlerts({
       }
       return;
     }
-    for (const n of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS'] as const) form.revert(n);
+    for (const n of SERVER_NAMES) form.revert(n);
     // why: Gmail's server name is no other server's; the field is emptied for the operator to type theirs
     if (view.values.SMTP_HOST === GMAIL.host) form.set('SMTP_HOST', '');
   };
