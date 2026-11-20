@@ -515,14 +515,14 @@ describe('the Settings page owns its names (settings plan, spec revision 72)', (
   const IMPORTED =
     'A settings-file line for one of them is read once, on the first start at which the app holds no value for it; after that the app keeps its own value, and a line that differs is ignored and reported on Settings › System ("… in .env is ignored: Settings holds it. Remove the line from .env."): remove the line.';
   const SET_ASIDE =
-    'A value the app holds but no longer accepts (an update tightened its rule) is set aside for that start, so the app still starts, and Settings › System names it ("Saved … isn’t valid any more: set it again in Settings").';
+    'A value the app holds or reads from the settings file but does not accept (an update tightened its rule, or the line was never valid) is set aside for that start, so the app still starts, and Settings › System names it ("… isn’t valid: set it in Settings").';
   const BACKUPS =
     'The database and its backups hold those keys and the mail password as the settings file holds them, readable by you alone (0600): keep every copy of a backup as private as the settings file.';
 
   it('section 0 says which settings the app keeps, how a line is imported once, what is set aside, and that backups hold the keys', () => {
     for (const s of [OWNED, IMPORTED, SET_ASIDE, BACKUPS]) expect(flat0).toContain(s);
     expect(flat0).toContain(
-      '`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window question of `--reconfigure browser`, then print the Settings address instead (Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources).',
+      '`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window question of `--reconfigure browser`, then print the Settings address instead (Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or not: setup reads the app\'s database (read-only) and does this once it holds any setting, which it does from its first start.',
     );
     expect(flat0).toContain('Tokens, keys and the mail password must be at least 8 characters');
   });

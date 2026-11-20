@@ -7,7 +7,6 @@
 import {
   ageEndsLine,
   apiContract,
-  asIsoDate,
   BACKUP_MAX_AGE_MS,
   backupState,
   capPercent,
@@ -17,6 +16,7 @@ import {
   consentWindowState,
   coverageGapWarn,
   coverageLine,
+  dateIn as dateInZone,
   formatAgeShort,
   formatDuration,
   formatInstant,
@@ -26,6 +26,7 @@ import {
   type OwnedName,
   PROVIDER_NAMES,
   SETTING_LABELS,
+  SETTING_SECTION,
   SKIP_CODE_TEXT,
   START_REFUSAL_TEXT,
   TRIAL_WARN_CREDITS,
@@ -39,6 +40,9 @@ export type StatusResponse = apiContract.StatusResponse;
 /** The fixed words of the report; one table so the banned-word test reads them all. */
 export const STATUS_TEXT = {
   docs: 'docs/setup.md section 11',
+  // why: review I1 (ruling R19): each source's calls, caps and windows are on the Providers view, linked from
+  // Settings › Price sources as "Calls and caps"; Settings › Price sources itself shows none of them
+  callsAndCaps: 'Calls and caps (/?view=providers)',
   /** Revision 55 §7 (data-004): the note of a search that runs only when pressed. */
   notScheduled: 'not scheduled',
   browserWindow: {
@@ -123,16 +127,8 @@ const openSettings = (section: SettingsSection): StatusCheck['fix'] => ({
 /** What the time and mode words of a check need of the facts. */
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
 const at = (f: Frame, iso: IsoDateTime) => formatInstant(iso, f.tz);
-/** An instant's calendar date in the report's time zone (`en-CA` formats as YYYY-MM-DD, the IsoDate form). */
-const dateIn = (f: Frame, iso: IsoDateTime): IsoDate =>
-  asIsoDate(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: f.tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(iso)),
-  );
+/** An instant's calendar date in the report's time zone. */
+const dateIn = (f: Frame, iso: IsoDateTime): IsoDate => dateInZone(iso, f.tz);
 
 /** The app check's words for an app with no password that only this machine can reach (spec §4). */
 export const NO_PASSWORD_LOCAL = 'no password: only this machine can reach the app';
@@ -309,7 +305,7 @@ function scheduleCheck(f: StatusFacts): StatusCheck {
 const SKIPPED: Readonly<Record<string, { reason: string; fix: string }>> = {
   skipped_budget: {
     reason: 'it would exceed a budget cap',
-    fix: 'a budget cap was reached: Settings → Price sources shows when its window reopens; raise the cap or search less, or the next firing skips again',
+    fix: `a budget cap was reached: ${STATUS_TEXT.callsAndCaps} shows when its window reopens; raise the cap or search less, or the next firing skips again`,
   },
   skipped_confirm: {
     reason: 'its cost estimate needs your confirmation',
@@ -490,8 +486,8 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       summary: `${name}: ${why}${usage}`,
       fix: fix(
         failedOther
-          ? 'check Settings → Price sources and the app log'
-          : 'watch Settings → Price sources; raise the plan or wait for the window to reopen',
+          ? `check ${STATUS_TEXT.callsAndCaps} and the app log`
+          : `watch ${STATUS_TEXT.callsAndCaps}; raise the plan or wait for the window to reopen`,
       ),
     });
   }
@@ -804,32 +800,12 @@ function emailCheck(f: StatusFacts): StatusCheck {
   return check({ id: 'email', area: 'email', state: 'ok', summary: `configured; ${last}` });
 }
 
-/** The Settings section each owned name is edited in (the page's own grouping). */
-const NAME_SECTION: Readonly<Record<OwnedName, SettingsSection>> = {
-  TRAVELPAYOUTS_TOKEN: 'sources',
-  SEARCHAPI_KEY: 'sources',
-  SEARCHAPI_PLAN: 'sources',
-  SEARCHAPI_BILLING_DAY: 'sources',
-  CAMOUFOX_BROWSER_WINDOW: 'sources',
-  FLIGHT_READ_PATIENCE: 'sources',
-  DISCOVERY_REFRESH_DAYS: 'sources',
-  NEW_SEARCH_DISCOVERY: 'sources',
-  NEW_SEARCH_VERIFICATION: 'sources',
-  MONTHLY_SPEND_CAP_PENCE: 'limits',
-  EXECUTION_MAX_CALLS: 'limits',
-  SMTP_HOST: 'email',
-  SMTP_PORT: 'email',
-  SMTP_TLS: 'email',
-  SMTP_USER: 'email',
-  SMTP_PASS: 'email',
-  ALERT_EMAIL_TO: 'email',
-  ALERT_EMAIL_FROM: 'email',
-};
 const idOf = (name: OwnedName) => name.toLowerCase().replaceAll('_', '-');
 
 /**
- * Ruling 13, one check per name: an `.env` line the Settings page now owns is ignored (warn); a saved value the schema
- * refused is set aside for this boot (fail). The words come from the label table, never from a value.
+ * Ruling 13, one check per name: an `.env` line the Settings page now owns is ignored (warn); a stored or imported
+ * value the schema refused is set aside for this boot (fail), worded the same whether it was saved or came from
+ * `.env`. The words come from the label table, never from a value.
  */
 function settingsChecks(f: StatusFacts): StatusCheck[] {
   return [
@@ -840,7 +816,7 @@ function settingsChecks(f: StatusFacts): StatusCheck[] {
         state: 'warn',
         summary: `${SETTING_LABELS[name]} in .env is ignored: Settings holds it. Remove the line from .env.`,
         label: SETTING_LABELS[name],
-        fix: openSettings(NAME_SECTION[name]),
+        fix: openSettings(SETTING_SECTION[name]),
       }),
     ),
     ...f.settings.setAside.map((name) =>
@@ -848,9 +824,9 @@ function settingsChecks(f: StatusFacts): StatusCheck[] {
         id: `settings-aside-${idOf(name)}`,
         area: 'settings',
         state: 'fail',
-        summary: `Saved ${SETTING_LABELS[name]} isn't valid any more: set it again in Settings`,
+        summary: `${SETTING_LABELS[name]} isn't valid: set it in Settings`,
         label: SETTING_LABELS[name],
-        fix: openSettings(NAME_SECTION[name]),
+        fix: openSettings(SETTING_SECTION[name]),
       }),
     ),
   ];

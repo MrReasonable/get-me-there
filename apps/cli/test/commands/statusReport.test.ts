@@ -8,11 +8,11 @@ import { runCli } from '../../src/cli.js';
 import type { HttpRequest } from '../../src/deps.js';
 import { offeredFor, TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
 
-/** Review MINOR 11: the test email's next steps carry Settings › Email and alerts' address on this app. */
-const EMAIL_AT = 'http://127.0.0.1:3000/?view=settings&section=email';
-
 import { scriptedAsk, stubHttp, testIo, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
+
+/** Review MINOR 11: the test email's next steps carry Settings › Email and alerts' address on this app. */
+const EMAIL_AT = 'http://127.0.0.1:3000/?view=settings&section=email';
 
 type Report = z.input<typeof apiContract.statusResponseSchema>;
 type Check = Report['checks'][number];
@@ -140,12 +140,12 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
         id: 'settings-aside-smtp-port',
         area: 'settings',
         state: 'fail',
-        summary: "Saved Mail server port isn't valid any more: set it again in Settings",
+        summary: "Mail server port isn't valid: set it in Settings",
         fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
       }),
     ]);
     expect(await runCli(['status'], m.deps)).toBe(1);
-    expect(m.io.stdout).toMatch(/settings +fail +Saved Mail server port/);
+    expect(m.io.stdout).toMatch(/settings +fail +Mail server port isn.t valid/);
     expect(m.io.stdout).toContain(
       'fix: set it again in Settings › Email and alerts (http://127.0.0.1:3000/?view=settings&section=email)',
     );

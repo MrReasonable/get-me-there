@@ -8,6 +8,7 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
+  apiContract,
   type BudgetGuard,
   type Clock,
   type Config,
@@ -27,7 +28,6 @@ import {
   parseBootConfig,
   parseConfig,
   type ResponseCache,
-  SETTINGS_NAMES,
   Secret,
   type SettingRow,
   type SettingsReport,
@@ -289,8 +289,6 @@ export interface Ports {
   settingsReport: SettingsReport;
 }
 
-const SECRET_NAMES: readonly OwnedName[] = SETTINGS_NAMES.filter((s) => s.secret).map((s) => s.name);
-
 /**
  * Every configured secret, for http-kit, recorder and log scrubbing (spec §5.3), and every stored secret setting beside
  * them (Global Constraints: every stored secret joins the boot's secrets list, used by this config or not), each value
@@ -308,7 +306,7 @@ export function collectSecrets(config: Config, stored: readonly SettingRow[] = [
   // refuses to build with one in its list; scrubbing so short a value would rewrite every body that holds it
   for (const row of stored)
     if (
-      SECRET_NAMES.includes(row.name) &&
+      apiContract.SECRET_SETTING_NAMES.some((n) => n === row.name) &&
       row.value.length >= MIN_SECRET_LENGTH &&
       !out.some((s) => s.reveal() === row.value)
     )
@@ -471,7 +469,7 @@ export function openDatabase(databasePath: string, migrationsDir: string): Db {
 export function bootSecrets(config: Config, env: Env): Secret[] {
   return collectSecrets(
     config,
-    SECRET_NAMES.flatMap((name) => {
+    apiContract.SECRET_SETTING_NAMES.flatMap((name) => {
       const value = env[name];
       return value === undefined ? [] : [{ name, value }];
     }),

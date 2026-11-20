@@ -11,6 +11,7 @@
  * it and stops the heartbeat before the database closes.
  */
 import { randomUUID } from 'node:crypto';
+import { Server as HttpServer } from 'node:http';
 import {
   type Clock,
   type Config,
@@ -186,6 +187,22 @@ function listen(app: Hono<AppEnv>, config: Config): Promise<{ server: ServerType
       resolve({ server, port: info.port }),
     );
     server.once('error', reject);
+    if (server instanceof HttpServer) closeWhenIdle(server);
+  });
+}
+
+/**
+ * Review I5: once the server stops listening (a restart in place or a shutdown), each keep-alive connection is closed
+ * as soon as its response is written. `close()` closes the idle ones itself, but a connection busy at that moment (the
+ * save's own) would otherwise stay open until its client's keep-alive timeout, holding the close and so the restart,
+ * and a page asking /api/health every second over it would keep it busy until the shutdown deadline.
+ */
+function closeWhenIdle(server: HttpServer): void {
+  server.on('request', (_req, res) => {
+    res.once('finish', () => {
+      // why: the connection counts as idle once the response's own finish has run, a turn later
+      if (!server.listening) setImmediate(() => server.closeIdleConnections());
+    });
   });
 }
 

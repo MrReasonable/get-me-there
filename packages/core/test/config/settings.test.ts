@@ -18,12 +18,15 @@ import {
   type OwnedName,
   ownedNameSchema,
   poundsToPence,
+  present,
   SECRET_TOO_SHORT,
   SETTING_LABELS,
+  SETTING_SECTION,
   SETTINGS_NAMES,
   SMTP_ALL_OR_NOTHING,
   SMTP_REQUIRED_NAMES,
   settingRefusal,
+  settingsInSection,
 } from '../../src/config/settings.js';
 import { findBannedWords } from '../../src/text/bannedWords.js';
 
@@ -62,6 +65,34 @@ describe('SETTINGS_NAMES (ruling 1)', () => {
     for (const n of ['SEARCHAPI_TRIAL_USED', 'CAMOUFOX_ENABLED', 'DATABASE_PATH', 'searchapi_key', ''])
       expect(isOwnedName(n), n).toBe(false);
     expect(ownedNameSchema.options).toEqual(OWNED_NAMES);
+  });
+});
+
+describe('SETTING_SECTION (the page’s grouping, read by its Saves and by Status)', () => {
+  it('puts each owned name in one section, in SETTINGS_NAMES order, and System holds none', () => {
+    expect(settingsInSection('sources')).toEqual([
+      'TRAVELPAYOUTS_TOKEN',
+      'SEARCHAPI_KEY',
+      'SEARCHAPI_PLAN',
+      'SEARCHAPI_BILLING_DAY',
+      'CAMOUFOX_BROWSER_WINDOW',
+      'FLIGHT_READ_PATIENCE',
+      'DISCOVERY_REFRESH_DAYS',
+      'NEW_SEARCH_DISCOVERY',
+      'NEW_SEARCH_VERIFICATION',
+    ]);
+    expect(settingsInSection('limits')).toEqual(['MONTHLY_SPEND_CAP_PENCE', 'EXECUTION_MAX_CALLS']);
+    expect(new Set(settingsInSection('email'))).toEqual(new Set(EMAIL_NAMES));
+    expect(settingsInSection('system')).toEqual([]);
+    expect(Object.keys(SETTING_SECTION).sort()).toEqual([...OWNED_NAMES].sort());
+  });
+});
+
+describe('present (spec §12: an empty line is unset)', () => {
+  it('is true only for a non-empty string', () => {
+    expect(present('x')).toBe(true);
+    expect(present('')).toBe(false);
+    expect(present(undefined)).toBe(false);
   });
 });
 

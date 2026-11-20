@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fixedClock, londonDateOf, systemClock } from '../../src/ports/clock.js';
+import { dateIn, fixedClock, londonDateOf, systemClock } from '../../src/ports/clock.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
 
 describe('clock', () => {
@@ -15,6 +15,11 @@ describe('clock', () => {
   it('todayLondon in winter equals the UTC date', () => {
     expect(fixedClock(asIsoDateTime('2026-12-01T23:30:00.000Z')).todayLondon()).toBe('2026-12-01');
     expect(londonDateOf(asIsoDateTime('2026-12-01T23:30:00.000Z'))).toBe('2026-12-01');
+  });
+  it('dateIn gives the calendar date of an instant in any zone, as an IsoDate', () => {
+    expect(dateIn('2026-10-14T23:30:00.000Z', 'Europe/London')).toBe('2026-10-15');
+    expect(dateIn('2026-10-14T23:30:00.000Z', 'America/New_York')).toBe('2026-10-14');
+    expect(dateIn('2026-12-01T23:30:00.000Z', 'UTC')).toBe('2026-12-01');
   });
   it('systemClock reads Date.now in toISOString form and a London date', () => {
     // why: pinning the instant with fake timers keeps this off the real clock and lets it assert exact values.

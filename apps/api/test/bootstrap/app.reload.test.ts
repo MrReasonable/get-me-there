@@ -5,12 +5,15 @@
 // boot that fails ends the loop with its code; three passes leave one pair of signal listeners, no timer and no lock;
 // SIGTERM after a restart checkpoints and releases once. No secret reaches a log across a restart. Every wait is on an
 // event (a pass serving, `closed`, the exit), never a timer.
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { copyFileSync } from 'node:fs';
+import { Agent, request as httpRequest, type IncomingMessage } from 'node:http';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { apiContract, type ExecutionStatus, fixedClock, type IsoDateTime, type ProviderId } from '@gmt/core';
 import { AppLock, openDatabase } from '@gmt/db';
 import { RELOAD_PENDING_TEXT, type RunWatch } from '@gmt/engine';
+import { allowLoopback } from '@gmt/providers/testing';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { type BootDeps, bootApp, main, type RunningApp } from '../../src/bootstrap/app.js';
@@ -94,6 +97,7 @@ function deferred<T>() {
 function drive(
   env: Record<string, string>,
   bootWrap?: (deps: BootDeps, pass: number) => Promise<RunningApp>,
+  listen = false,
 ) {
   const lines: string[] = [];
   const signals = new EventEmitter();
@@ -114,7 +118,7 @@ function drive(
       exited.resolve(code);
     },
     signals,
-    boot: { listen: false, clock: fixedClock(T0) },
+    boot: { listen, clock: fixedClock(T0) },
     logDestination: captureLines(lines),
     ...(bootWrap === undefined
       ? {}
@@ -490,5 +494,120 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
     await d.exited;
     await d.done;
     expectNoSecrets(Object.values(S), { log: d.lines.join(''), 'GET /api/settings': view });
+  });
+});
+
+/** A port the OS has just handed out and taken back, so no test hard-codes one. */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  // why: the network guards refuse every lookup, the loopback literal's included, unless a test lets it through
+  const undo = allowLoopback(0);
+  try {
+    probe.listen(0, '127.0.0.1');
+    await once(probe, 'listening');
+  } finally {
+    undo();
+  }
+  const address = probe.address();
+  probe.close();
+  await once(probe, 'close');
+  if (address === null || typeof address === 'string') throw new Error('no port');
+  return address.port;
+}
+
+/** One request over real HTTP, its body read whole; `agent` keeps its connection open afterwards when it keeps alive. */
+async function call(
+  port: number,
+  path: string,
+  o: { agent: Agent | false; method?: 'GET' | 'PUT'; json?: unknown },
+): Promise<{ status: number; body: string; socketClosed: Promise<unknown> }> {
+  const body = o.json === undefined ? undefined : JSON.stringify(o.json);
+  const req = httpRequest({
+    host: '127.0.0.1',
+    port,
+    path,
+    method: o.method ?? 'GET',
+    agent: o.agent,
+    headers: {
+      host: `127.0.0.1:${port}`,
+      ...(body === undefined
+        ? {}
+        : { 'content-type': 'application/json', 'x-requested-with': 'get-me-there' }),
+    },
+  });
+  req.end(body);
+  const [res] = await once(req, 'response');
+  if (!(res instanceof Object) || !('statusCode' in res)) throw new Error('no response');
+  const message: IncomingMessage = res;
+  const chunks: Buffer[] = [];
+  for await (const chunk of message) chunks.push(Buffer.from(chunk));
+  const socket = req.socket;
+  return {
+    status: message.statusCode ?? 0,
+    body: Buffer.concat(chunks).toString('utf8'),
+    socketClosed: socket === null || socket.destroyed ? Promise.resolve() : once(socket, 'close'),
+  };
+}
+
+describe('a save restarts the app in place on a real listener (Review Focus 4: no EADDRINUSE)', {
+  timeout: TIMEOUT_MS,
+}, () => {
+  it('with keep-alive connections open when the save lands, the next pass listens on the same port and answers with a new bootId', async () => {
+    const port = await freePort();
+    // the listen and this test's own requests reach 127.0.0.1:<port>; nothing else does
+    const undoLoopback = allowLoopback(port);
+    const d = drive(devEnv(seededDb(), { PORT: String(port) }), undefined, true);
+    const first = await d.pass(1);
+    expect(first.port).toBe(port);
+    // an idle keep-alive connection, and the one the save is sent on, kept alive after its answer
+    const idle = new Agent({ keepAlive: true, maxSockets: 1 });
+    const saving = new Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      const health = await call(port, '/api/health', { agent: idle });
+      expect(health.status).toBe(200);
+      const firstId = z.object({ bootId: z.string() }).parse(JSON.parse(health.body)).bootId;
+      expect(firstId).toBe(first.bootId);
+      expect((await call(port, '/api/health', { agent: saving })).status).toBe(200);
+      const saved = await call(port, '/api/settings', {
+        agent: saving,
+        method: 'PUT',
+        json: { changes: { FLIGHT_READ_PATIENCE: '20' } },
+      });
+      expect(saved.status).toBe(200);
+      expect(apiContract.settingsUpdateResponseSchema.parse(JSON.parse(saved.body))).toEqual({
+        warnings: [],
+        applies: 'now',
+      });
+      // why: a page asks /api/health again over the connection it saved on; the closing pass must not answer it (a
+      // connection kept alive past the close would be served by it, old bootId and all, and a page asking every second
+      // would hold the close until the shutdown deadline). Refused, reset or the next pass's answer are all fine.
+      const asked = await call(port, '/api/health', { agent: saving }).then(
+        (r) => ({ answered: true as const, body: r.body }),
+        () => ({ answered: false as const }),
+      );
+      if (asked.answered)
+        expect(z.object({ bootId: z.string() }).parse(JSON.parse(asked.body)).bootId).not.toBe(firstId);
+      // the close does not wait on either client: both connections are closed by the app, then the pass ends
+      await Promise.all([health.socketClosed, saved.socketClosed]);
+      expect(await first.closed).toBe('reload');
+
+      const second = await d.pass(2);
+      expect(second.port).toBe(port);
+      expect(second.ports.config.flightReadPatience).toBe(20);
+      const again = await call(port, '/api/health', { agent: false });
+      expect(again.status).toBe(200);
+      const secondId = z.object({ bootId: z.string() }).parse(JSON.parse(again.body)).bootId;
+      expect(secondId).toBe(second.bootId);
+      expect(secondId).not.toBe(firstId);
+      expect(d.exitCodes).toEqual([]);
+      expect(d.lines.join('')).not.toContain('EADDRINUSE');
+    } finally {
+      idle.destroy();
+      saving.destroy();
+      d.signals.emit('SIGTERM');
+      await d.exited;
+      await d.done;
+      undoLoopback();
+    }
   });
 });

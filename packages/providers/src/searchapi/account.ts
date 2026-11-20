@@ -9,8 +9,7 @@
  */
 import {
   AbortedError,
-  asIsoDate,
-  type IsoDate,
+  dateIn,
   type Logger,
   ProviderError,
   type SearchApiAccount,
@@ -26,12 +25,6 @@ const accountBodySchema = z.object({
   account: z.object({ remaining_searches: credits, monthly_allowance: credits }),
   subscription: z.object({ period_end: z.iso.datetime() }).optional(),
 });
-
-/** The calendar date an instant falls on in `timeZone` (`en-CA` formats as YYYY-MM-DD, as core's londonDateOf relies on). */
-function dateIn(instant: string, timeZone: string): IsoDate {
-  const f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
-  return asIsoDate(f.format(new Date(instant)));
-}
 
 export async function searchApiAccount(
   http: HttpKit,

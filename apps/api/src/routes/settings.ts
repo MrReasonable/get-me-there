@@ -19,6 +19,7 @@ import {
   MIN_SECRET_LENGTH,
   OWNED_NAMES,
   type OwnedName,
+  present,
   providerIdSchema,
   Secret,
   type SettingRow,
@@ -42,8 +43,6 @@ import type { HandlerTable, RouteContext, RouteHandler } from './types.js';
 const LAST4_NAMES: readonly OwnedName[] = ['TRAVELPAYOUTS_TOKEN', 'SEARCHAPI_KEY'];
 /** A key shorter than this gives no last four: they would be most of it. */
 const LAST4_MIN_LENGTH = 12;
-
-const present = (v: string | undefined): v is string => v !== undefined && v !== '';
 
 /** The body's `changes`, read loosely before the schema runs, so its secrets are scrubbed first. */
 const looseChanges = z.object({ changes: z.record(z.string(), z.unknown()) });
@@ -199,6 +198,22 @@ function settingsView(ctx: RouteContext): apiContract.SettingsView {
 }
 
 /**
+ * The parse a save checks with. A save can make the parse read `.env` lines it skipped before (a first SearchApi key
+ * makes it read SEARCHAPI_MONTHLY_CALL_CAP): one the schema refuses is no setting the page holds, so the save is 422
+ * naming each such line (review M7), never a 500; the names only, never a value.
+ */
+function parseLayeredOrEnvError(...args: Parameters<typeof parseLayered>): ReturnType<typeof parseLayered> {
+  try {
+    return parseLayered(...args);
+  } catch (e) {
+    if (!(e instanceof InvalidConfigError)) throw e;
+    const envOnly = e.errors.map((x) => x.field).filter((f) => !isOwnedName(f));
+    const lines = [...new Set(envOnly.length > 0 ? envOnly : e.errors.map((x) => x.field))];
+    throw new ApiError(422, 'invalid_env', API_TEXT.settingsEnvRefused(lines), { lines });
+  }
+}
+
+/**
  * Ruling 5: the changes laid over the stored rows and parsed as the next boot will (a stored value the save leaves
  * alone that the schema refuses is set aside, as at boot); a refusal of a changed name, or email's all-or-nothing rule
  * when the save changes email, is 422 naming only those, with nothing saved. Valid: the names whose value differs are
@@ -219,7 +234,7 @@ function save(ctx: RouteContext, changes: apiContract.SettingChanges): apiContra
     const stored = repo.all();
     const differs = changed.filter((c) => stored.find((r) => r.name === c.name)?.value !== c.value);
     const next = [...stored.filter((r) => !keep.has(r.name)), ...changed];
-    const parsed = parseLayered(ctx.settingsEnv, next, keep);
+    const parsed = parseLayeredOrEnvError(ctx.settingsEnv, next, keep);
     if (!parsed.ok)
       throw refusalError(
         API_TEXT.settingsRefused,

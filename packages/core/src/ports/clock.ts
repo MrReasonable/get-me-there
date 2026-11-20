@@ -19,6 +19,15 @@ export function londonDateOf(instant: IsoDateTime): IsoDate {
   return asIsoDate(londonDate.format(new Date(instant)));
 }
 
+/**
+ * The calendar date an instant falls on in `timeZone`, as an IsoDate (`en-CA` formats as YYYY-MM-DD). The one copy for
+ * any zone: SearchApi's period end and the Status report's dates read it.
+ */
+export function dateIn(instant: string, timeZone: string): IsoDate {
+  const f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  return asIsoDate(f.format(new Date(instant)));
+}
+
 export const systemClock: Clock = {
   now: () => isoDateTimeOfEpochMs(Date.now()),
   todayLondon: () => londonDateOf(isoDateTimeOfEpochMs(Date.now())),

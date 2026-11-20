@@ -371,6 +371,25 @@ describe('PUT /api/settings: fix round 1 (secrets, refusals, unchanged saves, wa
     expect(reload.told).toEqual(['request']);
   });
 
+  it('a save that makes the app read a refused .env line is 422 naming the line, never a 500, and saves nothing (review M7)', async () => {
+    // why: with no SearchApi key the provider's own lines are not read, so this app boots; a saved key would read them
+    const x = await harness({ SEARCHAPI_MONTHLY_CALL_CAP: 'lots' });
+    const res = await put(x, { SEARCHAPI_KEY: S.SEARCHAPI_KEY });
+    const text = await res.clone().text();
+    expect(res.status).toBe(422);
+    expect(await errorOf(res)).toEqual({
+      code: 'invalid_env',
+      message: API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP']),
+      details: { lines: ['SEARCHAPI_MONTHLY_CALL_CAP'] },
+    });
+    expect(API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP'])).toContain(
+      'SEARCHAPI_MONTHLY_CALL_CAP in .env',
+    );
+    expect(text).not.toContain('lots');
+    expect(rawRows(x)).toEqual([]);
+    expectNoSecrets(ALL_SECRETS, { 'PUT /api/settings': text, log: x.logLines.join('') });
+  });
+
   it("passes on the config's own warnings in the page's words", async () => {
     const x = await harness({ SEARCHAPI_KEY: S.SEARCHAPI_KEY, SEARCHAPI_TRIAL_USED: '9' });
     const res = await put(x, { SEARCHAPI_PLAN: '40usd' });

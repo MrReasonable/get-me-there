@@ -196,6 +196,7 @@ function apiTexts(): string[] {
     Object.values(API_TEXT.emailTestFailed).join(' '),
     API_TEXT.settingsTrialUsedIgnored,
     API_TEXT.settingsEnvWarning('SEARCHAPI_TRIAL_USED'),
+    API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP']),
     Object.values(API_TEXT.toolRunLabel).join(' '),
     API_TEXT.itineraryNotFound,
     API_TEXT.draftNotice,

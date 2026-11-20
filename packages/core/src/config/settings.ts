@@ -59,9 +59,42 @@ export interface SettingsReport {
 
 type Env = Record<string, string | undefined>;
 
-/** Spec §12: an empty line is unset. */
-function present(v: string | undefined): v is string {
+/** Spec §12: an empty line is unset. The one copy: the api's Settings routes read it too. */
+export function present(v: string | undefined): v is string {
   return v !== undefined && v !== '';
+}
+
+/** The Settings page's sections that hold owned names (System holds none): the page's own `section=` values. */
+export type SettingSection = 'sources' | 'limits' | 'email';
+
+/**
+ * The section each owned name is edited in (the page's own grouping): the one copy, read by the page's Save of each
+ * section and by the Status report's fix for a name.
+ */
+export const SETTING_SECTION: Readonly<Record<OwnedName, SettingSection>> = {
+  TRAVELPAYOUTS_TOKEN: 'sources',
+  SEARCHAPI_KEY: 'sources',
+  SEARCHAPI_PLAN: 'sources',
+  SEARCHAPI_BILLING_DAY: 'sources',
+  CAMOUFOX_BROWSER_WINDOW: 'sources',
+  FLIGHT_READ_PATIENCE: 'sources',
+  DISCOVERY_REFRESH_DAYS: 'sources',
+  NEW_SEARCH_DISCOVERY: 'sources',
+  NEW_SEARCH_VERIFICATION: 'sources',
+  MONTHLY_SPEND_CAP_PENCE: 'limits',
+  EXECUTION_MAX_CALLS: 'limits',
+  SMTP_HOST: 'email',
+  SMTP_PORT: 'email',
+  SMTP_TLS: 'email',
+  SMTP_USER: 'email',
+  SMTP_PASS: 'email',
+  ALERT_EMAIL_TO: 'email',
+  ALERT_EMAIL_FROM: 'email',
+};
+
+/** The owned names a section holds, in SETTINGS_NAMES order; none for a section that holds none (System). */
+export function settingsInSection(section: string): OwnedName[] {
+  return OWNED_NAMES.filter((name) => SETTING_SECTION[name] === section);
 }
 
 /**

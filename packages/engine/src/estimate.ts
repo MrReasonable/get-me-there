@@ -854,7 +854,7 @@ export interface BilledCalls {
 
 /**
  * The runnable (unblocked) lines of billable-plan providers, one entry a provider with its calls summed over stages
- * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 searches left".
+ * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 credits left".
  */
 export function billedCallsOf(
   ctx: EngineContext,

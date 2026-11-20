@@ -62,6 +62,9 @@ export const API_TEXT = {
   // why: settings plan ruling 5 — the config's own warnings, in the page's words
   settingsTrialUsedIgnored:
     "SEARCHAPI_TRIAL_USED in .env counts only the free trial's credits, so it is ignored on the $40 plan: remove the line from .env.",
+  // why: review M7: an env-only line a save makes the app read, refused by the schema; named, never quoted
+  settingsEnvRefused: (names: readonly string[]) =>
+    `nothing was saved: ${names.join(', ')} in .env is not valid with these settings: fix the line in .env, then save again`,
   settingsEnvWarning: (name: string) =>
     `${name} in .env is ignored with these settings: remove the line from .env.`,
   // why: settings plan ruling 6 — a tool run the restart waits for, named as a search would be

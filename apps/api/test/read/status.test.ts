@@ -625,7 +625,11 @@ describe('the data check: honest and complete (review V6)', () => {
       "the schedule is now off: change the dates in the search's Edit page, then set it to repeat again",
     );
     expect(fixOf('skipped_confirm')).toContain('confirm the new estimate');
-    expect(fixOf('skipped_budget')).toContain('Settings → Price sources shows when its window reopens');
+    // why: review I1 (ruling R19): windows and caps are on the Providers view, never on Settings › Price sources
+    expect(fixOf('skipped_budget')).toContain(
+      'Calls and caps (/?view=providers) shows when its window reopens',
+    );
+    expect(fixOf('skipped_budget')).not.toContain('Price sources');
     expect(fixOf('skipped_missed', 'half-cadence')).toContain('the next scheduled run goes ahead as normal');
     expect(fixOf('skipped_missed', 'browser-only-definition')).toBe(STATUS_TEXT.browserOnlyFix);
   });
@@ -986,7 +990,14 @@ describe('providers', () => {
     expect(tpCheck({ lastCall: null }).summary).toContain('configured; not used yet');
     expect(tpCheck({ lastCall: { at: ago(HOUR), result: 'other' } }).state).toBe('warn');
   });
-  it('the trial warns at 10 credits left and words its lifetime usage as Settings → Price sources does', () => {
+  it('a warning provider points at Calls and caps, the Providers view, for its window and its last call (review I1)', () => {
+    const trial = saCheck({ usage: { used: 90, cap: 100, window: 'lifetime' }, trialLeft: 10 });
+    expect(trial.fix?.text).toContain('watch Calls and caps (/?view=providers)');
+    const failed = tpCheck({ lastCall: { at: ago(HOUR), result: 'other' } });
+    expect(failed.fix?.text).toContain('check Calls and caps (/?view=providers) and the app log');
+    for (const c of [trial, failed]) expect(c.fix?.text).not.toContain('Price sources');
+  });
+  it('the trial warns at 10 credits left and words its lifetime usage as the Providers view does', () => {
     const usage = { used: 90, cap: 100, window: 'lifetime' as const };
     expect(saCheck({ usage, trialLeft: 10 }).state).toBe('warn');
     expect(saCheck({ usage, trialLeft: 10 }).summary).toContain('10 trial credits left');
@@ -1063,7 +1074,7 @@ describe('settings checks (settings plan ruling 13)', () => {
       fix: { text: 'Open Settings › Price sources', command: null, settings: 'sources' },
     });
   });
-  it('a saved value the app set aside is a fail naming the label and the section that fixes it', () => {
+  it('a value the app set aside (saved, or an .env line never saved) is a fail naming the label and the section that fixes it', () => {
     const c = checkOf(
       healthyFacts({ settings: { envIgnored: [], setAside: ['MONTHLY_SPEND_CAP_PENCE', 'SMTP_PORT'] } }),
       'settings-aside-monthly-spend-cap-pence',
@@ -1071,7 +1082,7 @@ describe('settings checks (settings plan ruling 13)', () => {
     expect(c).toMatchObject({
       area: 'settings',
       state: 'fail',
-      summary: "Saved Monthly spend limit isn't valid any more: set it again in Settings",
+      summary: "Monthly spend limit isn't valid: set it in Settings",
       label: 'Monthly spend limit',
       fix: { text: 'Open Settings › Limits', command: null, settings: 'limits' },
     });
