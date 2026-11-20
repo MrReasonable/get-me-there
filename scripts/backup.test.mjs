@@ -141,7 +141,14 @@ describe('scripts/check-backup.mjs (spec §13 Restore)', { timeout: 60_000 }, ()
     const made = JSON.parse(backup(['--db', sampleDb(dir)]).stdout);
     const r = check([made.file]);
     expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout)).toEqual({ ok: true, file: made.file, resumable: 0, scheduled: 0 });
+    // why: controller ruling R18: the summary also gives the stored settings whose names are not secrets (none here)
+    expect(JSON.parse(r.stdout)).toEqual({
+      ok: true,
+      file: made.file,
+      resumable: 0,
+      scheduled: 0,
+      settings: [],
+    });
   });
 
   it('exits 74 for a file that is not a database or does not exist', () => {

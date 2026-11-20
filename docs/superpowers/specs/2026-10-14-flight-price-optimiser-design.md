@@ -5654,11 +5654,13 @@ the pinned Camoufox. An update's backup names its commit in the `.commit` file
 beside it. A restored ledger lacks any call made after its backup, so check the
 vendor's dashboard and raise `SEARCHAPI_TRIAL_USED` (trial; then `pnpm gmt
 restart`) or lower `SEARCHAPI_MONTHLY_CALL_CAP` (`40usd`) to match, both
-`app.env` lines the Settings page does not own; restore says which when the
-app answers its Settings read with a SearchApi key set (the plan as Settings
-holds it, unset being the trial), and otherwise gives the plan-free advice to
-check each vendor's dashboard, never judging the plan from an `app.env` line
-(restore runs with the app stopped, so that advice is the usual one), and what
+`app.env` lines the Settings page does not own; restore says which, judging
+SearchApi's plan as the app would with the app stopped: the restored file's
+stored `SEARCHAPI_PLAN` (`check-backup.mjs` prints the stored settings whose
+names are not secrets) layered over `app.env` by `core`'s `layerSettings`, so
+a row wins (`''` is unset) and the `app.env` line counts only where no row
+exists; with no plan it gives the plan-free advice to check each vendor's
+dashboard; and what
 the next start will resume and catch up (`AUTO_RESUME=false` leaves the
 resumes to the operator).
 The checkout is then on a detached commit: run `git switch main` before the
@@ -5840,8 +5842,9 @@ no key or password".
   warnings as notes; the closing screen, the smoke and the test email's words point at Settings.)
 - **Ruling (controller R17, Task 8's review): the remaining pointers move to Settings.** The Providers view's empty
   state links Travelpayouts and SearchApi to Settings › Price sources (the browser keeps its setup command); the search
-  page's Alert fold links "Email isn't set up yet" to Settings › Email and alerts; restore takes SearchApi's plan from
-  the app's Settings read, never `app.env`, else the plan-free advice; setup's closing screen judges the price source by
+  page's Alert fold links "Email isn't set up yet" to Settings › Email and alerts; restore judges SearchApi's
+  plan as the app would (R18: the restored file's stored row layered over `app.env` by `layerSettings`), else the
+  plan-free advice; setup's closing screen judges the price source by
   the app's report; `gmt status` adds a local price-source line only when the report cannot be read, naming why; the
   operator docs give the one-time update steps (the container first, then native: check the imported values in
   Settings, then remove the lines), and natively `.env` in the Status words is `app.env`.

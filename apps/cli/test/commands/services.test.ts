@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli.js';
 import type { Action } from '../../src/plan/action.js';
-import { scriptedAsk, settingsView, stubHttp } from '../support/deps.js';
+import { scriptedAsk } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 const show = (log: readonly Action[]) =>
@@ -215,46 +215,51 @@ describe('restore <file> (spec §13 Restore (native))', () => {
     expect(m.fs.read(`${DB}.before-restore-2026-10-24T09-30-00-000Z`)).toBe('first');
     expect(m.fs.read(`${DB}.before-restore-2026-10-24T09-31-00-000Z`)).toBe('second');
   });
-  // why: review R17c: SearchApi's plan is the Settings page's, so the advice takes it from the app's Settings read
-  // (with a key set) and never from an app.env line, which the app may be ignoring; with no answer it is plan-free
+  // why: controller ruling R18: restore runs with the app stopped, so SearchApi's plan is read as the app would read it:
+  // the restored file's stored SEARCHAPI_PLAN (check-backup prints the stored settings that are not secrets), layered
+  // over app.env by core's layerSettings: a row wins ('' is unset), app.env's line counts only where no row exists
+  const withStored = (settings: ReadonlyArray<{ name: string; value: string }>) => ({
+    extra: (a: readonly string[]) =>
+      String(a[1]).endsWith('check-backup.mjs')
+        ? {
+            code: 0,
+            stdout: `${JSON.stringify({ ok: true, file: a[2], resumable: 0, scheduled: 0, settings })}\n`,
+          }
+        : undefined,
+  });
+  const ENV = '/Users/op/.config/get-me-there/app.env';
   it.each([
-    ['trial', 'raise SEARCHAPI_TRIAL_USED'],
-    ['40usd', 'lower SEARCHAPI_MONTHLY_CALL_CAP'],
-  ])('the dashboard advice fits the SearchApi plan Settings holds (%s; cb-b1-010)', async (plan, text) => {
-    const m = await setUp();
-    m.running.clear();
-    m.deps.http = stubHttp({
-      'GET /api/settings': () => ({
-        status: 200,
-        body: settingsView({ values: { SEARCHAPI_PLAN: plan }, secretsSet: ['SEARCHAPI_KEY'] }),
-      }),
-    });
-    m.fs.file('/b/x.db', 'backup');
-    expect(await runCli(['restore', '/b/x.db'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain(text);
-    // why: settings plan ruling 15: SEARCHAPI_TRIAL_USED stays an app.env line, but the searchapi group is the Settings
-    // page's, so the advice is to edit the line and restart
-    expect(m.io.stdout).not.toContain('--reconfigure searchapi');
-  });
-  it('without an answer from the app the advice is plan-free, whatever app.env says; no key, no SearchApi advice', async () => {
-    const m = await setUp();
-    m.running.clear();
-    const env = '/Users/op/.config/get-me-there/app.env';
-    m.fs.file(env, `${m.fs.read(env) ?? ''}SEARCHAPI_PLAN=trial\n`, 0o600);
-    m.fs.file('/b/x.db', 'backup');
-    expect(await runCli(['restore', '/b/x.db'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain('so check each vendor’s dashboard.');
-    expect(m.io.stdout).not.toContain('SEARCHAPI_TRIAL_USED');
-    m.io.stdout = '';
-    m.deps.http = stubHttp({
-      'GET /api/settings': () => ({
-        status: 200,
-        body: settingsView({ values: { SEARCHAPI_PLAN: 'trial' } }),
-      }),
-    });
-    expect(await runCli(['restore', '/b/x.db'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain('so check each vendor’s dashboard.');
-  });
+    [
+      'a stored row wins over app.env',
+      [{ name: 'SEARCHAPI_PLAN', value: '40usd' }],
+      'trial',
+      'lower SEARCHAPI_MONTHLY_CALL_CAP',
+    ],
+    [
+      'a stored empty row is unset, so app.env is not read',
+      [{ name: 'SEARCHAPI_PLAN', value: '' }],
+      'trial',
+      null,
+    ],
+    ['no row: app.env’s line is the plan', [], 'trial', 'raise SEARCHAPI_TRIAL_USED'],
+    ['no row and no line', [], null, null],
+  ])(
+    'the dashboard advice takes SearchApi’s plan as the app would: %s (cb-b1-010, R18)',
+    async (_n, rows, line, text) => {
+      const m = await setUp('darwin', withStored(rows));
+      m.running.clear();
+      if (line !== null) m.fs.file(ENV, `${m.fs.read(ENV) ?? ''}SEARCHAPI_PLAN=${line}\n`, 0o600);
+      m.fs.file('/b/x.db', 'backup');
+      expect(await runCli(['restore', '/b/x.db'], m.deps)).toBe(0);
+      if (text === null) {
+        expect(m.io.stdout).toContain('so check each vendor’s dashboard.');
+        expect(m.io.stdout).not.toContain('SEARCHAPI_');
+      } else expect(m.io.stdout).toContain(text);
+      // why: settings plan ruling 15: SEARCHAPI_TRIAL_USED stays an app.env line, but the searchapi group is the Settings
+      // page's, so the advice is to edit the line and restart
+      expect(m.io.stdout).not.toContain('--reconfigure searchapi');
+    },
+  );
   it('names the runs a start would resume and the scheduled searches it may catch up (cb-b1-010)', async () => {
     const m = await setUp('darwin', {
       extra: (a) =>

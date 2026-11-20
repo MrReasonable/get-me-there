@@ -1,13 +1,14 @@
 import { resolve } from 'node:path/posix';
-import { readSettingsView } from '../appClient.js';
-import { nativeEndpoint } from '../appEndpoint.js';
+import { layerSettings } from '@gmt/core';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
 import { describePlan, describeResult } from '../plan/describe.js';
 import { factOf } from '../services/set.js';
-import { databasePath } from '../services/specs.js';
+import { appEnvPath, databasePath } from '../services/specs.js';
+import { readEnvText } from '../setup/appEnv.js';
 import {
+  checkedSettings,
   checkedSummary,
   dashboardText,
   importingPath,
@@ -76,13 +77,12 @@ export async function restoreCommand(flags: Flags, positional: string | null, de
   }
   const checkAt = r.done.findIndex((a) => a.kind === 'run');
   const summary = checkedSummary(r.outputs[checkAt] ?? '');
-  // why: review R17c: SearchApi's plan is the Settings page's, so it comes from the app's Settings read (with a key
-  // set; an unset plan is the trial), never from an app.env line the app may be ignoring; with no answer (restore runs
-  // with the app stopped, so usually none) the advice is plan-free
-  const endpoint = nativeEndpoint(deps);
-  const view = endpoint.kind === 'none' ? null : await readSettingsView(deps, endpoint.target);
-  const plan_ =
-    view === null || !view.secrets.SEARCHAPI_KEY.set ? undefined : (view.values.SEARCHAPI_PLAN ?? 'trial');
+  // why: controller ruling R18: restore runs with the app stopped, so SearchApi's plan is read as the app would read
+  // it: the restored file's stored row (checked above; '' is unset) layered over app.env by core's layerSettings, so
+  // app.env's line counts only where no row exists; no plan, the plan-free advice
+  const env = deps.files.read(appEnvPath(deps.platform.paths));
+  const plan_ = layerSettings(env === null ? {} : readEnvText(env), checkedSettings(r.outputs[checkAt] ?? ''))
+    .merged.SEARCHAPI_PLAN;
   const previous = deps.files.size(kept) === null ? '' : ` (the previous file is ${kept})`;
   deps.io.out(`Restored ${source} as ${db}${previous}. ${dashboardText(plan_)}\n`);
   deps.io.out(startNote(summary));

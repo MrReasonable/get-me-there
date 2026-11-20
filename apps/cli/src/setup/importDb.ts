@@ -1,5 +1,5 @@
 import { basename, dirname, join } from 'node:path/posix';
-import { asIsoDateTime, MOVED_MARKER, movedMarkerText } from '@gmt/core';
+import { asIsoDateTime, MOVED_MARKER, movedMarkerText, ownedNameSchema, type SettingRow } from '@gmt/core';
 import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import { type Action, runAction } from '../plan/action.js';
@@ -61,6 +61,24 @@ const checkedSchema = z.object({
   resumable: z.number().int().nonnegative(),
   scheduled: z.number().int().nonnegative(),
 });
+
+const storedSchema = z.object({
+  ok: z.literal(true),
+  settings: z.array(z.object({ name: ownedNameSchema, value: z.string() })),
+});
+
+/**
+ * Controller ruling R18: the stored settings (names that are not secrets) scripts/check-backup.mjs printed about a
+ * checked file, for core's layerSettings; none when it printed none or something else (a file before migration 0014).
+ */
+export function checkedSettings(stdout: string): SettingRow[] {
+  try {
+    const r = storedSchema.safeParse(JSON.parse(stdout.trim().split('\n').at(-1) ?? ''));
+    return r.success ? r.data.settings : [];
+  } catch {
+    return [];
+  }
+}
 
 /** What scripts/check-backup.mjs printed about a checked file: the runs a start resumes and the schedules it may catch up. */
 export function checkedSummary(stdout: string): { resumable: number; scheduled: number } | null {

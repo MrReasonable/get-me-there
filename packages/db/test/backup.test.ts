@@ -199,7 +199,7 @@ describe('backupSummary (cb-b1-010: what starting the app on a restored or impor
     ex.run({ id: 'e1', definitionId: 'd1', status: 'running', at: T0 });
     ex.run({ id: 'e2', definitionId: 'd3', status: 'interrupted', at: T0 });
     ex.run({ id: 'e3', definitionId: 'd1', status: 'completed', at: T0 });
-    expect(backupSummary(path)).toEqual({ resumable: 2, scheduled: 1 });
+    expect(backupSummary(path)).toEqual({ resumable: 2, scheduled: 1, settings: [] });
   });
 
   it('an older schema counts what its columns allow: no is_child means every active row; a definitions table without a schedule counts none', () => {
@@ -209,12 +209,30 @@ describe('backupSummary (cb-b1-010: what starting the app on a restored or impor
     db.exec("INSERT INTO search_executions VALUES ('a', 'running'), ('b', 'completed')");
     db.exec('CREATE TABLE search_definitions (id TEXT PRIMARY KEY, name TEXT)');
     db.close();
-    expect(backupSummary(file)).toEqual({ resumable: 1, scheduled: 0 });
+    expect(backupSummary(file)).toEqual({ resumable: 1, scheduled: 0, settings: [] });
   });
 
   it('a database without those tables (before any migration) counts none', () => {
     const file = join(tmpDir(), 'empty.db');
     new Database(file).close();
-    expect(backupSummary(file)).toEqual({ resumable: 0, scheduled: 0 });
+    expect(backupSummary(file)).toEqual({ resumable: 0, scheduled: 0, settings: [] });
+  });
+
+  // why: controller ruling R18: restore runs with the app stopped, so the CLI reads the restored file's stored settings
+  // to judge SearchApi's plan as the app would; only the names that are not secrets ever leave the file
+  it('gives the stored settings that are not secrets, by name and value, never a secret or an unknown name', () => {
+    const { path, db } = live();
+    const put = db.raw.prepare('INSERT INTO settings (name, value, updated_at) VALUES (?, ?, ?)');
+    put.run('SEARCHAPI_PLAN', '40usd', T0);
+    put.run('SEARCHAPI_KEY', 'sa-key-secret-0123456789', T0);
+    put.run('SMTP_PASS', 'smtp-secret-0123', T0);
+    put.run('SMTP_HOST', '', T0);
+    put.run('NOT_A_SETTING', 'x', T0);
+    const summary = backupSummary(path);
+    expect(summary.settings).toEqual([
+      { name: 'SEARCHAPI_PLAN', value: '40usd' },
+      { name: 'SMTP_HOST', value: '' },
+    ]);
+    expect(JSON.stringify(summary)).not.toContain('secret');
   });
 });
