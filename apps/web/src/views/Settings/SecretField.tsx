@@ -40,9 +40,16 @@ export function SecretField({
   const typing = !saved || replacingAt === form.saves || typed;
   // why: the field is uncontrolled; when a save clears its draft, the text the field still holds is cleared with it
   const field = useRef<HTMLInputElement>(null);
+  const draft = typed ? form.shown(name) : null;
+  // why: a field mounted again (a section switch and back) while the draft holds a typed key shows it again, set as
+  // the property, never the attribute, so the key is never in the markup (fix round 2)
   useEffect(() => {
-    if (!typed && field.current !== null && field.current.value !== '') field.current.value = '';
-  }, [typed]);
+    const el = field.current;
+    if (el === null) return;
+    if (draft === null) {
+      if (el.value !== '') el.value = '';
+    } else if (el.value !== draft) el.value = draft;
+  }, [draft]);
   const error = form.error(name);
   const described = [ids.hint, ...(setAside ? [ids.note] : []), ...(error === null ? [] : [ids.error])].join(
     ' ',

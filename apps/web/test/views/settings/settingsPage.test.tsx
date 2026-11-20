@@ -887,6 +887,27 @@ describe('fix round 1', () => {
     expect(field).not.toHaveAttribute('value');
   });
 
+  it('a typed key survives a section switch: shown again as the field’s value, never in the markup, and sent (fix round 2)', async () => {
+    const KEY = 'sk-test-switch-0123456789abcdef';
+    const { bodies: puts, reached } = capturePutEvents();
+    const { user, container } = open();
+    let sa = await searchApiCard();
+    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    await user.type(within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' }), KEY);
+    const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
+    await user.click(within(nav).getByRole('link', { name: 'Limits' }));
+    await screen.findByRole('heading', { level: 2, name: 'Limits' });
+    await user.click(within(nav).getByRole('link', { name: 'Price sources · unsaved' }));
+    sa = await searchApiCard();
+    const field = within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
+    expect(field).toHaveProperty('value', KEY);
+    expect(field.outerHTML).not.toContain(KEY);
+    expect(container.innerHTML).not.toContain(KEY);
+    await user.click(saveButton());
+    await reached(1);
+    expect(puts).toEqual([{ changes: { SEARCHAPI_KEY: KEY } }]);
+  });
+
   it('an error answer is said in the page’s words, never the api’s message (minor 9)', async () => {
     capturePuts({ error: { code: 'internal', message: 'internal error 7f3a: database is locked' } }, 500);
     const { user } = open();

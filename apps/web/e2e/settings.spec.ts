@@ -52,10 +52,10 @@ for (const width of [375, 1280] as const)
         for (const link of await nav.getByRole('link').all())
           tops.add(Math.round((await link.boundingBox())?.y ?? -1));
         expect(tops.size).toBe(1);
-        // fix round 1, important 2: where the row scrolls, part of the last link always shows, so a fourth section is
-        // seen to be there
-        const scrolls = await nav.getByRole('list').evaluate((el) => el.scrollWidth > el.clientWidth);
-        if (scrolls) await expect(nav.getByRole('link').last()).toBeInViewport();
+        // fix round 1, important 2: at 375 px the row scrolls, and part of the last link always shows, so a fourth
+        // section is seen to be there
+        expect(await nav.getByRole('list').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+        await expect(nav.getByRole('link').last()).toBeInViewport();
         expect(navBox.y + navBox.height).toBeLessThanOrEqual(headBox.y);
       } else {
         // a side list beside the section
