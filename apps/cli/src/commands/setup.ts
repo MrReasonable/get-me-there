@@ -743,7 +743,8 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   const report = await readReport(deps);
   const sourcesCheck =
     report.kind === 'ok' ? report.report.checks.find((c) => c.id === 'price-sources') : undefined;
-  const appSource = sourcesCheck === undefined ? null : sourcesCheck.state === 'ok';
+  const appSource =
+    report.kind !== 'ok' ? 'unread' : sourcesCheck === undefined ? 'unsaid' : sourcesCheck.state === 'ok';
   deps.io.out(
     closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written), appSource }),
   );

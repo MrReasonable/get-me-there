@@ -252,7 +252,17 @@ describe('the closing screen of a re-run judges the price source by the app (set
     expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
     // why: its Settings page may hold a key app.env has no line for, so the screen says it could not tell
     expect(m.io.stdout).not.toContain('No price source is set up yet');
-    expect(m.io.stdout).toContain(unknownSourceText(3000));
+    expect(m.io.stdout).toContain(unknownSourceText(3000, 'unread'));
+  });
+  it('a report that answers without a price-source check says it did not say, not that setup could not ask', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => ({ ...report('ok'), body: { ...report('ok').body, checks: [] } }));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain(unknownSourceText(3000, 'unsaid'));
+    expect(m.io.stdout).toContain("The app's report did not say whether it has a price source");
+    expect(m.io.stdout).not.toContain('Setup could not ask the app');
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
   });
   it('an app that does not answer, over an app.env that names a source, says nothing of a missing source', async () => {
     const m = await setUp();
@@ -261,7 +271,7 @@ describe('the closing screen of a re-run judges the price source by the app (set
     answersFile(m, {});
     expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
     expect(m.io.stdout).not.toContain('No price source is set up yet');
-    expect(m.io.stdout).not.toContain(unknownSourceText(3000));
+    expect(m.io.stdout).not.toContain(unknownSourceText(3000, 'unread'));
     expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
     expect(m.io.stdout).not.toContain('tp-token-0123456789');
   });

@@ -13,11 +13,12 @@ const addSourceText = (port: number): string =>
 export const noSourceText = (port: number): string =>
   `No price source is set up yet, so searches will find nothing. ${addSourceText(port)}`;
 /**
- * The app's report did not answer and app.env names no source: the app's Settings page may still hold one, so this
- * neither says it has none nor that it has one (CodeRabbit, PR #64).
+ * The app's report did not say whether it has a price source and app.env names none: its Settings page may still hold
+ * one, so this neither says it has none nor that it has one (CodeRabbit, PR #64). `unread`: the report could not be
+ * read; `unsaid`: it was read but carried no price-source check.
  */
-export const unknownSourceText = (port: number): string =>
-  `Setup could not ask the app whether it has a price source (pnpm gmt status shows it); with none, searches find nothing. ${addSourceText(port)}`;
+export const unknownSourceText = (port: number, why: 'unread' | 'unsaid'): string =>
+  `${why === 'unread' ? 'Setup could not ask the app whether it has a price source' : "The app's report did not say whether it has a price source"} (pnpm gmt status shows it); with none, searches find nothing. ${addSourceText(port)}`;
 export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';
@@ -71,18 +72,24 @@ export function closingScreen(x: {
   signIn: SignIn;
   /**
    * Whether the app has a price source, from its own report (settings plan ruling 15: its Settings page may hold a key
-   * app.env has no line for). null when the report did not say: a source app.env names counts, and without one the
-   * screen says it could not tell rather than that there is none. Left out (no report asked), the answers decide.
+   * app.env has no line for). `unread` (the report could not be read) or `unsaid` (it had no price-source check): a
+   * source app.env names counts, and without one the screen says it could not tell rather than that there is none.
+   * Left out (no report asked), the answers decide.
    */
-  appSource?: boolean | null;
+  appSource?: boolean | 'unread' | 'unsaid';
 }): string {
   const fromAnswers = searchSource(x.answers);
-  const source = x.appSource === undefined ? fromAnswers : (x.appSource ?? (fromAnswers ? true : null));
+  const source =
+    x.appSource === undefined
+      ? fromAnswers
+      : typeof x.appSource === 'boolean'
+        ? x.appSource
+        : fromAnswers || x.appSource;
   const trialLine = x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : [];
   const lines = [
     ...(source === true
       ? []
-      : [source === false ? noSourceText(x.port) : unknownSourceText(x.port), ...trialLine, '']),
+      : [source === false ? noSourceText(x.port) : unknownSourceText(x.port, source), ...trialLine, '']),
     `get-me-there is running at http://127.0.0.1:${x.port}`,
     ...(x.signIn === 'password'
       ? [
