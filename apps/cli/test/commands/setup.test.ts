@@ -4,6 +4,7 @@ import { ENABLE_QUESTION } from '../../src/camoufox/offer.js';
 import { runCli } from '../../src/cli.js';
 import type { RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
+import { unknownSourceText } from '../../src/setup/closing.js';
 import { BROWSER_WINDOW_QUESTION } from '../../src/setup/prompts.js';
 import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
@@ -173,9 +174,39 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
   });
 });
 
+/** The app's own Status report, its price-source check as given (settings plan ruling 15). */
+const report = (state: 'ok' | 'warn') => ({
+  status: 200,
+  body: {
+    generatedAt: '2026-10-24T09:30:00.000Z',
+    mode: 'native',
+    version: 'abc1234',
+    checks: [
+      {
+        id: 'price-sources',
+        area: 'provider',
+        providerId: null,
+        label: null,
+        state,
+        summary: state === 'ok' ? 'price sources: Travelpayouts' : 'No price source is set up',
+        note: null,
+        offReason: null,
+        fix: null,
+      },
+    ],
+  },
+});
+const routes = (status: () => { status: number; body: unknown } | { error: string }) =>
+  stubHttp({
+    'GET /api/status': status,
+    'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+    'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+  });
+
 describe('the closing screen (brief §6)', () => {
   it('with no price source its first line says so and points at Travelpayouts; with no password it says why and how to turn sign-in on', async () => {
-    const m = machine();
+    // why: the app's report says it has none; a report that does not answer says it could not tell (below)
+    const m = machine({ http: routes(() => report('warn')) });
     answersFile(m, {});
     await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps);
     const closing = m.io.stdout.slice(m.io.stdout.indexOf('No price source'));
@@ -202,33 +233,6 @@ describe('the closing screen (brief §6)', () => {
 // why: review IMPORTANT 5: once the app holds its settings, app.env's lines need not name its price sources, so the
 // closing screen judges them by the app's own report
 describe('the closing screen of a re-run judges the price source by the app (settings plan ruling 15)', () => {
-  const report = (state: 'ok' | 'warn') => ({
-    status: 200,
-    body: {
-      generatedAt: '2026-10-24T09:30:00.000Z',
-      mode: 'native',
-      version: 'abc1234',
-      checks: [
-        {
-          id: 'price-sources',
-          area: 'provider',
-          providerId: null,
-          label: null,
-          state,
-          summary: state === 'ok' ? 'price sources: Travelpayouts' : 'No price source is set up',
-          note: null,
-          offReason: null,
-          fix: null,
-        },
-      ],
-    },
-  });
-  const routes = (status: () => { status: number; body: unknown } | { error: string }) =>
-    stubHttp({
-      'GET /api/status': status,
-      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
-      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
-    });
   it('a token Settings holds is a price source, though app.env has no line for it', async () => {
     const m = await setUp();
     m.deps.http = routes(() => report('ok'));
@@ -237,7 +241,7 @@ describe('the closing screen of a re-run judges the price source by the app (set
     expect(m.io.stdout).not.toContain('No price source is set up yet');
     expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
   });
-  it('the app saying none keeps the lead; an app that does not answer falls back to app.env', async () => {
+  it('the app saying none keeps the lead; an app that does not answer is not said to have none', async () => {
     const m = await setUp();
     m.deps.http = routes(() => report('warn'));
     answersFile(m, {});
@@ -246,7 +250,20 @@ describe('the closing screen of a re-run judges the price source by the app (set
     m.io.stdout = '';
     m.deps.http = routes(() => ({ error: 'refused' }));
     expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain('No price source is set up yet');
+    // why: its Settings page may hold a key app.env has no line for, so the screen says it could not tell
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).toContain(unknownSourceText(3000));
+  });
+  it('an app that does not answer, over an app.env that names a source, says nothing of a missing source', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => ({ error: 'refused' }));
+    m.fs.file(ENV, `${m.fs.read(ENV)}TRAVELPAYOUTS_TOKEN="tp-token-0123456789"\n`, 0o600);
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).not.toContain(unknownSourceText(3000));
+    expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
+    expect(m.io.stdout).not.toContain('tp-token-0123456789');
   });
 });
 

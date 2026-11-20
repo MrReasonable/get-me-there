@@ -8,8 +8,16 @@ import { TP_SIGNUP_URL, TP_TOKEN_URL } from './prompts.js';
  * Settings plan ruling 15: the token is added on the Settings page (the app imports app.env's lines on its first start,
  * then holds them), so the words name its Price sources section on this app.
  */
+const addSourceText = (port: number): string =>
+  `The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}) and add it in Settings › Price sources: ${appUrl(port, settingsPath('sources'))}`;
 export const noSourceText = (port: number): string =>
-  `No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}) and add it in Settings › Price sources: ${appUrl(port, settingsPath('sources'))}`;
+  `No price source is set up yet, so searches will find nothing. ${addSourceText(port)}`;
+/**
+ * The app's report did not answer and app.env names no source: the app's Settings page may still hold one, so this
+ * neither says it has none nor that it has one (CodeRabbit, PR #64).
+ */
+export const unknownSourceText = (port: number): string =>
+  `Setup could not ask the app whether it has a price source (pnpm gmt status shows it); with none, searches find nothing. ${addSourceText(port)}`;
 export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';
@@ -63,15 +71,18 @@ export function closingScreen(x: {
   signIn: SignIn;
   /**
    * Whether the app has a price source, from its own report (settings plan ruling 15: its Settings page may hold a key
-   * app.env has no line for); null when the report did not say, and then the answers decide.
+   * app.env has no line for). null when the report did not say: a source app.env names counts, and without one the
+   * screen says it could not tell rather than that there is none. Left out (no report asked), the answers decide.
    */
   appSource?: boolean | null;
 }): string {
-  const source = x.appSource ?? searchSource(x.answers);
+  const fromAnswers = searchSource(x.answers);
+  const source = x.appSource === undefined ? fromAnswers : (x.appSource ?? (fromAnswers ? true : null));
+  const trialLine = x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : [];
   const lines = [
-    ...(source
+    ...(source === true
       ? []
-      : [noSourceText(x.port), ...(x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : []), '']),
+      : [source === false ? noSourceText(x.port) : unknownSourceText(x.port), ...trialLine, '']),
     `get-me-there is running at http://127.0.0.1:${x.port}`,
     ...(x.signIn === 'password'
       ? [
