@@ -1,5 +1,5 @@
 import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
@@ -173,7 +173,33 @@ describe('each Settings section says no banned word, no "searches left" and no "
         ),
       ),
       http.get(`${API}/budget`, () =>
-        HttpResponse.json(budgetResponse({ scopes: [usage('provider-month:searchapi', 49, 100)] })),
+        HttpResponse.json(
+          budgetResponse({
+            // Task 6: the month's spend too, which Settings › Limits says
+            scopes: [
+              usage('provider-month:searchapi', 49, 100),
+              usage('global-month', 0, 35_000_000, 32_000_000),
+            ],
+          }),
+        ),
+      ),
+    );
+    // Task 6: a rule (its threshold a price quoted in text) and its last send, so the alert lines are swept too
+    server.use(
+      http.get(`${API}/alerts`, () =>
+        HttpResponse.json([
+          {
+            id: 'rule-1',
+            definitionId: 'def-0001',
+            type: 'absolute',
+            thresholdPence: 40000,
+            pct: null,
+            basis: 'verified',
+            requireAllVerified: null,
+            cooldownHours: 336,
+            enabled: true,
+          },
+        ]),
       ),
     );
     renderWithProviders(<App />, { search: `?view=settings&section=${section}` });
@@ -181,6 +207,11 @@ describe('each Settings section says no banned word, no "searches left" and no "
     if (section === 'sources') {
       await screen.findByText(COPY.settingsView.browserReady);
       await screen.findByText(COPY.settingsView.credits(51, 100));
+    }
+    if (section === 'limits') await screen.findByText(COPY.settingsView.limits.spent('£32'));
+    if (section === 'email') {
+      const rules = await screen.findByRole('list', { name: COPY.settingsView.alerts.heading });
+      await within(rules).findByText(COPY.settingsView.alerts.lastSent(COPY.settingsView.alerts.never));
     }
     // why: the top bar's limits are in (on Settings › Limits the section shares their name)
     await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)");

@@ -1,12 +1,17 @@
-import { useSettings } from '../../api/queries.js';
+import type { OwnedName } from '@gmt/core';
+import { useState } from 'react';
+import { useBudget, useProviders, useSettings } from '../../api/queries.js';
 import { Crumbs } from '../../components/Crumbs.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { hrefWith, navigateTo, useSearchParams } from '../../state/urlState.js';
-import { navPatch, parseSettingsSection, SECTION_PARAM, type SettingsSection } from '../../state/view.js';
+import { navPatch, parseSettingsSection, SECTION_PARAM } from '../../state/view.js';
+import { EmailAlerts, type EmailMode } from './EmailAlerts.js';
+import { Limits } from './Limits.js';
 import { PriceSources } from './PriceSources.js';
+import { SaveBar } from './SaveBar.js';
 import { SettingsNav } from './SettingsNav.js';
-import { type SaveResult, type SettingsForm, useSettingsForm } from './useSettingsForm.js';
+import { useSettingsForm } from './useSettingsForm.js';
 import './settings.css';
 
 const S = COPY.settingsView;
@@ -23,93 +28,34 @@ export function SettingsCrumbs({ title }: { title: string }) {
   );
 }
 
-/** The last save's words (ruling 14), with the warnings a save gave (ruling 5). */
-function resultWords(r: SaveResult): string {
-  switch (r.kind) {
-    case 'saving':
-      return S.saving;
-    case 'restarting':
-      return S.restarting;
-    case 'restarted':
-      return S.restarted;
-    case 'not-back':
-      return S.notBack;
-    case 'after-runs':
-      return S.appliesAfter(r.running);
-    case 'unchanged':
-      return S.unchanged;
-    case 'refused':
-      return S.refused;
-    case 'no-answer':
-      return S.noAnswer;
-    case 'failed':
-      return S.failed;
-  }
-}
-
-/**
- * The section's one Save and the page's polite live region, which says what the last save did: saving, restarting
- * until the app answers with a new boot id, the runs it waits for, a refusal, or that the app did not come back.
- */
-function SaveBar({ section, form }: { section: SettingsSection; form: SettingsForm }) {
-  const r = form.result;
-  const warnings = r !== null && 'warnings' in r ? r.warnings : [];
-  return (
-    <div className="st-savebar">
-      <div role="status" aria-live="polite" className="st-result">
-        {r === null ? null : (
-          <p
-            className={
-              r.kind === 'refused' || r.kind === 'failed' || r.kind === 'not-back' || r.kind === 'no-answer'
-                ? 'st-bad'
-                : undefined
-            }
-          >
-            {resultWords(r)}
-          </p>
-        )}
-        {warnings.map((w) => (
-          <p key={w} className="st-warn">
-            <span aria-hidden="true">▲ </span>
-            {w}
-          </p>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="st-btn st-btn-primary"
-        disabled={r?.kind === 'saving'}
-        onClick={() => void form.save(section)}
-      >
-        {S.save(S.section[section])}
-      </button>
-    </div>
-  );
-}
-
-/** A section not on this page yet: its own page keeps it until then. */
-function NotHereYet({ section }: { section: Exclude<SettingsSection, 'sources'> }) {
-  const link =
-    section === 'email'
-      ? { patch: navPatch('alerts'), words: S.openAlerts }
-      : section === 'system'
-        ? { patch: navPatch('status'), words: S.openStatus }
-        : null;
+/** System is not on this page yet: the status report keeps it until then. */
+function NotHereYet() {
+  const patch = navPatch('status');
   return (
     <div className="st-card st-src">
       <p>
-        {S.notHereYet}
-        {link === null ? null : (
-          <>
-            {' '}
-            <a href={hrefWith(link.patch)} onClick={navigateTo(link.patch)}>
-              {link.words}
-            </a>
-          </>
-        )}
+        {S.notHereYet}{' '}
+        <a href={hrefWith(patch)} onClick={navigateTo(patch)}>
+          {S.openStatus}
+        </a>
       </p>
     </div>
   );
+}
+
+/**
+ * What an unset limit means is decided by the running app (the SearchApi plan's spend limit and credits a run, else 0),
+ * so the page shows the values in use there: the cap from /budget, the credits from the new-search presets.
+ */
+function useLimitsInUse(): Partial<Record<OwnedName, string>> {
+  const budget = useBudget();
+  const providers = useProviders();
+  return {
+    ...(budget.data === undefined ? {} : { MONTHLY_SPEND_CAP_PENCE: String(budget.data.monthlyCapPence) }),
+    ...(providers.data === undefined
+      ? {}
+      : { EXECUTION_MAX_CALLS: String(providers.data.presets.budget.maxCalls) }),
+  };
 }
 
 /**
@@ -121,7 +67,9 @@ export function SettingsView() {
   const params = useSearchParams();
   const section = parseSettingsSection(params.get(SECTION_PARAM));
   const settings = useSettings();
-  const form = useSettingsForm(settings.data);
+  const form = useSettingsForm(settings.data, useLimitsInUse());
+  // why: the email form's mode (Gmail or another server) is held here with the edits, so it survives a section switch
+  const [emailMode, setEmailMode] = useState<EmailMode | null>(null);
   const pending = settings.data?.pending ?? null;
   // why: the save's own line says it already; the read's is for a load of the page while the restart waits
   const showPending = pending !== null && form.result?.kind !== 'after-runs';
@@ -138,21 +86,26 @@ export function SettingsView() {
         <section aria-labelledby="settings-section" className="st-section">
           <h2 id="settings-section">{S.section[section]}</h2>
           <p className="st-lede">{S.lede[section]}</p>
-          {section === 'sources' ? (
-            settings.data === undefined ? (
-              settings.error === null ? (
-                <Loading />
-              ) : (
-                <LoadError error={settings.error} retry={() => void settings.refetch()} />
-              )
+          {section === 'system' ? (
+            <NotHereYet />
+          ) : settings.data === undefined ? (
+            settings.error === null ? (
+              <Loading />
             ) : (
-              <>
-                <PriceSources view={settings.data} form={form} />
-                <SaveBar section={section} form={form} />
-              </>
+              <LoadError error={settings.error} retry={() => void settings.refetch()} />
             )
+          ) : section === 'sources' ? (
+            <>
+              <PriceSources view={settings.data} form={form} />
+              <SaveBar section={section} form={form} />
+            </>
+          ) : section === 'limits' ? (
+            <>
+              <Limits view={settings.data} form={form} />
+              <SaveBar section={section} form={form} />
+            </>
           ) : (
-            <NotHereYet section={section} />
+            <EmailAlerts view={settings.data} form={form} mode={emailMode} setMode={setEmailMode} />
           )}
         </section>
       </div>

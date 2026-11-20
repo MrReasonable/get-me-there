@@ -237,7 +237,6 @@ export const COPY = {
     } satisfies Record<SettingsSection, string>,
     /** The sections that are not on this page yet keep their own pages until then. */
     notHereYet: 'Not on this page yet.',
-    openAlerts: 'Open Alerts',
     openStatus: 'Open the status report',
     // the source switches (ruling 8)
     switchOn: 'New searches use it',
@@ -319,6 +318,70 @@ export const COPY = {
     refused: 'Nothing was saved: fix the marked fields.',
     failed: 'Not saved: the app answered with an error; its log has the cause.',
     noAnswer: "Not saved: the app didn't answer.",
+    // Limits (rulings 5 and 14): sentences with a field in them; the money is typed in pounds and saved in pence
+    limits: {
+      spendBefore: 'Spend at most £',
+      spendAfter: 'a month',
+      /** The month's spend so far, from /budget (a cost, never a fare). */
+      spent: (used: string) => `${used} spent this month`,
+      creditsBefore: 'New searches: at most',
+      creditsAfter: 'SearchApi credits each run',
+      creditsHint: "A search that exists keeps its own limit; change it on the search's Edit form.",
+    },
+    // Email (ruling 11): Gmail, or another mail server; the test email's answers in the page's own words
+    email: {
+      sendWith: 'Send email with',
+      modeGmail: 'Gmail',
+      modeOther: 'Other mail server',
+      gmailAddress: 'Gmail address',
+      appPassword: 'App password',
+      appPasswordHint:
+        'Make one under Google account › Security › App passwords. Never shown again once saved.',
+      passwordHint: 'Never shown again once saved.',
+      tls: {
+        implicit: 'Encrypted from the start (usually port 465)',
+        starttls: 'Encrypted after connecting, STARTTLS (usually port 587)',
+        none: 'Not encrypted (only a mail server on this machine)',
+      } satisfies Record<'implicit' | 'starttls' | 'none', string>,
+      sendTest: 'Send a test email',
+      testSending: 'Sending a test email…',
+      testSent: (to: string) => `Test email sent to ${to}. If it isn't in the inbox, look in spam.`,
+      testFailed: {
+        refused: "Not sent: the mail server couldn't be reached. Check its name and port.",
+        'timed-out': "Not sent: the mail server didn't answer in time. Check its name and port.",
+        'sign-in-refused': 'Not sent: the mail server refused the sign-in. Check the user name and password.',
+        'not-a-mail-server':
+          "Not sent: that doesn't look like a mail server. Check its name, port and encryption.",
+      } satisfies Record<'refused' | 'timed-out' | 'sign-in-refused' | 'not-a-mail-server', string>,
+      testLimited: 'A test email went a moment ago: try again in a minute.',
+      testRefused: 'Not sent: fix the marked fields.',
+      testIncomplete: {
+        gmail: 'Fill in the Gmail address first.',
+        other: 'Fill in the mail server, its port and the user name first.',
+      } satisfies Record<'gmail' | 'other', string>,
+      testNoAnswer: "Not sent: the app didn't answer.",
+      testError: 'Not sent: the app answered with an error; its log has the cause.',
+      remove: 'Remove email',
+      confirmRemove: "Remove email? Alerts can't be sent until you set it up again.",
+    },
+    // the alert rules (ruling 12): each in words, its last send, Edit (the Alerts view's form) and Delete
+    alerts: {
+      heading: 'Alerts',
+      none: "No alerts yet. Alerts come from a search's page.",
+      noEmail: "Alerts can't be sent until email is set up.",
+      lastSent: (when: string) => `last sent: ${when}`,
+      /** A rule whose search is no longer listed. */
+      removedSearch: 'a removed search',
+      never: 'never',
+      off: 'off',
+      edit: 'Edit',
+      delete: 'Delete',
+      confirmDelete: (search: string) =>
+        `Delete this alert on ${search}? It stops at once; what it sent is kept.`,
+      deleteYes: 'Delete it',
+      deleteNo: 'Keep it',
+      deleteFailed: 'Not deleted: the app answered with an error; its log has the cause.',
+    },
   },
 
   // --- The top bar and run progress (design 2026-11-08 Rulings 10 and 11); main-path words only ---

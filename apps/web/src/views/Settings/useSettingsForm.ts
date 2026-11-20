@@ -5,17 +5,21 @@ import {
   DEFAULT_FLIGHT_READ_PATIENCE,
   DEFAULT_SEARCHAPI_BILLING_DAY,
   DEFAULT_SEARCHAPI_PLAN,
+  DEFAULT_SMTP_TLS,
   EMAIL_NAMES,
   isOwnedName,
   type OwnedName,
   type ProviderId,
+  poundsToPence,
   providerIdSchema,
+  settingRefusal,
 } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import { SETTINGS_KEY } from '../../api/queries.js';
+import { penceToPoundsInput } from '../../format.js';
 import type { SettingsSection } from '../../state/view.js';
 import { type RestartClock, RestartClockContext } from './restartClock.js';
 
@@ -52,6 +56,25 @@ export const SETTING_DEFAULTS: Readonly<Partial<Record<OwnedName, string>>> = {
   CAMOUFOX_BROWSER_WINDOW: DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   FLIGHT_READ_PATIENCE: String(DEFAULT_FLIGHT_READ_PATIENCE),
   DISCOVERY_REFRESH_DAYS: String(DEFAULT_DISCOVERY_REFRESH_DAYS),
+  SMTP_TLS: DEFAULT_SMTP_TLS,
+};
+
+/**
+ * A name typed in one form and stored in another (Global Constraints): the spend limit is typed in pounds and stored in
+ * pence, read from the typed string by core's poundsToPence, never through a float. `value` is null for text it refuses.
+ */
+interface Typed {
+  text(stored: string): string;
+  value(text: string): string | null;
+}
+const TYPED: Readonly<Partial<Record<OwnedName, Typed>>> = {
+  MONTHLY_SPEND_CAP_PENCE: {
+    text: (pence) => (/^\d+$/.test(pence) ? penceToPoundsInput(Number(pence)) : pence),
+    value: (text) => {
+      const pence = poundsToPence(text.trim());
+      return pence === null ? null : String(pence);
+    },
+  },
 };
 
 const SECRETS: ReadonlySet<string> = new Set(apiContract.SECRET_SETTING_NAMES);
@@ -171,6 +194,8 @@ export interface SettingsForm {
   unsaved(section: SettingsSection): boolean;
   /** A 422's words for a field, by owned name. */
   error(name: OwnedName): string | null;
+  /** Puts refusals beside their fields (a test email's 422 says them as a save's does). */
+  refuse(errors: Partial<Record<OwnedName, string>>): void;
   /** Saves `changes` (the section's own by default); the result is in `result`. */
   save(section: SettingsSection, changes?: Changes): Promise<void>;
   result: SaveResult | null;
@@ -183,7 +208,11 @@ export interface SettingsForm {
  * boot id read first, `PUT /settings` with only the changed names, then the restart watched until a new boot id
  * answers, or the runs it waits for named. A 422 puts each refusal's words beside its field.
  */
-export function useSettingsForm(view: View | undefined): SettingsForm {
+export function useSettingsForm(
+  view: View | undefined,
+  /** What an unset name means where the running app decides it (the plan's spend limit, its credits a run). */
+  inUseDefaults: Readonly<Partial<Record<OwnedName, string>>> = {},
+): SettingsForm {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Draft>({});
   const [errors, setErrors] = useState<Partial<Record<OwnedName, string>>>({});
@@ -217,11 +246,9 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
     }
   }, [pending, result, qc]);
 
-  const inUse = useCallback(
-    (name: OwnedName): string | null =>
-      view === undefined ? null : (originalOf(view, name) ?? SETTING_DEFAULTS[name] ?? null),
-    [view],
-  );
+  const defaultOf = (name: OwnedName): string | null => inUseDefaults[name] ?? SETTING_DEFAULTS[name] ?? null;
+  const inUse = (name: OwnedName): string | null =>
+    view === undefined ? null : (originalOf(view, name) ?? defaultOf(name));
 
   const edit = (name: OwnedName, value: string | null | undefined) => {
     setErrors((e) => {
@@ -237,33 +264,71 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
 
   const shown = (name: OwnedName): string | null => {
     if (name in draft) return draft[name] ?? null;
-    return isSecretName(name) ? null : inUse(name);
+    if (isSecretName(name)) return null;
+    const value = inUse(name);
+    const typed = TYPED[name];
+    return value === null || typed === undefined ? value : typed.text(value);
   };
 
   const storedOf = (name: OwnedName) => (view === undefined ? null : originalOf(view, name));
 
-  const set = (name: OwnedName, raw: string | null) => {
+  /** Whether `value` is what the name holds now: the stored value, or the default when nothing is stored. */
+  const inUseAlready = (name: OwnedName, value: string | null) => {
     const stored = storedOf(name);
-    const same = raw === stored || (stored === null && raw === (SETTING_DEFAULTS[name] ?? null));
+    return value === stored || (stored === null && value === defaultOf(name));
+  };
+
+  const set = (name: OwnedName, raw: string | null) => {
+    // why: a typed name keeps the text as typed ("35.5" is not rewritten to "35.50" under the cursor); whether it
+    // differs from what is in use is judged by the value it stores, when the changes are taken
+    if (TYPED[name] !== undefined) {
+      edit(name, raw);
+      return;
+    }
     // why: an emptied field is kept as typed (''), so the operator can type a new number into it; it saves as unset
-    edit(name, same ? undefined : raw);
+    edit(name, inUseAlready(name, raw) ? undefined : raw);
   };
 
   const list = (role: SourceRole) => parseSourceList(shown(LIST_NAME[role]));
 
-  const changes = (section: SettingsSection): Changes => {
+  /** A section's edits as they would be sent, and the typed names whose text cannot be (money it refuses). */
+  const prepared = (section: SettingsSection): { changes: Changes; refused: OwnedName[] } => {
     const out: Changes = {};
+    const refused: OwnedName[] = [];
     for (const name of SECTION_NAMES[section]) {
       if (!(name in draft)) continue;
-      const value = draft[name] === '' ? null : (draft[name] ?? null);
+      const raw = draft[name] === '' ? null : (draft[name] ?? null);
+      const typed = TYPED[name];
+      const value = raw === null || typed === undefined ? raw : typed.value(raw);
+      if (raw !== null && value === null) {
+        refused.push(name);
+        continue;
+      }
+      // why: typed text that stores the value in use ("35.00" for 3500) is no change
+      if (typed !== undefined && value !== null && inUseAlready(name, value)) continue;
       // why: emptying a field that holds nothing stored is no change (it reads the default either way)
       if (value === null && !isSecretName(name) && storedOf(name) === null) continue;
       out[name] = value;
     }
-    return out;
+    return { changes: out, refused };
   };
+  const changes = (section: SettingsSection): Changes => prepared(section).changes;
 
   const save = async (section: SettingsSection, given?: Changes) => {
+    if (given === undefined) {
+      const { refused } = prepared(section);
+      // why: text the page cannot read as a value (money poundsToPence refuses) is refused here, in the api's own
+      // words (core settingRefusal), and nothing is sent
+      if (refused.length > 0) {
+        setErrors(
+          Object.fromEntries(
+            refused.map((name) => [name, settingRefusal(name, { field: name, message: '' })]),
+          ),
+        );
+        setResult({ kind: 'refused' });
+        return;
+      }
+    }
     const body = given ?? changes(section);
     const names = Object.keys(body).filter(isOwnedName);
     if (names.length === 0) {
@@ -342,8 +407,12 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
     list,
     setList: (role, ids) => set(LIST_NAME[role], sourceListValue(ids)),
     changes,
-    unsaved: (section) => Object.keys(changes(section)).length > 0,
+    unsaved: (section) => {
+      const p = prepared(section);
+      return Object.keys(p.changes).length > 0 || p.refused.length > 0;
+    },
     error: (name) => errors[name] ?? null,
+    refuse: (next) => setErrors(next),
     save,
     result,
     saves,

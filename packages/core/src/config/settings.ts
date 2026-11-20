@@ -123,6 +123,8 @@ export const DEFAULT_SEARCHAPI_PLAN = 'trial';
 export const DEFAULT_SEARCHAPI_BILLING_DAY = 1;
 /** CAMOUFOX_BROWSER_WINDOW's default when unset: the browser runs only during scheduled searches. */
 export const DEFAULT_CAMOUFOX_BROWSER_WINDOW = 'scheduled';
+/** SMTP_TLS's default when unset: encrypted from the first byte (the Settings page's email form shows it). */
+export const DEFAULT_SMTP_TLS = 'implicit';
 
 /** DISCOVERY_REFRESH_DAYS's default (settings plan ruling 7): the days before a date's calendar price is read again. */
 export const DEFAULT_DISCOVERY_REFRESH_DAYS = 7;

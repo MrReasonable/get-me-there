@@ -50,8 +50,9 @@ export const SETUP_COPY = {
     refreshHint:
       "A price older than this is asked for again by the next run, and until then reads as older than this search's refresh.",
     maxCallsZero:
-      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
-    maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
+      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from the limit in Settings › Limits.',
+    maxCallsHint:
+      'Calls to paid sources (SearchApi). New searches start from the limit in Settings › Limits.',
     maxFreeCallsHint:
       "Requests to free sources (the Aviasales cache) a run may make before it stops. The browser worker's pages never count.",
     maxCostHint: 'A run stops before it would spend more than this. 0 means it spends nothing.',

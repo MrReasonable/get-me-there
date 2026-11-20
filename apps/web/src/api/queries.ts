@@ -24,6 +24,9 @@ import type {
 export const alertKeys = {
   rules: (id: string) => ['alerts', id] as const,
   events: (id: string) => ['alert-events', id] as const,
+  /** Every search's rules (Settings › Email and alerts); the prefix of each search's own, so one invalidation reads both. */
+  every: ['alerts'] as const,
+  everyEvent: ['alert-events'] as const,
 };
 
 export const qk = {

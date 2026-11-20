@@ -24,6 +24,7 @@ import {
   DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   DEFAULT_DISCOVERY_REFRESH_DAYS,
   DEFAULT_SEARCHAPI_PLAN,
+  DEFAULT_SMTP_TLS,
   MIN_SECRET_LENGTH,
   OWNED_NAMES,
   SECRET_TOO_SHORT,
@@ -530,7 +531,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     const [host, , user, pass, to, from] = smtpTuple.parse(smtpValues);
     r.secret('SMTP_PASS');
     const smtpPort = r.int('SMTP_PORT', 1, 65535);
-    const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? 'implicit';
+    const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? DEFAULT_SMTP_TLS;
     if (!isMailbox(to))
       r.fail(
         'ALERT_EMAIL_TO',

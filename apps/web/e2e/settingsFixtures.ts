@@ -98,3 +98,68 @@ export async function showFullSettings(page: Page): Promise<void> {
     });
   });
 }
+
+/**
+ * Settings › Limits and Email and alerts as mockup 04 draws them (settings plan Task 6), over the real api's answers:
+ * a £35 spend limit and 10 credits a run stored, Gmail stored (its password only as set, never a value), and one alert
+ * rule on the search `definitionId` (a London → New York search of the real api) that sent once. The fixture-mode api
+ * has none of these, so the bodies are laid over the real ones, each parsed by its contract schema.
+ */
+export async function showLimitsAndEmail(page: Page, definitionId: string): Promise<void> {
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const real = apiContract.settingsViewSchema.parse(await (await route.fetch()).json());
+    await route.fulfill({
+      json: apiContract.settingsViewSchema.parse({
+        ...real,
+        secrets: { ...real.secrets, SMTP_PASS: { set: true, last4: null } },
+        values: {
+          ...real.values,
+          MONTHLY_SPEND_CAP_PENCE: '3500',
+          EXECUTION_MAX_CALLS: '10',
+          SMTP_HOST: 'smtp.gmail.com',
+          SMTP_PORT: '465',
+          SMTP_TLS: 'implicit',
+          SMTP_USER: 'traveller@example.com',
+          ALERT_EMAIL_FROM: 'traveller@example.com',
+          ALERT_EMAIL_TO: 'alerts@example.com',
+        },
+      }),
+    });
+  });
+  const rule = apiContract.alertRuleSchema.parse({
+    id: 'rule-e2e',
+    definitionId,
+    type: 'absolute',
+    thresholdPence: 40000,
+    pct: null,
+    basis: 'verified',
+    requireAllVerified: null,
+    cooldownHours: 336,
+    enabled: true,
+  });
+  await page.route(
+    (url) => url.pathname === '/api/alerts',
+    (route) => (route.request().method() === 'GET' ? route.fulfill({ json: [rule] }) : route.fallback()),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/alerts/events',
+    (route) =>
+      route.fulfill({
+        json: apiContract.alertEventSchema.array().parse([
+          {
+            id: 1,
+            ruleId: rule.id,
+            identityKey: 'k',
+            observationId: null,
+            calendarPriceId: null,
+            dedupKey: 'd1',
+            firedAt: '2026-10-14T12:00:00.000Z',
+            status: 'notified',
+            reason: null,
+            payload: {},
+          },
+        ]),
+      }),
+  );
+}

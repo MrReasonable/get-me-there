@@ -19,14 +19,19 @@ export function SecretField({
   secret,
   setAside,
   onRemove,
+  label = SETTING_LABELS[name],
+  hint = S.secretHint,
 }: {
   name: OwnedName;
   form: SettingsForm;
   secret: { set: boolean; last4: string | null };
   setAside: boolean;
-  onRemove: () => void;
+  /** Remove's save; without one the field offers no Remove (the mail password goes with Remove email). */
+  onRemove?: () => void;
+  /** The field's name where a form words it its own way (Gmail's "App password"); core's label otherwise. */
+  label?: string;
+  hint?: string;
 }) {
-  const label = SETTING_LABELS[name];
   const ids = fieldIds(name);
   // why: each is open only for the save count it was opened at, so a save that stored something closes it in the same
   // render; a field still holding a typed key stays open whatever else was saved (fix round 1, minor 3)
@@ -37,7 +42,9 @@ export function SecretField({
   const setConfirming = (open: boolean) => setConfirmingAt(open ? form.saves : null);
   const typed = form.edited(name) && form.shown(name) !== null;
   const saved = secret.set && !setAside;
-  const typing = !saved || replacingAt === form.saves || typed;
+  const error = form.error(name);
+  // why: a refused secret (a test email to a changed server needs the password typed) opens the field to type it in
+  const typing = !saved || replacingAt === form.saves || typed || error !== null;
   // why: the field is uncontrolled; when a save clears its draft, the text the field still holds is cleared with it
   const field = useRef<HTMLInputElement>(null);
   const draft = typed ? form.shown(name) : null;
@@ -50,7 +57,6 @@ export function SecretField({
       if (el.value !== '') el.value = '';
     } else if (el.value !== draft) el.value = draft;
   }, [draft]);
-  const error = form.error(name);
   const described = [ids.hint, ...(setAside ? [ids.note] : []), ...(error === null ? [] : [ids.error])].join(
     ' ',
   );
@@ -100,7 +106,7 @@ export function SecretField({
             {S.cancel}
           </button>
         ) : null}
-        {secret.set && !confirming ? (
+        {secret.set && !confirming && onRemove !== undefined ? (
           <button type="button" className="st-btn st-btn-sm st-btn-quiet" onClick={() => setConfirming(true)}>
             {S.remove}
           </button>
@@ -115,7 +121,7 @@ export function SecretField({
               className="st-btn st-btn-sm st-btn-danger"
               onClick={() => {
                 setConfirming(false);
-                onRemove();
+                onRemove?.();
               }}
             >
               {S.confirmRemoveYes}
@@ -128,7 +134,7 @@ export function SecretField({
       ) : null}
       {!secret.set && !form.edited(name) ? <span className="st-hint">{S.secretNotSet}</span> : null}
       <span id={ids.hint} className="st-hint">
-        {S.secretHint}
+        {hint}
       </span>
       <FieldError name={name} form={form} />
     </fieldset>

@@ -1,7 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { SETTING_LABELS } from '@gmt/core';
+import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { z } from 'zod';
 import { COPY } from '../src/copy.js';
 import { expectNoSidewaysScroll } from './layout.js';
-import { showFullSettings } from './settingsFixtures.js';
+import { showFullSettings, showLimitsAndEmail } from './settingsFixtures.js';
+import { FIXTURE_SEARCH } from './tripFixtures.js';
 
 // Settings plan Task 5 (rulings 9, 10, 14; Global Constraints layout checks): the Settings page through the built SPA,
 // its Price sources at 375 and 1280 px in light and dark, never scrolling sideways, and a key typed and saved that is
@@ -115,4 +118,128 @@ test('a key typed and saved is never left in the page: the PUT carries it, the p
     els.map((el) => (el instanceof HTMLInputElement ? el.value : '')),
   );
   expect(values).not.toContain(KEY);
+});
+
+// Settings plan Task 6 (rulings 5, 11, 12, 14): Limits and Email and alerts at 375 and 1280 px in light and dark, never
+// scrolling sideways, and a mail password typed and saved that is never left in the page.
+
+const ids = z.array(z.object({ id: z.string() }));
+
+/** A search for the alert rule to name: the smoke's when it ran first, else one saved here (as the Trip spec does). */
+async function searchId(request: APIRequestContext): Promise<string> {
+  const [first] = ids.parse(await (await request.get('/api/definitions')).json());
+  if (first !== undefined) return first.id;
+  // why: the api refuses a change without the header its own client sends
+  const saved = await request.post('/api/definitions', {
+    data: FIXTURE_SEARCH,
+    headers: { 'X-Requested-With': 'get-me-there' },
+  });
+  expect(saved.ok(), await saved.text()).toBe(true);
+  return z.object({ id: z.string() }).parse(await saved.json()).id;
+}
+
+/** The boot id the page reads before a save and after it; the save below moves it on, as a restart would. */
+async function serveHealth(page: Page, boot: { id: string }): Promise<void> {
+  await page.route('**/api/health', (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        degraded: false,
+        bootId: boot.id,
+        db: { ok: true, sizeBytes: 1 },
+        providers: [],
+        scheduler: { jobCount: 0, nextRun: null, lastExecutionAt: null, degraded: false, blockedSince: null },
+      },
+    }),
+  );
+}
+
+for (const width of [375, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`Settings › Limits at ${width}px, ${colorScheme}: the two sentences and the month's spend, no sideways scroll`, async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showLimitsAndEmail(page, await searchId(request));
+      await page.goto('/?view=settings&section=limits');
+      await expect(page.getByRole('textbox', { name: SETTING_LABELS.MONTHLY_SPEND_CAP_PENCE })).toHaveValue(
+        '35',
+      );
+      await expect(page.getByRole('spinbutton', { name: SETTING_LABELS.EXECUTION_MAX_CALLS })).toHaveValue(
+        '10',
+      );
+      await expect(page.getByText(S.limits.spent('£0'))).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/settings-shots/settings-limits-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+    });
+
+    test(`Settings › Email and alerts at ${width}px, ${colorScheme}: Gmail stored, the rule and its last send, no sideways scroll`, async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showLimitsAndEmail(page, await searchId(request));
+      await page.goto('/?view=settings&section=email');
+      await expect(page.getByRole('radio', { name: S.email.modeGmail })).toBeChecked();
+      await expect(page.getByRole('textbox', { name: S.email.gmailAddress })).toHaveValue(
+        'traveller@example.com',
+      );
+      const rules = page.getByRole('list', { name: S.alerts.heading });
+      await expect(rules.getByRole('listitem')).toHaveCount(1);
+      await expect(rules).toContainText(S.alerts.lastSent('14 Oct 2026 13:00'));
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/settings-shots/settings-email-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+    });
+  }
+
+test('a mail password typed and saved is never left in the page: the PUT carries it, the page shows only "saved"', async ({
+  page,
+}) => {
+  // a synthetic password, never a real one
+  const PASS = 'synthetic-mail-pass-e2e-0123';
+  const boot = { id: 'boot-a' };
+  await serveHealth(page, boot);
+  const bodies: unknown[] = [];
+  // why: the save is answered here, so the fixture-mode api is not restarted under the other tests
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    bodies.push(route.request().postDataJSON());
+    boot.id = 'boot-b';
+    await route.fulfill({ json: { warnings: [], applies: 'now' } });
+  });
+  await page.goto('/?view=settings&section=email');
+  await page.getByRole('textbox', { name: S.email.gmailAddress }).fill('traveller@example.com');
+  const field = page.locator('input[type="password"]');
+  await expect(field).toHaveAttribute('type', 'password');
+  await expect(field).toHaveAttribute('autocomplete', 'new-password');
+  await field.fill(PASS);
+  await page.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_TO }).fill('alerts@example.com');
+  await page.getByRole('button', { name: S.save(S.section.email) }).click();
+  await expect(page.getByText(S.restarted)).toBeVisible();
+  expect(bodies).toEqual([
+    {
+      changes: {
+        SMTP_HOST: 'smtp.gmail.com',
+        SMTP_PORT: '465',
+        SMTP_USER: 'traveller@example.com',
+        SMTP_PASS: PASS,
+        ALERT_EMAIL_TO: 'alerts@example.com',
+        ALERT_EMAIL_FROM: 'traveller@example.com',
+      },
+    },
+  ]);
+  expect(await page.content()).not.toContain(PASS);
+  const values = await page.$$eval('input', (els) =>
+    els.map((el) => (el instanceof HTMLInputElement ? el.value : '')),
+  );
+  expect(values).not.toContain(PASS);
 });

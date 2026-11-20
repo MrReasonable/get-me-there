@@ -9,6 +9,7 @@ import {
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   DEFAULT_SEARCHAPI_BILLING_DAY,
   DEFAULT_SEARCHAPI_PLAN,
+  DEFAULT_SMTP_TLS,
   EMAIL_NAMES,
   isOwnedName,
   layerSettings,
@@ -342,5 +343,23 @@ describe('the defaults the Settings page shows for an unset name (Task 5 fix rou
     expect(r.config.providers.searchapi?.limits.billingDay).toBe(DEFAULT_SEARCHAPI_BILLING_DAY);
     expect(r.config.camoufoxBrowserWindow).toBe(DEFAULT_CAMOUFOX_BROWSER_WINDOW);
     expect(PLAN_PRESETS['40usd'].billingDay).toBe(DEFAULT_SEARCHAPI_BILLING_DAY);
+  });
+
+  it('mail encryption unset is encrypted from the start (settings plan Task 6: the email form shows it)', () => {
+    const r = parseConfig(
+      {
+        ...base,
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '465',
+        SMTP_USER: 'mailer',
+        SMTP_PASS: 'synthetic-pass-123',
+        ALERT_EMAIL_TO: 'alerts@example.com',
+        ALERT_EMAIL_FROM: 'flights@example.com',
+      },
+      { realpath: (p) => p },
+    );
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(DEFAULT_SMTP_TLS).toBe('implicit');
+    expect(r.config.smtp?.tls).toBe(DEFAULT_SMTP_TLS);
   });
 });

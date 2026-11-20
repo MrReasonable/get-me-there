@@ -23,6 +23,16 @@ export function describedBy(name: OwnedName, form: SettingsForm, setAside: boole
   return parts.length === 0 ? undefined : parts.join(' ');
 }
 
+/** The ids of a field that writes several names (the Gmail address is the user and the sender): each one's notes. */
+export function describedByAll(
+  names: readonly OwnedName[],
+  form: SettingsForm,
+  setAside: (name: OwnedName) => boolean,
+): string | undefined {
+  const parts = names.flatMap((n) => describedBy(n, form, setAside(n)) ?? []);
+  return parts.length === 0 ? undefined : parts.join(' ');
+}
+
 /**
  * A 422's words beside the field it refused (ruling 5), with a glyph so it is never told by colour alone. `id` names it
  * where one refusal is shown in more than one place (a source list, beside each control that writes it).
@@ -49,19 +59,27 @@ export function SetAsideNote({ name, setAside }: { name: OwnedName; setAside: bo
   );
 }
 
-/** A whole number inside a sentence ("until [12] reads in a row…"), labelled by core's SETTING_LABELS. */
+/**
+ * A whole number inside a sentence ("until [12] reads in a row…"), labelled by core's SETTING_LABELS; `labelled` when a
+ * visible `<label htmlFor>` names it instead.
+ */
 export function NumberInput({
   name,
   form,
   min,
   max,
   setAside,
+  labelled = false,
+  wide = false,
 }: {
   name: OwnedName;
   form: SettingsForm;
   min: number;
-  max: number;
+  max?: number;
   setAside: boolean;
+  labelled?: boolean;
+  /** Room for five digits (a port). */
+  wide?: boolean;
 }) {
   const error = form.error(name);
   return (
@@ -70,10 +88,10 @@ export function NumberInput({
       type="number"
       inputMode="numeric"
       min={min}
-      max={max}
+      {...(max === undefined ? {} : { max })}
       step={1}
-      className="st-num"
-      aria-label={SETTING_LABELS[name]}
+      className={wide ? 'st-num st-num-wide' : 'st-num'}
+      {...(labelled ? {} : { 'aria-label': SETTING_LABELS[name] })}
       aria-describedby={describedBy(name, form, setAside)}
       aria-invalid={error === null ? undefined : true}
       value={form.shown(name) ?? ''}
@@ -115,5 +133,47 @@ export function SelectInput<V extends string>({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * A line of text (a server's name, a user name, an address), named by a visible `<label htmlFor>` with core's label, or
+ * by `label` where a sentence holds it (the spend limit in pounds).
+ */
+export function TextInput({
+  name,
+  form,
+  setAside,
+  type = 'text',
+  label,
+  inputMode,
+  autoComplete = 'off',
+  className,
+}: {
+  name: OwnedName;
+  form: SettingsForm;
+  setAside: boolean;
+  type?: 'text' | 'email';
+  /** The accessible name when no visible label names the field. */
+  label?: string;
+  inputMode?: 'decimal' | 'email' | 'text';
+  autoComplete?: string;
+  className?: string;
+}) {
+  const error = form.error(name);
+  return (
+    <input
+      id={fieldIds(name).input}
+      type={type}
+      {...(inputMode === undefined ? {} : { inputMode })}
+      {...(label === undefined ? {} : { 'aria-label': label })}
+      {...(className === undefined ? {} : { className })}
+      autoComplete={autoComplete}
+      spellCheck={false}
+      aria-describedby={describedBy(name, form, setAside)}
+      aria-invalid={error === null ? undefined : true}
+      value={form.shown(name) ?? ''}
+      onChange={(e) => form.set(name, e.target.value)}
+    />
   );
 }

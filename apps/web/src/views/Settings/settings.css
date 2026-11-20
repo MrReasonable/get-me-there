@@ -262,6 +262,8 @@
 }
 .settings input[type="number"],
 .settings input[type="password"],
+.settings input[type="text"],
+.settings input[type="email"],
 .settings select {
   max-width: 100%;
   font: inherit;
@@ -279,6 +281,18 @@
 }
 .st-num {
   width: 72px;
+}
+.st-num-wide {
+  width: 96px;
+}
+/* a text or email field fills its column (the email form), a sum of money is short */
+.settings input[type="text"],
+.settings input[type="email"] {
+  width: 100%;
+  min-width: 0;
+}
+.settings input.st-money {
+  width: 96px;
 }
 .settings [aria-invalid="true"] {
   border-color: var(--t-bad);
@@ -442,4 +456,74 @@
     font-size: 14px;
     white-space: nowrap;
   }
+}
+
+/* Limits: a card whose body starts at its top (no heading row above it), the month's spend drawn as a meter. The
+   spend sentences are marked costs ([data-cost]) but keep the page's face, as the top bar's spend does */
+.settings [data-cost] {
+  font-family: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+}
+.st-flush {
+  margin-top: 0;
+}
+.st-meter {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: 8px;
+  margin-top: 2px;
+}
+
+/* Email: the mode choice, then rows of fields that take wider columns than a source's */
+.st-modes {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  min-width: 0;
+}
+.st-modes > legend {
+  float: left;
+  margin-right: 6px;
+  padding: 0;
+}
+.st-row-wide {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* The alert rules: one line each, its words first, then when it last sent, then Edit and Delete */
+.st-alerts {
+  margin-top: 16px;
+}
+.st-alerts > h3 {
+  margin-bottom: 10px;
+}
+.st-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.st-rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--t-line);
+}
+.st-rule:first-child {
+  border-top: 0;
+}
+.st-rule-what {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 14px;
+}
+.st-rule > .st-confirm {
+  flex: 1 1 100%;
 }
