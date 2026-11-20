@@ -12,7 +12,7 @@ import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { describeRule } from '../../../src/views/Alerts/ruleText.js';
 import { SettingsView } from '../../../src/views/Settings/SettingsView.js';
-import { API, budgetResponse, definition, settingsView, usage } from '../../fixtures.js';
+import { API, budgetResponse, definition, providersResponse, settingsView, usage } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
 
@@ -102,11 +102,22 @@ describe('Settings › Limits (rulings 5 and 14)', () => {
   });
 
   it('unset, each shows the value in use: the cap from /budget, the credits from the new-search presets', async () => {
-    server.use(http.get(`${API}/budget`, () => HttpResponse.json(budgetResponse({ monthlyCapPence: 3500 }))));
+    // why: neither is a default the page could show without reading it: £27.50 and 750 credits come only from the api
+    const base = providersResponse();
+    server.use(
+      http.get(`${API}/budget`, () => HttpResponse.json(budgetResponse({ monthlyCapPence: 2750 }))),
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json(
+          providersResponse({
+            presets: { ...base.presets, budget: { ...base.presets.budget, maxCalls: 750 } },
+          }),
+        ),
+      ),
+    );
     const puts = capturePuts();
     const { user, client } = open('limits');
-    expect(await spend()).toHaveValue('35');
-    expect(await credits()).toHaveValue(2000);
+    expect(await spend()).toHaveValue('27.50');
+    expect(await credits()).toHaveValue(750);
     // the value in use is no edit, so nothing is sent
     await user.click(save());
     expect(await screen.findByText(S.unchanged)).toBeInTheDocument();
@@ -420,6 +431,26 @@ describe('Settings › Email (ruling 11)', () => {
     );
   });
 
+  it('after a Gmail save, back to Other does not put the edits from before Gmail over the saved server', async () => {
+    capturePuts();
+    const { user } = open('email');
+    await user.click(await mode(E.modeOther));
+    await user.type(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST }), 'smtp.example.com');
+    await user.click(await mode(E.modeGmail));
+    await user.type(await gmailAddress(), 'traveller@example.com');
+    await user.type(passwordField(), 'abcd-efgh-ijkl-mnop');
+    await user.type(
+      screen.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_TO }),
+      'alerts@example.com',
+    );
+    await user.click(save());
+    await screen.findByText(S.restarting);
+    await user.click(await mode(E.modeOther));
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST })).not.toHaveValue(
+      'smtp.example.com',
+    );
+  });
+
   it('a test email’s refusal joins a save’s, never wiping it (fix round 1, minor 4)', async () => {
     serveValues(GMAIL, true);
     server.use(
@@ -482,6 +513,8 @@ describe('Settings › Email (ruling 11)', () => {
     await gmailAddress();
     const secret = 'synthetic-mail-pass-123';
     await user.type(passwordField(), secret);
+    // why: the field holds what was typed, so its absence from the markup below is not an empty field's
+    expect(passwordField()).toHaveValue(secret);
     expect(passwordField()).toHaveAttribute('type', 'password');
     expect(passwordField()).toHaveAttribute('autocomplete', 'new-password');
     expect(container.innerHTML).not.toContain(secret);
@@ -745,6 +778,9 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
   it('Delete asks in the page; "Delete it" deletes the rule and the list reads again', async () => {
     serveValues(GMAIL, true);
     serveRules([]);
+    // why: the list read after the delete answers a rule the page has not seen (one added elsewhere), so only a fresh
+    // read can show it: a page that only dropped the deleted rule locally would show none
+    const added = rule({ id: 'rule-2', definitionId: 'def-0002' });
     let rules = [rule()];
     const deleted: string[] = [];
     server.use(
@@ -752,7 +788,7 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
       http.delete(`${API}/alerts/:id`, ({ params }) => {
         deleted.push(String(params.id));
         const gone = rules[0];
-        rules = [];
+        rules = [added];
         return HttpResponse.json(gone);
       }),
     );
@@ -763,7 +799,9 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
     const confirm = within(item).getByRole('group', { name: A.confirmDelete('London → New York') });
     expect(deleted).toEqual([]);
     await user.click(within(confirm).getByRole('button', { name: A.deleteYes }));
-    expect(await screen.findByText(A.none)).toBeInTheDocument();
+    expect(await within(await list()).findByText(/London → Newark/)).toBeInTheDocument();
+    expect(within(await list()).getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByText(/London → New York ·/)).toBeNull();
     expect(deleted).toEqual(['rule-1']);
   });
 

@@ -318,6 +318,8 @@ export function useSettingsForm(
     }
     const body = given ?? changes(section);
     const names = Object.keys(body).filter(isOwnedName);
+    // why: the fields stay editable while the save is out; a field changed since it was sent keeps its new text
+    const submitted: Draft = { ...draft };
     if (names.length === 0) {
       setResult({ kind: 'unchanged', warnings: [] });
       return;
@@ -358,7 +360,7 @@ export function useSettingsForm(
     // why: the saved names are in use now (or will be after the runs); a typed key is cleared from the page at once
     setDraft((d) => {
       const rest: Draft = { ...d };
-      for (const name of names) delete rest[name];
+      for (const name of names) if (rest[name] === submitted[name]) delete rest[name];
       return rest;
     });
     setErrors({});

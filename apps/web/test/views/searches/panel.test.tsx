@@ -216,9 +216,7 @@ describe('the panel: what is in view (Ruling 13)', () => {
 
 describe('the panel and the top bar say SearchApi’s own balance alike (settings plan ruling 10)', () => {
   it('both show its credits and its reset day, and Where to look uses credits, not calls', async () => {
-    // why: the age of a balance read is judged against the clock; pin it, never the wall
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
     serve();
     server.use(
       http.get(`${API}/searchapi/account`, () =>
@@ -227,7 +225,7 @@ describe('the panel and the top bar say SearchApi’s own balance alike (setting
             remaining: 9_988,
             monthlyAllowance: 10_000,
             periodEnd: '2026-12-01',
-            fetchedAt: '2026-11-19T14:05:00.000Z',
+            fetchedAt: '2026-10-14T14:55:00.000Z',
           },
         }),
       ),
@@ -615,7 +613,17 @@ describe('the sources on a new panel', () => {
   it('an empty list from the api ticks nothing (the Settings page set it to none)', () => {
     serve();
     renderPanel(withFixture([]));
+    // why: every source box on the panel, the browser's included, is left unticked
+    const boxes = screen.getAllByRole('checkbox', { name: /·/ });
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(source(BROWSER)).not.toBeChecked();
     expect(source(CACHE)).not.toBeChecked();
+    expect(boxes.filter((b) => b instanceof HTMLInputElement && b.checked)).toEqual([]);
+  });
+
+  it('the test source is not offered once the presets leave it out', () => {
+    serve();
+    renderPanel(withFixture([]));
     expect(testSource()).toBeNull();
   });
 });

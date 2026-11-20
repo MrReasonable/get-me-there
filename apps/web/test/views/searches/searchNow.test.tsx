@@ -233,8 +233,12 @@ describe('the page’s words for a refused Search now (spec rev 55 §11; Review 
     renderRefused('disabled');
     const fix = within(await block(R.disabled)).getByRole('link', { name: R.disabledFix });
     // why: review residual (b): the fix is made on Settings › Price sources, never on the Providers view
-    expect(fix.getAttribute('href')).toContain('view=settings&section=sources');
-    expect(fix.getAttribute('href')).not.toContain('def=');
+    const to = new URL(fix.getAttribute('href') ?? '', window.location.origin);
+    expect(to.origin).toBe(window.location.origin);
+    expect(to.pathname).toBe('/');
+    expect(to.searchParams.get('view')).toBe('settings');
+    expect(to.searchParams.get('section')).toBe('sources');
+    expect(to.searchParams.has('def')).toBe(false);
   });
 
   it('confirm: the estimate is asked again and its sentence shown inline with "Search again · about £X", which sends its figures', async () => {

@@ -44,6 +44,11 @@ type OtherDraft = Partial<Record<(typeof OTHER_NAMES)[number], string | null>>;
 export interface EmailChoice {
   mode: EmailMode;
   other: OtherDraft | null;
+  /**
+   * The form's save count when `other` was kept (SettingsForm.saves): a save since then stored Gmail's server, so
+   * those edits are not put back over it (CodeRabbit, PR #64).
+   */
+  at: number;
 }
 
 /** Gmail's server, as ruling 11 stores it: the address is both the user name and the sender. */
@@ -170,13 +175,14 @@ export function EmailAlerts({
     // why: Gmail overwrites the Other form's server, user and sender; its edits are kept to put back on the way back
     const other: OtherDraft = {};
     for (const n of OTHER_NAMES) if (form.edited(n)) other[n] = form.shown(n);
-    setChoice({ mode: 'gmail', other });
+    setChoice({ mode: 'gmail', other, at: form.saves });
     fillGmail(form);
     form.set('ALERT_EMAIL_FROM', form.shown('SMTP_USER') ?? '');
   };
   const toOther = () => {
-    const before = choice?.other ?? null;
-    setChoice({ mode: 'other', other: null });
+    // why: edits kept before a save that has since stored Gmail are stale: the stored server is put back instead
+    const before = choice !== null && choice.at === form.saves ? choice.other : null;
+    setChoice({ mode: 'other', other: null, at: form.saves });
     // why: back from Gmail, the Other form is as it was: its own edits, else what is stored (fix round 1)
     if (before !== null) {
       for (const n of OTHER_NAMES) {

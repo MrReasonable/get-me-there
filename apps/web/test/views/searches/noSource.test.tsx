@@ -94,7 +94,12 @@ describe('Search now with no price source set up (Review Focus 1)', () => {
     const block = words.closest<HTMLElement>('[role="alert"]');
     if (block === null) throw new Error('the refusal is said in an alert');
     const fix = within(block).getByRole('link', { name: REFUSED_COPY.disabledFix });
-    expect(fix.getAttribute('href')).toContain('view=settings&section=sources');
+    // why: the app's own route and the Settings parameters, not merely the words somewhere in the link
+    const to = new URL(fix.getAttribute('href') ?? '', window.location.origin);
+    expect(to.origin).toBe(window.location.origin);
+    expect(to.pathname).toBe('/');
+    expect(to.searchParams.get('view')).toBe('settings');
+    expect(to.searchParams.get('section')).toBe('sources');
     expect(new URLSearchParams(window.location.search).get('refused')).toBe('disabled');
     expect(document.body.textContent ?? '').not.toMatch(/no runnable|engine|undefined/i);
   });

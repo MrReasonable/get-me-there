@@ -12,7 +12,7 @@ import { useStatus } from '../../api/statusQuery.js';
 import type { ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
-import { searchApiCreditsLine } from '../../lib/searchApiCreditsLine.js';
+import { accountCreditsLine, searchApiCreditsLine, useCreditsNow } from '../../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { navPatch, settingsPatch } from '../../state/view.js';
 import { FieldError, fieldIds, NumberInput, SelectInput, SetAsideNote } from './fields.js';
@@ -359,13 +359,21 @@ function EverySource({ view, form }: Omit<CardProps, 'toggle'>) {
 
 /**
  * SearchApi's balance (ruling 10), told apart from every other state: its own figure ("0 credits left" included), this
- * app's count when SearchApi could not be asked, or that it could not be read at all. Nothing while it is asked.
+ * app's count when SearchApi could not be asked, or that it could not be read at all. Nothing while any read it needs
+ * is asked; once one has failed, SearchApi's own figure if it was read, else that it could not be read (never empty).
  */
-function Balance({ providers }: { providers: ProvidersResponse | undefined }) {
+function Balance({ providers }: { providers: { data: ProvidersResponse | undefined; isPending: boolean } }) {
   const budget = useBudget();
   const account = useSearchApiAccount();
-  if (providers === undefined || budget.data === undefined || account.isPending) return null;
-  const line = searchApiCreditsLine(account.data?.account ?? null, budget.data, providers);
+  const read = account.data?.account ?? null;
+  const nowMs = useCreditsNow(read);
+  if (providers.isPending || budget.isPending || account.isPending) return null;
+  const line =
+    providers.data === undefined || budget.data === undefined
+      ? read === null
+        ? null
+        : accountCreditsLine(read, nowMs)
+      : searchApiCreditsLine(read, budget.data, providers.data, nowMs);
   if (line === null) return <p className="st-kv st-muted">{S.balanceUnread}</p>;
   return (
     <p className="st-kv">
@@ -415,7 +423,7 @@ function SearchApi({ view, form, toggle }: CardProps) {
       }
     >
       <ListLines view={view} form={form} id="searchapi" roles={['verification', 'discovery']} />
-      {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers.data} /> : null}
+      {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers} /> : null}
       {!key.set ? <p className="st-kv st-muted">{S.searchapiNoKey}</p> : null}
       <SecretField
         name="SEARCHAPI_KEY"

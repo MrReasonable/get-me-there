@@ -57,8 +57,10 @@ export function SettingsView() {
   // why: the email form's mode (Gmail or another server) is held here with the edits, so it survives a section switch
   const [emailChoice, setEmailChoice] = useState<EmailChoice | null>(null);
   const pending = settings.data?.pending ?? null;
-  // why: the save's own line says it already; the read's is for a load of the page while the restart waits
-  const showPending = pending !== null && form.result?.kind !== 'after-runs';
+  // why: the save's own line says it already where a Save bar shows it; the read's is for a load of the page while
+  // the restart waits, and for System, which has no Save bar to say it
+  const resultShown = section !== 'system' && settings.data !== undefined;
+  const showPending = pending !== null && !(resultShown && form.result?.kind === 'after-runs');
   return (
     <div className="settings">
       <h1 className="st-title">{S.heading}</h1>

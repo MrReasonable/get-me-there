@@ -32,12 +32,14 @@ describe('Providers', () => {
       expect(item).toHaveTextContent(source.what);
       expect(item).toHaveTextContent(source.cost);
       // why: review R17a (settings plan ruling 15): the two keyed sources are set up on Settings › Price sources; the
-      // browser keeps its setup command
-      if (source.setUp.kind === 'command') {
-        expect(source.id).toBe('camoufox');
-        expect(within(item).getByText(source.setUp.command)).toBeInTheDocument();
+      // browser keeps its setup command. The source decides which is expected, never the copy's own kind.
+      if (source.id === 'camoufox') {
+        if (source.setUp.kind !== 'command') throw new Error('the browser keeps its setup command');
+        expect(within(item).getByText('pnpm gmt setup --reconfigure browser')).toBeInTheDocument();
+        expect(within(item).queryByRole('link', { name: 'Settings › Price sources' })).toBeNull();
       } else {
-        const link = within(item).getByRole('link', { name: source.setUp.label });
+        expect(source.setUp.kind).toBe('link');
+        const link = within(item).getByRole('link', { name: 'Settings › Price sources' });
         expect(link).toHaveAttribute('href', '?view=settings&section=sources');
       }
       expect(item).toHaveTextContent(source.doc);

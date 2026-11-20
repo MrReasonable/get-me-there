@@ -260,9 +260,7 @@ describe('the top bar and run progress say no banned word, no set-up term and no
   });
 
   it('SearchApi’s own balance, with its reset day, says credits and no banned word', async () => {
-    // why: the age of a balance read is judged against the clock; pin it, never the wall
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
     server.use(
       http.get(`${API}/budget`, () =>
         HttpResponse.json(budgetResponse({ scopes: [usage('global-month', 0, 35_000_000, 0)] })),
@@ -273,7 +271,7 @@ describe('the top bar and run progress say no banned word, no set-up term and no
             remaining: 9_988,
             monthlyAllowance: 10_000,
             periodEnd: '2026-12-01',
-            fetchedAt: '2026-11-19T14:05:00.000Z',
+            fetchedAt: '2026-10-14T14:55:00.000Z',
           },
         }),
       ),

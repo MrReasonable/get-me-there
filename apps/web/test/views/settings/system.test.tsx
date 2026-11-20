@@ -117,7 +117,7 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
         },
       ]),
     );
-    open();
+    const { user } = open();
     const items = await lines();
     const [first, second] = items;
     if (first === undefined || second === undefined) throw new Error('two lines');
@@ -125,9 +125,13 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
     // the accessible name of the link is the fix's words alone; the label is plain text before it
     expect(within(first).getByRole('link', { name: 'Open Settings › Price sources' })).toBeVisible();
     expect(second).toHaveTextContent('the worker is not answering · Fix: start it');
-    expect(
-      within(second).getByRole('button', { name: COPY.statusView.copyCommand('pnpm gmt start') }),
-    ).toBeVisible();
+    const copy = within(second).getByRole('button', { name: COPY.statusView.copyCommand('pnpm gmt start') });
+    expect(copy).toBeVisible();
+    // why: the button copies exactly the command, not merely shows
+    const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    await user.click(copy);
+    expect(write).toHaveBeenCalledExactlyOnceWith('pnpm gmt start');
+    expect(await within(second).findByText(COPY.statusView.copied)).toBeInTheDocument();
   });
 
   it('keeps the report order (worst first) as served', async () => {
@@ -154,8 +158,11 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
     await act(async () => {
       await client.refetchQueries({ queryKey: STATUS_KEY });
     });
-    const stale = await screen.findByRole('status');
-    expect(stale).toHaveTextContent('stale, checked 5 min ago');
+    expect(await screen.findByText('stale, checked 5 min ago')).toBeInTheDocument();
+    // why: the live region says the change of state in fixed words; the ticking age is outside it
+    const live = screen.getByRole('status');
+    expect(live).toHaveTextContent(COPY.statusView.staleAnnounced);
+    expect(live).not.toHaveTextContent('checked');
     expect(screen.getByText(/kept report/)).toBeInTheDocument();
   });
 
@@ -178,21 +185,28 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
   });
 
   it('refetches every 60 s as Status does, and a later answer replaces the lines', async () => {
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
-      shouldAdvanceTime: true,
-    });
+    // why: fake time moves only when the test moves it (no shouldAdvanceTime): the first read is flushed, then the
+    // refresh interval is stepped
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     let hits = 0;
+    let answered: () => void = () => undefined;
     server.use(
       http.get(`${API}/status`, () => {
         hits += 1;
+        answered();
         return HttpResponse.json(statusReport([{ id: 'app', area: 'app', summary: `answer ${hits}` }]));
       }),
     );
     open();
-    await screen.findByText(/answer 1/);
+    await vi.waitFor(() => screen.getByText(/answer 1/));
+    expect(hits).toBe(1);
+    const second = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
     await act(() => vi.advanceTimersByTimeAsync(STATUS_REFRESH_MS));
-    expect(await screen.findByText(/answer 2/)).toBeInTheDocument();
+    await second;
+    await vi.waitFor(() => screen.getByText(/answer 2/));
+    expect(hits).toBe(2);
   });
 
   it('with no report says the app is not answering, and Try again loads it', async () => {

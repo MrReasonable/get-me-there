@@ -341,7 +341,7 @@ export const COPY = {
     envLine: (names: readonly string[]) =>
       names.length === 0
         ? "Nothing was saved: a line in .env isn't valid with these settings."
-        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env, then save again.`,
+        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env and restart the app (it reads .env only when it starts), then save again.`,
     failed: 'Not saved: the app answered with an error; its log has the cause.',
     noAnswer: "Not saved: the app didn't answer.",
     // Limits (rulings 5 and 14): sentences with a field in them; the money is typed in pounds and saved in pence
@@ -1489,6 +1489,8 @@ export const COPY = {
     checkedAgo: (seconds: number) =>
       seconds < 60 ? `checked ${seconds} s ago` : `checked ${Math.floor(seconds / 60)} min ago`,
     stale: (checked: string) => `stale, ${checked}`,
+    /** What the live region says once a refresh fails: the change of state alone, never the ticking age. */
+    staleAnnounced: 'The status report could not be refreshed; the last one is shown, marked stale.',
     notAnswering: 'The app is not answering.',
     // why: V11 (po-b1-011, ui-b1-003): an answer that is an error is not "not answering"; each is said in plain words
     signInRefused: 'The app refused the sign-in, so the report cannot be read. Sign in again.',

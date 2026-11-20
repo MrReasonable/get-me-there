@@ -1,6 +1,6 @@
 import { asIsoDate, asIsoDateTime, type SearchApiAccount } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { CREDITS_FRESH_MS, searchApiCreditsLine } from '../../src/lib/searchApiCreditsLine.js';
+import { searchApiCreditsLine } from '../../src/lib/searchApiCreditsLine.js';
 import { budgetResponse, providersResponse, usage } from '../fixtures.js';
 
 // Settings plan ruling 10: one helper words SearchApi's credits left for every caller (the top bar, the panel's Where to
@@ -55,19 +55,19 @@ describe('searchApiCreditsLine: SearchApi’s own balance', () => {
       line: 'SearchApi: 9,988 credits left · resets 1 Dec',
     });
   });
-  it('adds "as of" with the London time once the read is older than ten minutes, not before', () => {
-    expect(searchApiCreditsLine(account(), both, providers('trial'), readAt + CREDITS_FRESH_MS)?.line).toBe(
+  it('adds "as of" with the London time once the read is older than ten minutes (600,000 ms), not before', () => {
+    expect(searchApiCreditsLine(account(), both, providers('trial'), readAt + 600_000)?.line).toBe(
       'SearchApi: 38 credits left',
     );
-    expect(
-      searchApiCreditsLine(account(), both, providers('trial'), readAt + CREDITS_FRESH_MS + 1)?.line,
-    ).toBe('SearchApi: 38 credits left · as of 14:05');
+    expect(searchApiCreditsLine(account(), both, providers('trial'), readAt + 600_001)?.line).toBe(
+      'SearchApi: 38 credits left · as of 14:05',
+    );
     expect(
       searchApiCreditsLine(
         account({ periodEnd: asIsoDate('2026-12-01') }),
         both,
         providers('40usd'),
-        readAt + CREDITS_FRESH_MS + 1,
+        readAt + 600_001,
       )?.line,
     ).toBe('SearchApi: 38 credits left · resets 1 Dec · as of 14:05');
   });

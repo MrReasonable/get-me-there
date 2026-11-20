@@ -746,16 +746,26 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
       422,
     );
     const health = serveHealth(['boot-1']);
-    const { user } = open();
+    const m = manualClock();
+    const { user } = renderWithProviders(
+      <RestartClockContext.Provider value={m.clock}>
+        <SettingsView />
+      </RestartClockContext.Provider>,
+      { search: '?view=settings' },
+    );
     const field = await patience();
     await user.clear(field);
     await user.type(field, '20');
     await user.click(saveButton());
     const words = S.envLine(['SEARCHAPI_MONTHLY_CALL_CAP']);
     expect(words).toBe(
-      "Nothing was saved: SEARCHAPI_MONTHLY_CALL_CAP in .env isn't valid with these settings. Fix the line in .env, then save again.",
+      "Nothing was saved: SEARCHAPI_MONTHLY_CALL_CAP in .env isn't valid with these settings. Fix the line in .env and restart the app (it reads .env only when it starts), then save again.",
     );
     expect(await screen.findByText(words)).toHaveClass('st-bad');
+    expect(health.seen.reads).toBe(1);
+    // why: no restart watch is set, so a poll interval later the pre-save read is still the only one
+    expect(m.pending()).toBe(0);
+    act(() => m.advance(RESTART_POLL_MS));
     expect(health.seen.reads).toBe(1);
     expect(S.envLine([])).toBe("Nothing was saved: a line in .env isn't valid with these settings.");
   });
@@ -778,6 +788,64 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
       ),
     ).toBeInTheDocument();
     expect(health.seen.reads).toBe(1);
+  });
+
+  it('a field changed while its save is out keeps the new text, still marked unsaved', async () => {
+    let reached: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let answer: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const puts: unknown[] = [];
+    server.use(
+      http.put(`${API}/settings`, async ({ request }) => {
+        puts.push(await request.json());
+        reached();
+        await gate;
+        return HttpResponse.json({ warnings: [], applies: 'now' });
+      }),
+    );
+    serveHealth(['boot-1']);
+    const { user } = open();
+    const field = await patience();
+    await user.clear(field);
+    await user.type(field, '20');
+    await user.click(saveButton());
+    await arrived;
+    await user.clear(field);
+    await user.type(field, '25');
+    answer();
+    expect(await screen.findByText(S.restarting)).toBeInTheDocument();
+    expect(puts).toEqual([{ changes: { FLIGHT_READ_PATIENCE: '20' } }]);
+    expect(await patience()).toHaveValue(25);
+    const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
+    expect(within(nav).getByRole('link', { name: 'Price sources · unsaved' })).toBeInTheDocument();
+  });
+
+  it('a save held for running searches is still said on System, which has no Save bar', async () => {
+    let pending: { running: string[] } | null = null;
+    server.use(http.get(`${API}/settings`, () => HttpResponse.json(settingsView({ pending }))));
+    server.use(
+      http.put(`${API}/settings`, () => {
+        pending = { running: ['London → New York'] };
+        return HttpResponse.json({ warnings: [], applies: 'after-runs', running: ['London → New York'] });
+      }),
+    );
+    serveHealth(['boot-1']);
+    const { user } = open();
+    const field = await patience();
+    await user.clear(field);
+    await user.type(field, '20');
+    await user.click(saveButton());
+    const waiting = 'Saved. Applies when London → New York finish; new searches wait until then.';
+    expect(await screen.findByText(waiting)).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole('navigation', { name: S.sectionsLabel })).getByRole('link', { name: 'System' }),
+    );
+    expect(await screen.findByText(waiting)).toBeInTheDocument();
   });
 
   it('a page loaded while a save waits says so, every load', async () => {
@@ -867,8 +935,8 @@ describe('the key and the balance: every state told apart (ruling 10)', () => {
     );
 
   it('a saved key shows only its last four, never the key, with SearchApi’s own balance', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-14T15:00:00.000Z'));
+    // why: the balance's age is judged on the page's clock, which renderWithProviders pins at 15:00, two minutes after
+    // the read
     account(412);
     open();
     const card = await searchApiCard();
@@ -892,6 +960,29 @@ describe('the key and the balance: every state told apart (ruling 10)', () => {
     const card = await searchApiCard();
     expect(await within(card).findByText(S.balanceUnread)).toBeInTheDocument();
     expect(within(card).queryByText(/credits? left/)).toBeNull();
+  });
+
+  it('a failed providers or budget read still shows SearchApi’s own balance, never nothing', async () => {
+    account(412);
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 }),
+      ),
+    );
+    open();
+    const card = await searchApiCard();
+    expect(await within(card).findByText(S.credits(412, null))).toBeInTheDocument();
+  });
+
+  it('a failed budget read with no balance read says the balance could not be read, never nothing', async () => {
+    server.use(
+      http.get(`${API}/budget`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 }),
+      ),
+    );
+    open();
+    const card = await searchApiCard();
+    expect(await within(card).findByText(S.balanceUnread)).toBeInTheDocument();
   });
 
   it("a balance that couldn't be read is this app's count when it has one", async () => {
@@ -927,8 +1018,10 @@ describe('the key and the balance: every state told apart (ruling 10)', () => {
   it('a saved key the app set aside says to paste it again, not "not set", and shows no balance', async () => {
     account(412);
     serveView({ setAside: ['SEARCHAPI_KEY'] });
-    open();
+    const { client } = open();
     const card = await searchApiCard();
+    // why: every read has answered, the balance's included, before its absence is checked
+    await settled(client);
     expect(within(card).getByText(S.secretSetAside)).toBeInTheDocument();
     expect(within(card).queryByText(S.secretNotSet)).toBeNull();
     expect(within(card).queryByText(S.searchapiNoKey)).toBeNull();

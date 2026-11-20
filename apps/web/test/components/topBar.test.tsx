@@ -272,33 +272,29 @@ describe('the limits (Ruling 10)', () => {
     server.use(http.get(`${API}/searchapi/account`, () => HttpResponse.json({ account })));
 
   it('SearchApi: its own balance, with the day a monthly plan resets', async () => {
-    // why: the age of a balance read is judged against the clock; pin it, never the wall
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-19T14:10:00.000Z'));
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
     serveLimits(bothWindows);
     serveAccount({
       remaining: 9_988,
       monthlyAllowance: 10_000,
       periodEnd: '2026-12-01',
-      fetchedAt: '2026-11-19T14:05:00.000Z',
+      fetchedAt: '2026-10-14T14:55:00.000Z',
     });
     renderWithProviders(<Limits />);
     expect(await screen.findByText('SearchApi: 9,988 credits left · resets 1 Dec')).toBeInTheDocument();
   });
 
   it('SearchApi: a balance read more than ten minutes ago says when', async () => {
-    // why: eleven minutes after the read; London time is GMT in winter
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-19T14:16:00.000Z'));
+    // why: eleven minutes before the page's pinned clock (NOW, 15:00 UTC); London time is BST in October
     serveLimits(bothWindows, providers('trial'));
     serveAccount({
       remaining: 38,
       monthlyAllowance: 0,
       periodEnd: null,
-      fetchedAt: '2026-11-19T14:05:00.000Z',
+      fetchedAt: '2026-10-14T14:49:00.000Z',
     });
     renderWithProviders(<Limits />);
-    expect(await screen.findByText('SearchApi: 38 credits left · as of 14:05')).toBeInTheDocument();
+    expect(await screen.findByText('SearchApi: 38 credits left · as of 15:49')).toBeInTheDocument();
   });
 
   it('SearchApi: with no balance, this app’s count of the month on the $40 plan, says whose it is', async () => {
