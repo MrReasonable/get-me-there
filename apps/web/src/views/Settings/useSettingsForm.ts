@@ -11,6 +11,7 @@ import {
   type ProviderId,
   poundsToPence,
   providerIdSchema,
+  SETTING_SECTION,
   settingRefusal,
   settingsInSection,
 } from '@gmt/core';
@@ -205,6 +206,8 @@ export interface SettingsForm {
   result: SaveResult | null;
   /** Counts the saves that stored something, so a key field can close itself after one. */
   saves: number;
+  /** Counts the saves that stored something and named one of `section`'s settings (Email's kept Other edits). */
+  savesIn(section: Exclude<SettingsSection, 'system'>): number;
 }
 
 /**
@@ -222,6 +225,7 @@ export function useSettingsForm(
   const [errors, setErrors] = useState<Partial<Record<OwnedName, string>>>({});
   const [result, setResult] = useState<SaveResult | null>(null);
   const [saves, setSaves] = useState(0);
+  const [sectionSaves, setSectionSaves] = useState<Partial<Record<SettingsSection, number>>>({});
   const clock = useContext(RestartClockContext);
   const cancelWatch = useRef<(() => void) | null>(null);
   // why: a save answered after the page has gone must not start a watch or set state (fix round 1, minor 8)
@@ -370,6 +374,12 @@ export function useSettingsForm(
       return;
     }
     setSaves((n) => n + 1);
+    const touched = new Set(names.map((name) => SETTING_SECTION[name]));
+    setSectionSaves((c) => {
+      const next = { ...c };
+      for (const sec of touched) next[sec] = (next[sec] ?? 0) + 1;
+      return next;
+    });
     const afterRuns = answer.applies === 'after-runs';
     if (answer.applies === 'after-runs') {
       setResult({ kind: 'after-runs', running: answer.running, warnings });
@@ -410,5 +420,6 @@ export function useSettingsForm(
     save,
     result,
     saves,
+    savesIn: (section) => sectionSaves[section] ?? 0,
   };
 }

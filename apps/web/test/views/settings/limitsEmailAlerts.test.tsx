@@ -451,6 +451,25 @@ describe('Settings › Email (ruling 11)', () => {
     );
   });
 
+  it('a save of Limits between Gmail and back keeps the Other edits from before Gmail', async () => {
+    capturePuts();
+    const { user } = open('email');
+    await user.click(await mode(E.modeOther));
+    await user.type(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST }), 'smtp.example.com');
+    await user.click(await mode(E.modeGmail));
+    await gmailAddress();
+    const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
+    await user.click(within(nav).getByRole('link', { name: S.section.limits }));
+    const spendField = await screen.findByRole('textbox', { name: SETTING_LABELS.MONTHLY_SPEND_CAP_PENCE });
+    await user.clear(spendField);
+    await user.type(spendField, '12');
+    await user.click(screen.getByRole('button', { name: S.saveLabel.limits }));
+    await screen.findByText(S.restarting);
+    await user.click(within(nav).getByRole('link', { name: `${S.section.email} · unsaved` }));
+    await user.click(await mode(E.modeOther));
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST })).toHaveValue('smtp.example.com');
+  });
+
   it('a test email’s refusal joins a save’s, never wiping it (fix round 1, minor 4)', async () => {
     serveValues(GMAIL, true);
     server.use(
