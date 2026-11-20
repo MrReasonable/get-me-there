@@ -82,6 +82,38 @@ export async function readActive(deps: Deps, c: AppTarget): Promise<ActiveRead> 
     : { kind: 'active', execution: parsed.data.execution };
 }
 
+/** A Settings section's `section=` value (settings plan rulings 13 and 14). */
+export type SettingsSection = z.infer<typeof apiContract.statusFixSectionSchema>;
+
+/** The path of a Settings section on the app, which the CLI prints after the app's address. */
+export const settingsPath = (section: SettingsSection): string => `/?view=settings&section=${section}`;
+
+/**
+ * Settings plan ruling 15: what a command that no longer changes a setting prints instead, with the section's address.
+ */
+export const changeInSettings = (t: AppTarget, section: SettingsSection): string =>
+  `Change this in Settings: ${targetUrl(t, settingsPath(section))}`;
+
+/**
+ * Settings plan ruling 15: whether this app holds its own settings, which it does from its first start on: `GET
+ * /api/settings` answers with the Settings read. No answer, another status (an app from before the Settings page) or
+ * another body is not holding them, and the caller goes on as before.
+ */
+export async function holdsSettings(deps: Deps, c: AppTarget): Promise<boolean> {
+  const r = await deps.http({
+    method: 'GET',
+    url: targetUrl(c, '/api/settings'),
+    headers: authHeaders(c),
+    timeoutMs: 10_000,
+  });
+  if ('error' in r || r.status !== 200) return false;
+  try {
+    return apiContract.settingsViewSchema.safeParse(JSON.parse(r.body)).success;
+  } catch {
+    return false;
+  }
+}
+
 /** One line naming the active execution, its start and its estimated finish (or "unknown"). */
 export function activeLine(e: ActiveExecution): string {
   const what = e.kind === 'run' ? '' : ' (a single-cell verification)';

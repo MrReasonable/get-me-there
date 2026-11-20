@@ -110,7 +110,9 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
     const w = world({ searchApi: null, travelpayouts: null, camoufox: null }, { answers: [] });
     expect(await runCli(ARGS, w.deps)).toBe(78);
     expect(w.io.stderr).toContain('No price source is set up yet');
-    expect(w.io.stderr).toContain('pnpm gmt setup --reconfigure travelpayouts');
+    // why: settings plan ruling 15: the token is added on the app's Settings page
+    expect(w.io.stderr).toContain('add it in Settings › Price sources: http://127.0.0.1:');
+    expect(w.io.stderr).not.toContain('--reconfigure travelpayouts');
     expect(w.posts).toEqual([]);
     expect(w.ask.asked).toEqual([]);
   });

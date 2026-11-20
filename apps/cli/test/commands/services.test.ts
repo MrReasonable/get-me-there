@@ -226,6 +226,9 @@ describe('restore <file> (spec §13 Restore (native))', () => {
     m.fs.file('/b/x.db', 'backup');
     expect(await runCli(['restore', '/b/x.db'], m.deps)).toBe(0);
     expect(m.io.stdout).toContain(text);
+    // why: settings plan ruling 15: SEARCHAPI_TRIAL_USED stays an app.env line, but the searchapi group is the Settings
+    // page's, so the advice is to edit the line and restart
+    expect(m.io.stdout).not.toContain('--reconfigure searchapi');
   });
   it('names the runs a start would resume and the scheduled searches it may catch up (cb-b1-010)', async () => {
     const m = await setUp('darwin', {

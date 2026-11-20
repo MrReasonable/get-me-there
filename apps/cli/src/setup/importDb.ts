@@ -106,7 +106,7 @@ export function startNote(
  */
 export function dashboardText(plan: string | undefined): string {
   if (plan === 'trial')
-    return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and raise SEARCHAPI_TRIAL_USED in app.env to match (pnpm gmt setup --reconfigure searchapi), and check each other vendor’s dashboard.';
+    return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and raise SEARCHAPI_TRIAL_USED in app.env to match (then pnpm gmt restart), and check each other vendor’s dashboard.';
   if (plan === '40usd')
     return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and lower SEARCHAPI_MONTHLY_CALL_CAP in app.env by the calls it shows since the backup, and check each other vendor’s dashboard.';
   return 'A restored ledger lacks any call made after its backup, so check each vendor’s dashboard.';

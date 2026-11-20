@@ -255,10 +255,12 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     );
   });
 
-  it('tells an operator moving to 40usd to remove SEARCHAPI_TRIAL_USED, which otherwise exits 78 (N5, cost-007)', () => {
+  // why: settings plan ruling 1: the plan is the Settings page's, so an env-only trial count no longer stops boot
+  it('tells an operator moving to 40usd to remove SEARCHAPI_TRIAL_USED, which the app then ignores with a warning (N5, cost-007)', () => {
     expect(flat).toContain(
-      'If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0): on `40usd` the app refuses to start with it (exit 78).',
+      'If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0): on `40usd` the app ignores it and logs a warning naming it.',
     );
+    expect(flat).not.toContain('the app refuses to start with it (exit 78)');
   });
 
   it('turns auth off only through the Tailscale-only override file', () => {
@@ -501,6 +503,66 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
       expect([...new Set(others)]).toEqual([]);
     },
   );
+});
+
+// why: settings plan rulings 1–4, 10 and 15 (spec revision 72): the Settings page owns its names from the app's first
+// start, so every doc that told the operator to edit those lines or rerun a setup group says where they live now
+describe('the Settings page owns its names (settings plan, spec revision 72)', () => {
+  const setup = read('docs/setup.md');
+  const flat0 = between(setup, '## 0.', '## 1.').replace(/\s+/g, ' ');
+  const OWNED =
+    'From its first start the app keeps these settings itself, on its Settings page: the Travelpayouts token, the SearchApi key, plan and billing day, when the browser may run, the stopping rule for flight reads, how often a date’s calendar price is read again, the sources new searches start with, the monthly spend limit, the SearchApi credits a new search starts with, and email.';
+  const IMPORTED =
+    'A settings-file line for one of them is read once, on the first start at which the app holds no value for it; after that the app keeps its own value, and a line that differs is ignored and reported on Settings › System ("… in .env is ignored: Settings holds it. Remove the line from .env."): remove the line.';
+  const SET_ASIDE =
+    'A value the app holds but no longer accepts (an update tightened its rule) is set aside for that start, so the app still starts, and Settings › System names it ("Saved … isn’t valid any more: set it again in Settings").';
+  const BACKUPS =
+    'The database and its backups hold those keys and the mail password as the settings file holds them, readable by you alone (0600): keep every copy of a backup as private as the settings file.';
+
+  it('section 0 says which settings the app keeps, how a line is imported once, what is set aside, and that backups hold the keys', () => {
+    for (const s of [OWNED, IMPORTED, SET_ASIDE, BACKUPS]) expect(flat0).toContain(s);
+    expect(flat0).toContain(
+      '`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window question of `--reconfigure browser`, then print the Settings address instead (Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources).',
+    );
+    expect(flat0).toContain('Tokens, keys and the mail password must be at least 8 characters');
+  });
+
+  it('sections 2, 4, 6, 11 and 14 send the owned names to the Settings page', () => {
+    const flat2 = between(setup, '## 2.', '## 3.').replace(/\s+/g, ' ');
+    const flat4 = between(setup, '## 4.', '## 5.').replace(/\s+/g, ' ');
+    const flat6 = between(setup, '## 6.', '## 7.').replace(/\s+/g, ' ');
+    const flat11 = between(setup, '## 11.', '## 12.').replace(/\s+/g, ' ');
+    const flat14 = setup.slice(setup.indexOf('## 14.')).replace(/\s+/g, ' ');
+    expect(flat2).toContain('Settings › Price sources');
+    expect(flat2).toContain('read once, on the first start');
+    expect(flat2).not.toContain('**Secrets are kept only in `.env`.**');
+    expect(flat2).not.toContain('The database holds no key or password');
+    expect(flat4).toContain('Settings › Email and alerts');
+    expect(flat6).toContain(BACKUPS);
+    expect(flat11).toContain('Settings › System');
+    expect(flat11).toContain('in .env is ignored: Settings holds it');
+    expect(flat14).toContain('When the browser may run');
+    expect(setup).not.toMatch(/natively, `pnpm gmt setup --reconfigure (email|travelpayouts)`/);
+  });
+
+  it('README, local-quickstart, api-limits and providers say where the settings live and what the balance read costs', () => {
+    expect(read('README.md')).toContain('Settings page');
+    expect(read('docs/local-quickstart.md').replace(/\s+/g, ' ')).toContain('Settings › Price sources');
+    const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
+    expect(limits).toContain('New searches start from the limit in Settings › Limits');
+    expect(limits).toContain('credits');
+    const providers = read('docs/providers.md').replace(/\s+/g, ' ');
+    expect(providers).toContain('GET https://www.searchapi.io/api/v1/me');
+    expect(providers).toContain(
+      'Measured 2026-11-19: two calls left the account’s usage this month and its searches this hour at 0',
+    );
+  });
+
+  it('docker-compose.yml says the owned names are imported once', () => {
+    expect(read('docker-compose.yml').replace(/\n# /g, ' ')).toContain(
+      'the names .env.example marks [Settings] are read once, on the first start at which the app holds no value for one, and the Settings page owns them after that',
+    );
+  });
 });
 
 // why: docker-compose.yml fixes the project name, so a second checkout shares the operator's volume; the final pass

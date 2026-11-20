@@ -1,7 +1,10 @@
 import { parseEnv } from 'node:util';
+import { apiContract } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ENABLE_QUESTION } from '../../src/camoufox/offer.js';
 import { runCli } from '../../src/cli.js';
 import type { Action } from '../../src/plan/action.js';
+import { BROWSER_WINDOW_QUESTION } from '../../src/setup/prompts.js';
 import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -177,7 +180,7 @@ describe('the closing screen (brief §6)', () => {
     await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps);
     const closing = m.io.stdout.slice(m.io.stdout.indexOf('No price source'));
     expect(closing.split('\n')[0]).toBe(
-      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.',
+      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and add it in Settings › Price sources: http://127.0.0.1:3000/?view=settings&section=sources',
     );
     expect(closing).not.toContain('User name');
     expect(closing).not.toContain('The password is in');
@@ -189,7 +192,7 @@ describe('the closing screen (brief §6)', () => {
       'plain HTTP',
       'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
       'Next: open http://127.0.0.1:3000 and use the new-search panel on Trips: enter From, To and the dates, review what the search will use, then press Search.',
-      'Nothing runs on a schedule until you give a search one',
+      'Nothing runs on a schedule until you give a search one; a scheduled search spends within the limits Settings › Limits shows.',
     ])
       expect(closing).toContain(s);
     expect(m.io.stdout).not.toContain(PASS);
@@ -197,6 +200,19 @@ describe('the closing screen (brief §6)', () => {
 });
 
 describe('a second setup (spec §16: the first failing test)', () => {
+  it('says each variable the app ignores, by name, as a note (settings plan ruling 1)', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}SEARCHAPI_KEY="sa-key-0123456789"\nSEARCHAPI_PLAN="40usd"\nSEARCHAPI_BILLING_DAY="5"\nSEARCHAPI_TRIAL_USED="5"\n`,
+      0o600,
+    );
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toMatch(/note: app\.env: SEARCHAPI_TRIAL_USED: applies only to the trial/);
+    expect(m.io.stdout).not.toContain('sa-key-0123456789');
+  });
+
   it('over an app.env whose PORT differs from the plan’s reports the difference and plans no writeFile for it', async () => {
     const m = await setUp();
     answersFile(m, { port: 3917 });
@@ -391,6 +407,107 @@ describe('--reconfigure <group>', () => {
     m.deps.io = testIo({ tty: true });
     expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_BROWSER_WINDOW).toBe('scheduled');
+  });
+});
+
+// why: settings plan ruling 15: once the app holds its settings (GET /api/settings answers), the groups the Settings
+// page owns are changed there; before that, setup writes app.env as it always has (the app imports it on first start)
+describe('--reconfigure of a group the Settings page owns (settings plan ruling 15)', () => {
+  /** A Settings read as the app gives it: every owned name unset. */
+  const SETTINGS_VIEW = {
+    values: Object.fromEntries(apiContract.PLAIN_SETTING_NAMES.map((n) => [n, null])),
+    secrets: Object.fromEntries(
+      apiContract.SECRET_SETTING_NAMES.map((n) => [n, { set: false, last4: null }]),
+    ),
+    newSearchSources: { discovery: [], verification: [] },
+    envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
+    envIgnored: [],
+    setAside: [],
+    pending: null,
+  };
+  const appHolding = () =>
+    stubHttp({
+      'GET /api/settings': () => ({ status: 200, body: SETTINGS_VIEW }),
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+    });
+
+  it.each([
+    ['travelpayouts', 'sources'],
+    ['searchapi', 'sources'],
+    ['email', 'email'],
+  ] as const)('%s prints the Settings address and changes nothing', async (group, section) => {
+    const m = await setUp();
+    const before = m.fs.read(ENV);
+    const http = appHolding();
+    m.deps.http = http;
+    const ask = scriptedAsk([]);
+    m.deps.ask = ask;
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--reconfigure', group], m.deps)).toBe(0);
+    expect(io.stdout).toBe(
+      `Change this in Settings: http://127.0.0.1:3000/?view=settings&section=${section}\n`,
+    );
+    expect(m.fs.read(ENV)).toBe(before);
+    expect(m.executor.log).toEqual([]);
+    expect(ask.asked).toEqual([]);
+    expect(http.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+      'GET http://127.0.0.1:3000/api/settings',
+    ]);
+  });
+
+  it('browser leaves its window question to Settings and still runs the browser provider’s own step', async () => {
+    const m = await setUp();
+    const before = m.fs.read(ENV);
+    m.deps.http = appHolding();
+    // why: only the browser provider's own question (no); row 9 is not asked
+    const ask = scriptedAsk([false]);
+    m.deps.ask = ask;
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(io.stdout).toContain(
+      'Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources\n',
+    );
+    expect(ask.asked).not.toContain(BROWSER_WINDOW_QUESTION);
+    expect(ask.asked).toEqual([ENABLE_QUESTION]);
+    expect(m.fs.read(ENV)).toBe(before);
+    expect(show(m.executor.log)).not.toContain(
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+    );
+  });
+
+  it('an app that does not hold settings yet (no answer, or a 404 from an older app) is reconfigured as before', async () => {
+    for (const route of [
+      () => ({ error: 'refused' }),
+      () => ({ status: 404, body: { error: 'not_found' } }),
+    ]) {
+      const m = await setUp();
+      m.deps.http = stubHttp({
+        'GET /api/settings': route,
+        'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+        'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+      });
+      m.deps.ask = scriptedAsk(['tp-token-0123456789']);
+      const io = testIo({ tty: true });
+      m.deps.io = io;
+      expect(await runCli(['setup', '--reconfigure', 'travelpayouts'], m.deps)).toBe(0);
+      expect(parseEnv(m.fs.read(ENV) ?? '').TRAVELPAYOUTS_TOKEN).toBe('tp-token-0123456789');
+      expect(io.stdout).not.toContain('Change this in Settings');
+    }
+  });
+
+  it('a port, timezone or password group never asks for the Settings page', async () => {
+    const m = await setUp();
+    const http = appHolding();
+    m.deps.http = http;
+    m.deps.ask = scriptedAsk(['America/New_York']);
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--reconfigure', 'timezone'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '').SCHEDULER_TIMEZONE).toBe('America/New_York');
+    expect(http.requests.map((r) => new URL(r.url).pathname)).not.toContain('/api/settings');
   });
 });
 

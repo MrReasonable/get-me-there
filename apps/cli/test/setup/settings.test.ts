@@ -54,4 +54,16 @@ describe('readSettings and answersFromConfig', () => {
       record: { PORT: '99999', BIND_ADDRESS: '127.0.0.1' },
     });
   });
+  // why: settings plan ruling 1 (Task 1's review): a variable the app ignores rather than refusing boot is a warning,
+  // carried here by its name and the app's own words (never a value) so setup can say it
+  it('carries the app’s warnings: a trial count on the $40 plan is ignored, by name', () => {
+    const s = readSettings(
+      `DATABASE_PATH="/d.db"\nBIND_ADDRESS="127.0.0.1"\nSEARCHAPI_KEY="sa-key-0123456789"\nSEARCHAPI_PLAN="40usd"\nSEARCHAPI_TRIAL_USED="5"\n`,
+    );
+    if (!s.ok) throw new Error(s.fields.join(','));
+    expect(s.warnings).toEqual([expect.stringMatching(/^SEARCHAPI_TRIAL_USED: applies only to the trial/)]);
+    expect(s.warnings.join(' ')).not.toContain('sa-key-0123456789');
+    const clean = readSettings(`DATABASE_PATH="/d.db"\nBIND_ADDRESS="127.0.0.1"\n`);
+    expect(clean.ok ? clean.warnings : null).toEqual([]);
+  });
 });

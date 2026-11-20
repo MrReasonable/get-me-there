@@ -5,7 +5,7 @@ import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { appEnvPath } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
-import { NO_SOURCE_TEXT } from '../setup/closing.js';
+import { noSourceText } from '../setup/closing.js';
 
 type SmokePlan = z.infer<typeof apiContract.smokePlanResponseSchema>;
 
@@ -117,7 +117,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   }
   if (plan.searchApi === null && plan.travelpayouts === null && plan.camoufox === null) {
     // why: po-b1-012, U3: nothing could answer; say why before any question
-    deps.io.err(`${NO_SOURCE_TEXT}\nNothing was sent.\n`);
+    deps.io.err(`${noSourceText(target.port)}\nNothing was sent.\n`);
     return EXIT.badConfig;
   }
   const lines = spendLines(plan);

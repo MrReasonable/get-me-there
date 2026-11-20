@@ -6,6 +6,7 @@
  * header of one in-process request.
  */
 import { apiContract } from '@gmt/core';
+import { settingsPath } from './appClient.js';
 import { type AppEndpoint, nativeEndpoint } from './appEndpoint.js';
 import type { Flags } from './args.js';
 import { type Deps, EXIT } from './deps.js';
@@ -80,7 +81,7 @@ export function describeReport(checks: readonly StatusCheck[], baseUrl: string |
         const where =
           c.fix.settings === undefined || baseUrl === null
             ? ''
-            : ` (${baseUrl}/?view=settings&section=${c.fix.settings})`;
+            : ` (${baseUrl}${settingsPath(c.fix.settings)})`;
         lines.push(
           `${pad}fix: ${c.fix.command === null ? c.fix.text : `${c.fix.command} (${c.fix.text})`}${where}`,
         );
@@ -131,8 +132,10 @@ export async function finishStatus(
   rf: Extract<ReportFlags, { ok: true }>,
   local: readonly Check[],
   target: StatusTarget = nativeTarget(deps),
+  /** The report already read for the local facts (settings plan ruling 15), so the app is asked once. */
+  read?: ReportRead,
 ): Promise<number> {
-  const read = await readReport(deps, target.endpoint);
+  read ??= await readReport(deps, target.endpoint);
   const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
     const step = target.nextStep(local, target.endpoint.kind === 'none' ? null : target.endpoint.port);

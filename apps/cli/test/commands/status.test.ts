@@ -123,6 +123,10 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
   it('localChecks reads only: it runs no action, and status prints what it returns (ca-b1-006)', async () => {
     const { localChecks } = await import('../../src/commands/status.js');
     const m = await setUp();
+    // why: settings plan ruling 15: the price-source line comes from the app's report, which names its check
+    m.deps.http = stubHttp({
+      'GET /api/status': () => priceReport('ok', 'price sources: Travelpayouts', null),
+    });
     const checks = await localChecks(m.deps);
     expect(m.executor.log).toEqual([]);
     expect(checks.map((c) => c.name)).toEqual(
@@ -136,17 +140,65 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
       ]),
     );
   });
-  it('the price source is a line of its own: none (warn, with the fix) after Enter everywhere; named when set (pf-b1-001)', async () => {
+  // why: settings plan ruling 15: the price sources are the Settings page's, so the line reads the app's own report
+  // (its price-sources check), never app.env, whose lines the app may be ignoring; with the app down it says so
+  const priceReport = (state: 'ok' | 'warn', summary: string, fix: unknown) => ({
+    status: 200,
+    body: {
+      generatedAt: '2026-10-24T09:30:00.000Z',
+      mode: 'native',
+      version: 'abc1234',
+      checks: [
+        {
+          id: 'price-sources',
+          area: 'provider',
+          providerId: null,
+          label: null,
+          state,
+          summary,
+          note: null,
+          offReason: null,
+          fix,
+        },
+      ],
+    },
+  });
+  it('the price source is a line of its own, read from the app’s report: none (warn, with the Settings address) or named (pf-b1-001)', async () => {
     const m = await setUp();
-    await runCli(['status'], m.deps);
-    expect(m.io.stdout).toMatch(/price source +warn +none, so searches find nothing/);
-    expect(m.io.stdout).toContain('fix: pnpm gmt setup --reconfigure travelpayouts');
     const env = '/Users/op/.config/get-me-there/app.env';
+    // why: a token line the app ignores (Settings holds it) does not make a price source
     m.fs.file(env, `${m.fs.read(env) ?? ''}TRAVELPAYOUTS_TOKEN="tp-0123456789abcdef"\n`, 0o600);
+    m.deps.http = stubHttp({
+      'GET /api/status': () =>
+        priceReport('warn', 'No price source is set up, so searches find nothing', {
+          text: 'Travelpayouts is the no-cost source: add its token in Settings › Price sources',
+          command: null,
+          settings: 'sources',
+        }),
+    });
+    await runCli(['status'], m.deps);
+    expect(m.io.stdout).toMatch(/price source +warn +No price source is set up, so searches find nothing/);
+    expect(m.io.stdout).toContain(
+      'fix: Travelpayouts is the no-cost source: add its token in Settings › Price sources (http://127.0.0.1:3000/?view=settings&section=sources)',
+    );
+    expect(m.io.stdout).not.toContain('--reconfigure travelpayouts');
+    expect(m.io.stdout).not.toContain('tp-0123456789abcdef');
+    m.deps.http = stubHttp({
+      'GET /api/status': () => priceReport('ok', 'price sources: Travelpayouts', null),
+    });
     m.io.stdout = '';
     await runCli(['status'], m.deps);
-    expect(m.io.stdout).toMatch(/price source +ok +Travelpayouts/);
-    expect(m.io.stdout).not.toContain('tp-0123456789abcdef');
+    expect(m.io.stdout).toMatch(/price source +ok +price sources: Travelpayouts/);
+  });
+  it('with the app down the price source line says where they are kept, never "none" (settings plan ruling 15)', async () => {
+    const m = await setUp();
+    m.deps.http = stubHttp({ 'GET /api/status': () => ({ error: 'refused' }) });
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(
+      /price source +warn +the app isn’t running; price sources are kept in its Settings/,
+    );
+    expect(m.io.stdout).not.toMatch(/price source +warn +none/);
+    expect(m.io.stdout).not.toContain('--reconfigure travelpayouts');
   });
   it('a BIND_ADDRESS beyond loopback warns plainly; it is no fail (sec-b1-002, U8)', async () => {
     const m = await setUp();

@@ -1,4 +1,5 @@
 // Spec §12: .env.example is the spec's block verbatim, and it names every variable the config reads.
+import { SETTINGS_NAMES } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { ALL_VARS } from '../helpers/env.js';
 import { envExampleVariables, read, specEnvBlock } from './files.js';
@@ -34,5 +35,27 @@ describe('.env.example (spec §12)', () => {
   it('carries no value for any credential', () => {
     for (const name of ['APP_BASIC_AUTH_PASS', 'TRAVELPAYOUTS_TOKEN', 'SEARCHAPI_KEY', 'SMTP_PASS'])
       expect(read('.env.example')).toMatch(new RegExp(`^${name}=( |$)`, 'm'));
+  });
+
+  // why: settings plan rulings 1 and 2: the Settings page owns these names from the app's first start; a line for one is
+  // imported once, then reported and never applied, so the file says which they are
+  it('marks exactly the names the Settings page owns, and says a line for one is imported once', () => {
+    const text = read('.env.example');
+    const marked = text
+      .split('\n')
+      .filter((l) => !l.startsWith('#') && l.includes('[Settings]'))
+      .map((l) => /^([A-Z][A-Z0-9_]*)=/.exec(l)?.[1] ?? `not a variable line: ${l}`);
+    expect(marked.sort()).toEqual(SETTINGS_NAMES.map((s) => s.name).sort());
+    expect(text.replace(/\n# /g, ' ')).toContain(
+      'Names marked [Settings] are the Settings page’s from the app’s first start: a line for one is imported once, when the app holds no value for it, then reported and never applied (docs/setup.md section 0).',
+    );
+  });
+
+  it('says a trial count on the $40 plan is ignored with a warning (settings plan ruling 1)', () => {
+    const line = read('.env.example')
+      .split('\n')
+      .find((l) => l.startsWith('SEARCHAPI_TRIAL_USED='));
+    expect(line).toContain('above 0 on 40usd is ignored, with a warning');
+    expect(line).not.toContain('fails boot');
   });
 });

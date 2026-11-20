@@ -444,6 +444,13 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     expect(posts(http)).toHaveLength(0);
   });
 
+  it('the test email’s next steps point at Settings › Email and alerts, not a setup group (settings plan ruling 15)', () => {
+    for (const w of [TEST_EMAIL_WORDS.failed, TEST_EMAIL_WORDS.notConfigured]) {
+      expect(w).toContain('Settings › Email and alerts');
+      expect(w).not.toContain('--reconfigure email');
+    }
+  });
+
   it.each([
     [
       'failed',

@@ -24,6 +24,10 @@ name reaches it. On a Mac with Docker Desktop, double-click
 - [`docs/providers.md`](docs/providers.md): the provider research and the known vendor behaviour.
 - [`docs/release-notes.md`](docs/release-notes.md): what this release does and does not do.
 
+Once it is running, the app keeps its price sources' keys, its limits and email itself, on its
+Settings page (Price sources, Limits, Email and alerts, System), so they change there rather than
+in a settings file; [`docs/setup.md`](docs/setup.md) section 0 says how a settings-file line is read once.
+
 Every price is shown with its source and age; nothing is invented, converted without saying so,
 or presented as more certain than its source. Coverage is stated cell by cell: a cell with no
 cached data is never counted as having no flights.

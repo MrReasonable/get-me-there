@@ -2,13 +2,16 @@
 
 Every limit below is enforced by the app before a request leaves the process: the ledger
 (`provider_requests`) records each attempt, and a request that would cross a cap is refused
-before it is sent. Configuration lives in `.env` (see `.env.example`); this page explains
-what the values mean. Provider facts were measured on 2026-10-14 and 2026-10-15 and come from
+before it is sent. Configuration lives in `.env` (see `.env.example`), except the settings the
+app keeps on its Settings page from its first start (`.env.example` marks them `[Settings]`;
+docs/setup.md section 0): SearchApi's key, plan and billing day, the monthly spend limit and the
+SearchApi credits a new search starts with among them. This page explains what the values mean. Provider facts were measured on 2026-10-14 and 2026-10-15 and come from
 `docs/providers.md`; vendors change plans, so re-check their pages before relying on a number.
 
 ## Plan presets
 
-`SEARCHAPI_PLAN` selects a preset (`trial` by default, or `40usd`); Travelpayouts has one set of
+SearchApi's plan (Settings › Price sources: "Free trial" or "$40 a month"; `SEARCHAPI_PLAN`)
+selects a preset (`trial` by default, or `40usd`); Travelpayouts has one set of
 schema defaults. Each individual variable overrides its preset value. Money is configured in
 pence and held in micro-GBP (1p = 10,000 µGBP). This table is generated from the code
 (`PLAN_PRESETS`, `TRAVELPAYOUTS_DEFAULTS`) and a test fails if they drift apart.
@@ -36,13 +39,17 @@ How to read it:
 - **`trial`** is SearchApi's one-off allowance of 100 credits. The window is the lifetime of
   the install, not a month, and scheduled runs leave SearchApi out; use it for the smoke test
   only. If some credits were spent elsewhere, set `SEARCHAPI_TRIAL_USED` to the number used
-  (100 minus the dashboard's "Remaining free searches (credits)").
+  (100 minus the dashboard's "Remaining free searches (credits)"); it stays a `.env` line, and on
+  `40usd` a value above 0 is ignored with a warning.
 - **`40usd`** is the subscription. Each call costs 0 at the margin; the fee (£32, entered as
   3200p) is counted once in the global monthly cap, which defaults to 3500p, so
   `MONTHLY_SPEND_CAP_PENCE` reads as total monthly spend. The 10,000-call cap is the hard
   stop. The hourly rate of 2,000 is the vendor's "20% of the plan per hour" rule.
 - **Travelpayouts** is free and never billed; its call cap only bounds load. The vendor allows
   600 requests a minute on this endpoint; the app defaults to 200.
+- `EXECUTION_MAX_CALLS` is the SearchApi credits a new search may spend each run: New searches start from the limit in
+  Settings › Limits ("New searches: at most N SearchApi credits each run"), and a search that exists keeps its own,
+  changed on its Edit page. `MONTHLY_SPEND_CAP_PENCE` is Settings › Limits' "Spend at most £N a month".
 - `EXECUTION_MAX_FREE_CALLS` (default 2000), `SOFT_CONFIRM_PENCE` (100) and
   `CHILD_MAX_CALLS` (6) are not plan-dependent and are not in the table.
 - A billed provider whose calls cost money, enabled under a spend cap of 0, makes boot log a
@@ -58,7 +65,7 @@ How to read it:
 
 Each provider's month starts on its `<PROVIDER>_BILLING_DAY` (UTC, 1–28, so every month has
 the day); the global month starts on `GLOBAL_BILLING_DAY` (UTC, default 1). Set SearchApi's
-billing day to the day your subscription renews so the app's month and the vendor's month
+billing day (Settings › Price sources, shown on the $40 plan) to the day your subscription renews so the app's month and the vendor's month
 line up. `trial` uses a lifetime window. Settings › Price sources and `GET /api/budget` show every
 window's start and end with calls and cost so far.
 
@@ -109,7 +116,8 @@ window's start and end with calls and cost so far.
   (grid) it has to read, and Settings › Price sources shows the calendar month's pages, with no cap on them. Its pages count
   against no per-run call cap (neither `EXECUTION_MAX_FREE_CALLS` nor a search's own limit of free calls); its
   flight-list pages have none either. A run's flight-list step stops when reading more stops finding cheaper trips
-  (twelve reads in a row that leave the five cheapest trips with flights read unchanged), when it has no more dates to
+  (`FLIGHT_READ_PATIENCE` reads in a row, 12 by default and set in Settings › Price sources, that leave the five
+  cheapest trips with flights read unchanged; each run keeps the value it started with), when it has no more dates to
   read, when the return or booking reads stop, or at the browser window's end or an ending error. A run stopped at the
   per-run page cap an earlier version had is never resumed: Search again starts a fresh run that reuses the prices
   already found.
@@ -133,7 +141,9 @@ window's start and end with calls and cost so far.
 Once a week (or before raising a cap), compare the app with SearchApi's dashboard:
 
 1. Open Settings › Price sources (or `GET /api/budget`) and note SearchApi's calls in the current
-   window and the window's start date.
+   window and the window's start date. The SearchApi block also shows SearchApi's own count of
+   credits left (`GET /api/searchapi/account`, read from the vendor at no charge; docs/providers.md),
+   and the app's own count when the vendor does not answer.
 2. Open SearchApi's dashboard and note the searches used in the same billing period
    (on `trial`, 100 minus "Remaining free searches (credits)").
 3. Expect **app ≥ dashboard**. The gap is cached repeats and retries the vendor did not bill.
