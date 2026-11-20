@@ -341,7 +341,7 @@ export const COPY = {
     envLine: (names: readonly string[]) =>
       names.length === 0
         ? "Nothing was saved: a line in .env isn't valid with these settings."
-        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env and restart the app (it reads .env only when it starts), then save again.`,
+        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again.`,
     failed: 'Not saved: the app answered with an error; its log has the cause.',
     noAnswer: "Not saved: the app didn't answer.",
     // Limits (rulings 5 and 14): sentences with a field in them; the money is typed in pounds and saved in pence

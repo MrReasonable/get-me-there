@@ -759,7 +759,7 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
     await user.click(saveButton());
     const words = S.envLine(['SEARCHAPI_MONTHLY_CALL_CAP']);
     expect(words).toBe(
-      "Nothing was saved: SEARCHAPI_MONTHLY_CALL_CAP in .env isn't valid with these settings. Fix the line in .env and restart the app (it reads .env only when it starts), then save again.",
+      "Nothing was saved: SEARCHAPI_MONTHLY_CALL_CAP in .env isn't valid with these settings. Fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again.",
     );
     expect(await screen.findByText(words)).toHaveClass('st-bad');
     expect(health.seen.reads).toBe(1);

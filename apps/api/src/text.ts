@@ -64,7 +64,7 @@ export const API_TEXT = {
     "SEARCHAPI_TRIAL_USED in .env counts only the free trial's credits, so it is ignored on the $40 plan: remove the line from .env.",
   // why: review M7: an env-only line a save makes the app read, refused by the schema; named, never quoted
   settingsEnvRefused: (names: readonly string[]) =>
-    `nothing was saved: ${names.join(', ')} in .env is not valid with these settings: fix the line in .env and restart the app (it reads .env only when it starts), then save again`,
+    `nothing was saved: ${names.join(', ')} in .env is not valid with these settings: fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again`,
   settingsEnvWarning: (name: string) =>
     `${name} in .env is ignored with these settings: remove the line from .env.`,
   // why: settings plan ruling 6 — a tool run the restart waits for, named as a search would be
