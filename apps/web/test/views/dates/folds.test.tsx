@@ -478,7 +478,9 @@ describe('Alert', () => {
     await findTrips();
     const d = await waitFor(() => fold(/^Alert/));
     const link = await within(d).findByRole('link', { name: F.emailSetUp });
-    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('view')).toBe('status');
+    // why: review R17b: email is set up on Settings › Email and alerts
+    const params = new URL(link.getAttribute('href') ?? '', 'http://x').searchParams;
+    expect([params.get('view'), params.get('section')]).toEqual(['settings', 'email']);
     expect(within(d).getByText(F.emailNotSet)).toBeInTheDocument();
   });
 

@@ -5,13 +5,14 @@
  * the class it answers and the next step for it.
  */
 import { apiContract } from '@gmt/core';
-import { type AppTarget, authHeaders, targetUrl } from '../appClient.js';
+import { type AppTarget, authHeaders, settingsPath, targetUrl } from '../appClient.js';
 import type { Ask } from '../ask.js';
 import type { Deps } from '../deps.js';
 
 export const TEST_EMAIL_QUESTION = 'Send a test email now?';
-// why: settings plan ruling 15: the app holds the mail server settings from its first start, on its Settings page
-const NEXT = 'Settings › Email and alerts';
+// why: settings plan ruling 15: the app holds the mail server settings from its first start, on its Settings page,
+// named with its address on this app (review MINOR 11)
+const next = (where: string): string => `Settings › Email and alerts (${where})`;
 
 /** V9: the offer belongs to a full setup and to `--reconfigure email`, not to the other single-group changes. */
 export const offeredFor = (group: string | null): boolean => group === null || group === 'email';
@@ -20,8 +21,9 @@ export const offeredFor = (group: string | null): boolean => group === null || g
 export const TEST_EMAIL_WORDS = {
   sent: 'The test email was sent. Check the inbox (and the spam folder) of the address you gave.',
   refused: 'The test email was not sent: the hourly email limit is reached. Try again later.',
-  failed: `The test email failed to send. Check the mail server settings in ${NEXT} (where you can send another test), then run \`pnpm gmt status\`; the app log (pnpm gmt logs) has the cause.`,
-  notConfigured: `The app says email is not set up. Set it up in ${NEXT}.`,
+  failed: (where: string) =>
+    `The test email failed to send. Check the mail server settings in ${next(where)}, where you can send another test, then run \`pnpm gmt status\`; the app log (pnpm gmt logs) has the cause.`,
+  notConfigured: (where: string) => `The app says email is not set up. Set it up in ${next(where)}.`,
   silent: 'The app did not answer the test email request. Run `pnpm gmt status`.',
 } as const;
 
@@ -39,7 +41,8 @@ export async function sendTestEmail(deps: Deps, app: AppTarget): Promise<string>
     timeoutMs: 40_000,
   });
   if ('error' in r) return TEST_EMAIL_WORDS.silent;
-  if (r.status === 409) return TEST_EMAIL_WORDS.notConfigured;
+  const where = targetUrl(app, settingsPath('email'));
+  if (r.status === 409) return TEST_EMAIL_WORDS.notConfigured(where);
   if (r.status === 429) return TEST_EMAIL_WORDS.refused;
   if (r.status !== 200) return TEST_EMAIL_WORDS.silent;
   let json: unknown;
@@ -50,7 +53,7 @@ export async function sendTestEmail(deps: Deps, app: AppTarget): Promise<string>
   }
   const parsed = apiContract.testEmailResponseSchema.safeParse(json);
   if (!parsed.success) return TEST_EMAIL_WORDS.silent;
-  return parsed.data.result === 'sent' ? TEST_EMAIL_WORDS.sent : TEST_EMAIL_WORDS.failed;
+  return parsed.data.result === 'sent' ? TEST_EMAIL_WORDS.sent : TEST_EMAIL_WORDS.failed(where);
 }
 
 /**

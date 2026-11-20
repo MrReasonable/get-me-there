@@ -1,11 +1,10 @@
 import { parseEnv } from 'node:util';
-import { apiContract } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ENABLE_QUESTION } from '../../src/camoufox/offer.js';
 import { runCli } from '../../src/cli.js';
 import type { Action } from '../../src/plan/action.js';
 import { BROWSER_WINDOW_QUESTION } from '../../src/setup/prompts.js';
-import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
+import { scriptedAsk, settingsView, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 const ENV = '/Users/op/.config/get-me-there/app.env';
@@ -192,10 +191,61 @@ describe('the closing screen (brief §6)', () => {
       'plain HTTP',
       'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
       'Next: open http://127.0.0.1:3000 and use the new-search panel on Trips: enter From, To and the dates, review what the search will use, then press Search.',
-      'Nothing runs on a schedule until you give a search one; a scheduled search spends within the limits Settings › Limits shows.',
+      'Nothing runs on a schedule until you give a search one; a scheduled search spends within its own run limit and the caps and limits in Settings.',
     ])
       expect(closing).toContain(s);
     expect(m.io.stdout).not.toContain(PASS);
+  });
+});
+
+// why: review IMPORTANT 5: once the app holds its settings, app.env's lines need not name its price sources, so the
+// closing screen judges them by the app's own report
+describe('the closing screen of a re-run judges the price source by the app (settings plan ruling 15)', () => {
+  const report = (state: 'ok' | 'warn') => ({
+    status: 200,
+    body: {
+      generatedAt: '2026-10-24T09:30:00.000Z',
+      mode: 'native',
+      version: 'abc1234',
+      checks: [
+        {
+          id: 'price-sources',
+          area: 'provider',
+          providerId: null,
+          label: null,
+          state,
+          summary: state === 'ok' ? 'price sources: Travelpayouts' : 'No price source is set up',
+          note: null,
+          offReason: null,
+          fix: null,
+        },
+      ],
+    },
+  });
+  const routes = (status: () => { status: number; body: unknown } | { error: string }) =>
+    stubHttp({
+      'GET /api/status': status,
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+    });
+  it('a token Settings holds is a price source, though app.env has no line for it', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => report('ok'));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
+  });
+  it('the app saying none keeps the lead; an app that does not answer falls back to app.env', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => report('warn'));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('No price source is set up yet');
+    m.io.stdout = '';
+    m.deps.http = routes(() => ({ error: 'refused' }));
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('No price source is set up yet');
   });
 });
 
@@ -413,18 +463,7 @@ describe('--reconfigure <group>', () => {
 // why: settings plan ruling 15: once the app holds its settings (GET /api/settings answers), the groups the Settings
 // page owns are changed there; before that, setup writes app.env as it always has (the app imports it on first start)
 describe('--reconfigure of a group the Settings page owns (settings plan ruling 15)', () => {
-  /** A Settings read as the app gives it: every owned name unset. */
-  const SETTINGS_VIEW = {
-    values: Object.fromEntries(apiContract.PLAIN_SETTING_NAMES.map((n) => [n, null])),
-    secrets: Object.fromEntries(
-      apiContract.SECRET_SETTING_NAMES.map((n) => [n, { set: false, last4: null }]),
-    ),
-    newSearchSources: { discovery: [], verification: [] },
-    envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
-    envIgnored: [],
-    setAside: [],
-    pending: null,
-  };
+  const SETTINGS_VIEW = settingsView();
   const appHolding = () =>
     stubHttp({
       'GET /api/settings': () => ({ status: 200, body: SETTINGS_VIEW }),
@@ -478,10 +517,13 @@ describe('--reconfigure of a group the Settings page owns (settings plan ruling 
     );
   });
 
-  it('an app that does not hold settings yet (no answer, or a 404 from an older app) is reconfigured as before', async () => {
+  it('an app that does not hold settings yet (no answer, a 404 from an older app, another body) is reconfigured as before', async () => {
     for (const route of [
       () => ({ error: 'refused' }),
       () => ({ status: 404, body: { error: 'not_found' } }),
+      // why: review MINOR 9: a 200 that is not the Settings read is not an app holding its settings
+      () => ({ status: 200, body: { hello: 'not the settings read' } }),
+      () => ({ status: 200, body: 'not JSON' }),
     ]) {
       const m = await setUp();
       m.deps.http = stubHttp({

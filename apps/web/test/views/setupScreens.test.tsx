@@ -31,9 +31,19 @@ describe('Providers', () => {
       expect(item).toHaveTextContent(source.name);
       expect(item).toHaveTextContent(source.what);
       expect(item).toHaveTextContent(source.cost);
-      expect(within(item).getByText(source.command)).toBeInTheDocument();
+      // why: review R17a (settings plan ruling 15): the two keyed sources are set up on Settings › Price sources; the
+      // browser keeps its setup command
+      if (source.setUp.kind === 'command') {
+        expect(source.id).toBe('camoufox');
+        expect(within(item).getByText(source.setUp.command)).toBeInTheDocument();
+      } else {
+        const link = within(item).getByRole('link', { name: source.setUp.label });
+        expect(link).toHaveAttribute('href', '?view=settings&section=sources');
+      }
       expect(item).toHaveTextContent(source.doc);
     }
+    expect(empty).not.toHaveTextContent('--reconfigure travelpayouts');
+    expect(empty).not.toHaveTextContent('--reconfigure searchapi');
     expect(empty).toHaveTextContent('docs/setup.md section 2');
     expect(empty).toHaveTextContent('docs/setup.md section 14');
   });

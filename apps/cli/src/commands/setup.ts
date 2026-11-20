@@ -75,6 +75,7 @@ import { askAnswers, askPasteToken, type PromptRow } from '../setup/prompts.js';
 import { readSetupRecord, recordAction, type SetupRecord } from '../setup/record.js';
 import { generatePassword } from '../setup/secrets.js';
 import { offeredFor, offerTestEmail } from '../setup/testEmail.js';
+import { readReport } from '../statusReport.js';
 import { type GuardTarget, guardActiveRun } from './guard.js';
 
 /** The rows each `--reconfigure` group asks (brief §6); `password` asks none and generates a new one. */
@@ -722,7 +723,14 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     );
   // why: spec §4: the closing words follow the file as it now stands, by core's rule, never the mere absence of a line
   const written = envText !== null ? readEnvText(envText) : (settings?.record ?? effective);
-  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written) }));
+  // why: review IMPORTANT 5: once the app holds its settings, its own report says whether it has a price source
+  const report = await readReport(deps);
+  const sourcesCheck =
+    report.kind === 'ok' ? report.report.checks.find((c) => c.id === 'price-sources') : undefined;
+  const appSource = sourcesCheck === undefined ? null : sourcesCheck.state === 'ok';
+  deps.io.out(
+    closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written), appSource }),
+  );
   await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';

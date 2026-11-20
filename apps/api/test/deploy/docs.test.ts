@@ -558,6 +558,25 @@ describe('the Settings page owns its names (settings plan, spec revision 72)', (
     );
   });
 
+  // why: review IMPORTANT 4: an existing install's update imports the owned lines once; the docs say what to do then,
+  // the container first, then native, and every place says to remove the lines
+  it('section 0 gives the update steps, the container first, then native, and every place says to remove the lines', () => {
+    const update = between(setup, '**Updating to a version with the Settings page.**', '### ').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(update.indexOf('**In the container:**')).toBeGreaterThan(-1);
+    expect(update.indexOf('**In the container:**')).toBeLessThan(update.indexOf('**Natively:**'));
+    expect(update).toContain('then remove those lines from `.env`');
+    expect(update).toContain('then remove those lines from `app.env`');
+    expect(flat0).toContain('Natively, `.env` in those words means `~/.config/get-me-there/app.env`.');
+    expect(between(setup, '## 11.', '## 12.').replace(/\s+/g, ' ')).toContain(
+      'imports the settings it keeps from `.env` once',
+    );
+    expect(flat0).toContain('imports the settings it keeps from `app.env` once');
+    expect(read('docker-compose.yml').replace(/\n# /g, ' ')).toContain('then remove those lines from .env');
+  });
+
   it('docker-compose.yml says the owned names are imported once', () => {
     expect(read('docker-compose.yml').replace(/\n# /g, ' ')).toContain(
       'the names .env.example marks [Settings] are read once, on the first start at which the app holds no value for one, and the Settings page owns them after that',

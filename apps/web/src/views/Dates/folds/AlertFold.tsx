@@ -35,7 +35,8 @@ export function AlertFold({
     (c) => c.area === 'email' && c.offReason === 'not-set-up',
   );
   const alertsQuery = `?view=alerts&def=${encodeURIComponent(definition.id)}`;
-  const statusQuery = '?view=status';
+  // why: review R17b: email is set up on Settings › Email and alerts
+  const emailQuery = '?view=settings&section=email';
   return (
     <Fold
       id="alert"
@@ -74,7 +75,7 @@ export function AlertFold({
         <p className="sfold-note">
           <span>{F.emailNotSet}</span>
           {': '}
-          <a href={statusQuery} onClick={navigateToQuery(statusQuery)}>
+          <a href={emailQuery} onClick={navigateToQuery(emailQuery)}>
             {F.emailSetUp}
           </a>
           .

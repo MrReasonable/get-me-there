@@ -123,10 +123,8 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
   it('localChecks reads only: it runs no action, and status prints what it returns (ca-b1-006)', async () => {
     const { localChecks } = await import('../../src/commands/status.js');
     const m = await setUp();
-    // why: settings plan ruling 15: the price-source line comes from the app's report, which names its check
-    m.deps.http = stubHttp({
-      'GET /api/status': () => priceReport('ok', 'price sources: Travelpayouts', null),
-    });
+    // why: settings plan ruling 15: with the app down, the price-source line says where the sources are kept
+    m.deps.http = stubHttp({ 'GET /api/status': () => ({ error: 'refused' }) });
     const checks = await localChecks(m.deps);
     expect(m.executor.log).toEqual([]);
     expect(checks.map((c) => c.name)).toEqual(
@@ -163,7 +161,7 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
       ],
     },
   });
-  it('the price source is a line of its own, read from the app’s report: none (warn, with the Settings address) or named (pf-b1-001)', async () => {
+  it('with the app answering, the price source is the report’s own line, with the Settings address, not a local one (pf-b1-001)', async () => {
     const m = await setUp();
     const env = '/Users/op/.config/get-me-there/app.env';
     // why: a token line the app ignores (Settings holds it) does not make a price source
@@ -177,18 +175,20 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
         }),
     });
     await runCli(['status'], m.deps);
-    expect(m.io.stdout).toMatch(/price source +warn +No price source is set up, so searches find nothing/);
+    // why: review MINOR 7: the report's line is not repeated among the local facts
+    expect(m.io.stdout).not.toMatch(/price source +(ok|warn|fail) /);
+    expect(m.io.stdout).toMatch(/provider +warn +No price source is set up, so searches find nothing/);
     expect(m.io.stdout).toContain(
       'fix: Travelpayouts is the no-cost source: add its token in Settings › Price sources (http://127.0.0.1:3000/?view=settings&section=sources)',
     );
     expect(m.io.stdout).not.toContain('--reconfigure travelpayouts');
     expect(m.io.stdout).not.toContain('tp-0123456789abcdef');
-    m.deps.http = stubHttp({
-      'GET /api/status': () => priceReport('ok', 'price sources: Travelpayouts', null),
-    });
-    m.io.stdout = '';
+  });
+  it('a report with no price-sources check adds no line of its own (review MINOR 9)', async () => {
+    const m = await setUp();
+    m.deps.http = stubHttp({});
     await runCli(['status'], m.deps);
-    expect(m.io.stdout).toMatch(/price source +ok +price sources: Travelpayouts/);
+    expect(m.io.stdout).not.toMatch(/price source +(ok|warn|fail) /);
   });
   it('with the app down the price source line says where they are kept, never "none" (settings plan ruling 15)', async () => {
     const m = await setUp();
@@ -200,6 +200,22 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
     expect(m.io.stdout).not.toMatch(/price source +warn +none/);
     expect(m.io.stdout).not.toContain('--reconfigure travelpayouts');
   });
+  it.each([
+    ['401', () => ({ status: 401, body: 'no' }), 'the app answered 401'],
+    ['not JSON', () => ({ status: 200, body: 'plain' }), 'the app’s answer was not JSON'],
+  ])(
+    'an app that answers but gives no report (%s) is named by its reason, not "isn’t running" (review MINOR 6)',
+    async (_n, route, reason) => {
+      const m = await setUp();
+      m.deps.http = stubHttp({ 'GET /api/status': route });
+      expect(await runCli(['status'], m.deps)).toBe(1);
+      expect(m.io.stdout).toMatch(/price source +warn +the app’s report could not be read \(/);
+      expect(m.io.stdout).toContain(
+        `the app’s report could not be read (${reason}); price sources are kept in its Settings`,
+      );
+      expect(m.io.stdout).not.toContain('isn’t running');
+    },
+  );
   it('a BIND_ADDRESS beyond loopback warns plainly; it is no fail (sec-b1-002, U8)', async () => {
     const m = await setUp();
     const env = '/Users/op/.config/get-me-there/app.env';

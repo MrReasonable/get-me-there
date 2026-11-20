@@ -7,6 +7,10 @@ import type { z } from 'zod';
 import { runCli } from '../../src/cli.js';
 import type { HttpRequest } from '../../src/deps.js';
 import { offeredFor, TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
+
+/** Review MINOR 11: the test email's next steps carry Settings › Email and alerts' address on this app. */
+const EMAIL_AT = 'http://127.0.0.1:3000/?view=settings&section=email';
+
 import { scriptedAsk, stubHttp, testIo, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -445,8 +449,8 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
   });
 
   it('the test email’s next steps point at Settings › Email and alerts, not a setup group (settings plan ruling 15)', () => {
-    for (const w of [TEST_EMAIL_WORDS.failed, TEST_EMAIL_WORDS.notConfigured]) {
-      expect(w).toContain('Settings › Email and alerts');
+    for (const w of [TEST_EMAIL_WORDS.failed(EMAIL_AT), TEST_EMAIL_WORDS.notConfigured(EMAIL_AT)]) {
+      expect(w).toContain(`Settings › Email and alerts (${EMAIL_AT})`);
       expect(w).not.toContain('--reconfigure email');
     }
   });
@@ -455,7 +459,7 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     [
       'failed',
       () => ({ status: 200, body: { result: 'failed', at: '2026-10-24T09:30:00.000Z' } }),
-      TEST_EMAIL_WORDS.failed,
+      TEST_EMAIL_WORDS.failed(EMAIL_AT),
     ],
     [
       'refused',
@@ -468,7 +472,7 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     [
       'not set up',
       () => ({ status: 409, body: { error: { code: 'email_not_configured', message: 'x' } } }),
-      TEST_EMAIL_WORDS.notConfigured,
+      TEST_EMAIL_WORDS.notConfigured(EMAIL_AT),
     ],
     ['an unreadable answer', () => ({ status: 200, body: { hello: 1 } }), TEST_EMAIL_WORDS.silent],
     ['not JSON', () => ({ status: 200, body: 'plain' }), TEST_EMAIL_WORDS.silent],

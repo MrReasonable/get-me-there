@@ -8,7 +8,8 @@
 #
 # The Settings page (docs/setup.md section 0): the names .env.example marks [Settings] are read once, on the first
 # start at which the app holds no value for one, and the Settings page owns them after that; a .env line that differs
-# is then reported on Settings › System and never applied. Change those settings on the page, and remove the lines.
+# is then reported on Settings › System and never applied. After the first start, check them on the Settings page,
+# then remove those lines from .env (docs/setup.md section 0, "Updating to a version with the Settings page").
 #
 # Signing in (docs/setup.md section 1): the app needs no password while only this machine can reach it, that is while
 # it is published on 127.0.0.1 and every ALLOWED_HOSTS name is this machine's. Before another device or name reaches

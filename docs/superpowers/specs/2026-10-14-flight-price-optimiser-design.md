@@ -4796,7 +4796,8 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
     every 14 days", "calendar prices, limits not checked"); "Alerts watch calendar prices, not trips with flights read."
     shown only when a rule is listed and every listed rule watches calendar prices; **Change alerts**
     (`view=alerts&def=`); and, from the status report (`area: 'email'`, `offReason: 'not-set-up'`), "Email isn't set up yet"
-    linking to the Status view. A switch for alerts on trips with flights read waits for stage 4.
+    linking to Settings › Email and alerts (`?view=settings&section=email`). A switch for alerts on trips with flights read
+    waits for stage 4.
   - **The figure** of a date pair, chosen across the airport pairs in scope by the precedence the calendar day had: the cheapest
     class-verified price that is not stale (`STALE_AFTER_HOURS`), else the fresher of the cheapest stale verified price and the
     cheapest calendar price (unknown age loses to known; ties go to verified), else none; a calendar figure, or a stale
@@ -5461,13 +5462,16 @@ credentials, as every CLI read of an app with no password is); it prints the Doc
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when an address compose publishes is not loopback, and says nothing when every one is. It judges every mapping: the effective configuration's (`docker compose config --format json`, every compose file and override included, parsed in process with only `services.app.ports` taken, each entry read alone, a mapping with a missing, empty or null `host_ip` being every interface and an entry that cannot be read being judged beyond loopback) beside the running container's (`docker compose port app 3000`, which names one mapping only); when the configuration cannot be read, a warning says only the running mapping was checked, with none of its text. When the checkout's `.env` has no auth lines and neither source of `ALLOW_UNAUTHENTICATED` says `true` (the checkout's `.env`, or compose's effective environment, `services.app.environment.ALLOW_UNAUTHENTICATED`, where the documented tailscale-only override sets it; that one key is the only part of the environment read), a mapping beyond loopback is a `fail` naming both fixes (publish only `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check. A native install's **price source** line reads the app's own report (its
-`price-sources` check, read once for the line and the report beside the local
-facts; a fix made on the Settings page printed with its section's address), never
-`app.env`, whose key lines the app may be ignoring; with the app down it is a
-`warn` saying "the app isn’t running; price sources are kept in its Settings",
-never a false "no price source". Every fix the report names on the Settings page
-(`fix.settings`) prints that section's address after its words.
+app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when an address compose publishes is not loopback, and says nothing when every one is. It judges every mapping: the effective configuration's (`docker compose config --format json`, every compose file and override included, parsed in process with only `services.app.ports` taken, each entry read alone, a mapping with a missing, empty or null `host_ip` being every interface and an entry that cannot be read being judged beyond loopback) beside the running container's (`docker compose port app 3000`, which names one mapping only); when the configuration cannot be read, a warning says only the running mapping was checked, with none of its text. When the checkout's `.env` has no auth lines and neither source of `ALLOW_UNAUTHENTICATED` says `true` (the checkout's `.env`, or compose's effective environment, `services.app.environment.ALLOW_UNAUTHENTICATED`, where the documented tailscale-only override sets it; that one key is the only part of the environment read), a mapping beyond loopback is a `fail` naming both fixes (publish only `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check. A native install's price sources are never judged from
+`app.env`, whose key lines the app may be ignoring: with the app's report read
+(once, for the local facts and the report beside them), its own `price-sources`
+check says it and no local line repeats it; with no answer the local **price
+source** line is a `warn` saying "the app isn’t running; price sources are kept
+in its Settings", and with an answer that is not the report (a status, a body
+that is not JSON or not the report) "the app’s report could not be read
+(<reason>); price sources are kept in its Settings", never a false "no price
+source". Every fix the report names on the Settings page (`fix.settings`)
+prints that section's address after its words.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
 unknown: a `fail` saying so, the worker's facts, and no native fix. Every
@@ -5519,7 +5523,9 @@ Travelpayouts account (register at `https://www.travelpayouts.com/`, then
 copy the token from the Profile's API token section, with `https://support.travelpayouts.com/hc/en-us/articles/203956083` as help)
 and to add it in Settings › Price sources at its address on this app
 (`http://127.0.0.1:<port>/?view=settings&section=sources`, the words `gmt
-smoke` uses too); on an interactive terminal,
+smoke` uses too), the price source judged by the app's own report once it is
+up (its `price-sources` check; the answers only when the report does not say,
+since Settings may hold a key `app.env` has no line for); on an interactive terminal,
 before applying the plan, it asks once "Paste a token now? (Enter to finish
 without one)", so a first run can end with a source. Each provider prompt
 states in one line what it gives, from §1's configurations table
@@ -5530,7 +5536,8 @@ always asks how many trial searches are already used (default the current
 database holds; `40usd`: the $40 a month plan, Google Flights results through
 SearchApi); the email step asks for the SMTP settings with the password
 hidden (the test email offered at the end of setup is WP18's; its failure
-and not-set-up words point at Settings › Email and alerts); a variable the
+and not-set-up words point at Settings › Email and alerts with its address on
+this app); a variable the
 app ignores rather than refusing (`SEARCHAPI_TRIAL_USED` on `40usd`) is
 printed as a note naming it, in the app's own words; the browser
 provider is offered only where its flags are set (the interruption question, "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]", is asked only by `--reconfigure browser` before the app holds its settings, yes writing `CAMOUFOX_BROWSER_WINDOW=any`, §8.2; unset means `scheduled`), after the §2 costs
@@ -5647,7 +5654,11 @@ the pinned Camoufox. An update's backup names its commit in the `.commit` file
 beside it. A restored ledger lacks any call made after its backup, so check the
 vendor's dashboard and raise `SEARCHAPI_TRIAL_USED` (trial; then `pnpm gmt
 restart`) or lower `SEARCHAPI_MONTHLY_CALL_CAP` (`40usd`) to match, both
-`app.env` lines the Settings page does not own; restore says which, and what
+`app.env` lines the Settings page does not own; restore says which when the
+app answers its Settings read with a SearchApi key set (the plan as Settings
+holds it, unset being the trial), and otherwise gives the plan-free advice to
+check each vendor's dashboard, never judging the plan from an `app.env` line
+(restore runs with the app stopped, so that advice is the usual one), and what
 the next start will resume and catch up (`AUTO_RESUME=false` leaves the
 resumes to the operator).
 The checkout is then on a detached commit: run `git switch main` before the
@@ -5827,6 +5838,13 @@ no key or password".
   `--reconfigure travelpayouts|searchapi|email` and the browser window question print the Settings address and change
   nothing; `gmt status`' price source reads the app's report. (Execution: setup prints the app's ignored-variable
   warnings as notes; the closing screen, the smoke and the test email's words point at Settings.)
+- **Ruling (controller R17, Task 8's review): the remaining pointers move to Settings.** The Providers view's empty
+  state links Travelpayouts and SearchApi to Settings › Price sources (the browser keeps its setup command); the search
+  page's Alert fold links "Email isn't set up yet" to Settings › Email and alerts; restore takes SearchApi's plan from
+  the app's Settings read, never `app.env`, else the plan-free advice; setup's closing screen judges the price source by
+  the app's report; `gmt status` adds a local price-source line only when the report cannot be read, naming why; the
+  operator docs give the one-time update steps (the container first, then native: check the imported values in
+  Settings, then remove the lines), and natively `.env` in the Status words is `app.env`.
 - **Ruling (execution): secrets of fewer than 8 characters** (`MIN_SECRET_LENGTH`) are refused on save and set aside at
   boot, so a short secret can never stop the app starting.
 

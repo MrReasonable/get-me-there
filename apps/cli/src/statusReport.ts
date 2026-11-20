@@ -14,7 +14,13 @@ import { type Check, describeChecks } from './services/checks.js';
 
 export type StatusReport = apiContract.StatusResponse;
 export type StatusCheck = apiContract.StatusCheck;
-export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; reason: string };
+/**
+ * The report, or why there is none. `answered`: the app answered, with something that is not the report (a status, a
+ * body), as against no answer at all or no settings to ask with.
+ */
+export type ReportRead =
+  | { kind: 'ok'; report: StatusReport }
+  | { kind: 'down'; reason: string; answered: boolean };
 
 /** The areas `--only` accepts. */
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
@@ -44,7 +50,7 @@ function barLine(checks: readonly apiContract.StatusCheck[]): string {
 
 /** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
 export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(deps)): Promise<ReportRead> {
-  if (a.kind === 'none') return { kind: 'down', reason: a.reason };
+  if (a.kind === 'none') return { kind: 'down', reason: a.reason, answered: false };
   const r = await deps.http({
     method: 'GET',
     url: `${a.baseUrl}/api/status`,
@@ -52,18 +58,19 @@ export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(dep
     // why: the app's own worker read is bounded at 2 s; the rest is local reads
     timeoutMs: 15_000,
   });
-  if ('error' in r) return { kind: 'down', reason: `no answer from the app on port ${a.port}` };
-  if (r.status !== 200) return { kind: 'down', reason: `the app answered ${r.status}` };
+  if ('error' in r)
+    return { kind: 'down', reason: `no answer from the app on port ${a.port}`, answered: false };
+  if (r.status !== 200) return { kind: 'down', reason: `the app answered ${r.status}`, answered: true };
   let json: unknown;
   try {
     json = JSON.parse(r.body);
   } catch {
-    return { kind: 'down', reason: 'the app’s answer was not JSON' };
+    return { kind: 'down', reason: 'the app’s answer was not JSON', answered: true };
   }
   const parsed = apiContract.statusResponseSchema.safeParse(json);
   return parsed.success
     ? { kind: 'ok', report: parsed.data }
-    : { kind: 'down', reason: 'the app’s answer was not the status report' };
+    : { kind: 'down', reason: 'the app’s answer was not the status report', answered: true };
 }
 
 /**

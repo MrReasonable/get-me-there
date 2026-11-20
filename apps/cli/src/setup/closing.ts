@@ -14,7 +14,7 @@ export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';
 export const NO_SCHEDULE_TEXT =
-  'Nothing runs on a schedule until you give a search one; a scheduled search spends within the limits Settings › Limits shows.';
+  'Nothing runs on a schedule until you give a search one; a scheduled search spends within its own run limit and the caps and limits in Settings.';
 
 /** The line naming where to go next (U3: always printed, with or without a price source). */
 export const nextStep = (port: number): string =>
@@ -61,8 +61,13 @@ export function closingScreen(x: {
   os: 'darwin' | 'linux';
   /** How the app signs people in, from app.env (spec §4: no password while only this machine can reach it). */
   signIn: SignIn;
+  /**
+   * Whether the app has a price source, from its own report (settings plan ruling 15: its Settings page may hold a key
+   * app.env has no line for); null when the report did not say, and then the answers decide.
+   */
+  appSource?: boolean | null;
 }): string {
-  const source = searchSource(x.answers);
+  const source = x.appSource ?? searchSource(x.answers);
   const lines = [
     ...(source
       ? []

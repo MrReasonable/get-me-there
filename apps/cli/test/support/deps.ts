@@ -1,4 +1,4 @@
-import type { FlagName } from '@gmt/core';
+import { apiContract, type FlagName } from '@gmt/core';
 import type { Ask } from '../../src/ask.js';
 import type { Deps, Http, HttpRequest, Io } from '../../src/deps.js';
 import { MemoryFs, memoryExecutor, memoryRunner, type RunHandler } from '../../src/exec/memory.js';
@@ -73,6 +73,29 @@ const DEFAULT_ROUTES: Record<string, Route> = {
     body: { generatedAt: '2026-10-24T09:30:00.000Z', mode: 'native', version: 'abc1234', checks: [] },
   }),
 };
+
+/**
+ * Settings plan ruling 15: `GET /api/settings` as the app gives it, every owned name unset unless `values` or `secrets`
+ * say otherwise (a secret named here is set). A test routes it to say the app holds its settings.
+ */
+export function settingsView(
+  o: { values?: Record<string, string>; secretsSet?: readonly string[] } = {},
+): Record<string, unknown> {
+  return {
+    values: Object.fromEntries(apiContract.PLAIN_SETTING_NAMES.map((n) => [n, o.values?.[n] ?? null])),
+    secrets: Object.fromEntries(
+      apiContract.SECRET_SETTING_NAMES.map((n) => [
+        n,
+        { set: o.secretsSet?.includes(n) === true, last4: null },
+      ]),
+    ),
+    newSearchSources: { discovery: [], verification: [] },
+    envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
+    envIgnored: [],
+    setAside: [],
+    pending: null,
+  };
+}
 
 /** An Http stand-in answering from a route table keyed "METHOD path"; every request is recorded. */
 export function stubHttp(routes: Record<string, Route>): Http & { requests: HttpRequest[] } {

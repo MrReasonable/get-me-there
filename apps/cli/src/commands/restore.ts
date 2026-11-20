@@ -1,11 +1,12 @@
 import { resolve } from 'node:path/posix';
+import { readSettingsView } from '../appClient.js';
+import { nativeEndpoint } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
 import { describePlan, describeResult } from '../plan/describe.js';
 import { factOf } from '../services/set.js';
-import { appEnvPath, databasePath } from '../services/specs.js';
-import { readEnvText } from '../setup/appEnv.js';
+import { databasePath } from '../services/specs.js';
 import {
   checkedSummary,
   dashboardText,
@@ -75,8 +76,13 @@ export async function restoreCommand(flags: Flags, positional: string | null, de
   }
   const checkAt = r.done.findIndex((a) => a.kind === 'run');
   const summary = checkedSummary(r.outputs[checkAt] ?? '');
-  const env = deps.files.read(appEnvPath(deps.platform.paths));
-  const plan_ = env === null ? undefined : readEnvText(env).SEARCHAPI_PLAN;
+  // why: review R17c: SearchApi's plan is the Settings page's, so it comes from the app's Settings read (with a key
+  // set; an unset plan is the trial), never from an app.env line the app may be ignoring; with no answer (restore runs
+  // with the app stopped, so usually none) the advice is plan-free
+  const endpoint = nativeEndpoint(deps);
+  const view = endpoint.kind === 'none' ? null : await readSettingsView(deps, endpoint.target);
+  const plan_ =
+    view === null || !view.secrets.SEARCHAPI_KEY.set ? undefined : (view.values.SEARCHAPI_PLAN ?? 'trial');
   const previous = deps.files.size(kept) === null ? '' : ` (the previous file is ${kept})`;
   deps.io.out(`Restored ${source} as ${db}${previous}. ${dashboardText(plan_)}\n`);
   deps.io.out(startNote(summary));

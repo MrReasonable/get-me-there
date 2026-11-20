@@ -1,6 +1,6 @@
 import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, isLoopbackHost, START_REFUSAL_TEXT } from '@gmt/core';
-import { authFrom, settingsPath } from '../appClient.js';
+import { authFrom } from '../appClient.js';
 import {
   composeConfigFacts,
   type DockerAppState,
@@ -176,29 +176,27 @@ async function checkoutCheck(deps: Deps): Promise<Check> {
 export const PRICE_SOURCE_UNKNOWN = 'the app isn’t running; price sources are kept in its Settings';
 
 /**
- * pf-b1-001 and settings plan ruling 15: the price source the app will search with, read from the app's own report (its
- * `price-sources` check), since the Settings page holds the keys and an app.env line for one may be ignored. With the
- * app down it says where they are kept; an answer without the check (an app from before it) adds no line.
+ * pf-b1-001 and settings plan ruling 15: the Settings page holds the price sources' keys, and an app.env line for one
+ * may be ignored, so app.env never says which sources the app has. With the app's report read, its own price-sources
+ * check says it (beside the local facts), so no line is added here; with no answer, the ruled words; with an answer
+ * that is not the report, why (review MINOR 6, 7).
  */
-function priceSourceCheck(read: ReportRead, baseUrl: string | null): Check[] {
-  if (read.kind === 'down')
-    return [{ name: 'price source', level: 'warn', detail: PRICE_SOURCE_UNKNOWN, fix: null }];
-  const c = read.report.checks.find((x) => x.id === 'price-sources');
-  if (c === undefined) return [];
-  const where =
-    c.fix?.settings === undefined || baseUrl === null ? '' : ` (${baseUrl}${settingsPath(c.fix.settings)})`;
+function priceSourceCheck(read: ReportRead): Check[] {
+  if (read.kind === 'ok') return [];
   return [
     {
       name: 'price source',
-      level: c.state === 'ok' ? 'ok' : c.state === 'fail' ? 'fail' : 'warn',
-      detail: c.summary,
-      fix: c.fix === null ? null : `${c.fix.command ?? c.fix.text}${where}`,
+      level: 'warn',
+      detail: read.answered
+        ? `the app’s report could not be read (${read.reason}); price sources are kept in its Settings`
+        : PRICE_SOURCE_UNKNOWN,
+      fix: null,
     },
   ];
 }
 
-/** sec-b1-002: a bind address beyond loopback, from app.env; and, with app.env there, the price source above. */
-function appEnvChecks(deps: Deps, read: ReportRead, baseUrl: string | null): Check[] {
+/** sec-b1-002: a bind address beyond loopback, from app.env; and, with app.env there, the price-source line above. */
+function appEnvChecks(deps: Deps, read: ReportRead): Check[] {
   let text: string | null;
   try {
     text = deps.files.read(appEnvPath(deps.platform.paths));
@@ -207,7 +205,7 @@ function appEnvChecks(deps: Deps, read: ReportRead, baseUrl: string | null): Che
   }
   if (text === null) return [];
   const env = readEnvText(text);
-  const out: Check[] = priceSourceCheck(read, baseUrl);
+  const out: Check[] = priceSourceCheck(read);
   const bind = env.BIND_ADDRESS;
   if (bind !== undefined && bind !== '' && !isLoopbackHost(bind))
     out.push({
@@ -299,12 +297,12 @@ const workerUnit = (deps: Deps) => ({
 /**
  * The local facts of `gmt status` (brief Task 16b.8 and §5; WP18 prints its app report beside them) and the app it reads
  * the report from. Native (or nothing installed): each service's state, the settings files' presence and modes, the
- * price source (from the app's report), a bind address beyond loopback, stale units, the macOS log size, a Docker app
+ * price source when the app's report cannot be read, a bind address beyond loopback, stale units, the macOS log size, a Docker app
  * running beside the native one (two ledgers), a detached checkout, the newest daily backup, and the worker's refusal;
  * the report from app.env's port and basic auth. The app in Docker with no native install (W1): the same facts for the worker only (its service,
  * worker.env, its refusal), with no app.env, app service or daily backup job to check, the Docker app's own state, and
- * the report from the Docker app, read here once (the native price-source line comes from it). Reads only: it runs no
- * action.
+ * the report from the Docker app, read here once (the native price-source line depends on it). Reads only: it runs
+ * no action.
  */
 export async function statusFacts(
   deps: Deps,
@@ -320,7 +318,6 @@ export async function statusFacts(
     : nativeTarget(deps);
   // why: settings plan ruling 15: read once, for the price-source line here and the report beside the local facts
   const read = await readReport(deps, target.endpoint);
-  const baseUrl = target.endpoint.kind === 'none' ? null : target.endpoint.baseUrl;
   const shown = inDocker ? entries.filter((e) => e.name === 'camoufox-worker') : entries;
   // why: W1: with the app in Docker the worker's service is installed by gmt browser install, never by setup
   const workerFix = (c: Check): Check =>
@@ -329,7 +326,7 @@ export async function statusFacts(
     ...shown.map((e) => serviceCheck(deps, e, facts)).map(workerFix),
     ...staleChecks(deps, shown, facts).map(workerFix),
     ...settingsChecks(deps, !inDocker),
-    ...appEnvChecks(deps, read, baseUrl),
+    ...appEnvChecks(deps, read),
     ...(inDocker ? await dockerBindChecks(deps, docker) : []),
     ...(inDocker ? [] : [backupsCheck(deps)]),
   ];

@@ -143,7 +143,22 @@ keeps its own value, and a line that differs is ignored and reported on Settings
 holds but no longer accepts (an update tightened its rule) is set aside for that start, so the app
 still starts, and Settings › System names it ("Saved … isn’t valid any more: set it again in
 Settings"). Tokens, keys and the mail password must be at least 8 characters; a shorter one is
-refused when you save it, and one already held is set aside.
+refused when you save it, and one already held is set aside. Natively, `.env` in those words means
+`~/.config/get-me-there/app.env`. Once the app holds these settings, remove their lines from the
+settings file: a line left there does nothing, and it is reported once it differs.
+
+**Updating to a version with the Settings page.** Do this once, in this order:
+
+1. **In the container:** back up (section 6), then `git pull` and
+   `docker compose up -d --build --wait --wait-timeout 240` (section 11, Upgrade). On that first
+   start each of these settings' lines in `.env` is imported once. Open Settings, check each
+   section's values, then remove those lines from `.env` (`.env.example` marks them `[Settings]`)
+   and run `docker compose up -d`.
+2. **Natively:** `pnpm gmt update`. On the first start after it, each of these settings' lines in
+   `~/.config/get-me-there/app.env` is imported once. Open Settings, check each section's values,
+   then remove those lines from `app.env` and run `pnpm gmt restart`. From then on change them
+   in Settings; `pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email` print the
+   Settings address.
 
 Settings has four sections: **Price sources** (each source's key, whether new searches use it,
 SearchApi's plan, billing day and its own count of credits left, and the browser's block),
@@ -163,8 +178,8 @@ them, readable by you alone (0600): keep every copy of a backup as private as th
 question of `--reconfigure browser`, then print the Settings address instead (Change this in
 Settings: http://127.0.0.1:3000/?view=settings&section=sources). Before the app's first start
 they write `app.env` as on a first run. `pnpm gmt status` reads the price sources from the app's
-report; with the app down it says "the app isn’t running; price sources are kept in its
-Settings".
+report (its own **price sources** line), and with the app down says "the app isn’t running; price
+sources are kept in its Settings".
 
 ### Your first search, and a search's page
 
@@ -246,8 +261,10 @@ the next commit's Camoufox before it stops anything (section 14). It then stops 
 into `backups/update` (with a `.commit` file naming the commit it was taken at), merges,
 installs, builds, switches the browser to the new Camoufox, restarts, waits for health and shows
 the status. If a step fails it prints the commit it started from, the backup (or why there is
-none), and the ways back; running `pnpm gmt update` again carries on from the failed step. A
-failed browser step never keeps the app down: the app starts without the browser worker, the
+none), and the ways back; running `pnpm gmt update` again carries on from the failed step. The
+first update to a version with the Settings page imports the settings it keeps from `app.env` once;
+check them in Settings, then remove those lines ("Updating to a version with the Settings page",
+above). A failed browser step never keeps the app down: the app starts without the browser worker, the
 update exits 1, and `pnpm gmt browser install` retries the browser.
 
 ### Moving from Docker or from a checkout
@@ -924,7 +941,10 @@ failing check.
   backs the database up again before applying them and logs `backup before N migration(s):
   <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
-  `docker compose cp` that file out) so a copy exists off the volume.
+  `docker compose cp` that file out) so a copy exists off the volume. The first upgrade to a
+  version with the Settings page imports the settings it keeps from `.env` once: check them in
+  Settings, then remove those lines from `.env` (section 0, "Updating to a version with the
+  Settings page").
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
   named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 240`. An older version
   cannot use a database a newer one has migrated, so the restore is required.
