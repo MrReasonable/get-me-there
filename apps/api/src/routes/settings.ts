@@ -200,15 +200,18 @@ function settingsView(ctx: RouteContext): apiContract.SettingsView {
 /**
  * The parse a save checks with. A save can make the parse read `.env` lines it skipped before (a first SearchApi key
  * makes it read SEARCHAPI_MONTHLY_CALL_CAP): one the schema refuses is no setting the page holds, so the save is 422
- * naming each such line (review M7), never a 500; the names only, never a value.
+ * naming each such line (review M7), never a 500; the names only, never a value. A failure that names only owned
+ * names is answered as the page's own refusal of them.
  */
 function parseLayeredOrEnvError(...args: Parameters<typeof parseLayered>): ReturnType<typeof parseLayered> {
   try {
     return parseLayered(...args);
   } catch (e) {
     if (!(e instanceof InvalidConfigError)) throw e;
-    const envOnly = e.errors.map((x) => x.field).filter((f) => !isOwnedName(f));
-    const lines = [...new Set(envOnly.length > 0 ? envOnly : e.errors.map((x) => x.field))];
+    const lines = [...new Set(e.errors.map((x) => x.field).filter((f) => !isOwnedName(f)))];
+    // why: review residual (e): only a genuine env-only line is called a line in .env; a refusal of owned names alone
+    // is the page's own 422, beside their fields
+    if (lines.length === 0) throw refusalError(API_TEXT.settingsRefused, e.errors);
     throw new ApiError(422, 'invalid_env', API_TEXT.settingsEnvRefused(lines), { lines });
   }
 }

@@ -573,7 +573,7 @@ describe('--reconfigure of a group the Settings page owns (settings plan ruling 
     m.deps.ask = scriptedAsk([]);
     expect(await runCli(['setup', '--reconfigure', 'travelpayouts'], m.deps)).toBe(78);
     expect(io.stderr).toContain(
-      `cannot tell whether the app holds its settings: ${DB} could not be read (run pnpm build, then setup again)`,
+      `cannot tell whether the app holds its settings: ${DB} could not be read, or the packages are not built (run pnpm build, then setup again)`,
     );
     expect(m.fs.read(ENV)).toBe(before);
     expect(m.executor.log).toEqual([]);

@@ -36,6 +36,27 @@ import { exampleDefinitionInput } from '../helpers/examples.js';
 import { createHarness, type Harness, T0 } from '../helpers/harness.js';
 import { expectNoSecrets, SETTINGS_SECRETS as S } from '../helpers/secrets.js';
 
+/**
+ * Review residual (e): the save's parse can fail on owned names alone (parseLayered's guard against a loop), which no
+ * real config here reaches; with `failWith` set, the next parse throws those errors, every other call goes through.
+ */
+const parseFault = vi.hoisted(() => {
+  const state: { failWith: Array<{ field: string; message: string }> | null } = { failWith: null };
+  return state;
+});
+vi.mock('../../src/wiring.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../../src/wiring.js')>();
+  return {
+    ...orig,
+    parseLayered: (...args: Parameters<typeof orig.parseLayered>) => {
+      const errors = parseFault.failWith;
+      if (errors === null) return orig.parseLayered(...args);
+      parseFault.failWith = null;
+      throw new orig.InvalidConfigError(errors);
+    },
+  };
+});
+
 let h: Harness | undefined;
 afterEach(async () => {
   await h?.close();
@@ -388,6 +409,32 @@ describe('PUT /api/settings: fix round 1 (secrets, refusals, unchanged saves, wa
     expect(text).not.toContain('lots');
     expect(rawRows(x)).toEqual([]);
     expectNoSecrets(ALL_SECRETS, { 'PUT /api/settings': text, log: x.logLines.join('') });
+  });
+
+  it('a parse failure naming only owned settings is the page’s own 422 beside their fields, never "in .env" (review residual (e))', async () => {
+    const x = await harness();
+    parseFault.failWith = [{ field: 'SMTP_PORT', message: 'must be at most 65535' }];
+    const res = await put(x, { FLIGHT_READ_PATIENCE: '20' });
+    const text = await res.clone().text();
+    expect(res.status).toBe(422);
+    expect(text).not.toContain('.env');
+    expect(text).not.toContain('invalid_env');
+    expect(await refusalsOf(res)).toEqual([refusal('SMTP_PORT', 'must be at most 65535')]);
+    expect(rawRows(x)).toEqual([]);
+  });
+
+  it('a parse failure naming an env-only line and owned settings names only the env-only line', async () => {
+    const x = await harness();
+    parseFault.failWith = [
+      { field: 'SMTP_PORT', message: 'must be at most 65535' },
+      { field: 'SEARCHAPI_MONTHLY_CALL_CAP', message: 'must be a whole number' },
+    ];
+    const res = await put(x, { FLIGHT_READ_PATIENCE: '20' });
+    expect(await errorOf(res)).toEqual({
+      code: 'invalid_env',
+      message: API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP']),
+      details: { lines: ['SEARCHAPI_MONTHLY_CALL_CAP'] },
+    });
   });
 
   it("passes on the config's own warnings in the page's words", async () => {

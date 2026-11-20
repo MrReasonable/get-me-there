@@ -6,8 +6,8 @@ const heldSchema = z.object({ rows: z.number().int().nonnegative() });
 
 /**
  * Settings plan ruling 15 (review I2, controller ruling R20): whether the app holds its settings, told from the
- * database, not from whether the app answers, so a stopped app counts too. It does from its first start, when the
- * settings table gets a row for each `app.env` line it imports. No database, or one with no settings table (before
+ * database, not from whether the app answers, so a stopped app counts too. It does from the first start at which
+ * `app.env` had a line for one of them (imported as a row), or from the first save on the Settings page. No database, or one with no settings table (before
  * migration 0014) or no row, is not holding them: setup then writes `app.env` as on a first run. The file is read
  * read-only by scripts/settings-held.mjs (setup does not import @gmt/db); a file it cannot read is an error, never a
  * guess.
@@ -32,7 +32,7 @@ export async function settingsHeld(
   if (rows === null)
     return {
       ok: false,
-      error: `cannot tell whether the app holds its settings: ${db} could not be read (run pnpm build, then setup again)`,
+      error: `cannot tell whether the app holds its settings: ${db} could not be read, or the packages are not built (run pnpm build, then setup again)`,
     };
   return { ok: true, held: rows > 0 };
 }

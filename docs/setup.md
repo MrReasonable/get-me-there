@@ -177,8 +177,9 @@ them, readable by you alone (0600): keep every copy of a backup as private as th
 `pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window
 question of `--reconfigure browser`, then print the Settings address instead (Change this in
 Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or
-not: setup reads the app's database (read-only) and does this once it holds any setting, which it
-does from its first start. Until then (no database yet, or none of these settings in it) they write
+not: setup reads the app's database (read-only) and does this once it holds any of these settings,
+which it does from the first start at which `app.env` had a line for one (the app imports it then)
+or from the first save on the Settings page. Until then (no database yet, or none of these settings in it) they write
 `app.env` as on a first run. A full `pnpm gmt setup` re-run keeps `app.env` as it is and names the
 Settings address for any of these settings it would have changed. `pnpm gmt status` reads the price sources from the app's
 report (its own **price sources** line), and with the app down says "the app isn’t running; price

@@ -522,7 +522,7 @@ describe('the Settings page owns its names (settings plan, spec revision 72)', (
   it('section 0 says which settings the app keeps, how a line is imported once, what is set aside, and that backups hold the keys', () => {
     for (const s of [OWNED, IMPORTED, SET_ASIDE, BACKUPS]) expect(flat0).toContain(s);
     expect(flat0).toContain(
-      '`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window question of `--reconfigure browser`, then print the Settings address instead (Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or not: setup reads the app\'s database (read-only) and does this once it holds any setting, which it does from its first start.',
+      "`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window question of `--reconfigure browser`, then print the Settings address instead (Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or not: setup reads the app's database (read-only) and does this once it holds any of these settings, which it does from the first start at which `app.env` had a line for one (the app imports it then) or from the first save on the Settings page.",
     );
     expect(flat0).toContain('Tokens, keys and the mail password must be at least 8 characters');
   });
