@@ -12,7 +12,13 @@ import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { backupDatabase, backupSummary, checkBackup, integrityCheck } from '../src/backup.js';
+import {
+  backupDatabase,
+  backupSummary,
+  checkBackup,
+  integrityCheck,
+  storedSettingCount,
+} from '../src/backup.js';
 import { at, count, freshDb, openTracked, T0, tmpDir } from './helpers/db.js';
 
 const NAME = 'get-me-there-2026-10-14T12-00-00-000Z.db';
@@ -234,5 +240,26 @@ describe('backupSummary (cb-b1-010: what starting the app on a restored or impor
       { name: 'SMTP_HOST', value: '' },
     ]);
     expect(JSON.stringify(summary)).not.toContain('secret');
+  });
+});
+
+describe('storedSettingCount (review I2: whether the app holds its settings, the app running or not)', () => {
+  it('counts every settings row, secrets and emptied names included, read-only', () => {
+    const { path, db } = live();
+    expect(storedSettingCount(path)).toBe(0);
+    const put = db.raw.prepare('INSERT INTO settings (name, value, updated_at) VALUES (?, ?, ?)');
+    put.run('TRAVELPAYOUTS_TOKEN', 'tp-token-secret-0123', T0);
+    put.run('SMTP_HOST', '', T0);
+    expect(storedSettingCount(path)).toBe(2);
+  });
+
+  it('a database with no settings table (before migration 0014) holds none', () => {
+    const file = join(tmpDir(), 'old.db');
+    new Database(file).close();
+    expect(storedSettingCount(file)).toBe(0);
+  });
+
+  it('a missing file is an error, never a count', () => {
+    expect(() => storedSettingCount(join(tmpDir(), 'none.db'))).toThrow();
   });
 });

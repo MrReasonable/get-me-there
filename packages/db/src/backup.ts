@@ -84,6 +84,26 @@ export function backupSummary(file: string): {
 }
 
 /**
+ * Settings plan ruling 15 (review I2, controller ruling R20): how many settings rows this database holds, read without
+ * writing and without a value leaving the file; 0 before migration 0014 (no settings table). From the app's first
+ * start the table holds a row for each name it imported, so `gmt setup` (through scripts/settings-held.mjs) knows the
+ * app holds its settings whether the app is running or not.
+ */
+export function storedSettingCount(file: string): number {
+  const db = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const table: unknown = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'")
+      .get();
+    if (table === undefined) return 0;
+    const row: unknown = db.prepare('SELECT COUNT(*) AS n FROM settings').get();
+    return typeof row === 'object' && row !== null && 'n' in row && typeof row.n === 'number' ? row.n : 0;
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Spec §7 "Migrations" and §13 "Backup" (decision 14): `VACUUM INTO` a timestamped file under `backupsDir`, check its
  * integrity, keep the newest `keep` backups. Throws on any failure, so the caller refuses migrations and boot fails
  * naming the cause. The copy holds every table, so it is created private (0600 in a 0700 directory).

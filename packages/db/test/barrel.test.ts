@@ -74,6 +74,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       'HEARTBEAT_INTERVAL_MS',
       'LOCK_STALE_AFTER_MS',
       'readOnlyLockState',
+      'storedSettingCount',
     ]) {
       expect(db, name).toHaveProperty(name);
     }
@@ -123,6 +124,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'retriedOnResume',
         'runMaintenance',
         'sanityCheckAirports',
+        'storedSettingCount',
         'seedAirports',
       ].sort(),
     );

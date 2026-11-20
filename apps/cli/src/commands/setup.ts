@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from 'node:path/posix';
-import { isLoopbackHost } from '@gmt/core';
-import { authFrom, changeInSettings, holdsSettings, type SettingsSection, targetFrom } from '../appClient.js';
+import { isLoopbackHost, isOwnedName, SETTING_SECTION } from '@gmt/core';
+import { authFrom, changeInSettings, type SettingsSection, targetFrom } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';
 import { browserSetup } from '../camoufox/browserSetup.js';
@@ -74,6 +74,7 @@ import { describeProblems, gatherPrereqs, judgePrereqs, nextFreePort } from '../
 import { askAnswers, askPasteToken, type PromptRow } from '../setup/prompts.js';
 import { readSetupRecord, recordAction, type SetupRecord } from '../setup/record.js';
 import { generatePassword } from '../setup/secrets.js';
+import { settingsHeld } from '../setup/settingsHeld.js';
 import { offeredFor, offerTestEmail } from '../setup/testEmail.js';
 import { readReport } from '../statusReport.js';
 import { type GuardTarget, guardActiveRun } from './guard.js';
@@ -336,13 +337,18 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   const current = settings?.ok === true ? answersFromConfig(settings.config, settings.record, record) : null;
   // why: settings plan ruling 15: from the app's first start its Settings page owns these groups' names, and an
   // app.env line for one is reported, never applied; so once the app holds its settings, setup names the page and
-  // writes nothing (before that, as on a first run, it writes app.env, which the app imports on its first start)
+  // writes nothing (before that, as on a first run, it writes app.env, which the app imports on its first start).
+  // Review I2 (controller ruling R20): whether it holds them is read from its database, so a stopped app counts too
   const section = group === null ? undefined : SETTINGS_SECTION[group];
   const app = target.app;
-  const settingsLine =
-    section !== undefined && current !== null && app !== null && (await holdsSettings(deps, app))
-      ? changeInSettings(app, section)
-      : null;
+  let held = false;
+  if (settings?.ok === true && app !== null && (section !== undefined || (group === null && !moving))) {
+    const h = await settingsHeld(deps, settings.config.databasePath);
+    // why: a group the page owns must not be written blind; a full run only words its note by it, and goes on
+    if (!h.ok && section !== undefined) return refuse(deps, h.error);
+    held = h.ok && h.held;
+  }
+  const settingsLine = section !== undefined && held && app !== null ? changeInSettings(app, section) : null;
   if (settingsLine !== null && group !== 'browser') {
     deps.io.out(`${settingsLine}\n`);
     return EXIT.ok;
@@ -457,9 +463,19 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     const differs = ownedDiff(settings.record, intended);
     if (differs.length > 0) {
       effective = settings.record;
-      notes.push(
-        `app.env differs from what setup would write: ${differs.join(', ')}. Setup keeps the file as it is; to change a value, run pnpm gmt setup --reconfigure <group> (for PORT: pnpm gmt setup --reconfigure port).`,
-      );
+      // why: review I2: once the app holds its settings, a name its Settings page owns is changed there, never by a
+      // --reconfigure that would only print the page's address
+      const inSettings = held && app !== null ? differs.filter(isOwnedName) : [];
+      const rest = differs.filter((n) => !inSettings.some((o) => o === n));
+      if (rest.length > 0)
+        notes.push(
+          `app.env differs from what setup would write: ${rest.join(', ')}. Setup keeps the file as it is; to change a value, run pnpm gmt setup --reconfigure <group> (for PORT: pnpm gmt setup --reconfigure port).`,
+        );
+      if (app !== null)
+        for (const where of new Set(inSettings.map((n) => SETTING_SECTION[n])))
+          notes.push(
+            `app.env differs from what setup would write: ${inSettings.filter((n) => SETTING_SECTION[n] === where).join(', ')}. The app holds these in its Settings page and ignores app.env for them. ${changeInSettings(app, where)}`,
+          );
     }
     // why: U8 (sec-b1-002): an operator may bind wider for a tunnel (docs section 3); said plainly, never refused
     if (!isLoopbackHost(settings.config.bindAddress))

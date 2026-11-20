@@ -94,33 +94,6 @@ export const settingsPath = (section: SettingsSection): string => `/?view=settin
 export const changeInSettings = (t: AppTarget, section: SettingsSection): string =>
   `Change this in Settings: ${targetUrl(t, settingsPath(section))}`;
 
-/**
- * `GET /api/settings` (settings plan ruling 15): the Settings read, or null for no answer, another status (an app from
- * before the Settings page) or another body. No secret is in it (a secret is `{ set, last4 }`).
- */
-export async function readSettingsView(deps: Deps, c: AppTarget): Promise<apiContract.SettingsView | null> {
-  const r = await deps.http({
-    method: 'GET',
-    url: targetUrl(c, '/api/settings'),
-    headers: authHeaders(c),
-    timeoutMs: 10_000,
-  });
-  if ('error' in r || r.status !== 200) return null;
-  try {
-    const parsed = apiContract.settingsViewSchema.safeParse(JSON.parse(r.body));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Settings plan ruling 15: whether this app holds its own settings, which it does from its first start on: `GET
- * /api/settings` answers with the Settings read; anything else is not holding them, and the caller goes on as before.
- */
-export const holdsSettings = async (deps: Deps, c: AppTarget): Promise<boolean> =>
-  (await readSettingsView(deps, c)) !== null;
-
 /** One line naming the active execution, its start and its estimated finish (or "unknown"). */
 export function activeLine(e: ActiveExecution): string {
   const what = e.kind === 'run' ? '' : ' (a single-cell verification)';
