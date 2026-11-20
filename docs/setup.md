@@ -140,9 +140,9 @@ writes your answers for them into `app.env` for that first start. A settings-fil
 them is read once, on the first start at which the app holds no value for it; after that the app
 keeps its own value, and a line that differs is ignored and reported on Settings › System ("… in
 .env is ignored: Settings holds it. Remove the line from .env."): remove the line. A value the app
-holds but no longer accepts (an update tightened its rule) is set aside for that start, so the app
-still starts, and Settings › System names it ("Saved … isn’t valid any more: set it again in
-Settings"). Tokens, keys and the mail password must be at least 8 characters; a shorter one is
+holds or reads from the settings file but does not accept (an update tightened its rule, or the
+line was never valid) is set aside for that start, so the app still starts, and Settings › System
+names it ("… isn’t valid: set it in Settings"). Tokens, keys and the mail password must be at least 8 characters; a shorter one is
 refused when you save it, and one already held is set aside. Natively, `.env` in those words means
 `~/.config/get-me-there/app.env`. Once the app holds these settings, remove their lines from the
 settings file: a line left there does nothing, and it is reported once it differs.
@@ -176,8 +176,11 @@ them, readable by you alone (0600): keep every copy of a backup as private as th
 
 `pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window
 question of `--reconfigure browser`, then print the Settings address instead (Change this in
-Settings: http://127.0.0.1:3000/?view=settings&section=sources). Before the app's first start
-they write `app.env` as on a first run. `pnpm gmt status` reads the price sources from the app's
+Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or
+not: setup reads the app's database (read-only) and does this once it holds any setting, which it
+does from its first start. Until then (no database yet, or none of these settings in it) they write
+`app.env` as on a first run. A full `pnpm gmt setup` re-run keeps `app.env` as it is and names the
+Settings address for any of these settings it would have changed. `pnpm gmt status` reads the price sources from the app's
 report (its own **price sources** line), and with the app down says "the app isn’t running; price
 sources are kept in its Settings".
 
@@ -897,12 +900,12 @@ failing check.
   A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
   at the scheduled time (once a run starts, the app keeps it from idle sleep, but it cannot wake a sleeping machine), or
   move the schedule.
-- **Provider.** One card per price source with its last successful call and its use against its cap (in Settings ›
-  Price sources' wording, linked to it), and **price sources**, which warns when no usable source is set up; its fix
+- **Provider.** One card per price source with its last successful call and its use against its cap (in the wording
+  of Calls and caps, `/?view=providers`, linked to it), and **price sources**, which warns when no usable source is set up; its fix
   is Settings › Price sources.
 - **Settings.** A warning for each setting whose `.env` line the app ignores ("Travelpayouts token in .env is ignored:
-  Settings holds it. Remove the line from .env."), and a failure for each value the app holds but set aside at this
-  start ("Saved Travelpayouts token isn't valid any more: set it again in Settings").
+  Settings holds it. Remove the line from .env."), and a failure for each value the app holds or read from `.env` but set
+  aside at this start ("Travelpayouts token isn't valid: set it in Settings").
 - **Browser worker and consent.** Whether the worker answers, any cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
   window: "browser pages: only inside a run's window" or "also when a run resumes"; while a search runs, its note also
   says "keeping the machine awake until <time>". The consent card gives the
@@ -1322,7 +1325,7 @@ loopback, so the Docker path on Linux leaves the provider off; the native app re
 
 Every app and recorder that calls the worker waits on its one page spacing and stops at its one cool-down. There is no
 page or scroll cap, a run's or a month's: every page waits for the spacing, a run's flight lists have their own
-allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. Settings › Price sources
+allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. Calls and caps (`/?view=providers`)
 shows the browser's pages this calendar month, with no cap on them. A second app calling the same worker in one
 calendar month is reported in the status, not refused.
 
