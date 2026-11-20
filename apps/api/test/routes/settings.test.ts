@@ -406,6 +406,8 @@ describe('PUT /api/settings: fix round 1 (secrets, refusals, unchanged saves, wa
     expect(API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP'])).toContain(
       'SEARCHAPI_MONTHLY_CALL_CAP in .env',
     );
+    // why: the save reads the environment the app started with, so the fix needs a restart before it is read
+    expect(API_TEXT.settingsEnvRefused(['SEARCHAPI_MONTHLY_CALL_CAP'])).toContain('restart the app');
     expect(text).not.toContain('lots');
     expect(rawRows(x)).toEqual([]);
     expectNoSecrets(ALL_SECRETS, { 'PUT /api/settings': text, log: x.logLines.join('') });

@@ -6,7 +6,9 @@
  * follows the last run's end of any kind, checked on each run's and each read's settle through the engine's second
  * observer (EngineOptions.runWatch). A tool run inside the app (`/tools/record`, `/tools/smoke`) runs outside the
  * engine, so the tools route tells the reloader of its start and end: the restart waits for it as for a run, and its
- * end checks again. Two saves during a run give one restart.
+ * end checks again. Two saves during a run give one restart. A check that throws (the in-flight read failed) is
+ * logged and checked again RESTART_RETRY_MS later, and again after each further failure, so a restart waiting on the
+ * last run's settle is never lost; nothing is stopped while the check cannot tell whether work is in flight.
  */
 import type { Logger, Secret } from '@gmt/core';
 import type { RunWatch } from '@gmt/engine';
@@ -31,6 +33,9 @@ export interface ReloadPort {
   tools(): string[];
 }
 
+/** How long after a failed check the restart is checked again (the check is retried until it answers). */
+export const RESTART_RETRY_MS = 5_000;
+
 export interface Reloader extends ReloadPort {
   /** The engine's second observer (EngineOptions.runWatch): each end checks whether the restart may go. */
   readonly watch: RunWatch;
@@ -51,10 +56,16 @@ export function createReloader(o: {
   let requested = false;
   let fired = false;
   let stopped = false;
+  let retry: NodeJS.Timeout | null = null;
   const tools: string[] = [];
   const idle = (): boolean => tools.length === 0 && o.idle();
+  const cancelRetry = (): void => {
+    if (retry !== null) clearTimeout(retry);
+    retry = null;
+  };
   const fire = (): void => {
     fired = true;
+    cancelRetry();
     // why: a save's route answers in the turn it asks; the close (which stops accepting first) begins after it
     queueMicrotask(o.reload);
   };
@@ -65,6 +76,16 @@ export function createReloader(o: {
     } catch (e) {
       // why: told from the run registry's settle; a throw there would reject the run's own settle and the shutdown's
       o.log.error({ err: { message: safeMessage(e, o.secrets) } }, 'restart check failed');
+      // why: the failed check may have been the last run's settle, which no later event repeats; without a retry the
+      // engine would stay held with nothing to release it. One retry at a time; unref, as the server keeps the
+      // process alive while it serves.
+      if (retry === null) {
+        retry = setTimeout(() => {
+          retry = null;
+          check();
+        }, RESTART_RETRY_MS);
+        retry.unref();
+      }
     }
   };
   return {
@@ -73,7 +94,8 @@ export function createReloader(o: {
         requested = true;
         o.hold();
       }
-      if (!fired && !stopped && idle()) fire();
+      // why: the same guarded check as a settle's, so a failing read answers the save 'after-runs' and is retried
+      check();
       return fired ? 'now' : 'after-runs';
     },
     pending: () => requested && !fired && !stopped,
@@ -89,6 +111,7 @@ export function createReloader(o: {
     watch: { started: () => undefined, ended: check },
     stop: () => {
       stopped = true;
+      cancelRetry();
     },
   };
 }

@@ -42,6 +42,13 @@ function rig(answers: Array<SearchApiAccount | null | 'throws'>) {
 }
 
 describe('createSearchApiAccount', () => {
+  it('keeps a read ten minutes, a failure one minute, and the last good read 24 hours (plan ruling 10, R10)', () => {
+    // why: the tests below step by these constants, so each is pinned to its required duration here
+    expect(ACCOUNT_TTL_MS).toBe(600_000);
+    expect(ACCOUNT_FAILURE_TTL_MS).toBe(60_000);
+    expect(ACCOUNT_STALE_MAX_MS).toBe(86_400_000);
+  });
+
   it('asks once, then serves the cached balance for ten minutes', async () => {
     const r = rig([account(38, T0), account(30, T0)]);
     expect((await r.port.read())?.remaining).toBe(38);
@@ -110,6 +117,62 @@ describe('createSearchApiAccount', () => {
     expect(await r.port.read()).toBeNull();
   });
 
+  it('a failed refresh near the 24-hour limit keeps the last good read no later than that limit', async () => {
+    const r = rig([account(38, T0), null, null]);
+    await r.port.read();
+    r.clock.advance(ACCOUNT_STALE_MAX_MS - 10_000); // the refresh fails ten seconds before the limit
+    expect(await r.port.read()).toEqual(account(38, T0));
+    r.clock.advance(10_001); // past the limit, inside the failure minute: asked again, and nothing to fall back on
+    expect(await r.port.read()).toBeNull();
+    expect(r.asked()).toBe(3);
+  });
+
+  it('a run that billed calls ending while a read is out: that answer is served but not kept', async () => {
+    let answer: (a: SearchApiAccount) => void = () => undefined;
+    let asked = 0;
+    let ledgered = 0;
+    const port = createSearchApiAccount({
+      fetch: () => {
+        asked += 1;
+        return asked === 1
+          ? new Promise((resolve) => {
+              answer = resolve;
+            })
+          : Promise.resolve(account(35, T0));
+      },
+      clock: fixedClock(T0),
+      callsMade: () => ledgered,
+    });
+    const first = port.read();
+    ledgered = 3;
+    port.runEnded();
+    answer(account(38, T0));
+    expect((await first)?.remaining).toBe(38);
+    expect((await port.read())?.remaining).toBe(35);
+    expect(asked).toBe(2);
+  });
+
+  it('a run with no SearchApi call ending while a read is out leaves that answer kept', async () => {
+    let answer: (a: SearchApiAccount) => void = () => undefined;
+    let asked = 0;
+    const port = createSearchApiAccount({
+      fetch: () => {
+        asked += 1;
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      },
+      clock: fixedClock(T0),
+      callsMade: () => 3,
+    });
+    const first = port.read();
+    port.runEnded();
+    answer(account(38, T0));
+    await first;
+    expect((await port.read())?.remaining).toBe(38);
+    expect(asked).toBe(1);
+  });
+
   it('a run end drops the cache but not the last good read a failed refresh falls back on', async () => {
     const r = rig([account(38, T0), null]);
     await r.port.read();
@@ -147,5 +210,28 @@ describe('createSearchApiAccount', () => {
     port.close();
     expect(seen?.aborted).toBe(true);
     expect(await port.read()).toBeNull();
+  });
+
+  it('a question close ended answers null, not the last good read a failure falls back on', async () => {
+    const clock = fixedClock(T0);
+    let n = 0;
+    let fail: () => void = () => undefined;
+    const port = createSearchApiAccount({
+      fetch: () => {
+        n += 1;
+        if (n === 1) return Promise.resolve(account(38, T0));
+        return new Promise((resolve) => {
+          fail = () => resolve(null);
+        });
+      },
+      clock,
+      callsMade: () => 0,
+    });
+    expect((await port.read())?.remaining).toBe(38);
+    clock.advance(ACCOUNT_TTL_MS);
+    const outstanding = port.read();
+    port.close();
+    fail();
+    expect(await outstanding).toBeNull();
   });
 });

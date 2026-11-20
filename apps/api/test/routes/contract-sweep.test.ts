@@ -345,9 +345,11 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
       },
     });
     const x = h;
+    let kitCalls = 0;
     const echoingKit: HttpKit = {
-      request: () =>
-        Promise.resolve({
+      request: () => {
+        kitCalls += 1;
+        return Promise.resolve({
           status: 200,
           body: {
             account: { remaining_searches: 38, monthly_allowance: 0, echo: SENTINEL_SA },
@@ -356,11 +358,18 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
           fetchedAt: asIsoDateTime('2026-11-19T14:00:00.000Z'),
           fromCache: false,
           cacheKey: 'k',
-        }),
+        });
+      },
       stats: () => ({ inFlight: 0 }),
       holdUntil: () => undefined,
     };
     account.port = searchApiAccountFor({ ...x.ports, http: echoingKit });
+    // why: the echoing answer is really read: the balance route answers its 38, so the checks below cover its body
+    const balance = apiContract.searchApiAccountResponseSchema.parse(
+      await (await x.request('/api/searchapi/account')).json(),
+    );
+    expect(balance.account?.remaining).toBe(38);
+    expect(kitCalls).toBe(1);
     const ids = seedWorld(x);
     const bodies: string[] = [];
     for (const route of mounted.filter((r) => r.method === 'GET'))

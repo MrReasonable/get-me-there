@@ -44,25 +44,38 @@ export function createSearchApiAccount(o: {
   // why: kept apart from `kept`, which a run's end drops: the last good read is what a failed refresh falls back on
   let lastGood: SearchApiAccount | null = null;
   let inFlight: Promise<SearchApiAccount | null> | null = null;
+  // why: the question in flight's ledger count, and whether a run that billed calls ended while it was out: its
+  // answer may predate those calls, so it is answered to the reads waiting on it but never kept
+  let pending: { callsAtRead: number; dropped: boolean } | null = null;
 
   async function ask(fetchBalance: NonNullable<typeof o.fetch>): Promise<SearchApiAccount | null> {
     const callsAtRead = o.callsMade();
+    const mine = { callsAtRead, dropped: false };
+    pending = mine;
     let value: SearchApiAccount | null = null;
     try {
       value = await fetchBalance(stop.signal);
     } catch {
       // why: a balance is a courtesy; the answer's reason is already in the provider's own log line
       value = null;
+    } finally {
+      pending = null;
     }
+    // why: close() promises null to a question it ended, never the last good read a failure would fall back on
+    if (stop.signal.aborted) return null;
     if (value !== null) lastGood = value;
     const failed = value === null;
     // why: controller ruling R10 — a failed refresh serves the last good read with its own fetchedAt, for up to 24
-    // hours
-    const served =
-      failed && lastGood !== null && now() - Date.parse(lastGood.fetchedAt) <= ACCOUNT_STALE_MAX_MS
-        ? lastGood
-        : value;
-    kept = { value: served, until: now() + (failed ? ACCOUNT_FAILURE_TTL_MS : ACCOUNT_TTL_MS), callsAtRead };
+    // hours after that read and no longer: the kept answer ends at that deadline too
+    const staleUntil = lastGood === null ? 0 : Date.parse(lastGood.fetchedAt) + ACCOUNT_STALE_MAX_MS;
+    const fallback = failed && lastGood !== null && now() <= staleUntil;
+    const served = fallback ? lastGood : value;
+    const until = failed
+      ? fallback
+        ? Math.min(now() + ACCOUNT_FAILURE_TTL_MS, staleUntil)
+        : now() + ACCOUNT_FAILURE_TTL_MS
+      : now() + ACCOUNT_TTL_MS;
+    kept = mine.dropped && !failed ? null : { value: served, until, callsAtRead };
     return served;
   }
 
@@ -77,9 +90,10 @@ export function createSearchApiAccount(o: {
       return inFlight;
     },
     runEnded: () => {
-      // why: a billed call that lands while a read is in flight is not seen here; the next run's end or the TTL
-      // catches it
-      if (kept !== null && o.callsMade() !== kept.callsAtRead) kept = null;
+      const calls = o.callsMade();
+      if (kept !== null && calls !== kept.callsAtRead) kept = null;
+      // why: a run that billed calls while a read was out: that read's answer is not kept (ask)
+      if (pending !== null && calls !== pending.callsAtRead) pending.dropped = true;
     },
     close: () => stop.abort(),
   };

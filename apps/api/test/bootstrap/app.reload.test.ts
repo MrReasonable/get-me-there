@@ -11,7 +11,7 @@ import { Agent, request as httpRequest, type IncomingMessage } from 'node:http';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { apiContract, type ExecutionStatus, fixedClock, type IsoDateTime, type ProviderId } from '@gmt/core';
-import { AppLock, openDatabase } from '@gmt/db';
+import { AppLock, type Db, openDatabase } from '@gmt/db';
 import { RELOAD_PENDING_TEXT, type RunWatch } from '@gmt/engine';
 import { allowLoopback } from '@gmt/providers/testing';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -285,8 +285,13 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
     const checkpoint = vi.spyOn(second.ports.db, 'checkpoint');
     const release = vi.spyOn(AppLock.prototype, 'release');
     d.signals.emit('SIGTERM');
+    // why: both listeners stay while the close runs, so a second signal is ignored here rather than taking the
+    // platform's default exit before the lock is released
+    expect(d.signals.listenerCount('SIGTERM')).toBe(1);
+    expect(d.signals.listenerCount('SIGINT')).toBe(1);
     // why: a second signal while the first close runs is the same close
     d.signals.emit('SIGINT');
+    d.signals.emit('SIGTERM');
     expect(await d.exited).toBe(EXIT.ok);
     await d.done;
     expect(checkpoint).toHaveBeenCalledTimes(1);
@@ -298,11 +303,12 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
 
   it('a second boot that fails ends the loop with its own code and the boot-failure log, holding no lock', async () => {
     const dbPath = seededDb();
-    const other: { lock: AppLock | null } = { lock: null };
+    const other: { lock: AppLock | null; db: Db | null } = { lock: null, db: null };
     const d = drive(devEnv(dbPath), async (deps, pass) => {
       if (pass === 2) {
         // why: another holder takes the lock between the passes; the next pass takes it without the wait, so refuses
         const db = openDatabase(dbPath);
+        other.db = db;
         other.lock = new AppLock(db, 'tool', fixedClock(T0), silentLog);
         expect(other.lock.acquire({ waitMs: 0 })).toBe('acquired');
       }
@@ -320,6 +326,8 @@ describe('a save restarts the app in place (settings plan ruling 6)', { timeout:
     expect(d.signals.listenerCount('SIGTERM')).toBe(0);
     expect(lockRow(dbPath)?.holder).toBe('tool');
     other.lock?.release();
+    // why: the other holder's own handle is closed too; Windows cannot remove a file a handle still holds open
+    other.db?.close();
     expect(lockRow(dbPath)).toBeNull();
   });
 

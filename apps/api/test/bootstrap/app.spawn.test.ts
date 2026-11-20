@@ -101,7 +101,8 @@ function send(
   };
   const script = `const r = await fetch(${JSON.stringify(url)}, ${JSON.stringify(init)}); process.stdout.write(JSON.stringify({ status: r.status, body: await r.json() }));`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { PATH: process.env.PATH ?? '' },
+    // why: the probe is this node binary by its own path, so it needs nothing from this process's environment
+    env: {},
     encoding: 'utf8',
     timeout: PROBE_TIMEOUT_MS,
   });
@@ -115,7 +116,8 @@ function send(
 function probe(url: string, authorization: string): { status: number; body: unknown } {
   const script = `const r = await fetch(${JSON.stringify(url)}, { headers: { authorization: ${JSON.stringify(authorization)} } }); process.stdout.write(JSON.stringify({ status: r.status, body: await r.json() }));`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { PATH: process.env.PATH ?? '' },
+    // why: the probe is this node binary by its own path, so it needs nothing from this process's environment
+    env: {},
     encoding: 'utf8',
     timeout: PROBE_TIMEOUT_MS,
   });
@@ -215,7 +217,6 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
       const dir = tempDir('gmt-spawn-');
       const port = await freePort();
       const env = cleanEnv({
-        PATH: process.env.PATH ?? '',
         NODE_ENV: 'production',
         DATABASE_PATH: join(dir, 'reload.db'),
         PORT: String(port),

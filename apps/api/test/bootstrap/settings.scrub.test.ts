@@ -2,13 +2,14 @@
 // stored key the config does not use joins both bootstraps' scrub lists straight after the stored settings are read,
 // so a failure while the ports are built that quotes it reaches no sink.
 import { join } from 'node:path';
+import { fixedClock } from '@gmt/core';
 import { applyMigrations, MIGRATIONS_DIR, openDatabase, SettingsRepo } from '@gmt/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { main } from '../../src/bootstrap/app.js';
 import { BootError } from '../../src/bootstrap/errors.js';
 import { EXIT, runTool } from '../../src/bootstrap/tool.js';
 import { cleanEnv, SENTINEL_AUTH, toolEnv } from '../helpers/env.js';
-import { T0 } from '../helpers/harness.js';
+import { captureLines, T0 } from '../helpers/harness.js';
 import { testRecording } from '../helpers/recording.js';
 import { tempDir } from '../helpers/tmp.js';
 
@@ -52,7 +53,8 @@ function storedOnlyKey(): string {
 describe('a stored key no config uses is scrubbed from a failure after the settings are read', {
   timeout: 30_000,
 }, () => {
-  it('the app: main rethrows the failure without it', async () => {
+  it('the app: main logs and rethrows the failure without it', async () => {
+    const lines: string[] = [];
     const err = await main(
       cleanEnv({
         NODE_ENV: 'production',
@@ -62,6 +64,8 @@ describe('a stored key no config uses is scrubbed from a failure after the setti
         APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
         LOG_LEVEL: 'error',
       }),
+      // why: a fixed clock, never the wall; the database is fresh, so the lock is free and no wait runs
+      { boot: { clock: fixedClock(T0) }, logDestination: captureLines(lines) },
     ).then(
       () => null,
       (e: unknown) => e,
@@ -71,6 +75,11 @@ describe('a stored key no config uses is scrubbed from a failure after the setti
     expect(err.message).toContain('could not build the ports');
     expect(err.message).not.toContain(STORED);
     expect(err.exitCode).toBe(EXIT.failed);
+    // why: the log is a sink too: its boot-failure line names the failure and never the stored password
+    const log = lines.join('\n');
+    expect(log).toContain('boot failed');
+    expect(log).toContain('could not build the ports');
+    expect(log).not.toContain(STORED);
   });
 
   it('the tool: its refusal line is without it', async () => {

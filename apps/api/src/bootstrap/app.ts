@@ -420,11 +420,12 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
             await closeServer(bound?.server ?? null); // stop accepting
             searchApiAccount.close();
             await engine.shutdown();
-            // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
-            db.checkpoint();
           })(),
           timedOut,
         ]);
+        // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly. Here, after
+        // the race, so a shutdown that ends past the deadline never checkpoints a handle the finally below has closed
+        db.checkpoint();
       } finally {
         clearTimeout(deadline);
         // why: review T12 — past the deadline the engine's own wait may still be running; marked closed first, a job
@@ -528,7 +529,7 @@ export interface MainOptions {
   /** Ends the process (process.exit). */
   exit?: (code: number) => void;
   /** Where SIGTERM and SIGINT are listened for (the process). */
-  signals?: Pick<NodeJS.EventEmitter, 'once' | 'removeListener'>;
+  signals?: Pick<NodeJS.EventEmitter, 'on' | 'removeListener'>;
   /** Overrides of each pass's boot: no listening, a fixed clock, the assets. */
   boot?: Partial<Pick<BootDeps, 'listen' | 'clock' | 'assets'>>;
   /** The log's destination (stdout). */
@@ -541,8 +542,8 @@ export interface MainOptions {
 
 /**
  * The app entrypoint: the environment parsed without the Settings page's names (settings plan ruling 3), then passes of
- * boot and serve (ruling 6): SIGTERM and SIGINT are listened for once; each pass boots (laying the stored settings over
- * the environment under the lock) and serves until it closes. A pass a save closed (`closed` = 'reload') is followed by
+ * boot and serve (ruling 6): SIGTERM and SIGINT are listened for by one pair of listeners kept until main returns;
+ * each pass boots (laying the stored settings over the environment under the lock) and serves until it closes. A pass a save closed (`closed` = 'reload') is followed by
  * the next, which takes the lock without the other-holder wait; a signal at any point (during a pass's boot, its
  * serving or its close) ends the loop through `shutdownHandler`, which exits 0 once the close is done. A boot that
  * throws ends the loop with today's boot-failure log and code (main rethrows it; start.ts exits with its code); a
@@ -575,8 +576,10 @@ export async function main(env: NodeJS.ProcessEnv, opts: MainOptions = {}): Prom
   };
   const onTerm = (): void => onSignal('SIGTERM');
   const onInt = (): void => onSignal('SIGINT');
-  signals.once('SIGTERM', onTerm);
-  signals.once('SIGINT', onInt);
+  // why: `on`, not `once`: the listeners stay until main returns, so a second Ctrl-C during the close is ignored here
+  // (`stopping`) rather than taking Node's default exit before the lock is released
+  signals.on('SIGTERM', onTerm);
+  signals.on('SIGINT', onInt);
   try {
     for (let pass = 1; ; pass += 1) {
       let running: RunningApp;

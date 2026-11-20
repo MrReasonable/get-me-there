@@ -323,6 +323,23 @@ describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s
     running.ports.db.close();
   });
 
+  it('an engine shutdown that ends past the deadline never checkpoints the handle the deadline closed', async () => {
+    const { running, exit } = await booted();
+    let finish: () => void = () => undefined;
+    vi.spyOn(running.engine, 'shutdown').mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const checkpoint = vi.spyOn(running.ports.db, 'checkpoint');
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS);
+    expect(exit).toHaveBeenCalledWith(EXIT.failed);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkpoint).not.toHaveBeenCalled();
+  });
+
   it('a shutdown that finishes before the deadline exits 0 with no timeout line, and the timer is gone', async () => {
     const { running, errors, exit } = await booted();
     shutdownHandler(running, silentLog, [], exit)('SIGTERM');
