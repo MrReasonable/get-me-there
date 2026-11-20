@@ -49,9 +49,11 @@ export interface MailMessage {
   subject: string;
   text: string;
 }
-/** The one transporter method used; nodemailer's Transporter satisfies it. */
+/** The transporter methods used; nodemailer's Transporter satisfies it. */
 export interface MailTransport {
   sendMail(m: MailMessage): Promise<{ messageId: string }>;
+  /** Closes the transport's connections (nodemailer's `close`); a test send past its deadline calls it. */
+  close?(): void;
 }
 export type TransportFactory = (o: SmtpTransportOptions) => MailTransport;
 
@@ -117,6 +119,30 @@ export const TEST_SEND_TIMEOUTS = {
   greetingTimeout: 10_000,
   socketTimeout: 10_000,
 } as const;
+
+/**
+ * A test send's whole deadline. why: the socket timeout bounds a silence, not a send: a server that answers a fragment
+ * every few seconds would hold the one test limit (and both test routes) for ever. Past it the send is answered
+ * `timed-out`, its transport closed and the limit released; it is never retried, as the server may have taken it.
+ */
+export const TEST_SEND_DEADLINE_MS = 30_000;
+
+/** `send` within TEST_SEND_DEADLINE_MS, else `onTimeout` runs and it rejects coded ETIMEDOUT (`timed-out`). */
+async function withinTestDeadline<T>(send: Promise<T>, onTimeout: () => void): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(Object.assign(new Error('the test send ran past its deadline'), { code: 'ETIMEDOUT' }));
+    }, TEST_SEND_DEADLINE_MS);
+  });
+  try {
+    // why: the send that loses the race settles later into this race's own handlers, never unhandled
+    return await Promise.race([send, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * The one-a-minute limit on test sends, with its in-flight guard (V7). Settings plan ruling 11: one limit for the
@@ -185,12 +211,16 @@ export async function sendTestEmail(o: {
   const log = o.log.child({ notifier: 'email' });
   try {
     const options = { ...smtpTransportOptions(o.smtp, o.nodeEnv), ...TEST_SEND_TIMEOUTS };
-    await (o.createTransport ?? defaultFactory)(options).sendMail({
-      from: o.smtp.from,
-      to: o.smtp.to,
-      subject: TEST_EMAIL_SUBJECT,
-      text: TEST_EMAIL_BODY,
-    });
+    const transport = (o.createTransport ?? defaultFactory)(options);
+    await withinTestDeadline(
+      transport.sendMail({
+        from: o.smtp.from,
+        to: o.smtp.to,
+        subject: TEST_EMAIL_SUBJECT,
+        text: TEST_EMAIL_BODY,
+      }),
+      () => transport.close?.(),
+    );
     log.info({}, 'settings test email sent');
     return { result: 'sent' };
   } catch (err) {
@@ -275,7 +305,18 @@ export class EmailNotifier implements Notifier {
     // ceiling, so pressing the button cannot crowd out a price alert or a consent notice
     if (!this.#testLimit.take(Date.parse(this.#clock.now()))) return 'refused';
     try {
-      return (await this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false)).result;
+      // why: bounded as the Settings test is (TEST_SEND_DEADLINE_MS); the transport is the alerts' own, so it is not
+      // closed: the late send ends by its own timeouts and only the limit is handed back
+      return (
+        await withinTestDeadline(
+          this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false),
+          () => undefined,
+        )
+      ).result;
+    } catch {
+      this.#log.warn({ code: 'ETIMEDOUT', deadlineMs: TEST_SEND_DEADLINE_MS }, 'test email not sent');
+      this.#last = { at: this.#clock.now(), kind: 'test', result: 'failed' };
+      return 'failed';
     } finally {
       this.#testLimit.release();
     }
