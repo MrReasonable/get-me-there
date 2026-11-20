@@ -65,16 +65,26 @@ export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(dep
     : { kind: 'down', reason: 'the app’s answer was not the status report' };
 }
 
-/** One row per check: state as text, area, summary; then its note and its fix. */
-export function describeReport(checks: readonly StatusCheck[]): string {
+/**
+ * One row per check: state as text, area, summary; then its note and its fix. A fix made on the Settings page names
+ * its section's address on the app (settings plan ruling 13), so the person can open it.
+ */
+export function describeReport(checks: readonly StatusCheck[], baseUrl: string | null = null): string {
   const width = Math.max(10, ...checks.map((c) => c.area.length));
   const pad = ' '.repeat(width + 8);
   return `${checks
     .map((c) => {
       const lines = [`${c.area.padEnd(width)}  ${c.state.padEnd(4)}  ${c.summary}`];
       if (c.note !== null) lines.push(`${pad}note: ${c.note}`);
-      if (c.fix !== null)
-        lines.push(`${pad}fix: ${c.fix.command === null ? c.fix.text : `${c.fix.command} (${c.fix.text})`}`);
+      if (c.fix !== null) {
+        const where =
+          c.fix.settings === undefined || baseUrl === null
+            ? ''
+            : ` (${baseUrl}/?view=settings&section=${c.fix.settings})`;
+        lines.push(
+          `${pad}fix: ${c.fix.command === null ? c.fix.text : `${c.fix.command} (${c.fix.text})`}${where}`,
+        );
+      }
       return lines.join('\n');
     })
     .join('\n')}\n`;
@@ -140,7 +150,9 @@ export async function finishStatus(
   const checks = rf.only === null ? read.report.checks : read.report.checks.filter((c) => c.area === rf.only);
   if (rf.json) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
   else {
-    deps.io.out(`\n${describeReport(checks)}`);
+    deps.io.out(
+      `\n${describeReport(checks, target.endpoint.kind === 'none' ? null : target.endpoint.baseUrl)}`,
+    );
     deps.io.out(`${barLine(checks)} (app ${read.report.version}, ${read.report.mode} mode)\n`);
   }
   // why: CodeRabbit on PR #14 — the exit code never depends on what was printed: a failing check anywhere, local or in

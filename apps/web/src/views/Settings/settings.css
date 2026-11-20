@@ -532,3 +532,73 @@
 .st-rule > .st-confirm {
   flex: 1 1 100%;
 }
+
+/* System: the status report's checks, one per line (ruling 13; mockup .health) */
+.st-sys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.st-sys-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--t-line);
+  font-size: 14px;
+}
+.st-sys-line:last-child {
+  border-bottom: 0;
+}
+.st-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--t-ok);
+  box-sizing: border-box;
+}
+.st-sys-line[data-state="warn"] .st-dot {
+  background: var(--t-warn);
+}
+.st-sys-line[data-state="fail"] .st-dot {
+  background: var(--t-bad);
+}
+/* an off line is a hollow dot, and says "Off" in words besides */
+.st-sys-line[data-state="off"] .st-dot {
+  background: transparent;
+  border: 1.5px solid var(--t-muted);
+}
+.st-sys-what {
+  flex: none;
+  width: 130px;
+  font-weight: 600;
+}
+.st-sys-words {
+  min-width: 0;
+}
+.st-sys-state {
+  font-weight: 600;
+}
+.st-sys-note {
+  color: var(--t-muted);
+}
+.st-sys-error {
+  padding: 16px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+@media (max-width: 800px) {
+  .st-sys-line {
+    flex-wrap: wrap;
+  }
+  .st-sys-what {
+    width: auto;
+  }
+}
+
+.st-sys-fix a {
+  font-weight: 600;
+}

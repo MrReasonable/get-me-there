@@ -210,6 +210,8 @@ describe('each Settings section says no banned word, no "searches left" and no "
       await screen.findByText(COPY.settingsView.credits(51, 100));
     }
     if (section === 'limits') await screen.findByText(COPY.settingsView.limits.spent('£32'));
+    // Task 7: the System lines (the report's checks, one per line) are swept too
+    if (section === 'system') await screen.findByRole('list', { name: COPY.settingsView.systemLabel });
     if (section === 'email') {
       const rules = await screen.findByRole('list', { name: COPY.settingsView.alerts.heading });
       await within(rules).findByText(COPY.settingsView.alerts.lastSent(COPY.settingsView.alerts.never));

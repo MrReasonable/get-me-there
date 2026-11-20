@@ -465,18 +465,20 @@ describe('the report never spends, waits on a vendor or loads a page (spec §10)
       (await expectContract(await get(x), 'GET', '/api/status', STATUS)).checks.find((c) => c.id === id);
 
     it.each([
-      ['401, key refused', 401, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['401, key refused', 401, 'auth', 'fail', 'sources'],
       ['403 whose words name the credits: quota, not a bad key', 403, 'quota', 'fail', null],
-      ['403 that is the key', 403, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['403 that is the key', 403, 'auth', 'fail', 'sources'],
       ['429 whose words name the credits: quota, fail not warn', 429, 'quota', 'fail', null],
       ['5xx', 503, 'upstream', 'warn', null],
       ['a socket failure with no status', null, 'network', 'warn', null],
-    ] as const)('%s', async (_n, status, kind, state, command) => {
+    ] as const)('%s', async (_n, status, kind, state, section) => {
       const x = await harness(KEYS);
       insert(x, { provider: 'searchapi', status, outcome: 'error', kind, t: '2026-10-14T08:00:00.000Z' });
       const c = await cardOf(x, 'provider-searchapi');
       expect(c?.state).toBe(state);
-      expect(c?.fix?.command ?? null).toBe(command);
+      // why: ruling 13: a refused key's fix points to Settings, not to `--reconfigure`; no fix of these carries a command
+      expect(c?.fix?.command ?? null).toBeNull();
+      expect(c?.fix?.settings ?? null).toBe(section);
     });
 
     it('a success after a failure is ok with its time; a failure after a success fails', async () => {

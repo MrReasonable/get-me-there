@@ -731,9 +731,11 @@ describe('the schedule note (pa-b1-008)', () => {
 describe('price sources', () => {
   it('a fixture-only or awaiting-verification browser setup leaves usable empty and warns with the Travelpayouts fix', () => {
     const c = checkOf(healthyFacts({ priceSources: { usable: [] } }), 'price-sources');
+    // why: settings plan ruling 13: the fix points to Settings, not to `--reconfigure`
     expect(c.fix).toEqual({
-      text: 'Travelpayouts is the no-cost source: add its token',
-      command: 'pnpm gmt setup --reconfigure travelpayouts',
+      text: 'Travelpayouts is the no-cost source: add its token in Settings › Price sources',
+      command: null,
+      settings: 'sources',
     });
     expect(
       checkOf(healthyFacts({ priceSources: { usable: ['travelpayouts', 'searchapi'] } }), 'price-sources')
@@ -998,7 +1000,11 @@ describe('providers', () => {
   it('an unconfigured provider is off and names its setup command', () => {
     const off = checkOf(healthyFacts(), 'provider-searchapi');
     expect(off).toMatchObject({ state: 'off', offReason: 'not-set-up' });
-    expect(off.fix?.command).toBe('pnpm gmt setup --reconfigure searchapi');
+    expect(off.fix).toEqual({
+      text: 'add SearchApi in Settings › Price sources',
+      command: null,
+      settings: 'sources',
+    });
   });
   it('a usage without a cap says so and does not warn', () => {
     const c = tpCheck({ usage: { used: 5, cap: null, window: 'month' } });
@@ -1024,9 +1030,62 @@ describe('email', () => {
         'email',
       ),
     ).toMatchObject({ state: 'ok' });
-    expect(checkOf(healthyFacts({ email: { configured: false, last: null } }), 'email').fix?.command).toBe(
-      'pnpm gmt setup --reconfigure email',
+    expect(checkOf(healthyFacts({ email: { configured: false, last: null } }), 'email').fix).toEqual({
+      text: 'set email up to get alerts and notices in Settings › Email and alerts',
+      command: null,
+      settings: 'email',
+    });
+  });
+  it('a failed send points to Settings › Email and alerts, not to --reconfigure', () => {
+    const c = checkOf(
+      healthyFacts({ email: { configured: true, last: { at: ago(HOUR), kind: 'test', result: 'failed' } } }),
+      'email',
     );
+    expect(c.fix).toEqual({
+      text: 'check the mail server settings in Settings › Email and alerts, then send a test again',
+      command: null,
+      settings: 'email',
+    });
+  });
+});
+
+describe('settings checks (settings plan ruling 13)', () => {
+  it('an env line the page now owns is a warn naming the label and where to remove it', () => {
+    const c = checkOf(
+      healthyFacts({ settings: { envIgnored: ['SEARCHAPI_KEY'], setAside: [] } }),
+      'settings-env-searchapi-key',
+    );
+    expect(c).toMatchObject({
+      area: 'settings',
+      state: 'warn',
+      summary: 'SearchApi key in .env is ignored: Settings holds it. Remove the line from .env.',
+      fix: {
+        text: 'remove the line from .env; change the value in Settings › Price sources',
+        command: null,
+        settings: 'sources',
+      },
+    });
+  });
+  it('a saved value the app set aside is a fail naming the label and the section that fixes it', () => {
+    const c = checkOf(
+      healthyFacts({ settings: { envIgnored: [], setAside: ['MONTHLY_SPEND_CAP_PENCE', 'SMTP_PORT'] } }),
+      'settings-aside-monthly-spend-cap-pence',
+    );
+    expect(c).toMatchObject({
+      area: 'settings',
+      state: 'fail',
+      summary: "Saved Monthly spend limit isn't valid any more: set it again in Settings",
+      fix: { text: 'set it again in Settings › Limits', command: null, settings: 'limits' },
+    });
+    expect(
+      checkOf(
+        healthyFacts({ settings: { envIgnored: [], setAside: ['SMTP_PORT'] } }),
+        'settings-aside-smtp-port',
+      ).fix?.settings,
+    ).toBe('email');
+  });
+  it('no names, no checks', () => {
+    expect(buildChecks(healthyFacts()).filter((c) => c.area === 'settings')).toEqual([]);
   });
 });
 

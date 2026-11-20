@@ -150,3 +150,52 @@ export async function showLimitsAndEmail(page: Page, definitionId: string): Prom
     },
   );
 }
+
+/**
+ * Settings › System with something to say (settings plan Task 7): the real api's report with a worker and consent that
+ * are ok, an env line the page now owns (warn) and a saved value set aside (fail), each with its Settings fix, and a
+ * Backups line that is off, so every kind of line is on the page.
+ */
+export async function showSystemChecks(page: Page): Promise<void> {
+  await page.route('**/api/status', async (route) => {
+    const real = apiContract.statusResponseSchema.parse(await (await route.fetch()).json());
+    const base = { providerId: null, label: null, note: null, offReason: null } as const;
+    await route.fulfill({
+      json: apiContract.statusResponseSchema.parse({
+        ...real,
+        checks: [
+          ...real.checks.filter((c) => c.area !== 'settings' && c.id !== 'backups'),
+          {
+            ...base,
+            id: 'backups',
+            area: 'backups',
+            state: 'off',
+            offReason: 'not-visible',
+            summary: "Can't be seen from inside the container.",
+            fix: null,
+          },
+          {
+            ...base,
+            id: 'settings-env-searchapi-key',
+            area: 'settings',
+            state: 'warn',
+            summary: 'SearchApi key in .env is ignored: Settings holds it. Remove the line from .env.',
+            fix: {
+              text: 'remove the line from .env; change the value in Settings › Price sources',
+              command: null,
+              settings: 'sources',
+            },
+          },
+          {
+            ...base,
+            id: 'settings-aside-smtp-port',
+            area: 'settings',
+            state: 'fail',
+            summary: "Saved Mail server port isn't valid any more: set it again in Settings",
+            fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
+          },
+        ],
+      }),
+    });
+  });
+}

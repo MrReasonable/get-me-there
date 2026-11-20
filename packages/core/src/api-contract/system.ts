@@ -167,7 +167,10 @@ export const statusAreaSchema = z.enum([
   'worker',
   'consent',
   'email',
+  'settings',
 ]);
+/** The Settings sections a fix can point to (settings plan ruling 13); the page's own `section=` values. */
+export const statusFixSectionSchema = z.enum(['sources', 'limits', 'email', 'system']);
 export const statusCheckSchema = z
   .strictObject({
     id: z.string().regex(/^[a-z0-9-]+$/),
@@ -186,6 +189,11 @@ export const statusCheckSchema = z
       .strictObject({
         text: z.string().max(200),
         command: z.string().startsWith('pnpm gmt ').nullable(),
+        /**
+         * Ruling 13: the Settings section where the fix is made. The page links to it; the CLI prints the Settings
+         * address with it. Absent when the fix is made elsewhere.
+         */
+        settings: statusFixSectionSchema.exactOptional(),
       })
       .nullable(),
     /**

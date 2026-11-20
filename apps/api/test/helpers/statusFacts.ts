@@ -106,6 +106,7 @@ export function healthyFacts(over: Partial<StatusFacts> = {}): StatusFacts {
     synthetic: false,
     worker: healthyWorker(),
     email: { configured: true, last: null },
+    settings: { envIgnored: [], setAside: [] },
     ...over,
   };
 }

@@ -130,6 +130,23 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(m.io.stdout).toContain('fix: add Travelpayouts');
   });
 
+  it('a fix made on the Settings page prints the page address of its section, and a settings check keeps parsing (ruling 13)', async () => {
+    const { m } = await installed([
+      check({
+        id: 'settings-aside-smtp-port',
+        area: 'settings',
+        state: 'fail',
+        summary: "Saved Mail server port isn't valid any more: set it again in Settings",
+        fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
+      }),
+    ]);
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(/settings +fail +Saved Mail server port/);
+    expect(m.io.stdout).toContain(
+      'fix: set it again in Settings › Email and alerts (http://127.0.0.1:3000/?view=settings&section=email)',
+    );
+  });
+
   it('the bar line counts every concern and says how many fail, naming a lone one by its label, provider or area', async () => {
     const warn = (id: string, area: apiContract.StatusCheck['area']) =>
       check({ id, area, state: 'warn', summary: 'look', fix: { text: 'x', command: null } });

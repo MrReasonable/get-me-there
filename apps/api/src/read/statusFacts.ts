@@ -10,6 +10,7 @@ import type {
   ExecutionStatus,
   IsoDateTime,
   ProviderId,
+  SettingsReport,
   SkipCode,
   StartRefusalReason,
 } from '@gmt/core';
@@ -176,4 +177,6 @@ export interface StatusFacts {
   synthetic: boolean;
   worker: WorkerFacts;
   email: EmailFacts;
+  /** What the boot did with the names the Settings page owns (ruling 13): the env lines ignored, the values set aside. */
+  settings: Pick<SettingsReport, 'envIgnored' | 'setAside'>;
 }

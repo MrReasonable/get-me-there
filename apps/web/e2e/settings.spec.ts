@@ -3,7 +3,7 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { z } from 'zod';
 import { COPY } from '../src/copy.js';
 import { expectNoSidewaysScroll } from './layout.js';
-import { showFullSettings, showLimitsAndEmail } from './settingsFixtures.js';
+import { showFullSettings, showLimitsAndEmail, showSystemChecks } from './settingsFixtures.js';
 import { FIXTURE_SEARCH } from './tripFixtures.js';
 
 // Settings plan Task 5 (rulings 9, 10, 14; Global Constraints layout checks): the Settings page through the built SPA,
@@ -200,6 +200,40 @@ for (const width of [375, 1280] as const)
       });
     });
   }
+
+// Settings plan Task 7 (ruling 13): System at 375 and 1280 px in light and dark, every kind of line, no sideways scroll,
+// and a fix that links to its section.
+for (const width of [375, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const)
+    test(`Settings › System at ${width}px, ${colorScheme}: one line per check, off and failing in words, no sideways scroll`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showSystemChecks(page);
+      await page.goto('/?view=settings&section=system');
+      const list = page.getByRole('list', { name: S.systemLabel });
+      await expect(list.getByRole('listitem').first()).toBeVisible();
+      await expect(list).toContainText(`${S.sysState.off}: Can't be seen from inside the container.`);
+      await expect(list).toContainText(`${S.sysState.fail}: Saved Mail server port`);
+      await expect(list).toContainText(`${S.sysState.warn}: SearchApi key in .env is ignored`);
+      await expect(
+        list.getByRole('link', { name: 'set it again in Settings › Email and alerts' }),
+      ).toHaveAttribute('href', '/?view=settings&section=email');
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({
+        path: `test-results/settings-shots/settings-system-${width}-${colorScheme}.png`,
+        fullPage: true,
+      });
+    });
+
+test('a System fix link opens its Settings section', async ({ page }) => {
+  await showSystemChecks(page);
+  await page.goto('/?view=settings&section=system');
+  await page.getByRole('link', { name: 'set it again in Settings › Email and alerts' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: S.section.email })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('section')).toBe('email');
+});
 
 test('a mail password typed and saved is never left in the page: the PUT carries it, the page shows only "saved"', async ({
   page,

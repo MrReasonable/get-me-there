@@ -235,9 +235,12 @@ export const COPY = {
       email: 'Alerts email you when a search finds a trip, with flights read, under your price.',
       system: "Only needs you when something isn't working; the top bar says so too.",
     } satisfies Record<SettingsSection, string>,
-    /** The sections that are not on this page yet keep their own pages until then. */
-    notHereYet: 'Not on this page yet.',
-    openStatus: 'Open the status report',
+    // System (ruling 13): the status report's checks, one per line
+    systemLabel: 'Checks',
+    sysState: { warn: 'To check', fail: 'Failing', off: 'Off' } satisfies Record<
+      Exclude<apiContract.StatusState, 'ok'>,
+      string
+    >,
     // the source switches (ruling 8)
     switchOn: 'New searches use it',
     switchOff: 'Off for new searches',
@@ -1486,6 +1489,7 @@ export const COPY = {
       worker: 'Browser worker',
       consent: 'Consent',
       email: 'Email',
+      settings: 'Settings',
     } satisfies Record<apiContract.StatusArea, string>,
     /** What an off check is called in the folded line. */
     offName: {
@@ -1498,6 +1502,7 @@ export const COPY = {
       worker: 'browser provider',
       consent: 'consent',
       email: 'email',
+      settings: 'settings',
     } satisfies Record<apiContract.StatusArea, string>,
     offLine: {
       'not-set-up': (names: string) => `not set up: ${names}`,

@@ -23,7 +23,9 @@ import {
   hoursSince,
   type IsoDate,
   type IsoDateTime,
+  type OwnedName,
   PROVIDER_NAMES,
+  SETTING_LABELS,
   SKIP_CODE_TEXT,
   START_REFUSAL_TEXT,
   TRIAL_WARN_CREDITS,
@@ -96,6 +98,20 @@ function fixer(f: Pick<StatusFacts, 'mode'>) {
   return (text: string, command: Cmd | null = null): StatusCheck['fix'] =>
     f.mode === 'native' ? { text, command } : { text: `${text}: see ${STATUS_TEXT.docs}`, command: null };
 }
+
+/** Settings plan ruling 13: a fix made on the Settings page, the same in every mode (the page works in each). */
+type SettingsSection = NonNullable<NonNullable<StatusCheck['fix']>['settings']>;
+const SETTINGS_WHERE: Readonly<Record<SettingsSection, string>> = {
+  sources: 'Settings › Price sources',
+  limits: 'Settings › Limits',
+  email: 'Settings › Email and alerts',
+  system: 'Settings › System',
+};
+const settingsFix = (text: string, section: SettingsSection, tail = ''): StatusCheck['fix'] => ({
+  text: `${text} in ${SETTINGS_WHERE[section]}${tail}`,
+  command: null,
+  settings: section,
+});
 
 /** What the time and mode words of a check need of the facts. */
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
@@ -397,7 +413,6 @@ function dataChecks(f: StatusFacts): StatusCheck[] {
 }
 
 function priceSourcesCheck(f: StatusFacts): StatusCheck {
-  const fix = fixer(f);
   const names = f.priceSources.usable.map((id) => PROVIDER_NAMES[id]);
   return names.length > 0
     ? check({
@@ -411,17 +426,9 @@ function priceSourcesCheck(f: StatusFacts): StatusCheck {
         area: 'provider',
         state: 'warn',
         summary: 'No price source is set up, so searches find nothing',
-        fix: fix(
-          'Travelpayouts is the no-cost source: add its token',
-          'pnpm gmt setup --reconfigure travelpayouts',
-        ),
+        fix: settingsFix('Travelpayouts is the no-cost source: add its token', 'sources'),
       });
 }
-
-const RECONFIGURE: Readonly<Record<string, Cmd>> = {
-  travelpayouts: 'pnpm gmt setup --reconfigure travelpayouts',
-  searchapi: 'pnpm gmt setup --reconfigure searchapi',
-};
 
 /** The Providers view's usage wording ("this month: 2 of 50000 calls", "7 of 24 calls over the plan's lifetime"). */
 function usageWords(u: NonNullable<ProviderFacts['usage']>): string {
@@ -443,7 +450,7 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       state: 'off',
       offReason: 'not-set-up',
       summary: `${name} is not set up`,
-      fix: fix(`add ${name}`, RECONFIGURE[p.id] ?? null),
+      fix: settingsFix(`add ${name}`, 'sources'),
     });
   const usage = p.usage === null ? '' : `; ${usageWords(p.usage)}`;
   const last = p.lastCall;
@@ -452,7 +459,7 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       ...base,
       state: 'fail',
       summary: `${name}: the last call was refused, the key is not accepted (${at(f, last.at)})`,
-      fix: fix(`replace the ${name} key`, RECONFIGURE[p.id] ?? null),
+      fix: settingsFix(`replace the ${name} key`, 'sources'),
     });
   if (last !== null && last.result === 'quota')
     return check({
@@ -765,7 +772,6 @@ const SEND_KIND: Readonly<Record<string, string>> = {
 };
 
 function emailCheck(f: StatusFacts): StatusCheck {
-  const fix = fixer(f);
   const e = f.email;
   if (!e.configured)
     return check({
@@ -774,7 +780,7 @@ function emailCheck(f: StatusFacts): StatusCheck {
       state: 'off',
       offReason: 'not-set-up',
       summary: 'email is not set up',
-      fix: fix('set email up to get alerts and notices', 'pnpm gmt setup --reconfigure email'),
+      fix: settingsFix('set email up to get alerts and notices', 'email'),
     });
   if (e.last?.result === 'failed')
     return check({
@@ -782,13 +788,67 @@ function emailCheck(f: StatusFacts): StatusCheck {
       area: 'email',
       state: 'fail',
       summary: `the last ${SEND_KIND[e.last.kind] ?? 'email'} email failed (${at(f, e.last.at)}), since the app started`,
-      fix: fix('check the SMTP settings and send a test again', 'pnpm gmt setup --reconfigure email'),
+      fix: settingsFix('check the mail server settings', 'email', ', then send a test again'),
     });
   const last =
     e.last === null
       ? 'no email sent since the app started'
       : `the last ${SEND_KIND[e.last.kind] ?? 'email'} email was ${e.last.result === 'sent' ? 'sent' : 'held back at the hourly limit'} at ${at(f, e.last.at)}, since the app started`;
   return check({ id: 'email', area: 'email', state: 'ok', summary: `configured; ${last}` });
+}
+
+/** The Settings section each owned name is edited in (the page's own grouping). */
+const NAME_SECTION: Readonly<Record<OwnedName, SettingsSection>> = {
+  TRAVELPAYOUTS_TOKEN: 'sources',
+  SEARCHAPI_KEY: 'sources',
+  SEARCHAPI_PLAN: 'sources',
+  SEARCHAPI_BILLING_DAY: 'sources',
+  CAMOUFOX_BROWSER_WINDOW: 'sources',
+  FLIGHT_READ_PATIENCE: 'sources',
+  DISCOVERY_REFRESH_DAYS: 'sources',
+  NEW_SEARCH_DISCOVERY: 'sources',
+  NEW_SEARCH_VERIFICATION: 'sources',
+  MONTHLY_SPEND_CAP_PENCE: 'limits',
+  EXECUTION_MAX_CALLS: 'limits',
+  SMTP_HOST: 'email',
+  SMTP_PORT: 'email',
+  SMTP_TLS: 'email',
+  SMTP_USER: 'email',
+  SMTP_PASS: 'email',
+  ALERT_EMAIL_TO: 'email',
+  ALERT_EMAIL_FROM: 'email',
+};
+const idOf = (name: OwnedName) => name.toLowerCase().replaceAll('_', '-');
+
+/**
+ * Ruling 13, one check per name: an `.env` line the Settings page now owns is ignored (warn); a saved value the schema
+ * refused is set aside for this boot (fail). The words come from the label table, never from a value.
+ */
+function settingsChecks(f: StatusFacts): StatusCheck[] {
+  return [
+    ...f.settings.envIgnored.map((name) =>
+      check({
+        id: `settings-env-${idOf(name)}`,
+        area: 'settings',
+        state: 'warn',
+        summary: `${SETTING_LABELS[name]} in .env is ignored: Settings holds it. Remove the line from .env.`,
+        fix: {
+          text: `remove the line from .env; change the value in ${SETTINGS_WHERE[NAME_SECTION[name]]}`,
+          command: null,
+          settings: NAME_SECTION[name],
+        },
+      }),
+    ),
+    ...f.settings.setAside.map((name) =>
+      check({
+        id: `settings-aside-${idOf(name)}`,
+        area: 'settings',
+        state: 'fail',
+        summary: `Saved ${SETTING_LABELS[name]} isn't valid any more: set it again in Settings`,
+        fix: settingsFix('set it again', NAME_SECTION[name]),
+      }),
+    ),
+  ];
 }
 
 /** Every check of brief WP18 §6 for these facts, worst first (core's `sortChecks`). */
@@ -805,6 +865,7 @@ export function buildChecks(f: StatusFacts): StatusCheck[] {
     workerCheckOf(f, f.worker),
     consentOutcome(f, f.worker).check,
     emailCheck(f),
+    ...settingsChecks(f),
   ];
   return apiContract.sortChecks(checks);
 }

@@ -4,13 +4,14 @@ import { useBudget, useProviders, useSettings } from '../../api/queries.js';
 import { Crumbs } from '../../components/Crumbs.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
-import { hrefWith, navigateTo, useSearchParams } from '../../state/urlState.js';
+import { hrefWith, useSearchParams } from '../../state/urlState.js';
 import { navPatch, parseSettingsSection, SECTION_PARAM } from '../../state/view.js';
 import { EmailAlerts, type EmailChoice } from './EmailAlerts.js';
 import { Limits } from './Limits.js';
 import { PriceSources } from './PriceSources.js';
 import { SaveBar } from './SaveBar.js';
 import { SettingsNav } from './SettingsNav.js';
+import { System } from './System.js';
 import { useSettingsForm } from './useSettingsForm.js';
 import './settings.css';
 
@@ -25,21 +26,6 @@ export function SettingsCrumbs({ title }: { title: string }) {
     <Crumbs
       items={[{ label: COPY.crumbs.settings, href: hrefWith(navPatch('settings')) }, { label: title }]}
     />
-  );
-}
-
-/** System is not on this page yet: the status report keeps it until then. */
-function NotHereYet() {
-  const patch = navPatch('status');
-  return (
-    <div className="st-card st-src">
-      <p>
-        {S.notHereYet}{' '}
-        <a href={hrefWith(patch)} onClick={navigateTo(patch)}>
-          {S.openStatus}
-        </a>
-      </p>
-    </div>
   );
 }
 
@@ -87,7 +73,7 @@ export function SettingsView() {
           <h2 id="settings-section">{S.section[section]}</h2>
           <p className="st-lede">{S.lede[section]}</p>
           {section === 'system' ? (
-            <NotHereYet />
+            <System />
           ) : settings.data === undefined ? (
             settings.error === null ? (
               <Loading />

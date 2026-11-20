@@ -464,5 +464,6 @@ export async function gatherFacts(ctx: RouteContext, env: StatusEnv): Promise<St
     synthetic: registered(ports, 'fixture'),
     worker,
     email: { configured: ports.config.smtp !== null, last: env.emailLast() },
+    settings: { envIgnored: ports.settingsReport.envIgnored, setAside: ports.settingsReport.setAside },
   };
 }
