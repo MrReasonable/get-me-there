@@ -152,8 +152,8 @@ settings file: a line left there does nothing, and it is reported once it differ
 1. **In the container:** back up (section 6), then `git pull` and
    `docker compose up -d --build --wait --wait-timeout 240` (section 11, Upgrade). On that first
    start each of these settings' lines in `.env` is imported once. Open Settings, check each
-   section's values and keep a private copy of the file as it is (`cp .env .env.pre-settings`,
-   then `chmod 600 .env.pre-settings`), then remove those lines from `.env` (`.env.example` marks
+   section's values and keep a private copy of the file as it is (`cp -p .env .env.pre-settings`,
+   which keeps the file's own mode), then remove those lines from `.env` (`.env.example` marks
    them `[Settings]`) and run `docker compose up -d`.
 2. **Natively:** `pnpm gmt update`. On the first start after it, each of these settings' lines in
    `~/.config/get-me-there/app.env` is imported once. Open Settings, check each section's values,
@@ -961,7 +961,7 @@ failing check.
   named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 240`. An older version
   cannot use a database a newer one has migrated, so the restore is required. Going back to a
   version from before the Settings page, first put back the `.env` copy kept when the Settings
-  lines were removed (`cp .env.pre-settings .env`; section 0, "Updating to a version with the
+  lines were removed (`cp -p .env.pre-settings .env`; section 0, "Updating to a version with the
   Settings page"): that version reads its keys, limits and email only from `.env`. Without the
   copy, write those lines into `.env` again by hand from Settings before going back (a saved
   key is shown only by its last four characters, so have the keys themselves to hand).
