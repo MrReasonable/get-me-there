@@ -27,8 +27,15 @@
 # quicker settle renames four; not yet confirmed by a Windows run.
 # The booking page's address (spec rev 69) adds eight return-phase tests that share that file's POSIX-mode setup
 # (https://github.com/MrReasonable/get-me-there/actions/runs/43631937545).
+# The Settings page (spec rev 72) adds two app.settings tests whose boot backs up first and so fails there with 74 at
+# the backup's world-writable refusal (as app.backup's listed test does), and the real-process restart test, whose
+# child.kill('SIGTERM') ends the child with exit null there (as the listed production-boot test does)
+# (https://github.com/MrReasonable/get-me-there/actions/runs/44675618796).
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
+apps/api/test/bootstrap/app.settings.test.ts > what is checked only once the stored settings are read comes after the backup and the migrations (ruling 3) a bad variable read only when a key is set fails the app boot with 78 after the migrations, importing nothing
+apps/api/test/bootstrap/app.settings.test.ts > what is checked only once the stored settings are read comes after the backup and the migrations (ruling 3) a record run without a key: backed up, migrated, then refused with 78 naming both places a key lives
+apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) a save restarts the real process in place: the next pass listens on the same port with a new boot id and the saved value (settings plan ruling 6)
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
 apps/api/test/bootstrap/moved.test.ts > movedDatabaseRefusal (spec §13) outside a container, the rm line quotes a path with spaces and quotes so it can be pasted as it is
 apps/api/test/bootstrap/preflight.test.ts > bootstrap preflight (spec §7 Migrations) backups live beside the database and five are kept
