@@ -152,13 +152,20 @@ settings file: a line left there does nothing, and it is reported once it differ
 1. **In the container:** back up (section 6), then `git pull` and
    `docker compose up -d --build --wait --wait-timeout 240` (section 11, Upgrade). On that first
    start each of these settings' lines in `.env` is imported once. Open Settings, check each
-   section's values, then remove those lines from `.env` (`.env.example` marks them `[Settings]`)
-   and run `docker compose up -d`.
+   section's values and keep a private copy of the file as it is (`cp .env .env.pre-settings`,
+   then `chmod 600 .env.pre-settings`), then remove those lines from `.env` (`.env.example` marks
+   them `[Settings]`) and run `docker compose up -d`.
 2. **Natively:** `pnpm gmt update`. On the first start after it, each of these settings' lines in
    `~/.config/get-me-there/app.env` is imported once. Open Settings, check each section's values,
-   then remove those lines from `app.env` and run `pnpm gmt restart`. From then on change them
-   in Settings; `pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email` print the
-   Settings address.
+   and keep a private copy of the file as it is (`cp -p ~/.config/get-me-there/app.env
+   ~/.config/get-me-there/app.env.pre-settings`), then remove those lines from `app.env` and run
+   `pnpm gmt restart`. From then on change them in Settings; `pnpm gmt setup --reconfigure
+   travelpayouts`, `searchapi` and `email` print the Settings address.
+
+The copy holds your keys and mail password, as the settings file does, so keep it as private. A
+version from before the Settings page reads these settings only from the settings file: to go
+back to one, put the copy back in place of the settings file (section 11, "Roll back a failed
+upgrade") before you start it. Once you are sure you will stay on this version, delete the copy.
 
 Settings has four sections: **Price sources** (each source's key, whether new searches use it,
 SearchApi's plan, billing day and its own count of credits left, and the browser's block),
@@ -267,8 +274,9 @@ installs, builds, switches the browser to the new Camoufox, restarts, waits for 
 the status. If a step fails it prints the commit it started from, the backup (or why there is
 none), and the ways back; running `pnpm gmt update` again carries on from the failed step. The
 first update to a version with the Settings page imports the settings it keeps from `app.env` once;
-check them in Settings, then remove those lines ("Updating to a version with the Settings page",
-above). A failed browser step never keeps the app down: the app starts without the browser worker, the
+check them in Settings, keep a private copy of `app.env`, then remove those lines ("Updating to a
+version with the Settings page", above). Going back to a version from before the Settings page,
+put that copy back as `app.env` first: that version reads these settings only from `app.env`. A failed browser step never keeps the app down: the app starts without the browser worker, the
 update exits 1, and `pnpm gmt browser install` retries the browser.
 
 ### Moving from Docker or from a checkout
@@ -947,11 +955,16 @@ failing check.
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
   `docker compose cp` that file out) so a copy exists off the volume. The first upgrade to a
   version with the Settings page imports the settings it keeps from `.env` once: check them in
-  Settings, then remove those lines from `.env` (section 0, "Updating to a version with the
-  Settings page").
+  Settings, keep a private copy of `.env` (git ignores `.env.pre-settings`), then remove those
+  lines from `.env` (section 0, "Updating to a version with the Settings page").
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
   named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 240`. An older version
-  cannot use a database a newer one has migrated, so the restore is required.
+  cannot use a database a newer one has migrated, so the restore is required. Going back to a
+  version from before the Settings page, first put back the `.env` copy kept when the Settings
+  lines were removed (`cp .env.pre-settings .env`; section 0, "Updating to a version with the
+  Settings page"): that version reads its keys, limits and email only from `.env`. Without the
+  copy, write those lines into `.env` again by hand from Settings before going back (a saved
+  key is shown only by its last four characters, so have the keys themselves to hand).
 - **Base image updates.** The `Dockerfile` pins `node:22-slim` by digest, so security fixes to
   Node and Debian arrive only when the pin moves. Once a month, run
   `docker buildx imagetools inspect node:22-slim`, put the new top-level digest in every `FROM`

@@ -3329,7 +3329,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   step's own reuse split applied over all of it. **At most** is every unreused pair in
   the queue. **Typically** it is `max(min(unreused, patience),
   min(queue, CONFIRM_TARGET + patience + CONFIRM_TYPICAL_EXTRA) − the
-  reusable pairs among the queue's first 25)` reads, never more than the unreused:
+  reusable pairs among the queue's first `CONFIRM_TARGET + patience +
+  CONFIRM_TYPICAL_EXTRA`, 25 at the default patience of 12)` reads, never more than the unreused:
   the reads until the target is held and the patience has run out, with
   `CONFIRM_TYPICAL_EXTRA = 8` more for reads that improve on it, less the
   reusable ones among them, but never fewer than the patience, since reuse
@@ -3578,14 +3579,17 @@ that pauses keeps its pause and resumes under the new settings). The restart
 follows the last such end of any kind (succeeded, failed, cancelled,
 budget-paused, interrupted), checked as each run, read and tool run settles
 through the engine's second observer (`EngineOptions.runWatch`); two saves
-during a run give one restart. The close is the shutdown above (scheduler,
+during a run give one restart. A check that cannot read whether anything is
+in flight is logged and checked again 5 s later (again after each failure),
+so the restart is never lost and nothing in flight is stopped. The close is the shutdown above (scheduler,
 engine drain, checkpoint, lock release, the server's close awaited; once the
 server stops listening, each keep-alive connection is closed as soon as its
 response is written, so a client's kept-alive connection, a page asking
 `/health` over it every second above all, can neither hold the close nor be
 answered by the closing pass), and the next pass boots in the same process on the same port (§12's boot order,
 taking the lock without the other-holder wait), with a new `bootId`
-(`GET /health`). The process registers SIGTERM and SIGINT once; a signal during
+(`GET /health`). The process registers SIGTERM and SIGINT once and keeps
+both listeners until it exits (a second signal during the close is ignored); a signal during
 a pass's close or boot ends the loop, and a pass whose boot throws exits with
 the boot-failure code and log, for the supervisor to restart. A catch-up keeps the `camoufox` provider in
 its snapshot for the reuse step only: reuse copies camoufox's own outcomes
@@ -4126,8 +4130,8 @@ points alike; a bare `true` is refused.
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | `GET /alerts` gives each rule its `lastSentAt`, the fire time of its newest `notified` event (null when it never sent; queued and suppressed events are not sends), read for Settings › Email and alerts |
 | `GET /settings` | authenticated, the Settings page's read (`settingsViewSchema`): `values` (every owned plain name, §12, as stored, null when unset), `secrets` (each owned secret as `{ set, last4 }`, `last4` only for the two API keys, never a password; no route ever returns a secret), `newSearchSources { discovery, verification }` (the sources a new search starts with, an unset list as the draft gives it, through the same function as `/providers`' presets), `envOnly { camoufoxEnabled, searchApiTrialUsed }` (shown, not owned), this boot's `envIgnored` and `setAside` names, and `pending: { running } \| null` (the searches a saved change waits for) |
-| `PUT /settings` | body `{ changes }`, a partial record of owned names to a string or null (null unsets; a secret not named is kept; the body's secrets join the request's scrub list before anything can fail); a name that is not owned is 422 `unknown_setting` without echoing it; the changes are laid over the stored rows and parsed through the config schema with every refusal 422 `invalid_settings` whose `details.fields[]` are `{ field: <owned name>, message }` (core `settingRefusal`'s words, with no env name or value; the page labels them from `SETTING_LABELS`) and nothing saved, a half email setup named field by field; valid, the changed names are written in one transaction and the answer is `{ warnings, applies }`: `warnings` the boot-style warnings (a spend limit below the plan's fees), `applies` `'now'` (the app restarts in place at once), `'after-runs'` with `running` (it restarts after those searches end; §8.2) or `'unchanged'` (nothing differed: nothing written, nothing restarts); a stored value the save leaves untouched that now fails the parse is set aside as at boot, never a refusal of the save; an `.env` line of a name the page does not own that the save makes the parse read and refuse (a first SearchApi key makes it read `SEARCHAPI_MONTHLY_CALL_CAP`) is 422 `invalid_env` with `details.lines[]` naming each such variable (never its value), nothing saved; the page says "Nothing was saved: <names> in .env isn't valid with these settings. Fix the line in .env, then save again." |
-| `POST /settings/email-test` | body: the email form's `{ host, port, tls, user, pass?, from, to }`; the stored password is used only when host, port, TLS and user equal the stored ones, else the body must carry one (422 before any connection); TLS `none` follows the loopback rule (§8.3) and each address must be one mailbox; connect and socket timeouts 10 s; `{ result: 'sent', at }`, or 502 `email_test_failed` with `details.reason` one of `refused`, `timed-out`, `sign-in-refused`, `not-a-mail-server` (never the server's reply or address); one test a minute shared with `POST /alerts/test-email` (429 past it) |
+| `PUT /settings` | body `{ changes }`, a partial record of owned names to a string or null (null unsets; a secret not named is kept; the body's secrets join the request's scrub list before anything can fail); a name that is not owned is 422 `unknown_setting` without echoing it; the changes are laid over the stored rows and parsed through the config schema with every refusal 422 `invalid_settings` whose `details.fields[]` are `{ field: <owned name>, message }` (core `settingRefusal`'s words, with no env name or value; the page labels them from `SETTING_LABELS`) and nothing saved, a half email setup named field by field; valid, the changed names are written in one transaction and the answer is `{ warnings, applies }`: `warnings` the boot-style warnings (a spend limit below the plan's fees), `applies` `'now'` (the app restarts in place at once), `'after-runs'` with `running` (it restarts after those searches end; §8.2) or `'unchanged'` (nothing differed: nothing written, nothing restarts); a stored value the save leaves untouched that now fails the parse is set aside as at boot, never a refusal of the save; an `.env` line of a name the page does not own that the save makes the parse read and refuse (a first SearchApi key makes it read `SEARCHAPI_MONTHLY_CALL_CAP`) is 422 `invalid_env` with `details.lines[]` naming each such variable (never its value), nothing saved; the page says "Nothing was saved: <names> in .env isn't valid with these settings. Fix the line in .env and restart the app (it reads .env only when it starts), then save again." |
+| `POST /settings/email-test` | body: the email form's `{ host, port, tls, user, pass?, from, to }`; the stored password is used only when host, port, TLS and user equal the stored ones, else the body must carry one (422 before any connection); TLS `none` follows the loopback rule (§8.3) and each address must be one mailbox; connect and socket timeouts 10 s, and the whole send 30 s (past it `timed-out`, the transport closed and the test limit handed back; never retried, as the server may have taken it; `POST /alerts/test-email` has the same deadline); `{ result: 'sent', at }`, or 502 `email_test_failed` with `details.reason` one of `refused`, `timed-out`, `sign-in-refused`, `not-a-mail-server` (never the server's reply or address); one test a minute shared with `POST /alerts/test-email` (429 past it) |
 | `GET /searchapi/account` | SearchApi's own balance, `{ account: { remaining, monthlyAllowance, periodEnd, fetchedAt } \| null }` from the vendor's `GET /api/v1/me` (§5.3's unledgered `searchapi-account` id: no ledger row, no reservation, no retry, a 10 s timeout; measured 2026-11-19 not to bill): `periodEnd` is the subscription's period end as a date in `SCHEDULER_TIMEZONE`, null on the trial; kept 10 minutes and refreshed after a run that called SearchApi; a failed refresh answers the last good read, its own `fetchedAt` showing its age, for up to 24 hours; null with no key or no read |
 | `GET /scheduler/jobs`, `GET /budget` | |
 
@@ -5114,7 +5118,7 @@ CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (loa
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
-CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way; [Settings]
+CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value is set aside at start (the log names it, the default scheduled applies) until Settings fixes it; app side only, not shared with the worker; a catch-up loads no browser page either way; [Settings]
 # worker side only (macOS and Linux; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
 # fixed, not configurable: concurrency = CAMOUFOX_PAGES_AT_ONCE, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0), no page or scroll cap a run or a month, and its pages count against no per-run call cap (EXECUTION_MAX_FREE_CALLS included; flight-list pages have their own allowance of 20), cost 0, cache never
 # --- email (all or nothing) ---
@@ -5862,9 +5866,12 @@ no key or password".
   page's Alert fold links "Email isn't set up yet" to Settings › Email and alerts; restore judges SearchApi's
   plan as the app would (R18: the restored file's stored row layered over `app.env` by `layerSettings`), else the
   plan-free advice; setup's closing screen judges the price source by
-  the app's report; `gmt status` adds a local price-source line only when the report cannot be read, naming why; the
+  the app's report (a report that cannot be read, over a settings file naming no source, is said as not known, never
+  as no source); `gmt status` adds a local price-source line only when the report cannot be read, naming why; the
   operator docs give the one-time update steps (the container first, then native: check the imported values in
-  Settings, then remove the lines), and natively `.env` in the Status words is `app.env`.
+  Settings, keep a private copy of the settings file, then remove the lines; a rollback to a version from before the
+  Settings page puts that copy back first, as that version reads these settings only from the file), and natively
+  `.env` in the Status words is `app.env`.
 - **Ruling (execution): secrets of fewer than 8 characters** (`MIN_SECRET_LENGTH`) are refused on save and set aside at
   boot, so a short secret can never stop the app starting.
 

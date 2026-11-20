@@ -569,6 +569,12 @@ describe('the Settings page owns its names (settings plan, spec revision 72)', (
     expect(update.indexOf('**In the container:**')).toBeLessThan(update.indexOf('**Natively:**'));
     expect(update).toContain('then remove those lines from `.env`');
     expect(update).toContain('then remove those lines from `app.env`');
+    // why: CodeRabbit (PR #64): a version from before the Settings page reads these settings only from the file, so the
+    // removed lines are kept in a private copy, and the rollback puts it back first
+    expect(update).toContain('keep a private copy of the file as it is (`cp .env .env.pre-settings`');
+    expect(update).toContain('~/.config/get-me-there/app.env.pre-settings`), then remove');
+    expect(update).toContain('put the copy back in place of the settings file');
+    expect(between(setup, '## 11.', '## 12.').replace(/\s+/g, ' ')).toContain('cp .env.pre-settings .env');
     expect(flat0).toContain('Natively, `.env` in those words means `~/.config/get-me-there/app.env`.');
     expect(between(setup, '## 11.', '## 12.').replace(/\s+/g, ' ')).toContain(
       'imports the settings it keeps from `.env` once',
