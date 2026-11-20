@@ -16,7 +16,7 @@ beforeEach(() => {
 const TAG = '0014_settings';
 
 describe('migration 0014 (the settings table)', () => {
-  it('applies to a database migrated to 0013, leaving its tables as they were', () => {
+  it('applies to a database migrated to 0013, leaving its tables and their rows as they were', () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(db, migrationsWithout([TAG]));
     const tables = () =>
@@ -25,9 +25,19 @@ describe('migration 0014 (the settings table)', () => {
           "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name <> 'settings' ORDER BY name",
         )
         .all();
+    // why: a row of application data (a synthetic airport) comes through unchanged too, not only the definitions
+    db.raw
+      .prepare(
+        `INSERT INTO airports (iata, icao, name, city, country, tz, lat, lon, metro, source, dataset_version) VALUES ('AAA', NULL, 'Synthetic', 'Nowhere', 'ZZ', 'UTC', 0, 0, NULL, 's', 'v')`,
+      )
+      .run();
+    const rows = () => db.raw.prepare('SELECT * FROM airports ORDER BY iata').all();
     const before = tables();
+    const rowsBefore = rows();
+    expect(rowsBefore).toHaveLength(1);
     expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG]);
     expect(tables()).toEqual(before);
+    expect(rows()).toEqual(rowsBefore);
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM settings').get()).toEqual({ n: 0 });
     expect(db.raw.pragma('integrity_check', { simple: true })).toBe('ok');
   });
