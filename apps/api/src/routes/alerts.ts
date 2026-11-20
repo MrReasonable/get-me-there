@@ -40,7 +40,14 @@ export const alertHandlers: HandlerTable = {
 
   'GET /api/alerts': route(
     { request: NO_INPUT, query: apiContract.alertRulesQuerySchema },
-    (c, { query }, ctx) => c.json(ctx.ports.repos.alerts.rules(query.definitionId)),
+    (c, { query }, ctx) => {
+      const { alerts } = ctx.ports.repos;
+      // why: settings plan R13 — each rule says when it last sent, exactly, from its own events
+      const sent = alerts.lastSends();
+      return c.json(
+        alerts.rules(query.definitionId).map((r) => ({ ...r, lastSentAt: sent.get(r.id) ?? null })),
+      );
+    },
   ),
 
   'POST /api/alerts': route(

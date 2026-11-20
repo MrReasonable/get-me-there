@@ -108,7 +108,7 @@ test('a key typed and saved is never left in the page: the PUT carries it, the p
   const field = card.locator('input[type="password"]');
   await expect(field).toHaveAttribute('autocomplete', 'new-password');
   await field.fill(KEY);
-  await page.getByRole('button', { name: S.save(S.section.sources) }).click();
+  await page.getByRole('button', { name: S.saveLabel.sources }).click();
   await expect(page.getByText(S.restarted)).toBeVisible();
   expect(bodies).toEqual([{ changes: { SEARCHAPI_KEY: KEY } }]);
   await expect(field).toHaveCount(0);
@@ -223,7 +223,7 @@ test('a mail password typed and saved is never left in the page: the PUT carries
   await expect(field).toHaveAttribute('autocomplete', 'new-password');
   await field.fill(PASS);
   await page.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_TO }).fill('alerts@example.com');
-  await page.getByRole('button', { name: S.save(S.section.email) }).click();
+  await page.getByRole('button', { name: S.saveLabel.email }).click();
   await expect(page.getByText(S.restarted)).toBeVisible();
   expect(bodies).toEqual([
     {

@@ -194,7 +194,7 @@ export interface SettingsForm {
   unsaved(section: SettingsSection): boolean;
   /** A 422's words for a field, by owned name. */
   error(name: OwnedName): string | null;
-  /** Puts refusals beside their fields (a test email's 422 says them as a save's does). */
+  /** Puts refusals beside their fields, with any already there (a test email's 422 says them as a save's does). */
   refuse(errors: Partial<Record<OwnedName, string>>): void;
   /** Saves `changes` (the section's own by default); the result is in `result`. */
   save(section: SettingsSection, changes?: Changes): Promise<void>;
@@ -412,7 +412,8 @@ export function useSettingsForm(
       return Object.keys(p.changes).length > 0 || p.refused.length > 0;
     },
     error: (name) => errors[name] ?? null,
-    refuse: (next) => setErrors(next),
+    // why: a test email's refusals join those a save left, never wiping them (fix round 1, minor 4)
+    refuse: (next) => setErrors((e) => ({ ...e, ...next })),
     save,
     result,
     saves,

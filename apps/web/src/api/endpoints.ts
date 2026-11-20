@@ -114,12 +114,11 @@ export const api = {
       params: { origin, destination },
       query: { cabin },
     }),
+  // settings plan R13: each listed rule says when it last sent
   alertRules: (definitionId: string) =>
-    call(c.alertRuleSchema.array(), 'GET', '/api/alerts', { query: { definitionId } }),
-  // settings plan ruling 12: every search's rules at once, and the newest events of them all, for Settings › Email
-  everyAlertRule: () => call(c.alertRuleSchema.array(), 'GET', '/api/alerts'),
-  everyAlertEvent: (limit: number) =>
-    call(c.alertEventSchema.array(), 'GET', '/api/alerts/events', { query: { limit: String(limit) } }),
+    call(c.alertRuleListedSchema.array(), 'GET', '/api/alerts', { query: { definitionId } }),
+  // settings plan ruling 12: every search's rules at once, for Settings › Email and alerts
+  everyAlertRule: () => call(c.alertRuleListedSchema.array(), 'GET', '/api/alerts'),
   createAlertRule: (body: AlertRuleBody) => call(c.alertRuleSchema, 'POST', '/api/alerts', { body }),
   // why: DELETE soft-deletes the rule (AlertsRepo.softDelete); its events stay listed.
   deleteAlertRule: (id: string) => call(c.alertRuleSchema, 'DELETE', '/api/alerts/:id', { params: { id } }),

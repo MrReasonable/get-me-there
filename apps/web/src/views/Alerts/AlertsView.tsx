@@ -27,6 +27,8 @@ export function AlertsView(props: { definitionId: string }) {
   const refresh = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: alertKeys.rules(props.definitionId) }),
+      // why: Settings › Email and alerts lists every search's rules; an Edit there leads here and back (fix round 1)
+      qc.invalidateQueries({ queryKey: alertKeys.every, exact: true }),
       qc.invalidateQueries({ queryKey: alertKeys.events(props.definitionId) }),
     ]);
   const create = useMutation({ mutationFn: api.createAlertRule, onSuccess: refresh });

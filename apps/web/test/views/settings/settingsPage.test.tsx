@@ -67,7 +67,7 @@ const searchApiCard = () => sourceCard(COPY.newSearch.source.searchapi);
 const cacheCard = () => sourceCard(COPY.newSearch.source.travelpayouts);
 const switchOf = (card: HTMLElement, source: string) =>
   within(card).getByRole('switch', { name: S.switchLabel(source) });
-const saveButton = () => screen.getByRole('button', { name: S.save(S.section.sources) });
+const saveButton = () => screen.getByRole('button', { name: S.saveLabel.sources });
 const patience = () => screen.findByRole('spinbutton', { name: SETTING_LABELS.FLIGHT_READ_PATIENCE });
 
 describe('the sections are in the URL (ruling 14)', () => {

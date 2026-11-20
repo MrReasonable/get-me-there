@@ -93,6 +93,19 @@ export class AlertsRepo {
       .map(toRule);
   }
 
+  /**
+   * Settings plan R13: each rule's last send, the fire time of its newest `notified` event, by rule id; a rule that has
+   * never sent (its events only queued or suppressed, or none) is absent.
+   */
+  lastSends(): Map<string, IsoDateTime> {
+    const rows = this.db.raw
+      .prepare<[], { ruleId: string; lastSentAt: string }>(
+        `SELECT rule_id AS ruleId, MAX(fired_at) AS lastSentAt FROM alert_events WHERE status = 'notified' GROUP BY rule_id`,
+      )
+      .all();
+    return new Map(rows.map((r) => [r.ruleId, readTime('alert_events.fired_at', r.lastSentAt)]));
+  }
+
   /** A live rule; a soft-deleted rule reads as absent. */
   get(id: string): AlertRule | null {
     const r = this.db.raw

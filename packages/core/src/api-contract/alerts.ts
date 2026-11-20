@@ -44,6 +44,14 @@ const refineRule = (
 /** Spec §6.8 rule. */
 export const alertRuleInputSchema = z.object(ruleFields).superRefine(refineRule);
 export const alertRuleSchema = z.object({ ...ruleFields, id: z.string() }).superRefine(refineRule);
+/**
+ * `GET /alerts` (settings plan R13): a rule with when it last sent, the fire time of its newest `notified` event; null
+ * when it has never sent (queued and suppressed events are not sends).
+ */
+export const alertRuleListedSchema = z
+  .object({ ...ruleFields, id: z.string(), lastSentAt: isoDateTimeSchema.nullable() })
+  .superRefine(refineRule);
+export type AlertRuleListed = z.output<typeof alertRuleListedSchema>;
 /** PUT body: any subset of the rule fields; the merged rule is re-validated with alertRuleInputSchema by the route. */
 // why: the create schema defaults cooldownHours to 336; zod 4 applies a default inside .partial() too, so a body naming
 // only `enabled` would silently reset a custom cooldown. The update shape therefore carries no default.

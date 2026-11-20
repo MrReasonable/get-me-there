@@ -403,6 +403,7 @@ describe('Alert', () => {
     requireAllVerified: null,
     cooldownHours: 336,
     enabled: true,
+    lastSentAt: null,
     ...over,
   });
   const serveRules = (rules: unknown[]) =>
@@ -514,6 +515,7 @@ describe('Alert, the calendar-prices line and the cooldown in words', () => {
     requireAllVerified: null,
     cooldownHours: 336,
     enabled: true,
+    lastSentAt: null,
     ...over,
   });
 
@@ -700,6 +702,7 @@ describe('the folds’ words', () => {
             requireAllVerified: null,
             cooldownHours: 336,
             enabled: true,
+            lastSentAt: null,
           },
           {
             id: 'r2',
@@ -711,6 +714,7 @@ describe('the folds’ words', () => {
             requireAllVerified: true,
             cooldownHours: 336,
             enabled: true,
+            lastSentAt: null,
           },
         ]),
       ),

@@ -1,4 +1,4 @@
-import type { AlertRule } from '@gmt/core';
+import type { apiContract } from '@gmt/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../../api/endpoints.js';
@@ -13,33 +13,18 @@ import { describeRule } from '../Alerts/ruleText.js';
 const A = COPY.settingsView.alerts;
 
 /**
- * The newest alert events read to find each rule's last send. The api lists them newest first, so a rule's last send is
- * among them unless a thousand later events of other rules came after it; with one operator's handful of rules, that
- * is far beyond what happens.
+ * One rule: its search and its words, when it last sent (the route's own `lastSentAt`, settings plan R13), Edit (the
+ * Alerts view's form) and Delete, asked first.
  */
-const EVENTS_READ = 1000;
-
-/** Each rule's newest event that was sent (`notified`), by rule id. */
-function lastSends(
-  events: readonly { ruleId: string; status: string; firedAt: string }[],
-): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const e of events) if (e.status === 'notified' && !out.has(e.ruleId)) out.set(e.ruleId, e.firedAt);
-  return out;
-}
-
-/** One rule: its search and its words, when it last sent, Edit (the Alerts view's form) and Delete, asked first. */
 function RuleLine({
   rule,
   search,
-  lastSent,
   confirming,
   onConfirm,
   onDelete,
 }: {
-  rule: AlertRule;
+  rule: apiContract.AlertRuleListed;
   search: string;
-  lastSent: string | null | undefined;
   confirming: boolean;
   onConfirm: (open: boolean) => void;
   onDelete: () => void;
@@ -54,11 +39,9 @@ function RuleLine({
         <span data-quote="">{describeRule(rule, true)}</span>
         {rule.enabled ? null : ` · ${A.off}`}
       </span>
-      {lastSent === undefined ? null : (
-        <span className="st-hint">
-          {A.lastSent(lastSent === null ? A.never : formatInstantLondon(Date.parse(lastSent)))}
-        </span>
-      )}
+      <span className="st-hint">
+        {A.lastSent(rule.lastSentAt === null ? A.never : formatInstantLondon(Date.parse(rule.lastSentAt)))}
+      </span>
       <span className="st-row-buttons">
         <a
           className="st-btn st-btn-sm st-btn-quiet"
@@ -104,29 +87,21 @@ function RuleLine({
 export function AlertList({ emailSetUp }: { emailSetUp: boolean }) {
   const qc = useQueryClient();
   const rules = useQuery({ queryKey: alertKeys.every, queryFn: () => api.everyAlertRule() });
-  const events = useQuery({
-    queryKey: alertKeys.everyEvent,
-    queryFn: () => api.everyAlertEvent(EVENTS_READ),
-  });
   const definitions = useDefinitions();
   const [confirming, setConfirming] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteAlertRule(id),
     // why: every rule list reads again: this one, a search's Alerts view and its page's Alert fold share the prefix
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: alertKeys.every }),
-        qc.invalidateQueries({ queryKey: alertKeys.everyEvent }),
-      ]),
+    onSuccess: () => qc.invalidateQueries({ queryKey: alertKeys.every }),
   });
-  // why: the lines wait for the names and the sends, unless one of those reads failed (the rules still show)
-  const waiting =
-    rules.data === undefined ||
-    (definitions.data === undefined && definitions.error === null) ||
-    (events.data === undefined && events.error === null);
-  const sent = events.data === undefined ? null : lastSends(events.data);
+  // why: the lines wait for the searches' names, unless that read failed (the rules still show, their search unnamed)
+  const waiting = rules.data === undefined || (definitions.data === undefined && definitions.error === null);
+  // why: a search missing from a good read was removed; with no read at all the line can't say which search it is
+  // (fix round 1, minor 2)
   const nameOf = (definitionId: string) =>
-    definitions.data?.find((d) => d.id === definitionId)?.name ?? A.removedSearch;
+    definitions.data === undefined
+      ? A.unnamedSearch
+      : (definitions.data.find((d) => d.id === definitionId)?.name ?? A.removedSearch);
   return (
     <div className="st-card st-src st-alerts">
       <h3 id="settings-alerts">{A.heading}</h3>
@@ -149,7 +124,6 @@ export function AlertList({ emailSetUp }: { emailSetUp: boolean }) {
               key={r.id}
               rule={r}
               search={nameOf(r.definitionId)}
-              lastSent={sent === null ? undefined : (sent.get(r.id) ?? null)}
               confirming={confirming === r.id}
               onConfirm={(open) => setConfirming(open ? r.id : null)}
               onDelete={() => {

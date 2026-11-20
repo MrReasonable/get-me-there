@@ -54,7 +54,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'settingsView.callsThisMonth': [64, 50_000],
   'settingsView.secretEnds': ['3f2a'],
   'settingsView.confirmRemove': ['SearchApi key'],
-  'settingsView.save': ['Price sources'],
   'settingsView.appliesAfter': [['London → New York']],
   'settingsView.limits.spent': ['£0'],
   'settingsView.email.testSent': ['alerts@example.com'],

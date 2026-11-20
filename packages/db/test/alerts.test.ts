@@ -44,6 +44,40 @@ describe('AlertsRepo (spec §6.8, §7 alert_rules / alert_events)', () => {
     expect(() => alerts.update('missing', {})).toThrow(RowRejected);
   });
 
+  it('lastSends: each rule’s newest notified event, never a queued or suppressed one; a rule never sent is absent (settings plan R13)', () => {
+    const { rule, alerts } = setup();
+    const sent = alerts.create(rule);
+    const unsent = alerts.create(rule);
+    const quiet = alerts.create(rule);
+    const event = (
+      ruleId: string,
+      status: 'queued' | 'notified' | 'suppressed',
+      firedAt: string,
+      n: number,
+    ) =>
+      alerts.insertEvent({
+        ruleId,
+        identityKey: 'k',
+        observationId: null,
+        calendarPriceId: null,
+        dedupKey: `d${n}`,
+        firedAt: at(firedAt),
+        status,
+        reason: null,
+        payload: {},
+      });
+    event(sent.id, 'notified', '2026-10-14T12:00:00.000Z', 1);
+    event(sent.id, 'notified', '2026-10-16T12:00:00.000Z', 2);
+    event(sent.id, 'queued', '2026-10-18T12:00:00.000Z', 3);
+    event(sent.id, 'notified', '2026-10-15T12:00:00.000Z', 4);
+    event(unsent.id, 'queued', '2026-10-18T12:00:00.000Z', 5);
+    event(unsent.id, 'suppressed', '2026-10-19T12:00:00.000Z', 6);
+    const last = alerts.lastSends();
+    expect(last.get(sent.id)).toBe('2026-10-16T12:00:00.000Z');
+    expect(last.has(unsent.id)).toBe(false);
+    expect(last.has(quiet.id)).toBe(false);
+  });
+
   it('softDelete hides the rule, refuses updates, keeps its events and is idempotent (ruling 12)', () => {
     const { clock, definition, rule, alerts } = setup();
     const r = alerts.create(rule);

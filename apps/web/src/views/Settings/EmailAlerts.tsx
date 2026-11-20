@@ -33,6 +33,19 @@ type View = apiContract.SettingsView;
 /** How the page sends email (settings plan ruling 11): Gmail, or another mail server named in full. */
 export type EmailMode = 'gmail' | 'other';
 
+/** The names another server's form writes that a switch to Gmail overwrites (Gmail's server, its address twice). */
+const OTHER_NAMES = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS', 'SMTP_USER', 'ALERT_EMAIL_FROM'] as const;
+/** Those names' edits as they stood in the Other form, so a switch back to it puts them back (fix round 1). */
+type OtherDraft = Partial<Record<(typeof OTHER_NAMES)[number], string | null>>;
+/**
+ * The email form's mode, held by the page so it survives a section switch, with the Other form's edits from before a
+ * switch to Gmail (null when none was made from Other).
+ */
+export interface EmailChoice {
+  mode: EmailMode;
+  other: OtherDraft | null;
+}
+
 /** Gmail's server, as ruling 11 stores it: the address is both the user name and the sender. */
 const GMAIL = { host: 'smtp.gmail.com', port: '465', tls: 'implicit' } as const;
 
@@ -127,31 +140,45 @@ function Labelled({ name, label, children }: { name: OwnedName; label?: string; 
 /**
  * Settings › Email and alerts (settings plan rulings 11 and 12): email by Gmail (address, app password, send-to) or by
  * another mail server (each name in full), the test email, Remove email (asked first, then the seven names unset at
- * once), and the alert rules. The mode is held by the page (`mode`), so it survives a switch to another section; a
- * mode switch writes the names it fixes (Gmail's server, and its address as user and sender).
+ * once), and the alert rules. The mode is held by the page (`choice`), so it survives a switch to another section; a
+ * switch to Gmail writes the names it fixes (Gmail's server, and its address as user and sender), and a switch back
+ * puts the Other form's edits back as they were.
  */
 export function EmailAlerts({
   view,
   form,
-  mode: chosen,
-  setMode,
+  choice,
+  setChoice,
 }: {
   view: View;
   form: SettingsForm;
-  mode: EmailMode | null;
-  setMode: (mode: EmailMode | null) => void;
+  choice: EmailChoice | null;
+  setChoice: (choice: EmailChoice | null) => void;
 }) {
-  const mode = chosen ?? storedEmailMode(view);
+  const mode = choice?.mode ?? storedEmailMode(view);
   const [test, setTest] = useState<TestResult | null>(null);
   const [confirming, setConfirming] = useState(false);
   const aside = (name: OwnedName) => view.setAside.includes(name);
   const toGmail = () => {
-    setMode('gmail');
+    // why: Gmail overwrites the Other form's server, user and sender; its edits are kept to put back on the way back
+    const other: OtherDraft = {};
+    for (const n of OTHER_NAMES) if (form.edited(n)) other[n] = form.shown(n);
+    setChoice({ mode: 'gmail', other });
     fillGmail(form);
     form.set('ALERT_EMAIL_FROM', form.shown('SMTP_USER') ?? '');
   };
   const toOther = () => {
-    setMode('other');
+    const before = choice?.other ?? null;
+    setChoice({ mode: 'other', other: null });
+    // why: back from Gmail, the Other form is as it was: its own edits, else what is stored (fix round 1)
+    if (before !== null) {
+      for (const n of OTHER_NAMES) {
+        const value = before[n];
+        if (value === undefined) form.revert(n);
+        else form.set(n, value);
+      }
+      return;
+    }
     for (const n of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS'] as const) form.revert(n);
     // why: Gmail's server name is no other server's; the field is emptied for the operator to type theirs
     if (view.values.SMTP_HOST === GMAIL.host) form.set('SMTP_HOST', '');
@@ -183,7 +210,7 @@ export function EmailAlerts({
   const removeAll = () => {
     const changes: apiContract.SettingChanges = {};
     for (const n of EMAIL_NAMES) changes[n] = null;
-    setMode(null);
+    setChoice(null);
     void form.save(SECTION, changes);
   };
   const toField = (
@@ -331,15 +358,13 @@ export function EmailAlerts({
                 </div>
               </fieldset>
             ) : (
-              <p>
-                <button
-                  type="button"
-                  className="st-btn st-btn-sm st-btn-quiet"
-                  onClick={() => setConfirming(true)}
-                >
-                  {E.remove}
-                </button>
-              </p>
+              <button
+                type="button"
+                className="st-btn st-btn-sm st-btn-quiet st-btn-start"
+                onClick={() => setConfirming(true)}
+              >
+                {E.remove}
+              </button>
             )
           ) : null}
         </div>

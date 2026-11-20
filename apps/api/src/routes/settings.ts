@@ -10,6 +10,7 @@ import {
   apiContract,
   type Config,
   type ConfigError,
+  DEFAULT_SMTP_TLS,
   EMAIL_NAMES,
   type FlightProvider,
   isMailbox,
@@ -267,7 +268,7 @@ const emailTest: RouteHandler = (() => {
     async (c, { body }, ctx) => {
       const { ports } = ctx;
       const stored = layerSettings(ctx.settingsEnv, new SettingsRepo(ports.db).all()).merged;
-      const storedTls = present(stored.SMTP_TLS) ? stored.SMTP_TLS : 'implicit';
+      const storedTls = present(stored.SMTP_TLS) ? stored.SMTP_TLS : DEFAULT_SMTP_TLS;
       const sameServer =
         body.host === stored.SMTP_HOST &&
         String(body.port) === stored.SMTP_PORT &&

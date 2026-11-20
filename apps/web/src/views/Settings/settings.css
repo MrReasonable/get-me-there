@@ -391,6 +391,11 @@
   background: transparent;
   color: var(--t-accent);
 }
+/* a quiet button on its own line, its words on the fields' left edge (Remove email) */
+.st-btn-start {
+  justify-self: start;
+  padding-inline: 0;
+}
 .st-btn-danger {
   color: var(--t-bad);
   border-color: var(--t-bad);

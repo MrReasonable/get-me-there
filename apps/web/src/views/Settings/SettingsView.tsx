@@ -6,7 +6,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { hrefWith, navigateTo, useSearchParams } from '../../state/urlState.js';
 import { navPatch, parseSettingsSection, SECTION_PARAM } from '../../state/view.js';
-import { EmailAlerts, type EmailMode } from './EmailAlerts.js';
+import { EmailAlerts, type EmailChoice } from './EmailAlerts.js';
 import { Limits } from './Limits.js';
 import { PriceSources } from './PriceSources.js';
 import { SaveBar } from './SaveBar.js';
@@ -69,7 +69,7 @@ export function SettingsView() {
   const settings = useSettings();
   const form = useSettingsForm(settings.data, useLimitsInUse());
   // why: the email form's mode (Gmail or another server) is held here with the edits, so it survives a section switch
-  const [emailMode, setEmailMode] = useState<EmailMode | null>(null);
+  const [emailChoice, setEmailChoice] = useState<EmailChoice | null>(null);
   const pending = settings.data?.pending ?? null;
   // why: the save's own line says it already; the read's is for a load of the page while the restart waits
   const showPending = pending !== null && form.result?.kind !== 'after-runs';
@@ -105,7 +105,7 @@ export function SettingsView() {
               <SaveBar section={section} form={form} />
             </>
           ) : (
-            <EmailAlerts view={settings.data} form={form} mode={emailMode} setMode={setEmailMode} />
+            <EmailAlerts view={settings.data} form={form} choice={emailChoice} setChoice={setEmailChoice} />
           )}
         </section>
       </div>

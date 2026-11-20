@@ -313,6 +313,8 @@ async function serveFolds(page: Page) {
     requireAllVerified: null,
     cooldownHours: 336,
     enabled: true,
+    // settings plan R13: GET /alerts says when each rule last sent
+    lastSentAt: null,
     ...over,
   });
   await page.route(

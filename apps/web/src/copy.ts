@@ -307,7 +307,12 @@ export const COPY = {
     /** A stored value the app set aside at boot (it no longer passes), so the default is used until it is set again. */
     valueSetAside: "The saved value isn't valid any more, so the default is used: set it again.",
     // saving (ruling 14)
-    save: (section: string) => `Save ${section.toLowerCase()}`,
+    /** Each section's one Save (System has none); Email's saves the mail settings only, the rules are changed in place. */
+    saveLabel: {
+      sources: 'Save price sources',
+      limits: 'Save limits',
+      email: 'Save email',
+    } satisfies Record<Exclude<SettingsSection, 'system'>, string>,
     saving: 'Saving…',
     restarting: 'Saved. Restarting the app…',
     restarted: 'Saved. The app restarted with the new settings.',
@@ -372,6 +377,8 @@ export const COPY = {
       lastSent: (when: string) => `last sent: ${when}`,
       /** A rule whose search is no longer listed. */
       removedSearch: 'a removed search',
+      /** A rule's search when the searches couldn't be read: neutral, never "removed". */
+      unnamedSearch: 'a search',
       never: 'never',
       off: 'off',
       edit: 'Edit',

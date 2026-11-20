@@ -87,7 +87,7 @@ const OTHER = {
 describe('Settings › Limits (rulings 5 and 14)', () => {
   const spend = () => screen.findByRole('textbox', { name: SETTING_LABELS.MONTHLY_SPEND_CAP_PENCE });
   const credits = () => screen.findByRole('spinbutton', { name: SETTING_LABELS.EXECUTION_MAX_CALLS });
-  const save = () => screen.getByRole('button', { name: S.save(S.section.limits) });
+  const save = () => screen.getByRole('button', { name: S.saveLabel.limits });
 
   it('"Spend at most £[35] a month" and "New searches: at most [10] SearchApi credits each run", from the stored values', async () => {
     serveValues({ MONTHLY_SPEND_CAP_PENCE: '3550', EXECUTION_MAX_CALLS: '10' });
@@ -259,7 +259,7 @@ describe('Settings › Limits (rulings 5 and 14)', () => {
 describe('Settings › Email (ruling 11)', () => {
   const mode = (name: string) => screen.findByRole('radio', { name });
   const gmailAddress = () => screen.findByRole('textbox', { name: E.gmailAddress });
-  const save = () => screen.getByRole('button', { name: S.save(S.section.email) });
+  const save = () => screen.getByRole('button', { name: S.saveLabel.email });
   const testButton = () => screen.getByRole('button', { name: E.sendTest });
   const passwordField = () => screen.getByLabelText(E.appPassword, { selector: 'input' });
 
@@ -360,6 +360,99 @@ describe('Settings › Email (ruling 11)', () => {
     expect(await screen.findByText(S.unchanged)).toBeInTheDocument();
     await settled(client);
     expect(puts).toEqual([]);
+  });
+
+  it('the section’s one Save reads "Save email" (fix round 1, R15)', async () => {
+    open('email');
+    await gmailAddress();
+    expect(save()).toHaveTextContent('Save email');
+  });
+
+  it('another server to Gmail and back again is no change: every name is as it was, nothing unsaved (fix round 1)', async () => {
+    serveValues(OTHER, true);
+    const puts = capturePuts();
+    const { user, client } = open('email');
+    await user.click(await mode(E.modeGmail));
+    await gmailAddress();
+    await user.click(await mode(E.modeOther));
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST })).toHaveValue('smtp.example.com');
+    expect(screen.getByRole('spinbutton', { name: SETTING_LABELS.SMTP_PORT })).toHaveValue(587);
+    expect(screen.getByRole('combobox', { name: SETTING_LABELS.SMTP_TLS })).toHaveValue('starttls');
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_USER })).toHaveValue('mailer');
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_FROM })).toHaveValue(
+      'flights@example.com',
+    );
+    const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
+    expect(within(nav).getByRole('link', { name: S.section.email })).toBeInTheDocument();
+    await user.click(save());
+    expect(await screen.findByText(S.unchanged)).toBeInTheDocument();
+    await settled(client);
+    expect(puts).toEqual([]);
+  });
+
+  it('a server typed on a fresh install is kept across Gmail and back (fix round 1)', async () => {
+    const { user } = open('email');
+    await user.click(await mode(E.modeOther));
+    await user.type(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST }), 'smtp.example.com');
+    await user.type(screen.getByRole('spinbutton', { name: SETTING_LABELS.SMTP_PORT }), '587');
+    await user.type(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_USER }), 'mailer');
+    await user.type(
+      screen.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_FROM }),
+      'flights@example.com',
+    );
+    await user.click(await mode(E.modeGmail));
+    await gmailAddress();
+    await user.click(await mode(E.modeOther));
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_HOST })).toHaveValue('smtp.example.com');
+    expect(screen.getByRole('spinbutton', { name: SETTING_LABELS.SMTP_PORT })).toHaveValue(587);
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.SMTP_USER })).toHaveValue('mailer');
+    expect(screen.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_FROM })).toHaveValue(
+      'flights@example.com',
+    );
+  });
+
+  it('a test email’s refusal joins a save’s, never wiping it (fix round 1, minor 4)', async () => {
+    serveValues(GMAIL, true);
+    server.use(
+      http.put(`${API}/settings`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'invalid_settings',
+              message: 'refused',
+              details: {
+                fields: [
+                  { field: 'ALERT_EMAIL_TO', message: 'Give one email address, like you@example.com.' },
+                ],
+              },
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    captureTests(422, {
+      error: {
+        code: 'invalid_settings',
+        message: 'refused',
+        details: {
+          fields: [{ field: 'SMTP_PASS', message: 'Give the password the mail server signs in with.' }],
+        },
+      },
+    });
+    const { user } = open('email');
+    await gmailAddress();
+    const to = screen.getByRole('textbox', { name: SETTING_LABELS.ALERT_EMAIL_TO });
+    await user.clear(to);
+    await user.type(to, 'nobody');
+    await user.click(save());
+    expect(await screen.findByText(S.refused)).toBeInTheDocument();
+    await user.click(testButton());
+    expect(await screen.findByText(E.testRefused)).toBeInTheDocument();
+    expect(to).toHaveAccessibleDescription('Give one email address, like you@example.com.');
+    expect(passwordField()).toHaveAccessibleDescription(
+      expect.stringContaining('Give the password the mail server signs in with.'),
+    );
   });
 
   it('the mode chosen survives a switch to Limits and back', async () => {
@@ -564,7 +657,7 @@ describe('Settings › Email (ruling 11)', () => {
 
 describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
   const rule = (over: Record<string, unknown> = {}) =>
-    apiContract.alertRuleSchema.parse({
+    apiContract.alertRuleListedSchema.parse({
       id: 'rule-1',
       definitionId: 'def-0001',
       type: 'absolute',
@@ -574,24 +667,12 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
       requireAllVerified: null,
       cooldownHours: 336,
       enabled: true,
+      lastSentAt: null,
       ...over,
     });
-  const event = (ruleId: string, status: string, firedAt: string, id = 1) => ({
-    id,
-    ruleId,
-    identityKey: 'k',
-    observationId: null,
-    calendarPriceId: null,
-    dedupKey: `d${id}`,
-    firedAt,
-    status,
-    reason: null,
-    payload: {},
-  });
-  const serveRules = (rules: unknown[], events: unknown[] = []) =>
+  const serveRules = (rules: unknown[]) =>
     server.use(
       http.get(`${API}/alerts`, () => HttpResponse.json(rules)),
-      http.get(`${API}/alerts/events`, () => HttpResponse.json(events)),
       http.get(`${API}/definitions`, () =>
         HttpResponse.json([
           definition({ id: 'def-0001', name: 'London → New York' }),
@@ -601,9 +682,9 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
     );
   const list = () => screen.findByRole('list', { name: A.heading });
 
-  it('each rule in words with its search, when it last sent, Edit to the Alerts form and Delete', async () => {
+  it('each rule in words with its search, when it last sent (the route’s lastSentAt), Edit to the Alerts form and Delete', async () => {
     serveValues(GMAIL, true);
-    const one = rule();
+    const one = rule({ lastSentAt: '2026-10-14T12:00:00.000Z' });
     const two = rule({
       id: 'rule-2',
       definitionId: 'def-0002',
@@ -611,14 +692,7 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
       thresholdPence: null,
       pct: 10,
     });
-    serveRules(
-      [one, two],
-      [
-        event('rule-1', 'queued', '2026-10-15T09:00:00.000Z', 3),
-        event('rule-1', 'notified', '2026-10-14T12:00:00.000Z', 2),
-        event('rule-2', 'suppressed', '2026-10-13T12:00:00.000Z', 1),
-      ],
-    );
+    serveRules([one, two]);
     open('email');
     const items = within(await list()).getAllByRole('listitem');
     expect(items).toHaveLength(2);
@@ -639,6 +713,16 @@ describe('Settings › Email and alerts: the alert rules (ruling 12)', () => {
     expect(within(first).getByRole('button', { name: A.delete })).toBeInTheDocument();
     // email is set up, so the list does not say it isn't
     expect(screen.queryByText(A.noEmail)).toBeNull();
+  });
+
+  it('a failed read of the searches names each rule’s search neutrally, never as removed (fix round 1, minor 2)', async () => {
+    serveValues(GMAIL, true);
+    serveRules([rule()]);
+    server.use(http.get(`${API}/definitions`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+    open('email');
+    const [item] = within(await list()).getAllByRole('listitem');
+    expect(item).toHaveTextContent(`${A.unnamedSearch} · ${describeRule(rule(), true)}`);
+    expect(item).not.toHaveTextContent(A.removedSearch);
   });
 
   it('a rule switched off says so', async () => {

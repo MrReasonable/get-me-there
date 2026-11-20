@@ -4,6 +4,7 @@ import {
   alertEventSchema,
   alertEventsQuerySchema,
   alertRuleInputSchema,
+  alertRuleListedSchema,
   alertRuleSchema,
   alertRulesQuerySchema,
   alertRuleUpdateRequestSchema,
@@ -162,7 +163,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/routes/:origin/:destination/history', routeHistoryResponseSchema, {
     query: routeHistoryQuerySchema,
   }),
-  route('GET', '/alerts', alertRuleSchema.array(), { query: alertRulesQuerySchema }),
+  route('GET', '/alerts', alertRuleListedSchema.array(), { query: alertRulesQuerySchema }),
   route('POST', '/alerts', alertRuleSchema, { request: alertRuleInputSchema }),
   route('PUT', '/alerts/:id', alertRuleSchema, { request: alertRuleUpdateRequestSchema }),
   route('DELETE', '/alerts/:id', alertRuleSchema),

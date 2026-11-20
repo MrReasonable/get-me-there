@@ -38,7 +38,7 @@ export function SaveBar({
   form,
   extra,
 }: {
-  section: SettingsSection;
+  section: Exclude<SettingsSection, 'system'>;
   form: SettingsForm;
   /** A button that sits before Save (Email's "Send a test email"). */
   extra?: ReactNode;
@@ -73,7 +73,7 @@ export function SaveBar({
         disabled={r?.kind === 'saving'}
         onClick={() => void form.save(section)}
       >
-        {S.save(S.section[section])}
+        {S.saveLabel[section]}
       </button>
     </div>
   );

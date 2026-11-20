@@ -102,8 +102,8 @@ export async function showFullSettings(page: Page): Promise<void> {
 /**
  * Settings › Limits and Email and alerts as mockup 04 draws them (settings plan Task 6), over the real api's answers:
  * a £35 spend limit and 10 credits a run stored, Gmail stored (its password only as set, never a value), and one alert
- * rule on the search `definitionId` (a London → New York search of the real api) that sent once. The fixture-mode api
- * has none of these, so the bodies are laid over the real ones, each parsed by its contract schema.
+ * rule on the search `definitionId` (a London → New York search of the real api) with the last send the route gives.
+ * The fixture-mode api has none of these, so the bodies are laid over the real ones, each parsed by its contract schema.
  */
 export async function showLimitsAndEmail(page: Page, definitionId: string): Promise<void> {
   await page.route('**/api/settings', async (route) => {
@@ -127,7 +127,9 @@ export async function showLimitsAndEmail(page: Page, definitionId: string): Prom
       }),
     });
   });
-  const rule = apiContract.alertRuleSchema.parse({
+  // why: settings plan R13 — the rule comes through GET /alerts, laid over the real route's answer, with the route's
+  // own lastSentAt (the fixture-mode api sends no email, so none of its rules has sent)
+  const rule = {
     id: 'rule-e2e',
     definitionId,
     type: 'absolute',
@@ -137,29 +139,14 @@ export async function showLimitsAndEmail(page: Page, definitionId: string): Prom
     requireAllVerified: null,
     cooldownHours: 336,
     enabled: true,
-  });
+    lastSentAt: '2026-10-14T12:00:00.000Z',
+  };
   await page.route(
     (url) => url.pathname === '/api/alerts',
-    (route) => (route.request().method() === 'GET' ? route.fulfill({ json: [rule] }) : route.fallback()),
-  );
-  await page.route(
-    (url) => url.pathname === '/api/alerts/events',
-    (route) =>
-      route.fulfill({
-        json: apiContract.alertEventSchema.array().parse([
-          {
-            id: 1,
-            ruleId: rule.id,
-            identityKey: 'k',
-            observationId: null,
-            calendarPriceId: null,
-            dedupKey: 'd1',
-            firedAt: '2026-10-14T12:00:00.000Z',
-            status: 'notified',
-            reason: null,
-            payload: {},
-          },
-        ]),
-      }),
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const real = apiContract.alertRuleListedSchema.array().parse(await (await route.fetch()).json());
+      await route.fulfill({ json: apiContract.alertRuleListedSchema.array().parse([...real, rule]) });
+    },
   );
 }
