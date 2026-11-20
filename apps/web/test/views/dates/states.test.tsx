@@ -229,7 +229,8 @@ describe('a refused Search now and a search naming no source (Review Focus 1 of 
     const line = await stateLine();
     await waitFor(() => expect(line).toHaveTextContent(P.noSource));
     const link = within(line).getByRole('link', { name: P.noSourceFix });
-    expect(new URL(link.getAttribute('href') ?? '', 'http://x').searchParams.get('view')).toBe('providers');
+    const to = new URL(link.getAttribute('href') ?? '', 'http://x').searchParams;
+    expect([to.get('view'), to.get('section'), to.get('def')]).toEqual(['settings', 'sources', null]);
     expect(within(line).queryByRole('button', { name: /^Search now/ })).toBeNull();
   });
 });

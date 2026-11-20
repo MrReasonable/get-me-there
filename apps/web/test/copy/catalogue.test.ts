@@ -56,6 +56,8 @@ const SAMPLES: Record<string, unknown[]> = {
   'settingsView.confirmRemove': ['SearchApi key'],
   'settingsView.appliesAfter': [['London → New York']],
   'settingsView.envLine': [['SEARCHAPI_MONTHLY_CALL_CAP']],
+  'settingsView.listSetAside': ['Calendar sources for new searches'],
+  'settingsView.listChoose': ['Calendar sources for new searches'],
   'settingsView.limits.spent': ['£0'],
   'settingsView.email.testSent': ['alerts@example.com'],
   'settingsView.alerts.lastSent': ['14 Oct 2026 13:00'],

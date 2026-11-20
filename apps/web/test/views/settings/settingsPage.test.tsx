@@ -445,6 +445,53 @@ describe('every source, and a setting the app set aside always has its field (re
     expect(within(card).queryByRole('combobox')).toBeNull();
   });
 
+  it('a source list the app set aside is said in each card whose switches write it, and is saved as none with every switch disabled (review residual (c))', async () => {
+    const puts = capturePuts();
+    serveView({
+      setAside: ['NEW_SEARCH_DISCOVERY'],
+      values: { ...settingsView().values, NEW_SEARCH_DISCOVERY: 'searchapi' },
+      secrets: {
+        TRAVELPAYOUTS_TOKEN: { set: false, last4: null },
+        SEARCHAPI_KEY: { set: false, last4: null },
+        SMTP_PASS: { set: false, last4: null },
+      },
+      newSearchSources: { discovery: [], verification: [] },
+      envOnly: { camoufoxEnabled: false, searchApiTrialUsed: 0 },
+    });
+    const { user } = open();
+    const note = S.listSetAside(SETTING_LABELS.NEW_SEARCH_DISCOVERY);
+    for (const [card, source] of [
+      [await cacheCard(), COPY.newSearch.source.travelpayouts],
+      [await searchApiCard(), COPY.newSearch.source.searchapi],
+    ] as const) {
+      expect(within(card).getByText(note)).toBeInTheDocument();
+      const sw = switchOf(card, source);
+      expect(sw).toBeDisabled();
+      expect(sw).toHaveAccessibleDescription(expect.stringContaining(note));
+    }
+    // the verification list is not set aside, so its own box says nothing of it
+    expect(screen.queryByText(S.listSetAside(SETTING_LABELS.NEW_SEARCH_VERIFICATION))).toBeNull();
+    const every = await everyCard();
+    expect(within(every).getByText(S.listChoose(SETTING_LABELS.NEW_SEARCH_DISCOVERY))).toBeInTheDocument();
+    await user.click(within(every).getByRole('button', { name: S.listUseNone }));
+    await screen.findByText(S.restarting);
+    expect(puts).toEqual([{ changes: { NEW_SEARCH_DISCOVERY: 'none' } }]);
+  });
+
+  it('a source list the app set aside can be cleared so the default applies; one not set aside offers no choice', async () => {
+    const puts = capturePuts();
+    serveView({ setAside: ['NEW_SEARCH_VERIFICATION'] });
+    const { user } = open();
+    const sa = await searchApiCard();
+    expect(within(sa).getByText(S.listSetAside(SETTING_LABELS.NEW_SEARCH_VERIFICATION))).toBeInTheDocument();
+    expect(within(await cacheCard()).queryByText(/the list isn't valid/)).toBeNull();
+    const every = await everyCard();
+    expect(within(every).queryByText(S.listChoose(SETTING_LABELS.NEW_SEARCH_DISCOVERY))).toBeNull();
+    await user.click(within(every).getByRole('button', { name: S.listUseDefault }));
+    await screen.findByText(S.restarting);
+    expect(puts).toEqual([{ changes: { NEW_SEARCH_VERIFICATION: null } }]);
+  });
+
   it('a billing day the app set aside has its field on the trial plan', async () => {
     serveView({
       setAside: ['SEARCHAPI_BILLING_DAY'],

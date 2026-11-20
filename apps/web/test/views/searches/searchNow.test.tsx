@@ -232,7 +232,9 @@ describe('the page’s words for a refused Search now (spec rev 55 §11; Review 
   it('disabled: "No price source is set up, so nothing was searched" with "Set up a price source (Settings → Price sources)"', async () => {
     renderRefused('disabled');
     const fix = within(await block(R.disabled)).getByRole('link', { name: R.disabledFix });
-    expect(fix.getAttribute('href')).toContain('view=providers');
+    // why: review residual (b): the fix is made on Settings › Price sources, never on the Providers view
+    expect(fix.getAttribute('href')).toContain('view=settings&section=sources');
+    expect(fix.getAttribute('href')).not.toContain('def=');
   });
 
   it('confirm: the estimate is asked again and its sentence shown inline with "Search again · about £X", which sends its figures', async () => {

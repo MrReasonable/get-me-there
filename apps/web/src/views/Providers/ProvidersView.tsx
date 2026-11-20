@@ -104,7 +104,7 @@ export function ProvidersView() {
   if (q.data === undefined) return <Loading />;
   return (
     <div className="providers pt-5">
-      <SettingsCrumbs title={COPY.crumbs.priceSources} />
+      <SettingsCrumbs title={COPY.crumbs.callsAndCaps} />
       <div className="space-y-2">
         <h1 className="h-view">{COPY.providersHeading}</h1>
         <p className="lede">{P.intro}</p>

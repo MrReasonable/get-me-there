@@ -4430,7 +4430,9 @@ back: run pnpm gmt status"), or "Saved. Applies when <names> finish; new searche
 while `pending` is set) until `/health` answers with a new `bootId`, however long the searches take (a settings read without
 `pending` is never taken for the restart), or "Nothing changed, so nothing was saved.". Any owned name in the read's
 `setAside` always has its field on the page, whatever its block shows otherwise, with the note "This value isn't valid, so
-the default is used: set it here.". Labels come from `core`'s `SETTING_LABELS`, other words
+the default is used: set it here."; a set-aside source list (`NEW_SEARCH_DISCOVERY`, `NEW_SEARCH_VERIFICATION`) is said in each
+card whose switches write it, and the Every source block offers "Use the default" (unset) and "Use none" for it, each
+saved at once, so it can be fixed with every switch disabled. Labels come from `core`'s `SETTING_LABELS`, other words
 from `COPY`.
   - **Price sources.** One block per source, each with its switch, "New searches use it" or "Off for new searches" (existing
     searches keep their own choice and change it on their Edit form); a source's switch is disabled until it has a key, saved or
@@ -5001,7 +5003,8 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   fix made on the page links to its section.
 - **Edit / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown; Alerts and
-  Providers keep their set-up terms. Their pages read "Alerts" and "Price sources" under Settings, with the breadcrumb
+  Providers keep their set-up terms. Their pages read "Alerts" and "Calls and caps" under Settings (the Providers view is
+  Calls and caps, the name every window and cap pointer uses, never a second "Price sources"), with the breadcrumb
   above, and the Status view reads "System".
 - **Accessibility**: 375px layout as above, with no sideways scroll on any page at 375 px and 1280 px in light and dark;
   keyboard-operable rows, calendar (one tab stop, arrow keys), day panel and folds; visible focus; labelled controls; no

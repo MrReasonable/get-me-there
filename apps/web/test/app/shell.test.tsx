@@ -82,7 +82,7 @@ describe('shell (spec §11 layout)', () => {
     ['the Trip page', '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28', 'Trips'],
     ['the Edit page', '?view=definitions&edit=def-0001', 'Trips'],
     ['History', '?view=history&def=def-0001', 'Trips'],
-    ['Price sources', '?view=providers', 'Settings'],
+    ['Calls and caps', '?view=providers', 'Settings'],
     ['Alerts', '?view=alerts&def=def-0001', 'Settings'],
     ['System', '?view=status', 'Settings'],
   ])('%s sits under %s in the nav', async (_name, search, item) => {
@@ -132,7 +132,7 @@ describe('shell (spec §11 layout)', () => {
   it('negative: no synthetic banner and no provider alert for real data', async () => {
     // why: the Dates fixtures' prices are synthetic and raise the banner themselves; Providers has no prices of its own
     renderWithProviders(<App />, { search: '?view=providers' });
-    await screen.findByRole('heading', { name: 'Price sources' });
+    await screen.findByRole('heading', { name: 'Calls and caps' });
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
     expect(screen.queryByText(/Provider status unknown/)).toBeNull();
   });
@@ -435,7 +435,8 @@ describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
   });
 
   it.each([
-    ['?view=providers', 'Price sources', 'Settings › Price sources'],
+    // why: ruling R24: the Providers view is Calls and caps, never a second "Price sources"
+    ['?view=providers', 'Calls and caps', 'Settings › Calls and caps'],
     ['?view=alerts&def=def-0001', 'Alerts', 'Settings › Alerts'],
     ['?view=status', 'System', 'Settings › System'],
   ])('%s: the heading reads "%s" under the trail "%s"', async (search, heading, trail) => {

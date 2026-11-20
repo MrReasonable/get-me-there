@@ -296,7 +296,7 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
   // why: Settings is three links, each a heading
-  settings: (p) => p.getByRole('heading', { name: COPY.crumbs.priceSources }),
+  settings: (p) => p.getByRole('heading', { name: COPY.settingsView.section.sources }),
   // why: the report's area headings draw only once the report has loaded
   status: (p) => p.getByRole('heading', { level: 3 }),
 };

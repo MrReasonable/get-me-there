@@ -34,14 +34,20 @@ interface CardProps {
 
 /** The id of a source list's refusal as shown in one source's card. */
 const listErrorId = (role: SourceRole, source: ProviderId) => `${fieldIds(LIST_NAME[role]).error}-${source}`;
+/** The id of a set-aside source list's note as shown in one source's card. */
+const listNoteId = (role: SourceRole, source: ProviderId) => `${fieldIds(LIST_NAME[role]).note}-${source}`;
 /** The id of a card's "save a key first" line. */
 const needsKeyId = (source: ProviderId) => `needs-key-${source}`;
+/** Whether the app set a source list aside at boot (review residual (c)). */
+const listAside = (view: View, role: SourceRole) => view.setAside.includes(LIST_NAME[role]);
 
 /**
  * What a control that writes the source lists `roles` is described by (fix round 1, important 1): each list's refusal
- * as its card shows it, when there is one, and the card's "save a key first" line when it is shown.
+ * as its card shows it, when there is one, each list's set-aside note, and the card's "save a key first" line when it
+ * is shown.
  */
 function describedBy(
+  view: View,
   form: SettingsForm,
   source: ProviderId,
   roles: readonly SourceRole[],
@@ -49,23 +55,37 @@ function describedBy(
 ) {
   const ids = [
     ...roles.filter((r) => form.error(LIST_NAME[r]) !== null).map((r) => listErrorId(r, source)),
+    ...roles.filter((r) => listAside(view, r)).map((r) => listNoteId(r, source)),
     ...(needsKey ? [needsKeyId(source)] : []),
   ];
   return ids.length === 0 ? undefined : ids.join(' ');
 }
 
-/** A source list's refusals inside the card of a source whose controls write that list. */
-function ListErrors({
+/**
+ * A source list's refusals and, when the app set it aside (review residual (c)), its note, inside the card of a source
+ * whose controls write that list. Every source's block offers the default or none for it, which need no switch.
+ */
+function ListLines({
+  view,
   form,
   id,
   roles,
 }: {
+  view: View;
   form: SettingsForm;
   id: ProviderId;
   roles: readonly SourceRole[];
 }) {
   return (
     <>
+      {roles.map((r) =>
+        listAside(view, r) ? (
+          <p key={`aside-${r}`} id={listNoteId(r, id)} className="st-note st-warn">
+            <span aria-hidden="true">▲ </span>
+            {S.listSetAside(SETTING_LABELS[LIST_NAME[r]])}
+          </p>
+        ) : null,
+      )}
       {roles.map((r) => (
         <FieldError key={r} name={LIST_NAME[r]} form={form} id={listErrorId(r, id)} />
       ))}
@@ -251,16 +271,47 @@ function Browser({ view, form, toggle }: CardProps) {
           source={NAME.camoufox}
           on={on}
           disabled={false}
-          describedBy={describedBy(form, 'camoufox', ['discovery'], false)}
+          describedBy={describedBy(view, form, 'camoufox', ['discovery'], false)}
           onChange={(v) => toggle('discovery', 'camoufox', v)}
         />
       }
     >
-      <ListErrors form={form} id="camoufox" roles={['discovery']} />
+      <ListLines view={view} form={form} id="camoufox" roles={['discovery']} />
       <BrowserStatus />
       <PatienceField view={view} form={form} />
       <WindowField view={view} form={form} />
     </SourceCard>
+  );
+}
+
+const LIST_ROLES: readonly SourceRole[] = ['discovery', 'verification'];
+
+/**
+ * A source list the app set aside (review residual (c)): the default or none, each saved at once, so it can be fixed
+ * even when no switch can be used (no key saved, the browser not set up).
+ */
+function ListChoice({ form, role }: { form: SettingsForm; role: SourceRole }) {
+  const name = LIST_NAME[role];
+  const choose = (value: string | null) => {
+    const changes: apiContract.SettingChanges = {};
+    changes[name] = value;
+    void form.save('sources', changes);
+  };
+  return (
+    <div className="st-field">
+      <p className="st-note st-warn">
+        <span aria-hidden="true">▲ </span>
+        {S.listChoose(SETTING_LABELS[name])}
+      </p>
+      <div className="st-row-buttons">
+        <button type="button" className="st-btn" onClick={() => choose(null)}>
+          {S.listUseDefault}
+        </button>
+        <button type="button" className="st-btn" onClick={() => choose('none')}>
+          {S.listUseNone}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -276,6 +327,9 @@ function EverySource({ view, form }: Omit<CardProps, 'toggle'>) {
     <section className="st-card st-src" aria-labelledby="sources-every">
       <h3 id="sources-every">{S.everySource}</h3>
       <div className="st-src-body">
+        {LIST_ROLES.filter((r) => listAside(view, r)).map((r) => (
+          <ListChoice key={r} form={form} role={r} />
+        ))}
         <p className="st-hint">
           {S.callsAndCapsBefore}{' '}
           <a href={hrefWith(providers)} onClick={navigateTo(providers)}>
@@ -348,7 +402,7 @@ function SearchApi({ view, form, toggle }: CardProps) {
           source={NAME.searchapi}
           on={on}
           disabled={!canUse && !on}
-          describedBy={describedBy(form, 'searchapi', ['verification', 'discovery'], !canUse)}
+          describedBy={describedBy(view, form, 'searchapi', ['verification', 'discovery'], !canUse)}
           onChange={(v) => {
             // why: ruling 8 — On ticks the first box; Off unticks both (an emptied list is stored as none)
             if (v) toggle('verification', 'searchapi', true);
@@ -360,7 +414,7 @@ function SearchApi({ view, form, toggle }: CardProps) {
         />
       }
     >
-      <ListErrors form={form} id="searchapi" roles={['verification', 'discovery']} />
+      <ListLines view={view} form={form} id="searchapi" roles={['verification', 'discovery']} />
       {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers.data} /> : null}
       {!key.set ? <p className="st-kv st-muted">{S.searchapiNoKey}</p> : null}
       <SecretField
@@ -408,7 +462,7 @@ function SearchApi({ view, form, toggle }: CardProps) {
           type="checkbox"
           checked={verification}
           disabled={!canUse && !verification}
-          aria-describedby={describedBy(form, 'searchapi', ['verification'], !canUse)}
+          aria-describedby={describedBy(view, form, 'searchapi', ['verification'], !canUse)}
           onChange={(e) => toggle('verification', 'searchapi', e.target.checked)}
         />
         <span>{S.verificationBox}</span>
@@ -418,7 +472,7 @@ function SearchApi({ view, form, toggle }: CardProps) {
           type="checkbox"
           checked={discovery}
           disabled={!canUse && !discovery}
-          aria-describedby={describedBy(form, 'searchapi', ['discovery'], !canUse)}
+          aria-describedby={describedBy(view, form, 'searchapi', ['discovery'], !canUse)}
           onChange={(e) => toggle('discovery', 'searchapi', e.target.checked)}
         />
         <span>
@@ -463,12 +517,12 @@ function Travelpayouts({ view, form, toggle }: CardProps) {
           source={NAME.travelpayouts}
           on={on}
           disabled={!canUse && !on}
-          describedBy={describedBy(form, 'travelpayouts', ['discovery'], !canUse)}
+          describedBy={describedBy(view, form, 'travelpayouts', ['discovery'], !canUse)}
           onChange={(v) => toggle('discovery', 'travelpayouts', v)}
         />
       }
     >
-      <ListErrors form={form} id="travelpayouts" roles={['discovery']} />
+      <ListLines view={view} form={form} id="travelpayouts" roles={['discovery']} />
       {!token.set ? <p className="st-kv st-muted">{S.travelpayoutsNoKey}</p> : null}
       <SecretField
         name="TRAVELPAYOUTS_TOKEN"

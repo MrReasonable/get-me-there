@@ -92,7 +92,8 @@ export const COPY = {
     edit: 'Edit',
     priceOverTime: 'Price over time',
     settings: 'Settings',
-    priceSources: 'Price sources',
+    // why: ruling R24: the Providers view is Calls and caps, the name every window and cap pointer uses
+    callsAndCaps: 'Calls and caps',
     alerts: 'Alerts',
     system: 'System',
   },
@@ -275,6 +276,12 @@ export const COPY = {
     >,
     // what applies to every source (review I1 and I3): the link to the Providers view, and how often prices are read
     everySource: 'Every source',
+    // a source list the app set aside (review residual (c)): said in each card whose switches write it, fixed here too
+    listSetAside: (label: string) =>
+      `${label}: the list isn't valid, so the default is used. Switch sources here, or choose under Every source.`,
+    listChoose: (label: string) => `${label}: the list isn't valid, so the default is used.`,
+    listUseDefault: 'Use the default',
+    listUseNone: 'Use none',
     callsAndCapsBefore: "Each source's calls this month, its caps and when its window reopens are on",
     callsAndCapsLink: 'Calls and caps',
     advanced: 'Advanced',
@@ -550,7 +557,7 @@ export const COPY = {
     unavailable: 'browser worker not reachable',
     note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds, so a run takes hours (${EXAMPLE_PAIR_CELLS} day pairs). Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
-  providersHeading: 'Price sources',
+  providersHeading: 'Calls and caps',
   providerEnabled: 'configured',
   providerDisabled: 'not configured',
   plan: (p: string) => `plan: ${p}`,
@@ -1528,7 +1535,7 @@ export const COPY = {
     copy: 'Copy',
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
-    providersLink: 'Price sources',
+    providersLink: 'Calls and caps',
     coverageLink: 'Its full search log',
     sendTest: 'Send test',
     sending: 'Sending…',

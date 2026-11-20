@@ -5,8 +5,15 @@ import { REFUSED_COPY } from '../../copy/refused.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { settingsPatch } from '../../state/view.js';
 import { SearchAgainButton } from './SearchAgainButton.js';
 import type { StateLine } from './stateLines.js';
+
+/**
+ * Where "Set up a price source (Settings → Price sources)" goes: the Settings section that sets sources up (review
+ * residual (b)), never the Providers view, which only shows them; the search's own parameters are dropped.
+ */
+const SET_UP_SOURCE = { ...settingsPatch('sources'), def: null, refused: null };
 
 // Spec §11 Dates "States", each in words, never colour alone. The page composes them; `RunProgress`, the sections and
 // the calendar carry the rest of each state.
@@ -47,11 +54,7 @@ export function NeverRun({
     <div className="plate notice flex flex-wrap items-center gap-3">
       <p className="font-bold">{line.text}</p>
       {fix !== null ? (
-        <a
-          href={hrefWith({ view: 'providers', def: null, refused: null })}
-          onClick={navigateTo({ view: 'providers', def: null, refused: null })}
-          className="font-bold underline"
-        >
+        <a href={hrefWith(SET_UP_SOURCE)} onClick={navigateTo(SET_UP_SOURCE)} className="font-bold underline">
           {fix}
         </a>
       ) : (
@@ -102,11 +105,7 @@ export function Refused({ definitionId, code }: { definitionId: string; code: St
           : R[code]}
       </p>
       {code === 'disabled' ? (
-        <a
-          href={hrefWith({ view: 'providers', def: null, refused: null })}
-          onClick={navigateTo({ view: 'providers', def: null, refused: null })}
-          className="font-bold underline"
-        >
+        <a href={hrefWith(SET_UP_SOURCE)} onClick={navigateTo(SET_UP_SOURCE)} className="font-bold underline">
           {R.disabledFix}
         </a>
       ) : null}

@@ -94,7 +94,7 @@ describe('Search now with no price source set up (Review Focus 1)', () => {
     const block = words.closest<HTMLElement>('[role="alert"]');
     if (block === null) throw new Error('the refusal is said in an alert');
     const fix = within(block).getByRole('link', { name: REFUSED_COPY.disabledFix });
-    expect(fix.getAttribute('href')).toContain('view=providers');
+    expect(fix.getAttribute('href')).toContain('view=settings&section=sources');
     expect(new URLSearchParams(window.location.search).get('refused')).toBe('disabled');
     expect(document.body.textContent ?? '').not.toMatch(/no runnable|engine|undefined/i);
   });
