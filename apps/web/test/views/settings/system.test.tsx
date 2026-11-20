@@ -4,7 +4,7 @@
 import { act, screen, within } from '@testing-library/react';
 import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STATUS_REFRESH_MS } from '../../../src/api/statusQuery.js';
+import { STATUS_KEY, STATUS_REFRESH_MS } from '../../../src/api/statusQuery.js';
 import { COPY } from '../../../src/copy.js';
 import { SettingsView } from '../../../src/views/Settings/SettingsView.js';
 import { API, statusReport } from '../../fixtures.js';
@@ -66,7 +66,7 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
           area: 'settings',
           state: 'fail',
           summary: "Saved Mail server port isn't valid any more: set it again in Settings",
-          fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
+          fix: { text: 'Open Settings › Email and alerts', command: null, settings: 'email' },
         },
         {
           id: 'worker',
@@ -89,12 +89,74 @@ describe('Settings › System lists the checks one per line (ruling 13)', () => 
       within(sa).getByRole('link', { name: 'replace the SearchApi key in Settings › Price sources' }),
     ).toHaveAttribute('href', '/?view=settings&section=sources');
     const aside = byName(/Mail server port/);
-    expect(
-      within(aside).getByRole('link', { name: 'set it again in Settings › Email and alerts' }),
-    ).toHaveAttribute('href', '/?view=settings&section=email');
+    expect(within(aside).getByRole('link', { name: 'Open Settings › Email and alerts' })).toHaveAttribute(
+      'href',
+      '/?view=settings&section=email',
+    );
     const worker = byName(/not answering/);
     expect(within(worker).getByText('pnpm gmt start')).toBeInTheDocument();
     expect(within(worker).queryByRole('link')).toBeNull();
+  });
+
+  it('the fix follows the summary after a written separator and the "Fix:" label, and a command can be copied', async () => {
+    serve(
+      statusReport([
+        {
+          id: 'app',
+          area: 'app',
+          state: 'warn',
+          summary: 'synthetic test data, not fares',
+          fix: { text: 'Open Settings › Price sources', command: null, settings: 'sources' },
+        },
+        {
+          id: 'worker',
+          area: 'worker',
+          state: 'warn',
+          summary: 'the worker is not answering',
+          fix: { text: 'start it', command: 'pnpm gmt start' },
+        },
+      ]),
+    );
+    open();
+    const items = await lines();
+    const [first, second] = items;
+    if (first === undefined || second === undefined) throw new Error('two lines');
+    expect(first).toHaveTextContent('synthetic test data, not fares · Fix: Open Settings › Price sources');
+    // the accessible name of the link is the fix's words alone; the label is plain text before it
+    expect(within(first).getByRole('link', { name: 'Open Settings › Price sources' })).toBeVisible();
+    expect(second).toHaveTextContent('the worker is not answering · Fix: start it');
+    expect(
+      within(second).getByRole('button', { name: COPY.statusView.copyCommand('pnpm gmt start') }),
+    ).toBeVisible();
+  });
+
+  it('keeps the report order (worst first) as served', async () => {
+    serve(
+      statusReport([
+        { id: 'schedule', area: 'schedule', state: 'fail', summary: 'blocked' },
+        { id: 'app', area: 'app', state: 'warn', summary: 'slow' },
+        { id: 'database', area: 'database', summary: 'fine' },
+      ]),
+    );
+    open();
+    expect((await lines()).map((li) => li.getAttribute('data-state'))).toEqual(['fail', 'warn', 'ok']);
+  });
+
+  it('a failed refresh keeps the last report, marked stale with its age, as Status does', async () => {
+    serve(
+      statusReport([{ id: 'app', area: 'app', summary: 'kept report' }], {
+        generatedAt: '2026-10-14T14:55:00.000Z',
+      }),
+    );
+    const { client } = open();
+    await screen.findByText(/kept report/);
+    serve({ error: { code: 'internal', message: 'boom' } }, 500);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: STATUS_KEY });
+    });
+    const stale = await screen.findByRole('status');
+    expect(stale).toHaveTextContent('stale, checked 5 min ago');
+    expect(screen.getByText(/kept report/)).toBeInTheDocument();
   });
 
   it('an ok line carries no fix, and a note shows on its line', async () => {

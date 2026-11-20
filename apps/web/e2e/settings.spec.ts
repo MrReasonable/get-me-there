@@ -217,9 +217,10 @@ for (const width of [375, 1280] as const)
       await expect(list).toContainText(`${S.sysState.off}: Can't be seen from inside the container.`);
       await expect(list).toContainText(`${S.sysState.fail}: Saved Mail server port`);
       await expect(list).toContainText(`${S.sysState.warn}: SearchApi key in .env is ignored`);
-      await expect(
-        list.getByRole('link', { name: 'set it again in Settings › Email and alerts' }),
-      ).toHaveAttribute('href', '/?view=settings&section=email');
+      await expect(list.getByRole('link', { name: 'Open Settings › Email and alerts' })).toHaveAttribute(
+        'href',
+        '/?view=settings&section=email',
+      );
       await expectNoSidewaysScroll(page);
       await page.screenshot({
         path: `test-results/settings-shots/settings-system-${width}-${colorScheme}.png`,
@@ -227,10 +228,25 @@ for (const width of [375, 1280] as const)
       });
     });
 
+test("at 375px the section row is scrolled so the open section's link is fully in view", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await showSystemChecks(page);
+  await page.goto('/?view=settings&section=system');
+  const link = page.getByRole('navigation', { name: S.sectionsLabel }).locator('a[aria-current="page"]');
+  await expect(link).toHaveText(S.section.system);
+  await expect(async () => {
+    const box = await link.boundingBox();
+    if (box === null) throw new Error('the current link is on the page');
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+  }).toPass();
+  await expectNoSidewaysScroll(page);
+});
+
 test('a System fix link opens its Settings section', async ({ page }) => {
   await showSystemChecks(page);
   await page.goto('/?view=settings&section=system');
-  await page.getByRole('link', { name: 'set it again in Settings › Email and alerts' }).click();
+  await page.getByRole('link', { name: 'Open Settings › Email and alerts' }).click();
   await expect(page.getByRole('heading', { level: 2, name: S.section.email })).toBeVisible();
   expect(new URL(page.url()).searchParams.get('section')).toBe('email');
 });

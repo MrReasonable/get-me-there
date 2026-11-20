@@ -163,7 +163,7 @@ export async function showSystemChecks(page: Page): Promise<void> {
     await route.fulfill({
       json: apiContract.statusResponseSchema.parse({
         ...real,
-        checks: [
+        checks: apiContract.sortChecks([
           ...real.checks.filter((c) => c.area !== 'settings' && c.id !== 'backups'),
           {
             ...base,
@@ -180,11 +180,8 @@ export async function showSystemChecks(page: Page): Promise<void> {
             area: 'settings',
             state: 'warn',
             summary: 'SearchApi key in .env is ignored: Settings holds it. Remove the line from .env.',
-            fix: {
-              text: 'remove the line from .env; change the value in Settings › Price sources',
-              command: null,
-              settings: 'sources',
-            },
+            label: 'SearchApi key',
+            fix: { text: 'Open Settings › Price sources', command: null, settings: 'sources' },
           },
           {
             ...base,
@@ -192,9 +189,10 @@ export async function showSystemChecks(page: Page): Promise<void> {
             area: 'settings',
             state: 'fail',
             summary: "Saved Mail server port isn't valid any more: set it again in Settings",
-            fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
+            label: 'Mail server port',
+            fix: { text: 'Open Settings › Email and alerts', command: null, settings: 'email' },
           },
-        ],
+        ]),
       }),
     });
   });

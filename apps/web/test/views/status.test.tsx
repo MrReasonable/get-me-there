@@ -106,6 +106,25 @@ describe('the Status view: states (spec §11)', () => {
   });
 });
 
+describe('the Status view: a fix made in Settings', () => {
+  it('the card form links the fix to its Settings section', async () => {
+    serve(
+      statusReport([
+        {
+          id: 'email',
+          area: 'email',
+          state: 'warn',
+          summary: 'the last test email failed',
+          fix: { text: 'set email up in Settings › Email and alerts', command: null, settings: 'email' },
+        },
+      ]),
+    );
+    renderWithProviders(<StatusView />);
+    const link = await screen.findByRole('link', { name: 'set email up in Settings › Email and alerts' });
+    expect(link).toHaveAttribute('href', '/?view=settings&section=email');
+  });
+});
+
 describe('the Status view: cards (spec §11)', () => {
   const report = () =>
     statusReport([

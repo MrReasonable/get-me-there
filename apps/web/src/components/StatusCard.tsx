@@ -149,12 +149,13 @@ export function StatusLine({ check }: { check: StatusCheck }) {
         {check.note === null ? null : <span className="st-sys-note"> · {check.note}</span>}
         {check.state !== 'ok' && check.fix !== null ? (
           <span className="st-sys-fix">
-            {' '}
-            <FixWords fix={check.fix} plain />
+            {/* why: a written separator and label, so the fix never runs on from the summary (also to a screen reader) */}
+            {' · '}
+            <span className="font-bold">{COPY.statusView.fixLabel}</span> <FixWords fix={check.fix} plain />
             {check.fix.command === null ? null : (
               <>
                 {' '}
-                <code className="cmd">{check.fix.command}</code>
+                <FixCommand key={check.fix.command} command={check.fix.command} />
               </>
             )}
           </span>

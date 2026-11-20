@@ -1059,11 +1059,8 @@ describe('settings checks (settings plan ruling 13)', () => {
       area: 'settings',
       state: 'warn',
       summary: 'SearchApi key in .env is ignored: Settings holds it. Remove the line from .env.',
-      fix: {
-        text: 'remove the line from .env; change the value in Settings › Price sources',
-        command: null,
-        settings: 'sources',
-      },
+      label: 'SearchApi key',
+      fix: { text: 'Open Settings › Price sources', command: null, settings: 'sources' },
     });
   });
   it('a saved value the app set aside is a fail naming the label and the section that fixes it', () => {
@@ -1075,7 +1072,8 @@ describe('settings checks (settings plan ruling 13)', () => {
       area: 'settings',
       state: 'fail',
       summary: "Saved Monthly spend limit isn't valid any more: set it again in Settings",
-      fix: { text: 'set it again in Settings › Limits', command: null, settings: 'limits' },
+      label: 'Monthly spend limit',
+      fix: { text: 'Open Settings › Limits', command: null, settings: 'limits' },
     });
     expect(
       checkOf(
@@ -1111,11 +1109,44 @@ describe('container and dev mode', () => {
   });
 });
 
+describe('settings checks in every mode', () => {
+  it('a Settings fix is the same in container and dev mode as in native: no docs section, no command', () => {
+    const settings: StatusFacts['settings'] = { envIgnored: ['SEARCHAPI_KEY'], setAside: ['SMTP_PORT'] };
+    const pick = (f: StatusFacts) =>
+      buildChecks(f)
+        .filter((c) => c.area === 'settings' || c.id === 'email' || c.id === 'price-sources')
+        .map((c) => ({ id: c.id, fix: c.fix }));
+    const native = pick(
+      healthyFacts({ settings, email: { configured: false, last: null }, priceSources: { usable: [] } }),
+    );
+    for (const mode of ['container', 'dev'] as const)
+      expect(
+        pick(
+          healthyFacts({
+            mode,
+            settings,
+            email: { configured: false, last: null },
+            priceSources: { usable: [] },
+          }),
+        ),
+      ).toEqual(native);
+    for (const c of native) expect(c.fix?.text).not.toContain('docs/setup.md');
+  });
+});
+
 describe('words', () => {
   it('no summary, note or fix text uses a banned word, "fresh", "complete" or "all"', () => {
     const variants: StatusFacts[] = [
       ...CASES.map((c) => c.facts),
       healthyFacts({ mode: 'container' }),
+      healthyFacts({
+        settings: {
+          envIgnored: ['SEARCHAPI_KEY', 'SMTP_HOST'],
+          setAside: ['MONTHLY_SPEND_CAP_PENCE', 'SMTP_PASS'],
+        },
+        email: { configured: false, last: null },
+        priceSources: { usable: [] },
+      }),
       healthyFacts({ synthetic: true, data: [healthyData({ ages: null })] }),
     ];
     const forbidden = /\b(fresh|complete|all)\b/i;

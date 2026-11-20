@@ -113,6 +113,13 @@ const settingsFix = (text: string, section: SettingsSection, tail = ''): StatusC
   settings: section,
 });
 
+/** The fix of a settings check: its summary already says what to do, so the fix only says where. */
+const openSettings = (section: SettingsSection): StatusCheck['fix'] => ({
+  text: `Open ${SETTINGS_WHERE[section]}`,
+  command: null,
+  settings: section,
+});
+
 /** What the time and mode words of a check need of the facts. */
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
 const at = (f: Frame, iso: IsoDateTime) => formatInstant(iso, f.tz);
@@ -832,11 +839,8 @@ function settingsChecks(f: StatusFacts): StatusCheck[] {
         area: 'settings',
         state: 'warn',
         summary: `${SETTING_LABELS[name]} in .env is ignored: Settings holds it. Remove the line from .env.`,
-        fix: {
-          text: `remove the line from .env; change the value in ${SETTINGS_WHERE[NAME_SECTION[name]]}`,
-          command: null,
-          settings: NAME_SECTION[name],
-        },
+        label: SETTING_LABELS[name],
+        fix: openSettings(NAME_SECTION[name]),
       }),
     ),
     ...f.settings.setAside.map((name) =>
@@ -845,7 +849,8 @@ function settingsChecks(f: StatusFacts): StatusCheck[] {
         area: 'settings',
         state: 'fail',
         summary: `Saved ${SETTING_LABELS[name]} isn't valid any more: set it again in Settings`,
-        fix: settingsFix('set it again', NAME_SECTION[name]),
+        label: SETTING_LABELS[name],
+        fix: openSettings(NAME_SECTION[name]),
       }),
     ),
   ];
