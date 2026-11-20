@@ -168,20 +168,17 @@ describe('sendTestEmail (settings plan ruling 11)', () => {
     expect(await send(transport().factory)).toEqual({ result: 'sent' });
   });
 
-  it('a send still going at its 30 s deadline is timed-out, its transport closed, sent once, and the limit handed back', async () => {
+  it('a send still going at its 30 s deadline is timed-out, sent once, and the limit handed back', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     expect(TEST_SEND_DEADLINE_MS).toBe(30_000);
     const limit = new TestSendLimit();
     const clock = fixedClock(NOW);
     let sends = 0;
-    let closed = 0;
+    // why: the connection is not ended (nodemailer cannot end one in flight); the send is simply never answered
     const trickling: TransportFactory = () => ({
       sendMail: () => {
         sends += 1;
         return new Promise(() => undefined);
-      },
-      close: () => {
-        closed += 1;
       },
     });
     const r = sendTestEmail({
@@ -193,14 +190,14 @@ describe('sendTestEmail (settings plan ruling 11)', () => {
       createTransport: trickling,
     });
     await vi.advanceTimersByTimeAsync(TEST_SEND_DEADLINE_MS - 1);
-    expect(closed).toBe(0);
+    // still in flight just before the deadline: the limit is held
+    clock.advance(TEST_EMAIL_MIN_GAP_MS);
+    expect(limit.take(Date.parse(clock.now()))).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await r).toEqual({ result: 'failed', reason: 'timed-out' });
-    expect(closed).toBe(1);
     expect(sends).toBe(1);
     expect(vi.getTimerCount()).toBe(0);
-    // the limit is free again: only its one-a-minute gap remains
-    clock.advance(TEST_EMAIL_MIN_GAP_MS);
+    // the limit is free again (its minute since the take has passed)
     expect(limit.take(Date.parse(clock.now()))).toBe(true);
   });
 
@@ -223,6 +220,44 @@ describe('sendTestEmail (settings plan ruling 11)', () => {
     expect(notifier.lastResult()).toMatchObject({ kind: 'test', result: 'failed' });
     clock.advance(TEST_EMAIL_MIN_GAP_MS);
     expect(limit.take(Date.parse(clock.now()))).toBe(true);
+  });
+
+  it('an alerts test answered after its deadline keeps the failure recorded at the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const clock = fixedClock(NOW);
+    let late: () => void = () => undefined;
+    let calls = 0;
+    const notifier = new EmailNotifier({
+      smtp: smtp(),
+      nodeEnv: 'production',
+      log: captureLogger(),
+      clock,
+      maxPerHour: 20,
+      testLimit: new TestSendLimit(),
+      createTransport: () => ({
+        sendMail: () => {
+          calls += 1;
+          // the first (the test) answers only when the test says; a later send answers at once
+          return calls === 1
+            ? new Promise((resolve) => {
+                late = () => resolve({ messageId: 'late' });
+              })
+            : Promise.resolve({ messageId: 'next' });
+        },
+      }),
+    });
+    const r = notifier.sendTest();
+    await vi.advanceTimersByTimeAsync(TEST_SEND_DEADLINE_MS);
+    expect(await r).toBe('failed');
+    const atDeadline = notifier.lastResult();
+    expect(atDeadline).toMatchObject({ kind: 'test', result: 'failed' });
+    late();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notifier.lastResult()).toEqual(atDeadline);
+    // a later send of its own still records its result
+    clock.advance(60_000);
+    expect(await notifier.send({ kind: 'system', subject: 'notice', body: 'b' })).toEqual({ ok: true });
+    expect(notifier.lastResult()).toMatchObject({ kind: 'system', result: 'sent' });
   });
 
   it('the process holds one limit: the alerts test and the Settings test share it by default', async () => {

@@ -49,11 +49,9 @@ export interface MailMessage {
   subject: string;
   text: string;
 }
-/** The transporter methods used; nodemailer's Transporter satisfies it. */
+/** The one transporter method used; nodemailer's Transporter satisfies it. */
 export interface MailTransport {
   sendMail(m: MailMessage): Promise<{ messageId: string }>;
-  /** Closes the transport's connections (nodemailer's `close`); a test send past its deadline calls it. */
-  close?(): void;
 }
 export type TransportFactory = (o: SmtpTransportOptions) => MailTransport;
 
@@ -123,12 +121,15 @@ export const TEST_SEND_TIMEOUTS = {
 /**
  * A test send's whole deadline. why: the socket timeout bounds a silence, not a send: a server that answers a fragment
  * every few seconds would hold the one test limit (and both test routes) for ever. Past it the send is answered
- * `timed-out`, its transport closed and the limit released; it is never retried, as the server may have taken it.
+ * `timed-out` and the limit is handed back; it is never retried, as the server may have taken it. The connection itself
+ * is not ended: nodemailer's single-connection transport has no way to end one in flight (its `close()` only emits
+ * an event, and a pool's leaves a sending connection to finish), so it ends on its own, at its socket timeout or when
+ * the server closes it.
  */
 export const TEST_SEND_DEADLINE_MS = 30_000;
 
 /** `send` within TEST_SEND_DEADLINE_MS, else `onTimeout` runs and it rejects coded ETIMEDOUT (`timed-out`). */
-async function withinTestDeadline<T>(send: Promise<T>, onTimeout: () => void): Promise<T> {
+async function withinTestDeadline<T>(send: Promise<T>, onTimeout: () => void = () => undefined): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
@@ -219,7 +220,6 @@ export async function sendTestEmail(o: {
         subject: TEST_EMAIL_SUBJECT,
         text: TEST_EMAIL_BODY,
       }),
-      () => transport.close?.(),
     );
     log.info({}, 'settings test email sent');
     return { result: 'sent' };
@@ -304,13 +304,17 @@ export class EmailNotifier implements Notifier {
     // why: V7 (sec-b1-001): a test send has its own small limit and an in-flight guard, and never draws on the alert
     // ceiling, so pressing the button cannot crowd out a price alert or a consent notice
     if (!this.#testLimit.take(Date.parse(this.#clock.now()))) return 'refused';
+    // why: the result recorded at the deadline is this send's last word: a late answer of the same send never
+    // overwrites it (a later send of any kind still records its own)
+    const token = { answered: false };
     try {
-      // why: bounded as the Settings test is (TEST_SEND_DEADLINE_MS); the transport is the alerts' own, so it is not
-      // closed: the late send ends by its own timeouts and only the limit is handed back
+      // why: bounded as the Settings test is (TEST_SEND_DEADLINE_MS); the connection is left to end on its own
       return (
         await withinTestDeadline(
-          this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false),
-          () => undefined,
+          this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false, token),
+          () => {
+            token.answered = true;
+          },
         )
       ).result;
     } catch {
@@ -327,9 +331,11 @@ export class EmailNotifier implements Notifier {
     subject: string,
     body: string,
     countsTowardCeiling: boolean,
+    /** Set by a test send whose deadline already recorded its result: this send then records nothing more. */
+    token: { answered: boolean } = { answered: false },
   ): Promise<{ result: 'sent'; detail?: undefined } | { result: 'refused' | 'failed'; detail: string }> {
     const r = await this.#attempt(kind, subject, body, countsTowardCeiling);
-    this.#last = { at: this.#clock.now(), kind, result: r.result };
+    if (!token.answered) this.#last = { at: this.#clock.now(), kind, result: r.result };
     return r;
   }
 
