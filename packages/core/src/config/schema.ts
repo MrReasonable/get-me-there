@@ -21,7 +21,9 @@ import {
 } from './presets.js';
 import { Secret } from './secret.js';
 import {
+  DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   DEFAULT_DISCOVERY_REFRESH_DAYS,
+  DEFAULT_SEARCHAPI_PLAN,
   MIN_SECRET_LENGTH,
   OWNED_NAMES,
   SECRET_TOO_SHORT,
@@ -484,7 +486,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
           limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS, 48),
         };
   const saKey = r.secret('SEARCHAPI_KEY');
-  const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
+  const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? DEFAULT_SEARCHAPI_PLAN;
   const preset = PLAN_PRESETS[plan];
   // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
   // switch to the subscription would be silently ignored; it is named in a warning instead. Settings plan ruling 1: the
@@ -571,7 +573,8 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const requestTimeoutSeconds = r.int('REQUEST_TIMEOUT_SECONDS', 1) ?? 60;
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
-  const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
+  const camoufoxBrowserWindow =
+    r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? DEFAULT_CAMOUFOX_BROWSER_WINDOW;
   const flightReadPatience = r.int('FLIGHT_READ_PATIENCE', 3, 50) ?? DEFAULT_FLIGHT_READ_PATIENCE;
   const discoveryRefreshDays = r.int('DISCOVERY_REFRESH_DAYS', 1, 30) ?? DEFAULT_DISCOVERY_REFRESH_DAYS;
   const newSearchSources = {

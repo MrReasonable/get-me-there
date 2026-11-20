@@ -1,7 +1,10 @@
 import {
   apiContract,
+  DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   DEFAULT_DISCOVERY_REFRESH_DAYS,
   DEFAULT_FLIGHT_READ_PATIENCE,
+  DEFAULT_SEARCHAPI_BILLING_DAY,
+  DEFAULT_SEARCHAPI_PLAN,
   EMAIL_NAMES,
   isOwnedName,
   type OwnedName,
@@ -9,11 +12,12 @@ import {
   providerIdSchema,
 } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import { SETTINGS_KEY } from '../../api/queries.js';
 import type { SettingsSection } from '../../state/view.js';
+import { type RestartClock, RestartClockContext } from './restartClock.js';
 
 type View = apiContract.SettingsView;
 type Changes = apiContract.SettingChanges;
@@ -43,9 +47,9 @@ export const SECTION_NAMES: Readonly<Record<SettingsSection, readonly OwnedName[
  * choosing it again is no change.
  */
 export const SETTING_DEFAULTS: Readonly<Partial<Record<OwnedName, string>>> = {
-  SEARCHAPI_PLAN: 'trial',
-  SEARCHAPI_BILLING_DAY: '1',
-  CAMOUFOX_BROWSER_WINDOW: 'scheduled',
+  SEARCHAPI_PLAN: DEFAULT_SEARCHAPI_PLAN,
+  SEARCHAPI_BILLING_DAY: String(DEFAULT_SEARCHAPI_BILLING_DAY),
+  CAMOUFOX_BROWSER_WINDOW: DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   FLIGHT_READ_PATIENCE: String(DEFAULT_FLIGHT_READ_PATIENCE),
   DISCOVERY_REFRESH_DAYS: String(DEFAULT_DISCOVERY_REFRESH_DAYS),
 };
@@ -96,27 +100,29 @@ export const RESTART_POLL_MS = 1_000;
 export const RESTART_LIMIT_MS = 60_000;
 
 /**
- * Asks `read` for the boot id every RESTART_POLL_MS (a failed read is the app restarting, and is asked again) until it
- * answers one other than `before` ("back"), or RESTART_LIMIT_MS have passed ("not-back"). Returns the cancel.
+ * Asks `read` for the boot id every RESTART_POLL_MS on `clock` (a failed read is the app restarting, and is asked
+ * again; the next ask waits for the last to settle) until it answers one other than `before` ("back"), or
+ * RESTART_LIMIT_MS have passed ("not-back"). Returns the cancel.
  */
 export function watchRestart(
   before: string,
   read: () => Promise<string | null>,
   done: (outcome: 'back' | 'not-back') => void,
+  clock: RestartClock,
 ): () => void {
   let over = false;
-  let poll: ReturnType<typeof setTimeout> | undefined;
+  let cancelPoll: () => void = () => undefined;
   const stop = () => {
     over = true;
-    clearTimeout(poll);
-    clearTimeout(limit);
+    cancelPoll();
+    cancelLimit();
   };
   const finish = (outcome: 'back' | 'not-back') => {
     if (over) return;
     stop();
     done(outcome);
   };
-  const limit = setTimeout(() => finish('not-back'), RESTART_LIMIT_MS);
+  const cancelLimit = clock.after(RESTART_LIMIT_MS, () => finish('not-back'));
   const tick = () => {
     read()
       .then(
@@ -127,10 +133,10 @@ export function watchRestart(
         () => undefined,
       )
       .finally(() => {
-        if (!over) poll = setTimeout(tick, RESTART_POLL_MS);
+        if (!over) cancelPoll = clock.after(RESTART_POLL_MS, tick);
       });
   };
-  poll = setTimeout(tick, RESTART_POLL_MS);
+  cancelPoll = clock.after(RESTART_POLL_MS, tick);
   return stop;
 }
 
@@ -144,7 +150,7 @@ export type SaveResult =
   | { kind: 'unchanged'; warnings: string[] }
   | { kind: 'refused' }
   | { kind: 'no-answer' }
-  | { kind: 'failed'; message: string };
+  | { kind: 'failed' };
 
 export interface SettingsForm {
   /** The value a field shows: the edit, else what is stored, else the default; a secret shows only what is typed. */
@@ -183,8 +189,33 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
   const [errors, setErrors] = useState<Partial<Record<OwnedName, string>>>({});
   const [result, setResult] = useState<SaveResult | null>(null);
   const [saves, setSaves] = useState(0);
+  const clock = useContext(RestartClockContext);
   const cancelWatch = useRef<(() => void) | null>(null);
-  useEffect(() => () => cancelWatch.current?.(), []);
+  // why: a save answered after the page has gone must not start a watch or set state (fix round 1, minor 8)
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      cancelWatch.current?.();
+    };
+  }, []);
+  // why: after a save that waited for running searches, the restart shows as `pending` going back to null; the page
+  // says so then and reads everything again, as a save that restarted at once does (fix round 1, minor 4)
+  const sawPending = useRef(false);
+  const pending = view?.pending ?? null;
+  useEffect(() => {
+    if (result?.kind !== 'after-runs') {
+      sawPending.current = false;
+      return;
+    }
+    if (pending !== null) sawPending.current = true;
+    else if (sawPending.current) {
+      sawPending.current = false;
+      setResult({ kind: 'restarted', warnings: result.warnings });
+      void qc.invalidateQueries();
+    }
+  }, [pending, result, qc]);
 
   const inUse = useCallback(
     (name: OwnedName): string | null =>
@@ -247,6 +278,7 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
     } catch {
       before = null;
     }
+    if (!mounted.current) return;
     // why: without the boot id the page could not tell the restart from the app before it, so it saves nothing
     if (before === null) {
       setResult({ kind: 'no-answer' });
@@ -256,6 +288,7 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
     try {
       answer = await api.saveSettings(body);
     } catch (e) {
+      if (!mounted.current) return;
       const refused = e instanceof ApiError && e.status === 422 ? e.fieldErrors() : [];
       if (refused.length > 0) {
         const next: Partial<Record<OwnedName, string>> = {};
@@ -263,9 +296,11 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
         setErrors(next);
         setResult({ kind: 'refused' });
       } else if (e instanceof ApiError && e.code === 'network') setResult({ kind: 'no-answer' });
-      else setResult({ kind: 'failed', message: e instanceof Error ? e.message : String(e) });
+      // why: the api's own message is for its log; the page says it in its own words (fix round 1, minor 9)
+      else setResult({ kind: 'failed' });
       return;
     }
+    if (!mounted.current) return;
     // why: the saved names are in use now (or will be after the runs); a typed key is cleared from the page at once
     setDraft((d) => {
       const rest: Draft = { ...d };
@@ -294,6 +329,7 @@ export function useSettingsForm(view: View | undefined): SettingsForm {
         // why: everything the page reads may differ under the new settings (sources, balance, status)
         if (outcome === 'back') void qc.invalidateQueries();
       },
+      clock,
     );
   };
 

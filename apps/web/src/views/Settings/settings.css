@@ -246,9 +246,6 @@
 .st-note {
   font-size: 13.5px;
 }
-.st-sources > .st-note {
-  margin-bottom: 12px;
-}
 /* a sentence with a field in it ("until [12] reads in a row…"): it wraps as text, the field sitting in the line */
 .st-inline {
   font-size: 14px;
@@ -416,7 +413,14 @@
   margin-top: 4px;
 }
 
-/* A phone: one row of section links above the section */
+/* The Remove question: its legend is the question, laid out as the fieldset's first line */
+.st-confirm > legend {
+  float: left;
+  padding: 0;
+}
+
+/* A phone: one row of section links above the section. The row runs to the page's edges (it bleeds through the
+   page's own gutter) and its links are tight, so part of the next link always shows where the row scrolls. */
 @media (max-width: 800px) {
   .st-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -425,19 +429,17 @@
   .st-side {
     position: static;
     min-width: 0;
+    margin-inline: calc(-1 * var(--t-gutter));
   }
   .st-side ul {
     flex-direction: row;
-    gap: 4px;
+    gap: 2px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding: 0 var(--t-gutter) 4px;
   }
   .st-side a {
+    padding: 0 8px;
+    font-size: 14px;
     white-space: nowrap;
   }
-}
-
-.st-confirm > legend {
-  float: left;
-  padding: 0;
 }

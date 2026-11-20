@@ -3,13 +3,21 @@
 // day, only changed names sent, a refusal beside its field, the restart watched to a new boot id, the pending line,
 // Remove confirmed in the page, and the balance's states told apart. Synthetic keys; London → New York only.
 import { type ProviderId, SETTING_LABELS } from '@gmt/core';
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, screen, within } from '@testing-library/react';
 import { HttpResponse, http, type JsonBodyType } from 'msw';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../src/App.js';
+import { SETTINGS_KEY } from '../../../src/api/queries.js';
 import { COPY } from '../../../src/copy.js';
+import { RestartClockContext } from '../../../src/views/Settings/restartClock.js';
 import { SettingsView } from '../../../src/views/Settings/SettingsView.js';
-import { RESTART_LIMIT_MS, RESTART_POLL_MS } from '../../../src/views/Settings/useSettingsForm.js';
+import {
+  RESTART_LIMIT_MS,
+  RESTART_POLL_MS,
+  useSettingsForm,
+} from '../../../src/views/Settings/useSettingsForm.js';
 import {
   API,
   budgetResponse,
@@ -21,6 +29,7 @@ import {
 } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
+import { manualClock } from './manualClock.js';
 
 const S = COPY.settingsView;
 
@@ -32,14 +41,23 @@ const serveView = (over: View = {}) =>
 
 /** Every PUT /settings body, answered with `answer` (a save that restarts at once by default). */
 function capturePuts(answer: JsonBodyType = { warnings: [], applies: 'now' }, status = 200) {
+  return capturePutEvents(answer, status).bodies;
+}
+
+/** As capturePuts, with `reached(n)`: resolves when the n-th PUT has reached the handler (an event, never a wait). */
+function capturePutEvents(answer: JsonBodyType = { warnings: [], applies: 'now' }, status = 200) {
   const bodies: unknown[] = [];
+  const waiting: Array<{ n: number; resolve: () => void }> = [];
   server.use(
     http.put(`${API}/settings`, async ({ request }) => {
       bodies.push(await request.json());
+      for (const w of waiting.filter((x) => bodies.length >= x.n)) w.resolve();
       return HttpResponse.json(answer, { status });
     }),
   );
-  return bodies;
+  const reached = (n: number) =>
+    bodies.length >= n ? Promise.resolve() : new Promise<void>((resolve) => waiting.push({ n, resolve }));
+  return { bodies, reached };
 }
 
 const open = (search = '?view=settings') => renderWithProviders(<SettingsView />, { search });
@@ -154,7 +172,12 @@ describe('the browser block, both ways (ruling 9)', () => {
           statusReport(
             [
               { id: 'worker', area: 'worker', providerId: 'camoufox', summary: 'ready' },
-              { id: 'consent', area: 'consent', summary: 'consent rejected, expires 18 Nov 2027 (cookie)' },
+              {
+                id: 'consent',
+                area: 'consent',
+                summary: 'consent rejected, expires Thu, 18 Nov 2027, 10:00 (Europe/London) (cookie)',
+                expiresOn: '2027-11-18',
+              },
             ],
             { pagesAtOnce: 2 },
           ),
@@ -165,9 +188,9 @@ describe('the browser block, both ways (ruling 9)', () => {
     const card = await browserCard();
     expect(switchOf(card, COPY.newSearch.source.camoufox)).toBeChecked();
     expect(await within(card).findByText(S.browserReady)).toBeInTheDocument();
-    expect(
-      within(card).getByText(S.consentLine('consent rejected, expires 18 Nov 2027 (cookie)')),
-    ).toBeInTheDocument();
+    expect(within(card).getByText("Google's cookie choice saved until 18 Nov 2027")).toBeInTheDocument();
+    // the report's own summary, with its internal bound, is never shown
+    expect(card).not.toHaveTextContent(/consent rejected|\(cookie\)/);
     expect(within(card).getByText(S.pagesAtOnce(2)).closest('p')).toHaveTextContent(
       `${S.pagesAtOnce(2)} · ${S.changeWith} ${S.browserCommand}`,
     );
@@ -193,6 +216,32 @@ describe('the browser block, both ways (ruling 9)', () => {
     // spec revision 38: the pause after an unrecognised page is not a setting
     expect(card).not.toHaveTextContent(/unrecognised/i);
   });
+
+  it.each([
+    ['held, its date unknown', { state: 'ok' }, "Google's cookie choice is saved"],
+    ['running out', { state: 'warn', expiresOn: '2026-11-30' }, S.consentEnding('30 Nov 2026')],
+    ['run out', { state: 'fail', expiresOn: '2026-11-01' }, S.consentEnded('1 Nov 2026')],
+    ['missing', { state: 'fail' }, S.consentProblem],
+    ['not checked yet', { state: 'off', offReason: 'awaiting-verification' }, S.consentUnchecked],
+  ] as const)(
+    'the consent record %s is said in the page’s words, never the summary',
+    async (_n, over, words) => {
+      server.use(
+        http.get(`${API}/status`, () =>
+          HttpResponse.json(
+            statusReport([
+              { id: 'worker', area: 'worker', providerId: 'camoufox', summary: 'ready' },
+              { id: 'consent', area: 'consent', summary: 'internal summary words', ...over },
+            ]),
+          ),
+        ),
+      );
+      open();
+      const card = await browserCard();
+      expect(await within(card).findByText(words)).toBeInTheDocument();
+      expect(card).not.toHaveTextContent('internal summary words');
+    },
+  );
 
   it('a worker that is not answering says so in words, and pages at once is then not known', async () => {
     server.use(
@@ -317,7 +366,13 @@ describe('the source switches (ruling 8)', () => {
     const sa = await searchApiCard();
     expect(switchOf(sa, COPY.newSearch.source.searchapi)).toBeDisabled();
     expect(within(sa).getByText(S.needsKey)).toBeInTheDocument();
-    expect(switchOf(await cacheCard(), COPY.newSearch.source.travelpayouts)).toBeDisabled();
+    // each disabled switch is described by its own card's reason (fix round 1, minor 2)
+    expect(switchOf(sa, COPY.newSearch.source.searchapi)).toHaveAccessibleDescription(S.needsKey);
+    const cache = await cacheCard();
+    expect(switchOf(cache, COPY.newSearch.source.travelpayouts)).toBeDisabled();
+    expect(switchOf(cache, COPY.newSearch.source.travelpayouts)).toHaveAccessibleDescription(S.needsKey);
+    const reasons = document.querySelectorAll('[id^="needs-key-"]');
+    expect([...reasons].map((r) => r.id)).toEqual(['needs-key-searchapi', 'needs-key-travelpayouts']);
     // a key typed in is enough to switch it on in the same save
     await user.type(
       within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' }),
@@ -444,66 +499,93 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
     return { seen, read: (n: number) => slot(n - 1) };
   }
 
-  /**
-   * Under fake timers testing-library's findBy* never returns (its flush waits on a faked setTimeout), so the page is
-   * read with getBy* once an answer that already reached its handler has been delivered: a few turns of the I/O queue
-   * (setImmediate is not faked), inside act so React renders what it set.
-   */
-  const delivered = () =>
-    act(async () => {
-      for (let turn = 0; turn < 10; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
-    });
-
+  /** The page on a restart clock the test steps (no global timer is faked), with one edit ready to save. */
   async function editAndSave(health: ReturnType<typeof serveHealth>) {
-    const view = open();
+    const m = manualClock();
+    const view = renderWithProviders(
+      <RestartClockContext.Provider value={m.clock}>
+        <SettingsView />
+      </RestartClockContext.Provider>,
+      { search: '?view=settings' },
+    );
     const field = await patience();
     await view.user.clear(field);
     await view.user.type(field, '20');
-    // why: from here the watch's polls and its 60 s are the test's, stepped explicitly
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    fireEvent.click(saveButton());
-    // the boot id is read before the save
-    await act(() => health.read(1));
-    await delivered();
-    expect(screen.getByText(S.restarting)).toBeInTheDocument();
-    return view;
+    await view.user.click(saveButton());
+    expect(await screen.findByText(S.restarting)).toBeInTheDocument();
+    // the boot id was read before the save; the watch has set its limit and its first poll
+    expect(health.seen.reads).toBe(1);
+    await m.scheduled(2);
+    return { ...view, m };
   }
 
   it('says "Restarting the app…" until /api/health answers a new boot id, through a spell of no answer', async () => {
     const puts = capturePuts();
     const health = serveHealth(['boot-1', 'boot-1', 'down', 'boot-2']);
-    await editAndSave(health);
+    const { m } = await editAndSave(health);
     expect(puts).toHaveLength(1);
     for (const n of [2, 3]) {
-      await act(() => vi.advanceTimersByTimeAsync(RESTART_POLL_MS));
-      await act(() => health.read(n));
-      await delivered();
+      act(() => m.advance(RESTART_POLL_MS));
+      await health.read(n);
+      // the next poll is set only once this read has settled, and it was not a new boot id
+      await m.scheduled(n + 1);
       expect(screen.getByText(S.restarting)).toBeInTheDocument();
     }
-    await act(() => vi.advanceTimersByTimeAsync(RESTART_POLL_MS));
-    await act(() => health.read(4));
-    await delivered();
-    expect(screen.getByText(S.restarted)).toBeInTheDocument();
-    // the watch is over: no more reads
-    await act(() => vi.advanceTimersByTimeAsync(RESTART_POLL_MS * 5));
-    await delivered();
+    act(() => m.advance(RESTART_POLL_MS));
+    await health.read(4);
+    expect(await screen.findByText(S.restarted)).toBeInTheDocument();
+    // the watch is over: nothing is left to ask again
+    expect(m.pending()).toBe(0);
     expect(health.seen.reads).toBe(4);
   });
 
   it('after 60 s with no new boot id it says the app did not come back, and stops asking', async () => {
     capturePuts();
     const health = serveHealth(['boot-1']);
-    await editAndSave(health);
-    await act(() => vi.advanceTimersByTimeAsync(RESTART_LIMIT_MS - 1));
-    await delivered();
+    const { m } = await editAndSave(health);
+    act(() => m.advance(RESTART_LIMIT_MS - 1));
     expect(screen.getByText(S.restarting)).toBeInTheDocument();
-    await act(() => vi.advanceTimersByTimeAsync(1));
-    await delivered();
+    act(() => m.advance(1));
     expect(screen.getByText("The app didn't come back: run pnpm gmt status")).toBeInTheDocument();
-    const reads = health.seen.reads;
-    await act(() => vi.advanceTimersByTimeAsync(RESTART_POLL_MS * 5));
-    await delivered();
-    expect(health.seen.reads).toBe(reads);
+    expect(m.pending()).toBe(0);
+  });
+
+  it('a save the app holds for running searches says Restarted once its pending clears, and reads everything again', async () => {
+    let pending: { running: string[] } | null = null;
+    server.use(http.get(`${API}/settings`, () => HttpResponse.json(settingsView({ pending }))));
+    const puts: unknown[] = [];
+    server.use(
+      http.put(`${API}/settings`, async ({ request }) => {
+        puts.push(await request.json());
+        pending = { running: ['London → New York'] };
+        return HttpResponse.json({ warnings: [], applies: 'after-runs', running: ['London → New York'] });
+      }),
+    );
+    let providerReads = 0;
+    server.use(
+      http.get(`${API}/providers`, () => {
+        providerReads += 1;
+        return HttpResponse.json(providersResponse());
+      }),
+    );
+    const { user, client } = open();
+    const field = await patience();
+    await user.clear(field);
+    await user.type(field, '20');
+    await user.click(saveButton());
+    const waiting = 'Saved. Applies when London → New York finish; new searches wait until then.';
+    expect(await screen.findByText(waiting)).toBeInTheDocument();
+    // the page's re-read after the save sees the restart waiting
+    await settled(client);
+    expect(screen.getByText(waiting)).toBeInTheDocument();
+    const before = providerReads;
+    // the runs end and the app restarts: the next read has no pending
+    pending = null;
+    await act(() => client.refetchQueries({ queryKey: SETTINGS_KEY }));
+    expect(await screen.findByText(S.restarted)).toBeInTheDocument();
+    expect(screen.queryByText(waiting)).toBeNull();
+    await settled(client);
+    expect(providerReads).toBeGreaterThan(before);
   });
 
   it('a save the app holds for running searches names them; nothing restarts', async () => {
@@ -678,10 +760,10 @@ describe('the key and the balance: every state told apart (ruling 10)', () => {
     expect(within(card).getByText(S.secretSetAside)).toBeInTheDocument();
     expect(within(card).queryByText(S.secretNotSet)).toBeNull();
     expect(within(card).queryByText(S.searchapiNoKey)).toBeNull();
-    expect(within(card).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' })).toHaveAttribute(
-      'type',
-      'password',
-    );
+    const input = within(card).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
+    expect(input).toHaveAttribute('type', 'password');
+    // the note describes the field it is about (fix round 1, minor 5)
+    expect(input).toHaveAccessibleDescription(expect.stringContaining(S.secretSetAside));
     expect(within(card).queryByText(/credits? left/)).toBeNull();
   });
 
@@ -713,5 +795,138 @@ describe('the key and the balance: every state told apart (ruling 10)', () => {
     const card = await cacheCard();
     expect(within(card).getByText(S.secretEnds('91c0'))).toBeInTheDocument();
     expect(await within(card).findByText('64 calls this month (limit 50,000)')).toBeInTheDocument();
+  });
+});
+
+describe('fix round 1', () => {
+  it('a refused calendar list is said in each card whose control writes it, and describes those controls (important 1)', async () => {
+    const words = 'Choose calendar sources this app has set up, or none.';
+    capturePuts(
+      {
+        error: {
+          code: 'invalid_settings',
+          message: 'nothing was saved',
+          details: { fields: [{ field: 'NEW_SEARCH_DISCOVERY', message: words }] },
+        },
+      },
+      422,
+    );
+    const { user } = open();
+    await user.click(switchOf(await cacheCard(), COPY.newSearch.source.travelpayouts));
+    await user.click(saveButton());
+    expect(await screen.findByText(S.refused)).toBeInTheDocument();
+    const cards = [
+      [await browserCard(), COPY.newSearch.source.camoufox],
+      [await cacheCard(), COPY.newSearch.source.travelpayouts],
+      [await searchApiCard(), COPY.newSearch.source.searchapi],
+    ] as const;
+    for (const [card, name] of cards) {
+      expect(within(card).getByText(words)).toBeInTheDocument();
+      expect(switchOf(card, name)).toHaveAccessibleDescription(words);
+    }
+    const sa = await searchApiCard();
+    expect(
+      within(sa).getByRole('checkbox', { name: `${S.discoveryBox} ${S.discoveryBoxNote}` }),
+    ).toHaveAccessibleDescription(words);
+    // the trip check box writes the other list, which was not refused
+    expect(within(sa).getByRole('checkbox', { name: S.verificationBox })).toHaveAccessibleDescription('');
+  });
+
+  it('a refused trip check list is said only in SearchApi’s card, on its switch and its first box', async () => {
+    const words = 'Choose trip check sources this app has set up, or none.';
+    capturePuts(
+      {
+        error: {
+          code: 'invalid_settings',
+          message: 'nothing was saved',
+          details: { fields: [{ field: 'NEW_SEARCH_VERIFICATION', message: words }] },
+        },
+      },
+      422,
+    );
+    const { user } = open();
+    const sa = await searchApiCard();
+    await user.click(switchOf(sa, COPY.newSearch.source.searchapi));
+    await user.click(saveButton());
+    await screen.findByText(S.refused);
+    expect(screen.getAllByText(words)).toHaveLength(1);
+    expect(switchOf(sa, COPY.newSearch.source.searchapi)).toHaveAccessibleDescription(words);
+    expect(within(sa).getByRole('checkbox', { name: S.verificationBox })).toHaveAccessibleDescription(words);
+    expect(switchOf(await cacheCard(), COPY.newSearch.source.travelpayouts)).toHaveAccessibleDescription('');
+  });
+
+  it('a key typed into one field stays, and is sent later, when another key is removed (minor 3)', async () => {
+    const KEY = 'sk-test-kept-0123456789abcdef';
+    const { bodies: puts, reached } = capturePutEvents();
+    const { user } = open();
+    const sa = await searchApiCard();
+    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    await user.type(within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' }), KEY);
+    const cache = await cacheCard();
+    await user.click(within(cache).getByRole('button', { name: S.remove }));
+    await user.click(within(cache).getByRole('button', { name: S.confirmRemoveYes }));
+    await screen.findByText(S.restarting);
+    expect(puts).toEqual([{ changes: { TRAVELPAYOUTS_TOKEN: null } }]);
+    const field = within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
+    expect(field).toHaveProperty('value', KEY);
+    await user.click(saveButton());
+    await reached(2);
+    expect(puts[1]).toEqual({ changes: { SEARCHAPI_KEY: KEY } });
+  });
+
+  it('a typed key is never in the markup while it is typed: the field is uncontrolled (minor 10)', async () => {
+    const KEY = 'sk-test-typing-0123456789abcdef';
+    const { user, container } = open();
+    const sa = await searchApiCard();
+    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    const field = within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
+    await user.type(field, KEY);
+    expect(field).toHaveProperty('value', KEY);
+    expect(field.outerHTML).not.toContain(KEY);
+    expect(container.innerHTML).not.toContain(KEY);
+    expect(field).not.toHaveAttribute('value');
+  });
+
+  it('an error answer is said in the page’s words, never the api’s message (minor 9)', async () => {
+    capturePuts({ error: { code: 'internal', message: 'internal error 7f3a: database is locked' } }, 500);
+    const { user } = open();
+    const field = await patience();
+    await user.clear(field);
+    await user.type(field, '20');
+    await user.click(saveButton());
+    expect(await screen.findByText(S.failed)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('database is locked');
+  });
+
+  it('a save answered after the page has gone starts no restart watch (minor 8)', async () => {
+    const m = manualClock();
+    let reached: () => void = () => undefined;
+    const putReached = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.put(`${API}/settings`, async () => {
+        reached();
+        await gate;
+        return HttpResponse.json({ warnings: [], applies: 'now' });
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <RestartClockContext.Provider value={m.clock}>{children}</RestartClockContext.Provider>
+      </QueryClientProvider>
+    );
+    const { result, unmount } = renderHook(() => useSettingsForm(settingsView()), { wrapper });
+    const saving = result.current.save('sources', { FLIGHT_READ_PATIENCE: '20' });
+    await putReached;
+    unmount();
+    release();
+    await saving;
+    expect(m.sets()).toBe(0);
   });
 });

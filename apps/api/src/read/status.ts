@@ -7,6 +7,7 @@
 import {
   ageEndsLine,
   apiContract,
+  asIsoDate,
   BACKUP_MAX_AGE_MS,
   backupState,
   capPercent,
@@ -20,6 +21,7 @@ import {
   formatDuration,
   formatInstant,
   hoursSince,
+  type IsoDate,
   type IsoDateTime,
   PROVIDER_NAMES,
   SKIP_CODE_TEXT,
@@ -55,6 +57,7 @@ interface CheckInput {
   note?: string | null;
   offReason?: StatusCheck['offReason'];
   fix?: StatusCheck['fix'];
+  expiresOn?: IsoDate;
 }
 function check(i: CheckInput): StatusCheck {
   return {
@@ -67,6 +70,7 @@ function check(i: CheckInput): StatusCheck {
     note: i.note ?? null,
     offReason: i.state === 'off' ? (i.offReason ?? 'not-set-up') : null,
     fix: i.fix ?? null,
+    ...(i.expiresOn === undefined ? {} : { expiresOn: i.expiresOn }),
   };
 }
 
@@ -96,6 +100,16 @@ function fixer(f: Pick<StatusFacts, 'mode'>) {
 /** What the time and mode words of a check need of the facts. */
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
 const at = (f: Frame, iso: IsoDateTime) => formatInstant(iso, f.tz);
+/** An instant's calendar date in the report's time zone (`en-CA` formats as YYYY-MM-DD, the IsoDate form). */
+const dateIn = (f: Frame, iso: IsoDateTime): IsoDate =>
+  asIsoDate(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: f.tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(iso)),
+  );
 
 /** The app check's words for an app with no password that only this machine can reach (spec §4). */
 export const NO_PASSWORD_LOCAL = 'no password: only this machine can reach the app';
@@ -568,7 +582,13 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
     // why: whatever the choice, a record past its latest expiry has expired
     if (consentWindowState(upper, f.now) === 'fail')
       return out(
-        check({ ...base, state: 'fail', summary: `consent expired on ${at(f, upper)}`, fix: consentFix }),
+        check({
+          ...base,
+          state: 'fail',
+          summary: `consent expired on ${at(f, upper)}`,
+          fix: consentFix,
+          expiresOn: dateIn(f, upper),
+        }),
         'expired',
       );
     return cannot(
@@ -589,13 +609,16 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
   const bound = upper;
   const state = consentWindowState(bound, f.now);
   const words = `consent rejected, expires ${at(f, bound)} (${c.boundedBy === 'cookie' ? 'cookie' : 'capture'})`;
-  if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words }), 'none');
+  // why: settings plan ruling 9 — the Settings page words the record's expiry itself, so it carries the date
+  const expiresOn = dateIn(f, bound);
+  if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words, expiresOn }), 'none');
   return out(
     check({
       ...base,
       state,
       summary: state === 'fail' ? `consent expired on ${at(f, bound)}` : `${words}; 30 days or less left`,
       fix: consentFix,
+      expiresOn,
     }),
     state === 'fail' ? 'expired' : 'expiring',
   );

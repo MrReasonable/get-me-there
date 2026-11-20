@@ -11,18 +11,67 @@ import { useBudget, useProviders, useSearchApiAccount } from '../../api/queries.
 import { useStatus } from '../../api/statusQuery.js';
 import type { ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
+import { formatIsoDate } from '../../format.js';
 import { searchApiCreditsLine } from '../../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { settingsPatch } from '../../state/view.js';
 import { FieldError, fieldIds, NumberInput, SelectInput, SetAsideNote } from './fields.js';
 import { SecretField } from './SecretField.js';
-import type { SettingsForm, SourceRole } from './useSettingsForm.js';
+import { LIST_NAME, type SettingsForm, type SourceRole } from './useSettingsForm.js';
 
 const S = COPY.settingsView;
 const NAME = COPY.newSearch.source;
 
 type View = apiContract.SettingsView;
 type StatusCheck = apiContract.StatusCheck;
+type Toggle = (role: SourceRole, id: ProviderId, on: boolean) => void;
+/** What every source card is given: the stored view, the page's form, and the switch that writes the source lists. */
+interface CardProps {
+  view: View;
+  form: SettingsForm;
+  toggle: Toggle;
+}
+
+/** The id of a source list's refusal as shown in one source's card. */
+const listErrorId = (role: SourceRole, source: ProviderId) => `${fieldIds(LIST_NAME[role]).error}-${source}`;
+/** The id of a card's "save a key first" line. */
+const needsKeyId = (source: ProviderId) => `needs-key-${source}`;
+
+/**
+ * What a control that writes the source lists `roles` is described by (fix round 1, important 1): each list's refusal
+ * as its card shows it, when there is one, and the card's "save a key first" line when it is shown.
+ */
+function describedBy(
+  form: SettingsForm,
+  source: ProviderId,
+  roles: readonly SourceRole[],
+  needsKey: boolean,
+) {
+  const ids = [
+    ...roles.filter((r) => form.error(LIST_NAME[r]) !== null).map((r) => listErrorId(r, source)),
+    ...(needsKey ? [needsKeyId(source)] : []),
+  ];
+  return ids.length === 0 ? undefined : ids.join(' ');
+}
+
+/** A source list's refusals inside the card of a source whose controls write that list. */
+function ListErrors({
+  form,
+  id,
+  roles,
+}: {
+  form: SettingsForm;
+  id: ProviderId;
+  roles: readonly SourceRole[];
+}) {
+  return (
+    <>
+      {roles.map((r) => (
+        <FieldError key={r} name={LIST_NAME[r]} form={form} id={listErrorId(r, id)} />
+      ))}
+    </>
+  );
+}
 
 /** A state in words and a glyph, so a line never says it by colour alone. */
 const GLYPH: Readonly<Record<StatusCheck['state'], string>> = { ok: '●', warn: '▲', fail: '✕', off: '○' };
@@ -92,6 +141,18 @@ function SourceCard({
 /** A set-up command, shown as code. */
 const Command = ({ text }: { text: string }) => <code className="st-cmd">{text}</code>;
 
+/**
+ * The consent record in the page's own words (fix round 1, minor 1): its expiry date when the report gives one, else a
+ * short line pointing to System; never the report's summary.
+ */
+function consentWords(c: StatusCheck): string {
+  const date = c.expiresOn === undefined ? null : formatIsoDate(c.expiresOn);
+  if (c.state === 'off') return S.consentUnchecked;
+  if (date === null) return c.state === 'ok' ? S.consentHeld : S.consentProblem;
+  if (c.state === 'ok') return S.consentSaved(date);
+  return c.state === 'warn' ? S.consentEnding(date) : S.consentEnded(date);
+}
+
 /** The browser's state from `/status` (ruling 9): the worker's line, then the consent record's, each in words. */
 function BrowserStatus() {
   const status = useStatus();
@@ -117,7 +178,7 @@ function BrowserStatus() {
               ? S.browserReady
               : S.browserState(COPY.statusView.state[worker.state], worker.summary),
           )}
-      {consent === undefined ? null : line(consent, S.consentLine(consent.summary))}
+      {consent === undefined ? null : line(consent, consentWords(consent))}
       <p className="st-kv">
         {status.data.pagesAtOnce === undefined
           ? S.pagesAtOnceUnknown
@@ -132,11 +193,7 @@ function BrowserStatus() {
 }
 
 /** Google Flights in the browser (ruling 9): set-up words when it is off, else its state and its settings. */
-function Browser({
-  view,
-  form,
-  toggle,
-}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+function Browser({ view, form, toggle }: CardProps) {
   const aside = (name: OwnedName) => view.setAside.includes(name);
   if (!view.envOnly.camoufoxEnabled)
     return (
@@ -157,10 +214,12 @@ function Browser({
           source={NAME.camoufox}
           on={on}
           disabled={false}
+          describedBy={describedBy(form, 'camoufox', ['discovery'], false)}
           onChange={(v) => toggle('discovery', 'camoufox', v)}
         />
       }
     >
+      <ListErrors form={form} id="camoufox" roles={['discovery']} />
       <BrowserStatus />
       <div className="st-field">
         <p className="st-inline">
@@ -240,11 +299,7 @@ function Balance({ providers }: { providers: ProvidersResponse | undefined }) {
   );
 }
 
-function SearchApi({
-  view,
-  form,
-  toggle,
-}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+function SearchApi({ view, form, toggle }: CardProps) {
   const providers = useProviders();
   const aside = (name: OwnedName) => view.setAside.includes(name);
   const key = view.secrets.SEARCHAPI_KEY;
@@ -256,7 +311,6 @@ function SearchApi({
   const discovery = form.list('discovery').includes('searchapi');
   const on = verification || discovery;
   const plan = form.shown('SEARCHAPI_PLAN');
-  const needsKey = canUse ? undefined : fieldIds('SEARCHAPI_KEY').hint;
   return (
     <SourceCard
       id="searchapi"
@@ -267,7 +321,7 @@ function SearchApi({
           source={NAME.searchapi}
           on={on}
           disabled={!canUse && !on}
-          describedBy={needsKey}
+          describedBy={describedBy(form, 'searchapi', ['verification', 'discovery'], !canUse)}
           onChange={(v) => {
             // why: ruling 8 — On ticks the first box; Off unticks both (an emptied list is stored as none)
             if (v) toggle('verification', 'searchapi', true);
@@ -279,6 +333,7 @@ function SearchApi({
         />
       }
     >
+      <ListErrors form={form} id="searchapi" roles={['verification', 'discovery']} />
       {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers.data} /> : null}
       {!key.set ? <p className="st-kv st-muted">{S.searchapiNoKey}</p> : null}
       <SecretField
@@ -325,6 +380,7 @@ function SearchApi({
           type="checkbox"
           checked={verification}
           disabled={!canUse && !verification}
+          aria-describedby={describedBy(form, 'searchapi', ['verification'], !canUse)}
           onChange={(e) => toggle('verification', 'searchapi', e.target.checked)}
         />
         <span>{S.verificationBox}</span>
@@ -334,13 +390,18 @@ function SearchApi({
           type="checkbox"
           checked={discovery}
           disabled={!canUse && !discovery}
+          aria-describedby={describedBy(form, 'searchapi', ['discovery'], !canUse)}
           onChange={(e) => toggle('discovery', 'searchapi', e.target.checked)}
         />
         <span>
           {S.discoveryBox} <span className="st-muted">{S.discoveryBoxNote}</span>
         </span>
       </label>
-      {canUse ? null : <p className="st-hint">{S.needsKey}</p>}
+      {canUse ? null : (
+        <p id={needsKeyId('searchapi')} className="st-hint">
+          {S.needsKey}
+        </p>
+      )}
       <p className="st-hint">
         {S.creditsPerSearch}{' '}
         <a href={hrefWith(settingsPatch('limits'))} onClick={navigateTo(settingsPatch('limits'))}>
@@ -352,11 +413,7 @@ function SearchApi({
   );
 }
 
-function Travelpayouts({
-  view,
-  form,
-  toggle,
-}: Props & { toggle: (role: SourceRole, id: ProviderId, on: boolean) => void }) {
+function Travelpayouts({ view, form, toggle }: CardProps) {
   const providers = useProviders();
   const token = view.secrets.TRAVELPAYOUTS_TOKEN;
   const aside = view.setAside.includes('TRAVELPAYOUTS_TOKEN');
@@ -378,10 +435,12 @@ function Travelpayouts({
           source={NAME.travelpayouts}
           on={on}
           disabled={!canUse && !on}
+          describedBy={describedBy(form, 'travelpayouts', ['discovery'], !canUse)}
           onChange={(v) => toggle('discovery', 'travelpayouts', v)}
         />
       }
     >
+      <ListErrors form={form} id="travelpayouts" roles={['discovery']} />
       {!token.set ? <p className="st-kv st-muted">{S.travelpayoutsNoKey}</p> : null}
       <SecretField
         name="TRAVELPAYOUTS_TOKEN"
@@ -393,30 +452,27 @@ function Travelpayouts({
       {saved && month !== undefined ? (
         <p className="st-kv st-muted">{S.callsThisMonth(month.calls, month.cap)}</p>
       ) : null}
-      {canUse ? null : <p className="st-hint">{S.needsKey}</p>}
+      {canUse ? null : (
+        <p id={needsKeyId('travelpayouts')} className="st-hint">
+          {S.needsKey}
+        </p>
+      )}
     </SourceCard>
   );
 }
 
-interface Props {
-  view: View;
-  form: SettingsForm;
-}
-
 /**
  * Settings › Price sources (settings plan rulings 8, 9 and 10): the browser, SearchApi and the Aviasales cache, each
- * with its switch for new searches and its own settings. A refused source list is said above the cards, tied to the
- * switches.
+ * with its switch for new searches and its own settings. A refused source list is said inside each card whose switch
+ * or box writes that list, and each of those controls is described by it.
  */
-export function PriceSources({ view, form }: Props) {
-  const toggle = (role: SourceRole, id: ProviderId, on: boolean) => {
+export function PriceSources({ view, form }: Omit<CardProps, 'toggle'>) {
+  const toggle: Toggle = (role, id, on) => {
     const now = form.list(role);
     form.setList(role, on ? [...now.filter((x) => x !== id), id] : now.filter((x) => x !== id));
   };
   return (
     <div className="st-sources">
-      <FieldError name="NEW_SEARCH_DISCOVERY" form={form} />
-      <FieldError name="NEW_SEARCH_VERIFICATION" form={form} />
       <Browser view={view} form={form} toggle={toggle} />
       <SearchApi view={view} form={form} toggle={toggle} />
       <Travelpayouts view={view} form={form} toggle={toggle} />

@@ -188,6 +188,11 @@ export const statusCheckSchema = z
         command: z.string().startsWith('pnpm gmt ').nullable(),
       })
       .nullable(),
+    /**
+     * Settings plan ruling 9: the consent check's record expiry as a date in the app's time zone, set only when the
+     * record's expiry is known (held, expiring or expired); the Settings page words it, never the summary.
+     */
+    expiresOn: isoDateSchema.exactOptional(),
   })
   .refine((c) => (c.state === 'off') === (c.offReason !== null), {
     message: 'offReason is set exactly when the state is off',

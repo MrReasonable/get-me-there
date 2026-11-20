@@ -117,6 +117,13 @@ export const SMTP_REQUIRED_NAMES = [
 /** Every owned mail setting: the all-or-nothing ones and SMTP_TLS, which has a default. Email is off without them. */
 export const EMAIL_NAMES: readonly OwnedName[] = [...SMTP_REQUIRED_NAMES, 'SMTP_TLS'];
 
+/** SEARCHAPI_PLAN's default when unset: the free trial (the Settings page shows it, the schema reads it). */
+export const DEFAULT_SEARCHAPI_PLAN = 'trial';
+/** SEARCHAPI_BILLING_DAY's default when unset: the 1st, as both SearchApi plan presets say. */
+export const DEFAULT_SEARCHAPI_BILLING_DAY = 1;
+/** CAMOUFOX_BROWSER_WINDOW's default when unset: the browser runs only during scheduled searches. */
+export const DEFAULT_CAMOUFOX_BROWSER_WINDOW = 'scheduled';
+
 /** DISCOVERY_REFRESH_DAYS's default (settings plan ruling 7): the days before a date's calendar price is read again. */
 export const DEFAULT_DISCOVERY_REFRESH_DAYS = 7;
 /**

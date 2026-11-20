@@ -43,7 +43,7 @@ function resultWords(r: SaveResult): string {
     case 'no-answer':
       return S.noAnswer;
     case 'failed':
-      return S.notSaved(r.message);
+      return S.failed;
   }
 }
 

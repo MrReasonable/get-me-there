@@ -838,7 +838,7 @@ describe('the worker read, through the real facts (V5)', () => {
     expect(byId(b, 'price-sources')?.summary).toBe('price sources: Camoufox');
   });
 
-  it("gives the worker's own pages at once, and none when the worker reported no shared settings (settings ruling 9)", async () => {
+  it("gives the worker's own pages at once, and none when the worker reported none, or one past its rule (settings ruling 9)", async () => {
     // why: app and worker hold the same value or the worker refuses pages; the page shows the worker's, as it reported it
     stubWorker(() =>
       Response.json(workerBody({ sharedSettings: { ...SHARED, CAMOUFOX_PAGES_AT_ONCE: '3' } })),
@@ -846,6 +846,14 @@ describe('the worker read, through the real facts (V5)', () => {
     const x = await harness({ ...WORKER_ENV, CAMOUFOX_PAGES_AT_ONCE: '3' });
     expect((await body(x)).pagesAtOnce).toBe(3);
     await x.close();
+    h = undefined;
+    vi.unstubAllGlobals();
+    stubWorker(() =>
+      Response.json(workerBody({ sharedSettings: { ...SHARED, CAMOUFOX_PAGES_AT_ONCE: '9' } })),
+    );
+    const z = await harness(WORKER_ENV);
+    expect(await body(z)).not.toHaveProperty('pagesAtOnce');
+    await z.close();
     h = undefined;
     vi.unstubAllGlobals();
     const { sharedSettings: _omitted, ...older } = workerBody();

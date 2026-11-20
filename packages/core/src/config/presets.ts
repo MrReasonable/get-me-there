@@ -1,4 +1,6 @@
 /** Plan presets from spec §12 and docs/api-limits.md. Money in micro-GBP; pence × 10 000. */
+import { DEFAULT_SEARCHAPI_BILLING_DAY } from './settings.js';
+
 export type PlanId = 'trial' | '40usd';
 
 export interface ProviderLimits {
@@ -44,7 +46,7 @@ export const PLAN_PRESETS: Record<PlanId, PlanPreset> = {
   trial: {
     monthlyCallCap: 100,
     window: 'lifetime',
-    billingDay: 1,
+    billingDay: DEFAULT_SEARCHAPI_BILLING_DAY,
     ratePerMinute: 2,
     ratePerHour: 20,
     concurrency: 1,
@@ -60,7 +62,7 @@ export const PLAN_PRESETS: Record<PlanId, PlanPreset> = {
   '40usd': {
     monthlyCallCap: 10_000,
     window: 'month',
-    billingDay: 1,
+    billingDay: DEFAULT_SEARCHAPI_BILLING_DAY,
     ratePerMinute: 10,
     ratePerHour: 2000,
     concurrency: 2,

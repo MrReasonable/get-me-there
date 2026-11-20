@@ -17,12 +17,13 @@ import {
   isLoopbackHost,
   isScheduled,
   onlyThisMachine,
-  PAGES_AT_ONCE_MAX,
   type ProviderId,
+  readSharedSettings,
   runModeOf,
   type SearchDefinition,
   START_REFUSAL_FILE,
   scheduledOnlyText,
+  sharedInt,
   startRefusalSchema,
   withAssumedBound,
   workerDataDir,
@@ -289,10 +290,17 @@ function readRefusal(home: string | null): RefusalRead {
   }
 }
 
-/** The worker's reported pages at once as a number, by the shared rule's own bound; null when it reported none it could. */
+/**
+ * The worker's reported pages at once as a number, read through core's one shared-settings rule; null when the worker
+ * reported none, or a value that rule refuses (never the default in its place: the page shows only what was reported).
+ */
 function pagesAtOnceOf(shared: Readonly<Partial<Record<string, string>>> | undefined): number | null {
-  const n = Number(shared?.CAMOUFOX_PAGES_AT_ONCE);
-  return Number.isInteger(n) && n >= 1 && n <= PAGES_AT_ONCE_MAX ? n : null;
+  const given = shared?.CAMOUFOX_PAGES_AT_ONCE;
+  if (given === undefined) return null;
+  const read = readSharedSettings({ CAMOUFOX_PAGES_AT_ONCE: given });
+  return read.invalid.includes('CAMOUFOX_PAGES_AT_ONCE')
+    ? null
+    : sharedInt(read.settings, 'CAMOUFOX_PAGES_AT_ONCE');
 }
 
 async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {

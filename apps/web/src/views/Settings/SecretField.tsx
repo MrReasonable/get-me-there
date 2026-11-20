@@ -1,5 +1,5 @@
 import { type OwnedName, SETTING_LABELS } from '@gmt/core';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { COPY } from '../../copy.js';
 import { FieldError, fieldIds } from './fields.js';
 import type { SettingsForm } from './useSettingsForm.js';
@@ -8,9 +8,10 @@ const S = COPY.settingsView;
 
 /**
  * A key or token, write-only (settings plan ruling 14): once saved the page shows only "saved · ends 3f2a" (or
- * "saved", or that the saved one was set aside at boot), with Replace and Remove. A typed key is a password field with
- * `autocomplete="new-password"`, and is cleared once saved. Remove asks in the page first; its "Remove it" saves the
- * removal at once (`onRemove`).
+ * "saved", or that the saved one was set aside at boot), with Replace and Remove. A typed key goes into a password
+ * field with `autocomplete="new-password"`. The field is uncontrolled, so React never copies the key into its value
+ * attribute; the typed text lives in the field and the page's draft only, and is cleared once saved. Remove asks in
+ * the page first; its "Remove it" saves the removal at once (`onRemove`).
  */
 export function SecretField({
   name,
@@ -27,24 +28,32 @@ export function SecretField({
 }) {
   const label = SETTING_LABELS[name];
   const ids = fieldIds(name);
-  // why: each is open only for the save count it was opened at, so a save that stored something closes the field in
-  // the same render that clears its typed key
+  // why: each is open only for the save count it was opened at, so a save that stored something closes it in the same
+  // render; a field still holding a typed key stays open whatever else was saved (fix round 1, minor 3)
   const [replacingAt, setReplacingAt] = useState<number | null>(null);
   const [confirmingAt, setConfirmingAt] = useState<number | null>(null);
-  const replacing = replacingAt === form.saves;
   const confirming = confirmingAt === form.saves;
   const setReplacing = (open: boolean) => setReplacingAt(open ? form.saves : null);
   const setConfirming = (open: boolean) => setConfirmingAt(open ? form.saves : null);
+  const typed = form.edited(name) && form.shown(name) !== null;
   const saved = secret.set && !setAside;
-  const typing = !saved || replacing;
+  const typing = !saved || replacingAt === form.saves || typed;
+  // why: the field is uncontrolled; when a save clears its draft, the text the field still holds is cleared with it
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!typed && field.current !== null && field.current.value !== '') field.current.value = '';
+  }, [typed]);
   const error = form.error(name);
+  const described = [ids.hint, ...(setAside ? [ids.note] : []), ...(error === null ? [] : [ids.error])].join(
+    ' ',
+  );
   return (
     <fieldset className="st-field">
       <legend id={ids.label} className="st-lab">
         {label}
       </legend>
       {setAside ? (
-        <p className="st-note st-warn">
+        <p id={ids.note} className="st-note st-warn">
           <span aria-hidden="true">▲ </span>
           {S.secretSetAside}
         </p>
@@ -52,14 +61,14 @@ export function SecretField({
       <div className="st-secret">
         {typing ? (
           <input
+            ref={field}
             id={ids.input}
             type="password"
             autoComplete="new-password"
             spellCheck={false}
             aria-labelledby={ids.label}
-            aria-describedby={error === null ? ids.hint : `${ids.hint} ${ids.error}`}
+            aria-describedby={described}
             aria-invalid={error === null ? undefined : true}
-            value={form.shown(name) ?? ''}
             onChange={(e) => form.type(name, e.target.value)}
           />
         ) : (
@@ -67,12 +76,12 @@ export function SecretField({
             {secret.last4 === null ? S.secretSaved : S.secretEnds(secret.last4)}
           </code>
         )}
-        {saved && !replacing ? (
+        {saved && !typing ? (
           <button type="button" className="st-btn st-btn-sm" onClick={() => setReplacing(true)}>
             {S.replace}
           </button>
         ) : null}
-        {saved && replacing ? (
+        {saved && typing ? (
           <button
             type="button"
             className="st-btn st-btn-sm"

@@ -1,7 +1,7 @@
 // The Settings page's form logic (settings plan rulings 8, 14): which section saves which owned name, a source list as
 // stored, what a name holds before any edit, and the restart's watch on a clock the test steps.
 import { OWNED_NAMES } from '@gmt/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SETTINGS_SECTIONS } from '../../../src/state/view.js';
 import {
   originalOf,
@@ -13,8 +13,7 @@ import {
   watchRestart,
 } from '../../../src/views/Settings/useSettingsForm.js';
 import { settingsView } from '../../fixtures.js';
-
-afterEach(() => vi.useRealTimers());
+import { manualClock } from './manualClock.js';
 
 describe('the sections own the names', () => {
   it('every owned name is saved by exactly one section, and System saves none', () => {
@@ -62,58 +61,72 @@ describe('the restart’s watch (ruling 14)', () => {
   }
 
   it('asks every poll until a new boot id answers; an old id or no answer is asked again', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const m = manualClock();
     const { read, pending } = reads();
-    const done = vi.fn();
-    watchRestart('boot-1', read, done);
+    let back: (outcome: string) => void = () => undefined;
+    const outcome = new Promise<string>((resolve) => {
+      back = resolve;
+    });
+    const done = vi.fn((o: string) => back(o));
+    watchRestart('boot-1', read, done, m.clock);
     expect(pending).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(RESTART_POLL_MS);
+    m.advance(RESTART_POLL_MS);
     expect(pending).toHaveLength(1);
     pending[0]?.resolve('boot-1');
-    await vi.advanceTimersByTimeAsync(RESTART_POLL_MS);
+    // the next poll is set once the read has settled
+    await m.scheduled(3);
+    m.advance(RESTART_POLL_MS);
     expect(pending).toHaveLength(2);
     pending[1]?.reject(new Error('no answer'));
-    await vi.advanceTimersByTimeAsync(RESTART_POLL_MS);
+    await m.scheduled(4);
+    m.advance(RESTART_POLL_MS);
     expect(pending).toHaveLength(3);
     expect(done).not.toHaveBeenCalled();
     pending[2]?.resolve('boot-2');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(done).toHaveBeenCalledExactlyOnceWith('back');
-    await vi.advanceTimersByTimeAsync(RESTART_LIMIT_MS);
+    expect(await outcome).toBe('back');
+    expect(done).toHaveBeenCalledOnce();
+    expect(m.pending()).toBe(0);
+    m.advance(RESTART_LIMIT_MS);
     expect(pending).toHaveLength(3);
     expect(done).toHaveBeenCalledOnce();
   });
 
-  it('a read still in flight is not asked again over it', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  it('a read still in flight is not asked again over it', () => {
+    const m = manualClock();
     const { read, pending } = reads();
-    watchRestart('boot-1', read, vi.fn());
-    await vi.advanceTimersByTimeAsync(RESTART_POLL_MS * 5);
+    watchRestart('boot-1', read, vi.fn(), m.clock);
+    m.advance(RESTART_POLL_MS * 5);
     expect(pending).toHaveLength(1);
   });
 
-  it('gives up after the limit, once, even with a read in flight that answers later', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  it('gives up after the limit, once, and a read in flight that answers later sets no new poll', async () => {
+    const m = manualClock();
     const { read, pending } = reads();
     const done = vi.fn();
-    watchRestart('boot-1', read, done);
-    await vi.advanceTimersByTimeAsync(RESTART_LIMIT_MS - 1);
+    watchRestart('boot-1', read, done, m.clock);
+    m.advance(RESTART_LIMIT_MS - 1);
     expect(done).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+    m.advance(1);
     expect(done).toHaveBeenCalledExactlyOnceWith('not-back');
+    expect(m.pending()).toBe(0);
+    const sets = m.sets();
     pending[0]?.resolve('boot-2');
-    await vi.advanceTimersByTimeAsync(RESTART_POLL_MS * 3);
+    // why: the read's then and finally are microtasks; one macrotask turn runs them all
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    m.advance(RESTART_POLL_MS * 3);
     expect(done).toHaveBeenCalledOnce();
+    expect(m.sets()).toBe(sets);
     expect(pending).toHaveLength(1);
   });
 
-  it('the cancel stops it: no read, no outcome', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  it('the cancel stops it: no read, no outcome', () => {
+    const m = manualClock();
     const { read, pending } = reads();
     const done = vi.fn();
-    const cancel = watchRestart('boot-1', read, done);
+    const cancel = watchRestart('boot-1', read, done, m.clock);
     cancel();
-    await vi.advanceTimersByTimeAsync(RESTART_LIMIT_MS * 2);
+    expect(m.pending()).toBe(0);
+    m.advance(RESTART_LIMIT_MS * 2);
     expect(pending).toHaveLength(0);
     expect(done).not.toHaveBeenCalled();
   });

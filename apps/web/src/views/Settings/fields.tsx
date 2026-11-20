@@ -23,12 +23,15 @@ export function describedBy(name: OwnedName, form: SettingsForm, setAside: boole
   return parts.length === 0 ? undefined : parts.join(' ');
 }
 
-/** A 422's words beside the field it refused (ruling 5), with a glyph so it is never told by colour alone. */
-export function FieldError({ name, form }: { name: OwnedName; form: SettingsForm }) {
+/**
+ * A 422's words beside the field it refused (ruling 5), with a glyph so it is never told by colour alone. `id` names it
+ * where one refusal is shown in more than one place (a source list, beside each control that writes it).
+ */
+export function FieldError({ name, form, id }: { name: OwnedName; form: SettingsForm; id?: string }) {
   const error = form.error(name);
   if (error === null) return null;
   return (
-    <p id={fieldIds(name).error} className="st-note st-bad">
+    <p id={id ?? fieldIds(name).error} className="st-note st-bad">
       <span aria-hidden="true">✕ </span>
       {error}
     </p>

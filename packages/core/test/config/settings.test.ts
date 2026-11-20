@@ -1,10 +1,14 @@
 // Plan rulings 1, 2 (UX stage 3 Settings): the names the Settings page owns, how stored rows lie over the environment,
 // the page's labels and refusal words, and the money parser for amounts typed in pounds.
 import { describe, expect, it } from 'vitest';
+import { PLAN_PRESETS } from '../../src/config/presets.js';
 import { parseBootConfig, parseConfig } from '../../src/config/schema.js';
 import {
+  DEFAULT_CAMOUFOX_BROWSER_WINDOW,
   DEFAULT_DISCOVERY_REFRESH_DAYS,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
+  DEFAULT_SEARCHAPI_BILLING_DAY,
+  DEFAULT_SEARCHAPI_PLAN,
   EMAIL_NAMES,
   isOwnedName,
   layerSettings,
@@ -321,5 +325,22 @@ describe('parseBootConfig (ruling 3)', () => {
   it('still refuses a name the page does not own', () => {
     const r = parseBootConfig({ ...base, PORT: '0' }, { realpath: (p) => p });
     expect(r.ok ? [] : r.errors.map((e) => e.field)).toEqual(['PORT']);
+  });
+});
+
+describe('the defaults the Settings page shows for an unset name (Task 5 fix round 1, minor 6)', () => {
+  const base = { NODE_ENV: 'development', DATABASE_PATH: ':memory:', BIND_ADDRESS: '127.0.0.1' };
+  it('are the values the schema reads when the name is unset', () => {
+    const r = parseConfig({ ...base, SEARCHAPI_KEY: 'k'.repeat(32) }, { realpath: (p) => p });
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect([DEFAULT_SEARCHAPI_PLAN, DEFAULT_SEARCHAPI_BILLING_DAY, DEFAULT_CAMOUFOX_BROWSER_WINDOW]).toEqual([
+      'trial',
+      1,
+      'scheduled',
+    ]);
+    expect(r.config.providers.searchapi?.plan).toBe(DEFAULT_SEARCHAPI_PLAN);
+    expect(r.config.providers.searchapi?.limits.billingDay).toBe(DEFAULT_SEARCHAPI_BILLING_DAY);
+    expect(r.config.camoufoxBrowserWindow).toBe(DEFAULT_CAMOUFOX_BROWSER_WINDOW);
+    expect(PLAN_PRESETS['40usd'].billingDay).toBe(DEFAULT_SEARCHAPI_BILLING_DAY);
   });
 });

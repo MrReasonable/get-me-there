@@ -252,7 +252,15 @@ export const COPY = {
     browserReady: 'Browser ready',
     browserState: (state: string, summary: string) => `Browser ${state}: ${summary}`,
     browserUnknown: "The browser's state couldn't be read.",
-    consentLine: (summary: string) => `Cookie choice: ${summary}`,
+    // the consent record, in the page's words from its state and expiry date (never the report's summary)
+    consentSaved: (date: string) => `Google's cookie choice saved until ${date}`,
+    consentEnding: (date: string) =>
+      `Google's cookie choice runs out on ${date}; System says how to save it again.`,
+    consentEnded: (date: string) =>
+      `Google's cookie choice ran out on ${date}; System says how to save it again.`,
+    consentHeld: "Google's cookie choice is saved",
+    consentProblem: "Google's cookie choice needs attention; System says what to do.",
+    consentUnchecked: "Google's cookie choice isn't checked yet.",
     pagesAtOnce: (n: number) => `Pages at once: ${n}`,
     pagesAtOnceUnknown: "Pages at once: not known (the browser worker didn't say)",
     changeWith: 'change with',
@@ -309,7 +317,7 @@ export const COPY = {
       `Saved. Applies when ${names.length === 0 ? 'the running searches' : listText(names)} finish; new searches wait until then.`,
     unchanged: 'Nothing changed, so nothing was saved.',
     refused: 'Nothing was saved: fix the marked fields.',
-    notSaved: (message: string) => `Not saved: ${message}`,
+    failed: 'Not saved: the app answered with an error; its log has the cause.',
     noAnswer: "Not saved: the app didn't answer.",
   },
 
@@ -322,7 +330,7 @@ export const COPY = {
     severalNeedYou: (count: number) => `${count} things need you`,
     /** The link's tail: the Status page says what to do (the System page of Settings). */
     fix: 'fix',
-    limitsLabel: 'Limits',
+    limitsLabel: "This month's limits",
     /**
      * SearchApi's credits left (settings plan ruling 10, `searchApiCreditsLine`): its own balance ("SearchApi: 38 credits
      * left"), or, when it could not be asked, this app's count of the window in use ("51 of 100", with the tail below
