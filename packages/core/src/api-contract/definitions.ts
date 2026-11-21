@@ -23,12 +23,14 @@ export const windowSpecSchema = z.discriminatedUnion('kind', [
     .refine((w) => w.to >= w.from, { message: 'to must not be before from', path: ['to'] }),
   z.object({
     kind: z.literal('relative'),
-    startOffsetDays: z.number().int().min(1),
+    // why: bounded here too, so a route that resolves the window without `validateSearchSpace` (the coverage check)
+    // refuses a start past the 400 days with a field error, not a 500 from a date past 9999-12-31
+    startOffsetDays: z.number().int().min(1).max(MAX_WINDOW_DAYS),
     lengthDays: z.number().int().min(1).max(MAX_WINDOW_DAYS),
   }),
   z.strictObject({
     kind: z.literal('months'),
-    startOffsetDays: z.number().int().min(1),
+    startOffsetDays: z.number().int().min(1).max(MAX_WINDOW_DAYS),
     lengthMonths: z.number().int().min(1).max(MAX_WINDOW_MONTHS),
   }),
 ]);

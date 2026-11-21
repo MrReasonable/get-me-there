@@ -229,6 +229,17 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
     );
   });
 
+  it.each([
+    ['Infinity in Starts in', COPY.startOffsetDays, '9'.repeat(309)],
+    ['Infinity in Length', COPY.lengthDays, '9'.repeat(309)],
+    ['a start past 400 days', COPY.startOffsetDays, '4000000'],
+  ])('a days window with %s leaves out its dates line, and the form stays up', (_name, label, digits) => {
+    renderEdit();
+    fireEvent.change(screen.getByLabelText(label), { target: { value: digits } });
+    expect(screen.getByLabelText(PLAN_COPY.whenToLeave)).toBeInTheDocument();
+    expect(screen.queryByText(/: departures from /)).toBeNull();
+  });
+
   it('a search saved with a rolling window in days keeps it as its own choice, with its boxes, until another is picked', async () => {
     const bodies = estimateBodies();
     renderEdit();

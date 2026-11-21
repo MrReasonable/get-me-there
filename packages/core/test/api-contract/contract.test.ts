@@ -280,6 +280,11 @@ describe('api-contract (spec §10)', () => {
     expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 12 }).success).toBe(true);
     expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 13 }).success).toBe(false);
     expect(def({ kind: 'months', startOffsetDays: 0, lengthMonths: 3 }).success).toBe(false);
+    // a start past the 400 days, for either rolling kind, so no route resolves one into a date past 9999-12-31
+    expect(def({ kind: 'months', startOffsetDays: 400, lengthMonths: 3 }).success).toBe(true);
+    expect(def({ kind: 'months', startOffsetDays: 401, lengthMonths: 3 }).success).toBe(false);
+    expect(def({ kind: 'months', startOffsetDays: 4_000_000, lengthMonths: 3 }).success).toBe(false);
+    expect(def({ kind: 'relative', startOffsetDays: 4_000_000, lengthDays: 10 }).success).toBe(false);
     expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 3, lengthDays: 90 }).success).toBe(false);
   });
   it('cronSchema is a bounded string only', () => {

@@ -1,4 +1,4 @@
-import { resolveWindow, WINDOW_PRESET_MONTHS } from '@gmt/core';
+import { MAX_WINDOW_DAYS, MAX_WINDOW_MONTHS, resolveWindow, WINDOW_PRESET_MONTHS } from '@gmt/core';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
@@ -8,6 +8,13 @@ import type { DateEnd, SearchForm } from './useSearchForm.js';
 import { choiceOf, choiceValue, windowChoice } from './windowChoice.js';
 
 const dateInput = 'input min-h-11';
+
+/**
+ * A whole number from 1 to `max`: the only values a rolling window's dates are worked out from. A number box takes any
+ * digits (309 of them read as Infinity), which the API refuses by its field; until then the line is left out rather
+ * than the resolution throwing and taking the form down.
+ */
+const resolvable = (n: number, max: number) => Number.isInteger(n) && n >= 1 && n <= max;
 /** The two ends of Leave between, first then last, with their labels. */
 const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
   { end: 'from', label: PLAN_COPY.earliest },
@@ -80,7 +87,12 @@ function rollingLine(w: DraftWindow): string {
 /** "Leaving 5 Dec 2026 to 4 Mar 2027 as of today; the dates move forward each day." for a rolling window. */
 function ResolvedDates({ form }: { form: SearchForm }) {
   const w = form.draft.window;
-  if (w.kind !== 'months' || w.startOffsetDays < 1 || w.lengthMonths < 1) return null;
+  if (
+    w.kind !== 'months' ||
+    !resolvable(w.startOffsetDays, MAX_WINDOW_DAYS) ||
+    !resolvable(w.lengthMonths, MAX_WINDOW_MONTHS)
+  )
+    return null;
   const r = resolveWindow(w, form.today);
   return (
     <p className="hint max-w-prose">
@@ -99,7 +111,7 @@ function DaysFields({ form }: { form: SearchForm }) {
   const { blank, markBlank } = form;
   if (w.kind !== 'relative') return null;
   const resolved =
-    w.startOffsetDays >= 1 && w.lengthDays >= 1
+    resolvable(w.startOffsetDays, MAX_WINDOW_DAYS) && resolvable(w.lengthDays, MAX_WINDOW_DAYS)
       ? resolveWindow(
           { kind: 'relative', startOffsetDays: w.startOffsetDays, lengthDays: w.lengthDays },
           form.today,
