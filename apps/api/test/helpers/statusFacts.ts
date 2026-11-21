@@ -35,6 +35,7 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
       total: 100,
     },
     noFlights: [],
+    unseenElsewhere: 0,
     budgetSkips: [],
     ages: { newest: observed(1), oldest: observed(30), stale: false },
     leftNotes: [],

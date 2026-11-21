@@ -108,6 +108,11 @@ export interface DataFacts {
    * search is such a route from that origin. Empty when there is none.
    */
   noFlights: NoFlightsRouteFacts[];
+  /**
+   * The last run's error cells that a "no flights" page did not show on a route not in `noFlights` (its other pages
+   * showed flights, or the rows predate the marks): not page failures, and a later run reads them.
+   */
+  unseenElsewhere: number;
   /** The last run's cheapest dates not checked because a credit limit was reached (`skipped:budget`), per provider. */
   budgetSkips: { providerId: ProviderId; cells: number }[];
   ages: AgeFacts | null;

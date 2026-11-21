@@ -429,7 +429,11 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
       `last run ${at(f, run.at)}${word === undefined ? '' : ` (${word})`}: ${
         c === null
           ? 'no cells recorded'
-          : lastRunLine(c.buckets, c.total, { cells: nf.unseen, where: nf.where })
+          : lastRunLine(c.buckets, c.total, {
+              cells: nf.unseen,
+              where: nf.where,
+              elsewhere: d.unseenElsewhere,
+            })
       }`,
     );
     parts.push(
