@@ -170,6 +170,10 @@ export const coverageResponseSchema = z.object({
   ),
   /** Review S6: who fetches the browser provider's left cells, read from the definition and config at this request. */
   browserLeftFor: z.enum(LEFT_FOR),
+  /**
+   * The run's error outcomes, less the day pairs a "no flights" page did not show (core's `isNoFlightsUnseen`): those are
+   * grouped per route in `noFlights` instead (revision 74). Each outcome keeps its stored status.
+   */
   errors: z.array(
     z.object({
       cell: cellSchema,
@@ -179,6 +183,22 @@ export const coverageResponseSchema = z.object({
       reason: z.string().nullable(),
       lastError: z.string().nullable(),
       attempts: count,
+      retryable: z.boolean(),
+    }),
+  ),
+  /**
+   * Revision 74: the discovery routes × providers on which a "no flights" page left day pairs unseen (core's
+   * `noFlightsRoutes`), sorted by origin, destination and provider. `cells` counts the unseen pairs (still `error`
+   * outcomes, out of `errors`); `everyPage` is true when every page of the route said no flights; `retryable` when any of
+   * its pairs would be picked up again by a resume, by the same rule as `errors[].retryable`.
+   */
+  noFlights: z.array(
+    z.object({
+      origin: iataSchema,
+      destination: iataSchema,
+      providerId: providerIdSchema,
+      cells: count,
+      everyPage: z.boolean(),
       retryable: z.boolean(),
     }),
   ),

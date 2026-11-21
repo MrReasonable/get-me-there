@@ -1,5 +1,7 @@
 import {
   addDays,
+  dateWords,
+  dateWordsShort,
   formatPence,
   type IsoDate,
   type IsoMonth,
@@ -31,21 +33,14 @@ export function formatMicroGbp(micro: number): string {
   return formatPence(microGbpToPence(micro));
 }
 
-/** Date form, "2027-03-14" → "14 Mar 2027", by string slicing only; anything malformed is returned as given. */
-export function formatIsoDate(d: string): string {
-  const [y, m, day] = d.split('-');
-  const month = MONTHS[Number(m) - 1];
-  if (y === undefined || day === undefined || month === undefined) return d;
-  return `${Number(day)} ${month} ${y}`;
-}
+/**
+ * Date form, "2027-03-14" → "14 Mar 2027", by string slicing only; anything malformed is returned as given (core's
+ * `dateWords`, the one date wording the Status report shares).
+ */
+export const formatIsoDate: (d: string) => string = dateWords;
 
 /** Short form without the year, "2027-03-14" → "14 Mar" (day cells, segment times); malformed input is returned as given. */
-export function formatIsoDateShort(d: string): string {
-  const [, m, day] = d.split('-');
-  const month = MONTHS[Number(m) - 1];
-  if (day === undefined || month === undefined) return d;
-  return `${Number(day)} ${month}`;
-}
+export const formatIsoDateShort: (d: string) => string = dateWordsShort;
 
 /** A trip's dates without the year (ruling 6): "5–15 Nov" in one month, "28 Nov–3 Dec" across two. */
 export function formatTripShort(departure: string, back: string): string {

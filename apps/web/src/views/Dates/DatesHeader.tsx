@@ -3,11 +3,11 @@ import {
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
   type StartRefusalCode,
+  windowSpanWords,
 } from '@gmt/core';
 import type { DefinitionResponse, ExecutionResponse, SearchCard } from '../../api/types.js';
 import { Crumbs, tripsCrumb } from '../../components/Crumbs.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatIsoDateShort } from '../../format.js';
 import { hoursText } from '../../lib/flightLines.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { useAirportDetails } from '../Definitions/airports.js';
@@ -35,11 +35,8 @@ const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 /** The latest parent run as the date-pairs read summarises it. */
 type RunSummary = DecodedDatePairs['executions'][number];
 
-/** "10 Jan – 31 Mar", or "10 Dec 2026 – 31 Mar 2027" when the dates cross a year (the cards' form). */
-function span(from: string, to: string): string {
-  const format = from.slice(0, 4) === to.slice(0, 4) ? formatIsoDateShort : formatIsoDate;
-  return S.windowSpan(format(from), format(to));
-}
+/** "10 Jan – 31 Mar", or "10 Dec 2026 – 31 Mar 2027" when the dates cross a year (the cards' form, core's words). */
+const span = (from: string, to: string): string => windowSpanWords(from, to);
 
 /**
  * The window in mockup 02's words: a fixed window's own dates ("leave 10 Jan – 31 Mar"); a rolling one's dates now with

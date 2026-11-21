@@ -3,7 +3,7 @@
 // in-process last result. The worked example only.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, FIXTURE_OPT_IN_PHRASE, fixedClock, Secret } from '@gmt/core';
+import { apiContract, asIata, FIXTURE_OPT_IN_PHRASE, fixedClock, NO_FLIGHTS_UNSEEN, Secret } from '@gmt/core';
 import { EmailNotifier, TestSendLimit } from '@gmt/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modeOf as modeOfConfig } from '../../src/read/statusSources.js';
@@ -94,10 +94,8 @@ describe('GET /api/status (spec §10)', () => {
     s.tile('E1', c2, { status: 'no_data', fetchedAt: at(-3), tileIndex: 1 });
     const body = await expectContract(await get(x), 'GET', '/api/status', STATUS);
     const data = body.checks.find((c) => c.id === `data-${def.id}`);
-    expect(data?.summary).toContain(
-      'priced 1, no fares 0, no cached data 1, error 0, skipped 0, not searched 0 of 2 cells',
-    );
-    expect(data?.summary).toContain('no prices yet');
+    expect(data?.summary).toContain('prices for 1 of 2 date pairs; 1 with no price found; no prices yet');
+    expect(data?.label).toBe('London to New York · rolling: 182 days from 7 days ahead');
     expect(data?.state).toBe('warn');
   });
 
@@ -160,15 +158,12 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
       reason: 'budget',
     });
     const c = await dataOf(x, def.id);
-    const m =
-      /priced (\d+), no fares (\d+), no cached data (\d+), error (\d+), skipped (\d+), not searched (\d+) of (\d+) cells/.exec(
-        c?.summary ?? '',
-      );
-    expect(m).not.toBeNull();
-    const [priced, empty, noData, error, skipped, notRun, total] = (m ?? []).slice(1).map(Number);
-    expect([priced, empty, noData, error, skipped, notRun, total]).toEqual([2, 1, 1, 1, 1, 2, 8]);
-    expect((priced ?? 0) + (empty ?? 0) + (noData ?? 0) + (error ?? 0) + (skipped ?? 0) + (notRun ?? 0)).toBe(
-      total,
+    // why: the parts are the six buckets (the error bucket split in two when a page said no flights): 2+1+1+1+1+2 = 8
+    expect(c?.summary).toContain(
+      'prices for 2 of 8 date pairs; 1 with no flights; 1 with no price found; 1 not read (the page failed); 1 skipped; 2 not searched yet',
+    );
+    expect(c?.fix?.text).toBe(
+      "run the search again to read the 4 date pairs left; the search's page lists them under What was searched",
     );
     expect(c?.state).toBe('warn');
   });
@@ -185,10 +180,79 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
       skipDetail: 'catch-up-no-browser',
     });
     const c = await dataOf(x, def.id);
-    expect(c?.summary).toContain('skipped 3');
+    expect(c?.summary).toContain('prices for 0 of 3 date pairs; 3 skipped');
     expect(c?.note).toContain('a catch-up loads no browser pages (3 cells)');
     // why: this definition does not use the browser provider, so the words are the engine's "no longer used" form
     expect(c?.note).toMatch(/^not fetched: this search no longer uses the browser provider; /);
+  });
+
+  it('names an origin every page of which said no flights, and says to take it out (revision 74)', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ origins: [asIata('LHR'), asIata('LGW')] }),
+    );
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    const lgw = (n: number) =>
+      cell(
+        'LGW',
+        'JFK',
+        `2026-11-${String(n).padStart(2, '0')}`,
+        `2026-11-${String(n + 10).padStart(2, '0')}`,
+      );
+    s.cells('E1', [days(1), lgw(1), lgw(2), lgw(3), lgw(4)]);
+    s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
+    s.tile('E1', lgw(1), { status: 'no_data', fetchedAt: at(-3), tileIndex: 1 });
+    s.tileError('E1', [lgw(2), lgw(3), lgw(4)], 'parse', `${NO_FLIGHTS_UNSEEN} the page answered no flights`);
+    const c = await dataOf(x, def.id);
+    expect(c?.summary).toContain(
+      'prices for 1 of 5 date pairs; 1 with no price found; 3 not shown because no flights were found from Gatwick (LGW)',
+    );
+    expect(c?.summary).not.toContain('not read');
+    expect(c?.state).toBe('warn');
+    expect(c?.fix?.text).toBe(
+      'take Gatwick (LGW) out of this search on its Edit page: no page showed flights from it to John F Kennedy (JFK)',
+    );
+  });
+
+  it('a no-flights page on a route that priced elsewhere is not every page: its unseen pairs stay not read', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [days(1), days(2)]);
+    s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
+    s.tileError('E1', [days(2)], 'parse', `${NO_FLIGHTS_UNSEEN} the page answered no flights`);
+    const c = await dataOf(x, def.id);
+    expect(c?.summary).toContain('prices for 1 of 2 date pairs; 1 not read (the page failed)');
+    expect(c?.fix?.text).toMatch(/^run the search again to read the 1 date pair left/);
+  });
+
+  it("notes the cheapest dates a credit limit left unchecked, by the search's own limit (revision 74)", async () => {
+    for (const [maxCalls, words] of [
+      [
+        0,
+        '1 cheapest date not checked with Fixture: this search allows 0 Fixture credits a run (raise it on its Edit page)',
+      ],
+      [1000, "1 cheapest date not checked with Fixture: this search's credit limit ran out"],
+    ] as const) {
+      const x = await harness();
+      const s = seeder(x.ports);
+      const def = x.ports.repos.definitions.create(
+        exampleDefinitionInput({ budget: { maxCalls, maxFreeCalls: 2000, maxCostMicroGbp: 10_000_000 } }),
+      );
+      s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+      s.cells('E1', [days(1)], { selected: [{ cell: days(1), reason: 'top_n' }] });
+      s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
+      x.ports.repos.cells.setOutcome(s.id('E1'), days(1), 'verification', 'fixture', {
+        status: 'skipped',
+        reason: 'budget',
+      });
+      const c = await dataOf(x, def.id);
+      expect(c?.note).toBe(`${words}; runs only when you start it`);
+      await x.close();
+      h = undefined;
+    }
   });
 
   it('a missed firing that was not caught up states the stored code, and is warn', async () => {

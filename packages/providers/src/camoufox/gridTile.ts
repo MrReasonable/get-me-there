@@ -21,6 +21,7 @@ import {
   type CellKey,
   cellKeyString,
   type DiscoveryTileResult,
+  NO_FLIGHTS_UNSEEN,
   ProviderError,
   type RawCalendarPrice,
   type TilePlan,
@@ -43,7 +44,7 @@ const WORDS: Readonly<Record<string, string>> = {
   'view-unparsed': 'the date grid view holding this day pair failed its check, so none of it was kept',
   'page-not-ready': 'a scroll did not settle before the grid reached this day pair',
   'off-plan-view': 'the grid showed other dates than planned, so the page ended before this day pair',
-  'no-flights-unseen':
+  [NO_FLIGHTS_UNSEEN]:
     'the page answered no flights for the pair it asked; this day pair was not shown, so it is not searched yet',
   'scroll-allowance': 'the run’s scroll allowance ended before the grid reached this day pair',
   'grid-not-drawn':
@@ -71,7 +72,7 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
       req !== null &&
       (req.probe === true ||
         (c.departureDate === req.start.departureDate && c.returnDate === req.start.returnDate));
-    const issues = plan.coveredCells.filter((c) => !inferred(c)).map((c) => issueOf(c, 'no-flights-unseen'));
+    const issues = plan.coveredCells.filter((c) => !inferred(c)).map((c) => issueOf(c, NO_FLIGHTS_UNSEEN));
     return {
       ...base,
       prices: [],

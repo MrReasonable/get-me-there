@@ -1,3 +1,4 @@
+import { airportShortName } from '@gmt/core';
 import { useQueries } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
 import { qk } from '../../api/queries.js';
@@ -12,16 +13,12 @@ export type AirportChoice =
   | { kind: 'metro'; metro: string; city: string; codes: readonly string[] }
   | { kind: 'airport'; row: AirportRow };
 
-/** The airports table's words that say nothing once the option says it is an airport. */
-const TRAILING = /\s+(international\s+)?airport$/i;
-
 /**
  * The airport's own name without a trailing "Airport" ("London Heathrow Airport" reads "London Heathrow"). The city
- * stays in the name: some airports are named after a neighbouring town, so dropping it could misname them.
+ * stays in the name: some airports are named after a neighbouring town, so dropping it could misname them. Core's one
+ * rule (revision 74).
  */
-export function shortAirportName(name: string): string {
-  return name.replace(TRAILING, '').trim() || name;
-}
+export const shortAirportName: (name: string) => string = airportShortName;
 
 /** "London Heathrow (LHR) · London, GB" — read as one option by a screen reader too. */
 export function airportOptionText(row: AirportRow): string {

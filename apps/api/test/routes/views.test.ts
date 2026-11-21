@@ -1,6 +1,6 @@
 // Spec §10 coverage, calendar gap and cell detail (the Dates view's coverage section and the date pair detail's
 // per-airport-pair panels; WP19 retired the calendar and duration-analysis routes).
-import { apiContract } from '@gmt/core';
+import { apiContract, NO_FLIGHTS_UNSEEN } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
@@ -118,6 +118,61 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     expect(cov.scheduleBlockedSince).toBeNull();
     expect(cov.onDemand).toEqual([]);
     expect(cov.scheduledOnly).toEqual([]);
+    expect(cov.noFlights).toEqual([]);
+  });
+
+  it('lists the day pairs a "no flights" page did not show per route, out of the errors (revision 74)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1, C2, C3, C4]);
+    s.tile('E1', C1, { status: 'no_data', fetchedAt: at(-1), tileIndex: 0 });
+    s.tileError(
+      'E1',
+      [C2, C3],
+      'parse',
+      `${NO_FLIGHTS_UNSEEN} the page answered no flights for the pair it asked`,
+    );
+    const read = () =>
+      get(
+        x,
+        `/api/definitions/${def.id}/coverage`,
+        '/api/definitions/:id/coverage',
+        apiContract.coverageResponseSchema,
+      );
+    const every = await read();
+    expect(every.errors).toEqual([]);
+    expect(every.noFlights).toEqual([
+      {
+        origin: 'LHR',
+        destination: 'JFK',
+        providerId: 'fixture',
+        cells: 2,
+        everyPage: true,
+        retryable: true,
+      },
+    ]);
+    // why: the six buckets are unchanged: the unseen pairs still count as error
+    expect(every.perStage.find((p) => p.stage === 'discovery')?.buckets).toMatchObject({
+      no_data: 1,
+      error: 2,
+      not_run: 1,
+    });
+    s.tileError('E1', [C4], 'upstream', 'HTTP 503');
+    const mixed = await read();
+    expect(mixed.errors.map((e) => [e.cell.departureDate, e.reason])).toEqual([['2026-11-05', 'upstream']]);
+    expect(mixed.noFlights).toEqual([
+      {
+        origin: 'LHR',
+        destination: 'JFK',
+        providerId: 'fixture',
+        cells: 2,
+        everyPage: false,
+        retryable: true,
+      },
+    ]);
   });
 
   it('names the scheduled_only cells per stage × provider and detail (spec §3, §8.2 rev 36)', async () => {

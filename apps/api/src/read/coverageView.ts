@@ -1,5 +1,12 @@
 /** Spec §10 `/coverage` (View D). Separate from `coverage.ts` so `results.ts` → `coverage.ts` stays acyclic. */
-import { type apiContract, type CellOutcome, type SearchDefinition, selectedNotReached } from '@gmt/core';
+import {
+  type apiContract,
+  type CellOutcome,
+  isNoFlightsUnseen,
+  noFlightsRoutes,
+  type SearchDefinition,
+  selectedNotReached,
+} from '@gmt/core';
 import { retriedOnResume } from '@gmt/db';
 import { type Engine, loadsBrowserPages, resumeLeavesBrowserCells, windowSetting } from '@gmt/engine';
 import type { z } from 'zod';
@@ -74,6 +81,14 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   // why: review R12 — a browser cell that a resume now would only leave for a later run (a catch-up's, or one past its
   // window under CAMOUFOX_BROWSER_WINDOW=scheduled) is offered no Retry: the resume reads this same rule
   const browserLeft = resumeLeavesBrowserCells(parent, windowSetting(ports), ports.clock.now());
+  // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built from
+  // (review arch-005), and, as resumableCells does, only a cell that has not departed (ssr-004), so View D's "retry" and
+  // the resume never disagree and no dead Retry button shows.
+  const retryable = (o: CellOutcome): boolean =>
+    retriedOnResume(o, true) &&
+    o.departureDate > today &&
+    !(browserLeft && o.stage === 'discovery' && loadsBrowserPages(o.providerId));
+  const unseen = outcomes.filter(isNoFlightsUnseen);
   const notReached = selectedNotReached(
     ports.repos.cells.selected(parent.id).map((s) => s.cell),
     outcomes.filter((o) => o.stage === 'verification'),
@@ -83,8 +98,10 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
     summary,
     perStage,
     selectedNotReached: notReached.map((s) => ({ cell: withNights(s.cell), reason: s.reason })),
+    // why: revision 74 — the day pairs a "no flights" page did not show are listed per route in `noFlights`, not one
+    // error row each; their stored status stays `error`
     errors: outcomes
-      .filter((o) => o.status === 'error')
+      .filter((o) => o.status === 'error' && !isNoFlightsUnseen(o))
       .map((o) => ({
         cell: withNights(o),
         stage: o.stage,
@@ -92,14 +109,19 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         reason: o.reason,
         lastError: o.lastError,
         attempts: o.attempts,
-        // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built
-        // from (review arch-005), and, as resumableCells does, only a cell that has not departed (ssr-004), so View D's
-        // "retry" and the resume never disagree and no dead Retry button shows.
-        retryable:
-          retriedOnResume(o, true) &&
-          o.departureDate > today &&
-          !(browserLeft && o.stage === 'discovery' && loadsBrowserPages(o.providerId)),
+        retryable: retryable(o),
       })),
+    noFlights: noFlightsRoutes(outcomes).map((r) => ({
+      ...r,
+      retryable: unseen.some(
+        (o) =>
+          o.stage === 'discovery' &&
+          o.origin === r.origin &&
+          o.destination === r.destination &&
+          o.providerId === r.providerId &&
+          retryable(o),
+      ),
+    })),
     scheduledOnly: scheduledOnlyOf(outcomes),
     browserLeftFor: engine.browserLeftFor(def),
     scheduleBlockedSince: engine.scheduler.blockedSince(),

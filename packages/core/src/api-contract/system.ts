@@ -179,15 +179,17 @@ export const statusCheckSchema = z
     state: statusStateSchema,
     /** What distinguishes the card when its area has several (a search definition's name); null otherwise. */
     label: z.string().max(200).nullable(),
-    // why: never cut a fact a state rests on (review V6): the longest summary is well under this
-    summary: z.string().max(600),
+    // why: never cut a fact a state rests on (review V6): the longest summary is well under this, a data check's naming
+    // up to nine airports in words (revision 74; the airports table's longest name is 92 characters) included
+    summary: z.string().max(4000),
     /** An aside on any check, such as "first daily backup due 03:30"; it never counts toward the status bar. */
-    note: z.string().max(600).nullable(),
+    note: z.string().max(1000).nullable(),
     /** Only when `state` is `off`: why nothing is checked. */
     offReason: z.enum(['not-set-up', 'not-visible', 'awaiting-verification', 'disabled']).nullable(),
     fix: z
       .strictObject({
-        text: z.string().max(200),
+        // why: a data check's fix names the airports to take out of a search in words (revision 74), up to nine a side
+        text: z.string().max(4000),
         command: z.string().startsWith('pnpm gmt ').nullable(),
         /**
          * Ruling 13: the Settings section where the fix is made. The page links to it; the CLI prints the Settings

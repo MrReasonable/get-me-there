@@ -5,7 +5,6 @@ import {
   ageEndsLine,
   BACKUP_FILE_PATTERN,
   BACKUP_MAX_AGE_MS,
-  BUCKET_WORDS,
   backupState,
   backupTimeOf,
   CONSENT_MAX_AGE_MONTHS,
@@ -16,7 +15,7 @@ import {
   consentWindowState,
   coverageBuckets,
   coverageGapWarn,
-  coverageLine,
+  lastRunLine,
 } from '../../src/status/rules.js';
 import { asIsoDateTime, isoDateTimeOfEpochMs } from '../../src/types/ids.js';
 
@@ -78,26 +77,27 @@ describe('coverageGapWarn', () => {
   });
 });
 
-describe('coverageLine', () => {
-  const b = { priced: 12, empty: 3, no_data: 4, error: 0, skipped: 1, not_run: 5, reused: 0 };
-  it('words the six buckets in order with the total and no suffix when nothing was reused', () => {
-    expect(coverageLine(b, 25)).toBe(
-      'priced 12, no fares 3, no cached data 4, error 0, skipped 1, not searched 5 of 25 cells',
+describe('lastRunLine', () => {
+  const b = { priced: 12, empty: 3, no_data: 4, error: 3, skipped: 1, not_run: 2, reused: 0 };
+  const none = { cells: 0, from: '' };
+  it('words every part in order, the error bucket split into not shown and not read', () => {
+    expect(lastRunLine(b, 25, { cells: 2, from: 'Gatwick (LGW)' })).toBe(
+      'prices for 12 of 25 date pairs; 3 with no flights; 4 with no price found; 2 not shown because no flights were found from Gatwick (LGW); 1 not read (the page failed); 1 skipped; 2 not searched yet',
     );
-    expect(BUCKET_WORDS.map(([, w]) => w)).toEqual([
-      'priced',
-      'no fares',
-      'no cached data',
-      'error',
-      'skipped',
-      'not searched',
-    ]);
   });
-  it('adds the reused count and a singular cell', () => {
-    expect(coverageLine({ ...b, reused: 7 }, 25)).toMatch(/ of 25 cells \(7 reused from earlier runs\)$/);
-    expect(coverageLine({ ...b, priced: 1, empty: 0, no_data: 0, skipped: 0, not_run: 0 }, 1)).toMatch(
-      / of 1 cell$/,
+  it('leaves out each part after the first when it is 0, and adds the reused count', () => {
+    expect(
+      lastRunLine({ ...b, priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 25 }, 25, none),
+    ).toBe('prices for 0 of 25 date pairs; 25 not searched yet');
+    expect(lastRunLine({ ...b, reused: 7 }, 25, none)).toMatch(
+      /; 3 not read \(the page failed\); 1 skipped; 2 not searched yet \(7 reused from earlier runs\)$/,
     );
+    expect(lastRunLine({ ...b, error: 2 }, 25, { cells: 2, from: 'QQA' })).not.toMatch(/not read/);
+  });
+  it('says one date pair in the singular', () => {
+    expect(
+      lastRunLine({ ...b, priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0 }, 1, none),
+    ).toBe('prices for 1 of 1 date pair');
   });
 });
 

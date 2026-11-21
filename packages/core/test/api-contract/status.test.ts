@@ -42,11 +42,15 @@ describe('statusCheckSchema', () => {
     expect(statusCheckSchema.safeParse(fix('rm -rf /')).success).toBe(false);
     expect(statusCheckSchema.safeParse(fix('pnpm gmt')).success).toBe(false);
   });
-  it('bounds the id, the summary and the note', () => {
+  it('bounds the id, the summary, the note and the fix', () => {
     expect(statusCheckSchema.safeParse(check({ id: 'Bad Id' })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(601) })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(600) })).success).toBe(true);
-    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(601) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(4001) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(4000) })).success).toBe(true);
+    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(1001) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(1000) })).success).toBe(true);
+    const fix = (n: number) => check({ fix: { text: 'x'.repeat(n), command: null } });
+    expect(statusCheckSchema.safeParse(fix(4000)).success).toBe(true);
+    expect(statusCheckSchema.safeParse(fix(4001)).success).toBe(false);
   });
 });
 

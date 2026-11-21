@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  airportWithCode,
   type CellOutcome,
   cellKeyString,
   compareAges,
@@ -15,7 +16,9 @@ import {
   effectiveAge,
   type IsoDateTime,
   isLoopbackHost,
+  isNoFlightsUnseen,
   isScheduled,
+  noFlightsRoutes,
   onlyThisMachine,
   type ProviderId,
   readSharedSettings,
@@ -157,20 +160,57 @@ function scheduleFacts(
   };
 }
 
-/** The six discovery buckets over a finished run's cells after the §6.6 roll-up; null when the run holds no cells. */
-function coverageOf(ports: Ports, executionId: string): DataFacts['coverage'] {
+/**
+ * The six discovery buckets over a finished run's cells after the §6.6 roll-up (null when the run holds no cells), and
+ * revision 74's no-flights facts: the routes every page of which said no flights, and how many error cells are day pairs
+ * those pages did not show (a cell whose roll-up is `error` with a no-flights-unseen outcome on such a route). No cell
+ * changes bucket: `unseen` only says what part of the error bucket is.
+ */
+function coverageOf(ports: Ports, executionId: string): Pick<DataFacts, 'coverage' | 'noFlights'> {
+  const none = { origins: [], destinations: [], unseen: 0 };
   const rollUps = ports.repos.cells.rollUps(executionId);
-  if (rollUps.size === 0) return null;
-  const reused = new Set(
-    ports.repos.cells
-      .outcomes(executionId, { stage: 'discovery' })
-      .filter((o) => o.reusedFromExecutionId !== null)
-      .map(cellKeyString),
-  ).size;
-  return coverageBuckets(
+  if (rollUps.size === 0) return { coverage: null, noFlights: none };
+  const discovery = ports.repos.cells.outcomes(executionId, { stage: 'discovery' });
+  const reused = new Set(discovery.filter((o) => o.reusedFromExecutionId !== null).map(cellKeyString)).size;
+  const coverage = coverageBuckets(
     [...rollUps.values()].map((r) => r.discovery.status),
     reused,
   );
+  const everyPage = noFlightsRoutes(discovery).filter((r) => r.everyPage);
+  if (everyPage.length === 0) return { coverage, noFlights: none };
+  const onEveryPage = new Set(everyPage.map((r) => `${r.origin}|${r.destination}|${r.providerId}`));
+  const unseen = new Set(
+    discovery
+      .filter(
+        (o) =>
+          isNoFlightsUnseen(o) &&
+          onEveryPage.has(`${o.origin}|${o.destination}|${o.providerId}`) &&
+          rollUps.get(cellKeyString(o))?.discovery.status === 'error',
+      )
+      .map(cellKeyString),
+  ).size;
+  const named = (codes: readonly string[]) =>
+    [...new Set(codes)].map((c) => airportWithCode(c, ports.repos.airports.get(c)));
+  return {
+    coverage,
+    noFlights: {
+      origins: named(everyPage.map((r) => r.origin)),
+      destinations: named(everyPage.map((r) => r.destination)),
+      unseen,
+    },
+  };
+}
+
+/** The last run's verification cells skipped because a credit limit was reached (`skipped:budget`), per provider. */
+function budgetSkipsOf(ports: Ports, executionId: string): DataFacts['budgetSkips'] {
+  const cells = new Map<ProviderId, Set<string>>();
+  for (const o of ports.repos.cells.outcomes(executionId, { stage: 'verification' })) {
+    if (o.status !== 'skipped' || o.reason !== 'budget') continue;
+    const set = cells.get(o.providerId) ?? new Set<string>();
+    set.add(cellKeyString(o));
+    cells.set(o.providerId, set);
+  }
+  return [...cells.entries()].map(([providerId, set]) => ({ providerId, cells: set.size }));
 }
 
 function agesOf(
@@ -236,10 +276,15 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
   return {
     definitionId: d.id,
     name: d.name,
+    window: d.window,
+    maxCalls: d.budget.maxCalls,
     scheduled: isScheduled(d),
     latest: latest === null ? null : runFacts(latest),
     lastRun: lastRun === null ? null : runFacts(lastRun),
-    coverage: lastRun === null ? null : coverageOf(ports, lastRun.id),
+    ...(lastRun === null
+      ? { coverage: null, noFlights: { origins: [], destinations: [], unseen: 0 } }
+      : coverageOf(ports, lastRun.id)),
+    budgetSkips: lastRun === null ? [] : budgetSkipsOf(ports, lastRun.id),
     ages: lastRun === null ? null : agesOf(ctx, d, lastRun.id, now),
     leftNotes: lastRun === null ? [] : leftNotes(ctx, d, lastRun.id),
     runningSince: active === null ? null : (active.startedAt ?? active.createdAt),

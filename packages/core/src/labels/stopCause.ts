@@ -8,6 +8,7 @@ import {
 import { BLOCKED_PAGES } from '../camoufox/protocol.js';
 import type { BudgetScopeKind } from '../errors.js';
 import { formatInstantShort } from '../status/time.js';
+import { listWords } from '../text/list.js';
 import { formatPence, groupThousands } from '../text/money.js';
 import type { SkipCode } from '../types/execution.js';
 import type { IsoDateTime } from '../types/ids.js';
@@ -161,11 +162,8 @@ const capitalise = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 /** A source's main-path name, or "a source" when the cause names none. */
 const nameOf = (id: ProviderId | null) => (id === null ? 'a source' : mainPathSource(id));
 const possessive = (name: string) => `${name}'s`;
-/** "A", "A and B", "A, B and C": a non-empty list, so there is always a first item to start from. */
-function listOf(items: readonly [string, ...string[]]): string {
-  const [first, ...rest] = items;
-  return rest.reduce((text, item, i) => `${text}${i === rest.length - 1 ? ' and ' : ', '}${item}`, first);
-}
+/** "A", "A and B", "A, B and C" (core's one list wording). */
+const listOf = (items: readonly [string, ...string[]]): string => listWords(items);
 
 /**
  * Wording of a cause (spec revision 55 §8.1 "Stop causes"): one full sentence and one fix (`{ text, command }`, the

@@ -1,8 +1,15 @@
-import { formatAgo, hoursSince, IN_FLIGHT_STATUSES, type IsoDateTime, STOPPED_STATUSES } from '@gmt/core';
+import {
+  airportLabel as coreAirportLabel,
+  formatAgo,
+  hoursSince,
+  IN_FLIGHT_STATUSES,
+  type IsoDateTime,
+  STOPPED_STATUSES,
+  windowSpanWords,
+} from '@gmt/core';
 import type { SearchCard } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatIsoDateShort } from '../../format.js';
-import { type AirportRow, shortAirportName } from '../Definitions/airports.js';
+import type { AirportRow } from '../Definitions/airports.js';
 import { parseSchedule } from '../Definitions/schedule.js';
 
 // Design 2026-11-08 §5.3 (mockup 01-searches), Rulings 5 and 8: the words of a card, pure functions from the served
@@ -21,9 +28,7 @@ export function windowText(w: SearchCard['window']): string {
     return S.windowRolling(w.lengthDays, w.startOffsetDays);
   if (w.kind === 'months' && w.lengthMonths !== null && w.startOffsetDays !== null)
     return S.windowRollingMonths(w.lengthMonths, w.startOffsetDays);
-  const crossesYear = w.departureFrom.slice(0, 4) !== w.departureTo.slice(0, 4);
-  const format = crossesYear ? formatIsoDate : formatIsoDateShort;
-  return S.windowSpan(format(w.departureFrom), format(w.departureTo));
+  return windowSpanWords(w.departureFrom, w.departureTo);
 }
 
 /** "repeats Mondays 05:00": only a scheduled search has one (the card's `schedule` is null otherwise). */
@@ -58,15 +63,10 @@ const isFinished = (run: NonNullable<SearchCard['latestRun']>): boolean =>
 
 /**
  * An airport named as the mockup does ("Heathrow", "JFK", "Newark"): the table's own short name without its city's name
- * in front ("London Heathrow" reads "Heathrow"), the code when the table does not know the airport (yet) or the name
- * is only its city.
+ * in front ("London Heathrow" reads "Heathrow"), the code when the table does not know the airport (yet). Core's one
+ * rule (revision 74), which the Status report names airports by too.
  */
-export function airportLabel(code: string, row: AirportRow | undefined): string {
-  if (row === undefined) return code;
-  const short = shortAirportName(row.name);
-  const rest = short.startsWith(`${row.city} `) ? short.slice(row.city.length + 1).trim() : short;
-  return rest === '' ? code : rest;
-}
+export const airportLabel: (code: string, row: AirportRow | undefined) => string = coreAirportLabel;
 
 /**
  * The card's one meta line (mockup 01): the route's codes, the window, the stay, and when a finished run is on record
