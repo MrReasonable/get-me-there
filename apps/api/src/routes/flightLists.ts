@@ -25,6 +25,7 @@ export const FLIGHT_READ_REFUSALS: Record<
   outside_space: { status: 422, code: 'outside_space', message: API_TEXT.datePairOutsideSpace },
   not_found: { status: 404, code: 'definition_not_found', message: API_TEXT.definitionNotFound },
   'shutting-down': { status: 503, code: 'shutting-down', message: API_TEXT.shuttingDown },
+  'reload-pending': { status: 503, code: 'reload-pending', message: API_TEXT.applyingSettings },
 };
 
 export const flightListHandlers: HandlerTable = {

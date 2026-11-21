@@ -77,3 +77,30 @@ export function searchApiHttpLimits(
     classifyError: classifySearchApiError,
   };
 }
+
+/** The longest the account read waits for its limiter's slot. */
+export const ACCOUNT_MAX_WAIT_SECONDS = 10;
+
+/**
+ * The account read's limits (settings plan ruling 10): the same host, never ledgered (`billable: 'never'` and the
+ * unledgered id), no response cache, its own limiter, so it takes no reservation, writes no row and still works once the
+ * local cap is spent. A 10 s timeout; the vendor states the read costs no credit (measured 2026-11-19: two reads left
+ * the month's usage and the hour's searches at 0), and the web asks at most every 10 minutes through the api's cache.
+ */
+export function searchApiAccountHttpLimits(cfg: Pick<Config, 'maxWaitSeconds'>): ProviderHttpLimits {
+  return {
+    hosts: [SEARCHAPI_HOST],
+    ratePerMinute: 6,
+    ratePerHour: 60,
+    concurrency: 1,
+    billable: 'never',
+    costPerCallMicroGbp: 0,
+    // why: a balance is a courtesy the top bar waits on: a read that cannot start within its own timeout is not worth
+    // queueing for the shared hour-long wait, and a timeout is not retried (one attempt, as the worker's status read)
+    maxWaitSeconds: Math.min(cfg.maxWaitSeconds, ACCOUNT_MAX_WAIT_SECONDS),
+    requestTimeoutSeconds: 10,
+    retryTransport: false,
+    // why: the search route's classifier, so a 429 naming credits or quota is `quota` here too and never retried
+    classifyError: classifySearchApiError,
+  };
+}

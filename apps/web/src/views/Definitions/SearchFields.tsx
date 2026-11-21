@@ -3,7 +3,7 @@ import type { ReactNode, Ref } from 'react';
 import type { BudgetFit, ProvidersResponse } from '../../api/types.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { COPY } from '../../copy.js';
-import type { CallsLeft } from '../../lib/searchApiCallsLeft.js';
+import type { CreditsLine } from '../../lib/searchApiCreditsLine.js';
 import { withKey } from '../../state/withKey.js';
 import { AdvancedFields } from './AdvancedFields.js';
 import { AirportListInput } from './AirportListInput.js';
@@ -33,7 +33,7 @@ const SR_ONLY = 'sr-only';
 export function SearchFields({
   form,
   providers,
-  callsLeft,
+  credits,
   edit,
   budgetFit,
   extra,
@@ -41,8 +41,8 @@ export function SearchFields({
 }: {
   form: SearchForm;
   providers: ProvidersResponse;
-  /** SearchApi's calls left, as the top bar says them (`searchApiCallsLeft`), or null when there is nothing to say. */
-  callsLeft: CallsLeft | null;
+  /** SearchApi's credits left, as the top bar says them (`searchApiCreditsLine`), or null when there is nothing to say. */
+  credits: CreditsLine | null;
   edit: boolean;
   budgetFit: BudgetFit | null;
   extra?: ReactNode;
@@ -117,7 +117,7 @@ export function SearchFields({
             />
           </span>
         </fieldset>
-        <WhereToLook draft={draft} onChange={setDraft} providers={providers} callsLeft={callsLeft} />
+        <WhereToLook draft={draft} onChange={setDraft} providers={providers} credits={credits} />
       </section>
       <details
         open={form.advancedOpen}

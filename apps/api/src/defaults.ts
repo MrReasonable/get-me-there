@@ -1,17 +1,49 @@
 /** The plan-aware default definition (spec §8.2 policy preset, §11 form defaults). */
 import {
   type Config,
-  DEFAULT_DISCOVERY_REFRESH_HOURS,
   type DefinitionInput,
   definitionDefaults,
   type FlightProvider,
   type ProviderId,
 } from '@gmt/core';
 
+/** The provider ids a new search starts with, per role. */
+export interface NewSearchSources {
+  discovery: ProviderId[];
+  verification: ProviderId[];
+}
+
+/**
+ * The one rule for the sources a new search starts with (settings plan ruling 7, controller ruling R2): the preset on
+ * `/providers`, the Settings page's switches and the default definition all read it, so the draft and the page cannot
+ * differ. A stored list (NEW_SEARCH_DISCOVERY / NEW_SEARCH_VERIFICATION) names exactly the sources to tick, in its
+ * order, minus any this install has not configured; `none` ticks nothing for that role. With no list the draft is
+ * today's: every configured free source for discovery (spec revision 55 §2, §8.2: Travelpayouts, and the browser worker
+ * only when it is registered), SearchApi ticked nowhere on every plan (its credits are spent only on a search the
+ * operator ticks it for, spec §2 fact 7), and the test source on discovery only when no real source is left.
+ */
+export function newSearchSourcesFor(config: Config, providers: readonly FlightProvider[]): NewSearchSources {
+  const configured = new Set(providers.map((p) => p.id));
+  const { discovery: listedDiscovery, verification: listedVerification } = config.newSearchSources;
+  // why: a listed source drops out when it is not configured, and when it lacks the role's capability (a stored
+  // NEW_SEARCH_VERIFICATION naming Travelpayouts would tick a trip check source that cannot check trips)
+  const listed = (ids: readonly ProviderId[], role: 'discovery' | 'verification'): ProviderId[] =>
+    ids.filter((id) => providers.some((p) => p.id === id && p[role] !== undefined));
+  const free: ProviderId[] = [];
+  if (configured.has('travelpayouts')) free.push('travelpayouts');
+  if (configured.has('camoufox')) free.push('camoufox');
+  const fixture: ProviderId[] = configured.has('fixture') ? ['fixture'] : [];
+  return {
+    discovery:
+      listedDiscovery === null ? (free.length > 0 ? free : fixture) : listed(listedDiscovery, 'discovery'),
+    verification: listedVerification === null ? fixture : listed(listedVerification, 'verification'),
+  };
+}
+
 /**
  * The default definition for the configured plan (spec §8.2 policy preset, §11 form defaults).
  * No airports (spec §1, §15). Revision 55 §8.2: no schedule and `enabled` false (a new search runs only when pressed),
- * no arrival window, and every configured free source (Travelpayouts, the browser worker); the paid rule is unchanged.
+ * no arrival window, and the sources of `newSearchSourcesFor`, each refreshed after DISCOVERY_REFRESH_DAYS.
  * No confirmation: `confirmedCostPence` and
  * `confirmedCalls` are not part of DefinitionInput and are set only from an explicit confirmation (spec §7, decision 37).
  */
@@ -19,22 +51,9 @@ export function defaultDefinitionInput(
   config: Config,
   providers: readonly FlightProvider[],
 ): DefinitionInput {
-  const configured = new Set(providers.map((p) => p.id));
-  const paid = config.providers.searchapi?.plan === '40usd' && configured.has('searchapi');
-  const fixture = configured.has('fixture');
-  const discovery: ProviderId[] = [];
-  if (configured.has('travelpayouts')) discovery.push('travelpayouts');
-  // why: spec revision 55 §2, §8.2 — a new search names every free source the install has configured and enabled: the
-  // browser worker is registered only with CAMOUFOX_ENABLED, its worker URL and its key (wiring.ts)
-  if (configured.has('camoufox')) discovery.push('camoufox');
-  if (paid) discovery.push('searchapi');
-  if (fixture) discovery.push('fixture');
-  // why: on trial the 100 credits are for the spike and smoke (spec §2 fact 7), so the preset never verifies with them.
-  const verification: ProviderId[] = [];
-  if (paid) verification.push('searchapi');
-  if (fixture) verification.push('fixture');
+  const { discovery, verification } = newSearchSourcesFor(config, providers);
   const discoveryRefreshHours: Partial<Record<ProviderId, number>> = {};
-  for (const id of discovery) discoveryRefreshHours[id] = DEFAULT_DISCOVERY_REFRESH_HOURS;
+  for (const id of discovery) discoveryRefreshHours[id] = config.discoveryRefreshDays * 24;
   return {
     name: 'New search',
     origins: [],

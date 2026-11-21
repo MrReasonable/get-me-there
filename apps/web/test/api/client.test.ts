@@ -84,6 +84,30 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
     ]);
   });
 
+  it("keeps a Settings 422's refusals: each field an owned name, its message the words to show beside it", async () => {
+    // why: settings plan ruling 5 — the api's 422 is the envelope's own shape, so the client keeps every refusal
+    const fields = [
+      { field: 'FLIGHT_READ_PATIENCE', message: 'Choose a whole number of reads from 3 to 50.' },
+      { field: 'SMTP_PASS', message: 'Mail password is too short: it needs at least 8 characters.' },
+    ];
+    server.use(
+      http.put(`${API}/settings`, () =>
+        HttpResponse.json(
+          { error: { code: 'invalid_settings', message: 'nothing was saved', details: { fields } } },
+          { status: 422 },
+        ),
+      ),
+    );
+    const err = await failure(
+      call(apiContract.settingsUpdateResponseSchema, 'PUT', '/api/settings', { body: { changes: {} } }),
+    );
+    expect([err.status, err.code]).toEqual([422, 'invalid_settings']);
+    expect(err.fieldErrors()).toEqual(fields);
+    expect(apiContract.settingsRefusalDetailsSchema.parse({ fields: err.fieldErrors() }).fields).toEqual(
+      fields,
+    );
+  });
+
   it.each([
     [
       'a 500 envelope',

@@ -1,7 +1,11 @@
 import { parseEnv } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ENABLE_QUESTION } from '../../src/camoufox/offer.js';
 import { runCli } from '../../src/cli.js';
+import type { RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
+import { unknownSourceText } from '../../src/setup/closing.js';
+import { BROWSER_WINDOW_QUESTION } from '../../src/setup/prompts.js';
 import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -18,9 +22,9 @@ const show = (log: readonly Action[]) =>
 const answersFile = (m: ReturnType<typeof machine>, body: unknown) =>
   m.fs.file('/work/a.json', JSON.stringify(body), 0o600);
 
-/** A machine that has been through one Enter-only setup. */
-async function setUp(os: 'darwin' | 'linux' = 'darwin') {
-  const m = machine({ os });
+/** A machine that has been through one Enter-only setup; `extra` answers commands first (machine's own). */
+async function setUp(os: 'darwin' | 'linux' = 'darwin', extra?: RunHandler) {
+  const m = machine({ os, ...(extra === undefined ? {} : { extra }) });
   answersFile(m, {});
   expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
   m.executor.log.length = 0;
@@ -170,14 +174,44 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
   });
 });
 
+/** The app's own Status report, its price-source check as given (settings plan ruling 15). */
+const report = (state: 'ok' | 'warn') => ({
+  status: 200,
+  body: {
+    generatedAt: '2026-10-24T09:30:00.000Z',
+    mode: 'native',
+    version: 'abc1234',
+    checks: [
+      {
+        id: 'price-sources',
+        area: 'provider',
+        providerId: null,
+        label: null,
+        state,
+        summary: state === 'ok' ? 'price sources: Travelpayouts' : 'No price source is set up',
+        note: null,
+        offReason: null,
+        fix: null,
+      },
+    ],
+  },
+});
+const routes = (status: () => { status: number; body: unknown } | { error: string }) =>
+  stubHttp({
+    'GET /api/status': status,
+    'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+    'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+  });
+
 describe('the closing screen (brief §6)', () => {
   it('with no price source its first line says so and points at Travelpayouts; with no password it says why and how to turn sign-in on', async () => {
-    const m = machine();
+    // why: the app's report says it has none; a report that does not answer says it could not tell (below)
+    const m = machine({ http: routes(() => report('warn')) });
     answersFile(m, {});
     await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps);
     const closing = m.io.stdout.slice(m.io.stdout.indexOf('No price source'));
     expect(closing.split('\n')[0]).toBe(
-      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.',
+      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and add it in Settings › Price sources: http://127.0.0.1:3000/?view=settings&section=sources',
     );
     expect(closing).not.toContain('User name');
     expect(closing).not.toContain('The password is in');
@@ -189,14 +223,74 @@ describe('the closing screen (brief §6)', () => {
       'plain HTTP',
       'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
       'Next: open http://127.0.0.1:3000 and use the new-search panel on Trips: enter From, To and the dates, review what the search will use, then press Search.',
-      'Nothing runs on a schedule until you give a search one',
+      'Nothing runs on a schedule until you give a search one; a scheduled search spends within its own run limit and the caps and limits in Settings.',
     ])
       expect(closing).toContain(s);
     expect(m.io.stdout).not.toContain(PASS);
   });
 });
 
+// why: review IMPORTANT 5: once the app holds its settings, app.env's lines need not name its price sources, so the
+// closing screen judges them by the app's own report
+describe('the closing screen of a re-run judges the price source by the app (settings plan ruling 15)', () => {
+  it('a token Settings holds is a price source, though app.env has no line for it', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => report('ok'));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
+  });
+  it('the app saying none keeps the lead; an app that does not answer is not said to have none', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => report('warn'));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('No price source is set up yet');
+    m.io.stdout = '';
+    m.deps.http = routes(() => ({ error: 'refused' }));
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    // why: its Settings page may hold a key app.env has no line for, so the screen says it could not tell
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).toContain(unknownSourceText(3000, 'unread'));
+  });
+  it('a report that answers without a price-source check says it did not say, not that setup could not ask', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => ({ ...report('ok'), body: { ...report('ok').body, checks: [] } }));
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain(unknownSourceText(3000, 'unsaid'));
+    expect(m.io.stdout).toContain("The app's report did not say whether it has a price source");
+    expect(m.io.stdout).not.toContain('Setup could not ask the app');
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+  });
+  it('an app that does not answer, over an app.env that names a source, says nothing of a missing source', async () => {
+    const m = await setUp();
+    m.deps.http = routes(() => ({ error: 'refused' }));
+    m.fs.file(ENV, `${m.fs.read(ENV)}TRAVELPAYOUTS_TOKEN="tp-token-0123456789"\n`, 0o600);
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain('No price source is set up yet');
+    expect(m.io.stdout).not.toContain(unknownSourceText(3000, 'unread'));
+    expect(m.io.stdout).toContain('get-me-there is running at http://127.0.0.1:3000');
+    expect(m.io.stdout).not.toContain('tp-token-0123456789');
+  });
+});
+
 describe('a second setup (spec §16: the first failing test)', () => {
+  it('says each variable the app ignores, by name, as a note (settings plan ruling 1)', async () => {
+    const m = await setUp();
+    m.fs.file(
+      ENV,
+      `${m.fs.read(ENV)}SEARCHAPI_KEY="sa-key-0123456789"\nSEARCHAPI_PLAN="40usd"\nSEARCHAPI_BILLING_DAY="5"\nSEARCHAPI_TRIAL_USED="5"\n`,
+      0o600,
+    );
+    answersFile(m, {});
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.io.stdout).toMatch(/note: app\.env: SEARCHAPI_TRIAL_USED: applies only to the trial/);
+    expect(m.io.stdout).not.toContain('sa-key-0123456789');
+  });
+
   it('over an app.env whose PORT differs from the plan’s reports the difference and plans no writeFile for it', async () => {
     const m = await setUp();
     answersFile(m, { port: 3917 });
@@ -391,6 +485,189 @@ describe('--reconfigure <group>', () => {
     m.deps.io = testIo({ tty: true });
     expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_BROWSER_WINDOW).toBe('scheduled');
+  });
+});
+
+// why: settings plan ruling 15: once the app holds its settings, the groups the Settings page owns are changed there;
+// before that, setup writes app.env as it always has (the app imports it on first start). Review I2 (controller ruling
+// R20): "holds" is read from the app's database (a settings row, read-only by scripts/settings-held.mjs), so a stopped
+// app with rows counts, and an app that answers but holds no row (or no database at all) does not
+describe('--reconfigure of a group the Settings page owns (settings plan ruling 15)', () => {
+  const DB = '/Users/op/.local/share/get-me-there/get-me-there.db';
+  /** scripts/settings-held.mjs over the database, answering `rows`; every argv it was run with is kept. */
+  const heldScript =
+    (rows: number | 'unreadable', seen: string[][] = []): RunHandler =>
+    (argv) => {
+      if (!argv.some((a) => a.endsWith('settings-held.mjs'))) return undefined;
+      seen.push([...argv]);
+      return rows === 'unreadable'
+        ? { code: 1, stderr: 'settings-held failed: file is not a database' }
+        : { code: 0, stdout: `${JSON.stringify({ rows })}\n` };
+    };
+  /** The app's database on disk, as its first start leaves it. */
+  const withDb = (m: ReturnType<typeof machine>) => m.fs.file(DB, 'sqlite', 0o600);
+  /** The app stopped: it answers nothing, so only its database can say whether it holds its settings. */
+  const appStopped = () =>
+    stubHttp({
+      'GET /api/executions/active': () => ({ error: 'refused' }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+    });
+
+  it.each([
+    ['travelpayouts', 'sources'],
+    ['searchapi', 'sources'],
+    ['email', 'email'],
+  ] as const)(
+    '%s with the app stopped and its database holding settings prints the Settings address and changes nothing',
+    async (group, section) => {
+      const seen: string[][] = [];
+      const m = await setUp('darwin', heldScript(2, seen));
+      withDb(m);
+      const before = m.fs.read(ENV);
+      const http = appStopped();
+      m.deps.http = http;
+      const ask = scriptedAsk([]);
+      m.deps.ask = ask;
+      const io = testIo({ tty: true });
+      m.deps.io = io;
+      expect(await runCli(['setup', '--reconfigure', group], m.deps)).toBe(0);
+      expect(io.stdout).toBe(
+        `Change this in Settings: http://127.0.0.1:3000/?view=settings&section=${section}\n`,
+      );
+      expect(m.fs.read(ENV)).toBe(before);
+      expect(m.executor.log).toEqual([]);
+      expect(ask.asked).toEqual([]);
+      expect(http.requests).toEqual([]);
+      expect(seen).toEqual([['/opt/node/bin/node', '/repo/scripts/settings-held.mjs', DB]]);
+    },
+  );
+
+  it.each([
+    ['no database yet (a fresh install)', null],
+    ['a database with no settings row', 0],
+  ] as const)('travelpayouts, searchapi and email with %s write app.env as before', async (_n, rows) => {
+    for (const [group, body, check] of [
+      [
+        'travelpayouts',
+        { travelpayouts: { token: 'tp-token-0123456789' } },
+        { TRAVELPAYOUTS_TOKEN: 'tp-token-0123456789' },
+      ],
+      [
+        'searchapi',
+        { searchApi: { plan: 'trial', key: 'sa-key-0123456789' } },
+        { SEARCHAPI_KEY: 'sa-key-0123456789', SEARCHAPI_PLAN: 'trial' },
+      ],
+      [
+        'email',
+        {
+          email: {
+            host: 'smtp.example.com',
+            port: 465,
+            tls: 'implicit',
+            user: 'alerts@example.com',
+            pass: 'smtp-pass-0123',
+            from: 'alerts@example.com',
+            to: 'operator@example.com',
+          },
+        },
+        { SMTP_HOST: 'smtp.example.com', ALERT_EMAIL_TO: 'operator@example.com' },
+      ],
+    ] as const) {
+      const m = await setUp('darwin', heldScript(rows ?? 0));
+      if (rows !== null) withDb(m);
+      answersFile(m, body);
+      m.deps.ask = scriptedAsk([]);
+      const io = testIo({ tty: false });
+      m.deps.io = io;
+      expect(
+        await runCli(
+          ['setup', '--reconfigure', group, '--non-interactive', '--answers', '/work/a.json'],
+          m.deps,
+        ),
+      ).toBe(0);
+      expect(parseEnv(m.fs.read(ENV) ?? '')).toMatchObject(check);
+      expect(io.stdout).not.toContain('Change this in Settings');
+      expect(io.stdout).toContain('written; the app restarted');
+    }
+  });
+
+  it('a database setup cannot read refuses the group, writing nothing', async () => {
+    const m = await setUp('darwin', heldScript('unreadable'));
+    withDb(m);
+    const before = m.fs.read(ENV);
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    m.deps.ask = scriptedAsk([]);
+    expect(await runCli(['setup', '--reconfigure', 'travelpayouts'], m.deps)).toBe(78);
+    expect(io.stderr).toContain(
+      `cannot tell whether the app holds its settings: ${DB} could not be read, or the packages are not built (run pnpm build, then setup again)`,
+    );
+    expect(m.fs.read(ENV)).toBe(before);
+    expect(m.executor.log).toEqual([]);
+  });
+
+  it('browser leaves its window question to Settings and still runs the browser provider’s own step', async () => {
+    const m = await setUp('darwin', heldScript(1));
+    withDb(m);
+    const before = m.fs.read(ENV);
+    // why: only the browser provider's own question (no); row 9 is not asked
+    const ask = scriptedAsk([false]);
+    m.deps.ask = ask;
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(io.stdout).toContain(
+      'Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources\n',
+    );
+    expect(ask.asked).not.toContain(BROWSER_WINDOW_QUESTION);
+    expect(ask.asked).toEqual([ENABLE_QUESTION]);
+    expect(m.fs.read(ENV)).toBe(before);
+    expect(show(m.executor.log)).not.toContain(
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+    );
+  });
+
+  it('a full re-run with settings held names the Settings page for a name it owns, and keeps app.env as it is', async () => {
+    const m = await setUp('darwin', heldScript(3));
+    withDb(m);
+    const before = m.fs.read(ENV);
+    answersFile(m, { travelpayouts: { token: 'tp-token-0123456789' }, timezone: 'America/New_York' });
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(m.fs.read(ENV)).toBe(before);
+    expect(io.stdout).toContain(
+      'note: app.env differs from what setup would write: SCHEDULER_TIMEZONE. Setup keeps the file as it is; to change a value, run pnpm gmt setup --reconfigure <group> (for PORT: pnpm gmt setup --reconfigure port).\n',
+    );
+    expect(io.stdout).toContain(
+      'note: app.env differs from what setup would write: TRAVELPAYOUTS_TOKEN. The app holds these in its Settings page and ignores app.env for them. Change this in Settings: http://127.0.0.1:3000/?view=settings&section=sources\n',
+    );
+  });
+
+  it('a full re-run on a fresh install (no database) words every difference as before', async () => {
+    const seen: string[][] = [];
+    const m = await setUp('darwin', heldScript(3, seen));
+    answersFile(m, { travelpayouts: { token: 'tp-token-0123456789' } });
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    expect(io.stdout).toContain(
+      'note: app.env differs from what setup would write: TRAVELPAYOUTS_TOKEN. Setup keeps the file as it is;',
+    );
+    expect(io.stdout).not.toContain('Change this in Settings');
+    expect(seen).toEqual([]);
+  });
+
+  it('a port, timezone or password group never reads the database', async () => {
+    const seen: string[][] = [];
+    const m = await setUp('darwin', heldScript(3, seen));
+    withDb(m);
+    m.deps.ask = scriptedAsk(['America/New_York']);
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['setup', '--reconfigure', 'timezone'], m.deps)).toBe(0);
+    expect(parseEnv(m.fs.read(ENV) ?? '').SCHEDULER_TIMEZONE).toBe('America/New_York');
+    expect(seen).toEqual([]);
   });
 });
 

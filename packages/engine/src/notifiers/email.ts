@@ -108,6 +108,130 @@ export const TEST_EMAIL_BODY =
 /** A test send is allowed once a minute, apart from the alert ceiling (V7). */
 export const TEST_EMAIL_MIN_GAP_MS = 60_000;
 
+/**
+ * Settings plan ruling 11: the test send's own timeouts. A server named in the Settings form that never answers fails
+ * the test in ten seconds, connect, greeting and socket alike, so the page is never left waiting on it.
+ */
+export const TEST_SEND_TIMEOUTS = {
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 10_000,
+} as const;
+
+/**
+ * A test send's whole deadline. why: the socket timeout bounds a silence, not a send: a server that answers a fragment
+ * every few seconds would hold the one test limit (and both test routes) for ever. Past it the send is answered
+ * `timed-out` and the limit is handed back; it is never retried, as the server may have taken it. The connection itself
+ * is not ended: nodemailer's single-connection transport has no way to end one in flight (its `close()` only emits
+ * an event, and a pool's leaves a sending connection to finish), so it ends on its own, at its socket timeout or when
+ * the server closes it.
+ */
+export const TEST_SEND_DEADLINE_MS = 30_000;
+
+/** `send` within TEST_SEND_DEADLINE_MS, else `onTimeout` runs and it rejects coded ETIMEDOUT (`timed-out`). */
+async function withinTestDeadline<T>(send: Promise<T>, onTimeout: () => void = () => undefined): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(Object.assign(new Error('the test send ran past its deadline'), { code: 'ETIMEDOUT' }));
+    }, TEST_SEND_DEADLINE_MS);
+  });
+  try {
+    // why: the send that loses the race settles later into this race's own handlers, never unhandled
+    return await Promise.race([send, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The one-a-minute limit on test sends, with its in-flight guard (V7). Settings plan ruling 11: one limit for the
+ * process (TEST_SEND_LIMIT), shared by the alerts test (`EmailNotifier.sendTest`) and the Settings page's test
+ * (`sendTestEmail`), and kept across a restart in place, which builds a new notifier.
+ */
+export class TestSendLimit {
+  #testing = false;
+  #lastAt = Number.NEGATIVE_INFINITY;
+
+  /** Takes the one slot at `nowMs`: false while a test is in flight or within a minute of the last; else true. */
+  take(nowMs: number): boolean {
+    if (this.#testing || nowMs - this.#lastAt < TEST_EMAIL_MIN_GAP_MS) return false;
+    this.#testing = true;
+    this.#lastAt = nowMs;
+    return true;
+  }
+
+  /** The test taken has finished, sent or not. */
+  release(): void {
+    this.#testing = false;
+  }
+}
+
+/** The process's one test-send limit (settings plan ruling 11). */
+export const TEST_SEND_LIMIT = new TestSendLimit();
+
+/** Why a test send failed, in one of four fixed words (settings plan ruling 11); never the server's reply. */
+export type TestSendFailure = 'refused' | 'timed-out' | 'sign-in-refused' | 'not-a-mail-server';
+
+/**
+ * A failed send's fixed reason from nodemailer's codes alone (its own `code`, and `originalCode`, the system code it
+ * replaced): a refused sign-in; a timeout; a connection refused or a name that does not resolve (the server cannot be
+ * reached); anything else (no greeting, a TLS or protocol failure) is not a mail server.
+ */
+export function testSendFailureOf(err: unknown): TestSendFailure {
+  const { code } = failureCodes(err);
+  const original =
+    typeof err === 'object' && err !== null && 'originalCode' in err && typeof err.originalCode === 'string'
+      ? err.originalCode
+      : null;
+  const codes = [code, original];
+  if (codes.includes('EAUTH')) return 'sign-in-refused';
+  if (codes.includes('ETIMEDOUT')) return 'timed-out';
+  if (codes.some((c) => c === 'ECONNREFUSED' || c === 'EDNS' || c === 'ENOTFOUND' || c === 'EHOSTUNREACH'))
+    return 'refused';
+  return 'not-a-mail-server';
+}
+
+/**
+ * Settings plan ruling 11 (`POST /api/settings/email-test`): the fixed test message through the server the form names,
+ * with TEST_SEND_TIMEOUTS, inside the process's one test limit (`limited` while a test is in flight or within a minute
+ * of the last). A failure answers one of four fixed reasons; only nodemailer's codes are logged, never its message, the
+ * reply, the user or the password.
+ */
+export async function sendTestEmail(o: {
+  smtp: SmtpConfig;
+  nodeEnv: Config['nodeEnv'];
+  log: Logger;
+  clock: Clock;
+  limit?: TestSendLimit;
+  createTransport?: TransportFactory;
+}): Promise<{ result: 'sent' } | { result: 'limited' } | { result: 'failed'; reason: TestSendFailure }> {
+  const limit = o.limit ?? TEST_SEND_LIMIT;
+  if (!limit.take(Date.parse(o.clock.now()))) return { result: 'limited' };
+  const log = o.log.child({ notifier: 'email' });
+  try {
+    const options = { ...smtpTransportOptions(o.smtp, o.nodeEnv), ...TEST_SEND_TIMEOUTS };
+    const transport = (o.createTransport ?? defaultFactory)(options);
+    await withinTestDeadline(
+      transport.sendMail({
+        from: o.smtp.from,
+        to: o.smtp.to,
+        subject: TEST_EMAIL_SUBJECT,
+        text: TEST_EMAIL_BODY,
+      }),
+    );
+    log.info({}, 'settings test email sent');
+    return { result: 'sent' };
+  } catch (err) {
+    const reason = testSendFailureOf(err);
+    log.warn({ ...failureCodes(err), reason }, 'settings test email not sent');
+    return { result: 'failed', reason };
+  } finally {
+    limit.release();
+  }
+}
+
 export interface EmailNotifierOptions {
   smtp: SmtpConfig;
   nodeEnv: Config['nodeEnv'];
@@ -116,6 +240,8 @@ export interface EmailNotifierOptions {
   /** ALERT_EMAIL_MAX_PER_HOUR (decision 56). */
   maxPerHour: number;
   createTransport?: TransportFactory;
+  /** The test-send limit; the process's one (TEST_SEND_LIMIT) unless a test passes its own. */
+  testLimit?: TestSendLimit;
 }
 
 /** Sends alert digests and operator messages as plain-text email. Spec §8.3. */
@@ -132,8 +258,7 @@ export class EmailNotifier implements Notifier {
    */
   #recent: IsoDateTime[] = [];
   #last: { at: IsoDateTime; kind: string; result: 'sent' | 'refused' | 'failed' } | null = null;
-  #testing = false;
-  #lastTestAt = Number.NEGATIVE_INFINITY;
+  readonly #testLimit: TestSendLimit;
 
   constructor(opts: EmailNotifierOptions) {
     // why: defence in depth for sec-001 — core's config already refuses anything but one mailbox per address
@@ -143,6 +268,7 @@ export class EmailNotifier implements Notifier {
     this.#log = opts.log.child({ notifier: 'email' });
     this.#clock = opts.clock;
     this.#maxPerHour = opts.maxPerHour;
+    this.#testLimit = opts.testLimit ?? TEST_SEND_LIMIT;
     this.#transport = (opts.createTransport ?? defaultFactory)(smtpTransportOptions(opts.smtp, opts.nodeEnv));
   }
 
@@ -169,21 +295,34 @@ export class EmailNotifier implements Notifier {
 
   /**
    * Spec §10 `POST /alerts/test-email`: sends the one fixed test message through the same transport as any other mail, but
-   * apart from the alert ceiling: a test has its own limit (one every TEST_EMAIL_MIN_GAP_MS) and an in-flight guard. The
+   * apart from the alert ceiling: a test has its own limit (one every TEST_EMAIL_MIN_GAP_MS) and an in-flight guard,
+   * the process's one, shared with the Settings page's test (settings plan ruling 11). The
    * answer is a class only: `sent`; `refused` for a test sent too soon after the last or one already in flight (the route
    * answers 429); `failed`. The server's text is logged scrubbed and never returned.
    */
   async sendTest(): Promise<'sent' | 'refused' | 'failed'> {
     // why: V7 (sec-b1-001): a test send has its own small limit and an in-flight guard, and never draws on the alert
     // ceiling, so pressing the button cannot crowd out a price alert or a consent notice
-    const now = Date.parse(this.#clock.now());
-    if (this.#testing || now - this.#lastTestAt < TEST_EMAIL_MIN_GAP_MS) return 'refused';
-    this.#testing = true;
-    this.#lastTestAt = now;
+    if (!this.#testLimit.take(Date.parse(this.#clock.now()))) return 'refused';
+    // why: the result recorded at the deadline is this send's last word: a late answer of the same send never
+    // overwrites it (a later send of any kind still records its own)
+    const token = { answered: false };
     try {
-      return (await this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false)).result;
+      // why: bounded as the Settings test is (TEST_SEND_DEADLINE_MS); the connection is left to end on its own
+      return (
+        await withinTestDeadline(
+          this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false, token),
+          () => {
+            token.answered = true;
+          },
+        )
+      ).result;
+    } catch {
+      this.#log.warn({ code: 'ETIMEDOUT', deadlineMs: TEST_SEND_DEADLINE_MS }, 'test email not sent');
+      this.#last = { at: this.#clock.now(), kind: 'test', result: 'failed' };
+      return 'failed';
     } finally {
-      this.#testing = false;
+      this.#testLimit.release();
     }
   }
 
@@ -192,9 +331,11 @@ export class EmailNotifier implements Notifier {
     subject: string,
     body: string,
     countsTowardCeiling: boolean,
+    /** Set by a test send whose deadline already recorded its result: this send then records nothing more. */
+    token: { answered: boolean } = { answered: false },
   ): Promise<{ result: 'sent'; detail?: undefined } | { result: 'refused' | 'failed'; detail: string }> {
     const r = await this.#attempt(kind, subject, body, countsTowardCeiling);
-    this.#last = { at: this.#clock.now(), kind, result: r.result };
+    if (!token.answered) this.#last = { at: this.#clock.now(), kind, result: r.result };
     return r;
   }
 

@@ -8,8 +8,10 @@ import {
   definition,
   estimateResponse,
   execution,
+  healthDetail,
   providersResponse,
   resultsResponse,
+  settingsView,
   statusReport,
 } from '../fixtures.js';
 import { tripBody } from '../fixtures.trip.js';
@@ -33,6 +35,8 @@ const MUTATIONS: ReadonlyArray<{ method: 'POST' | 'PUT'; path: string; body: Jso
   { method: 'POST', path: '/api/definitions/coverage-check', body: coverageCheck() },
   { method: 'POST', path: '/api/definitions', body: definition({ id: 'def-0002' }) },
   { method: 'PUT', path: '/api/definitions/:id', body: definition() },
+  // settings plan ruling 5: a save that restarts the app at once
+  { method: 'PUT', path: '/api/settings', body: { warnings: [], applies: 'now' } },
 ];
 
 /** The body a default handler returns for a mutation; tests reuse it when they override a handler. */
@@ -55,7 +59,12 @@ export const handlers = [
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
   http.get(url('/api/budget'), () => HttpResponse.json(budgetResponse())),
+  // settings plan ruling 10: SearchApi's own balance could not be read, so the views say this app's count
+  http.get(url('/api/searchapi/account'), () => HttpResponse.json({ account: null })),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
+  // settings plan rulings 6 and 14: the Settings page's read, and the boot id it watches across a save's restart
+  http.get(url('/api/settings'), () => HttpResponse.json(settingsView())),
+  http.get(url('/api/health'), () => HttpResponse.json(healthDetail('boot-1'))),
   // WP18: a clean report, so the status bar's link shows nothing unless a test says otherwise
   http.get(url('/api/status'), () => HttpResponse.json(statusReport())),
   http.get(url('/api/definitions'), () => HttpResponse.json([definition()])),

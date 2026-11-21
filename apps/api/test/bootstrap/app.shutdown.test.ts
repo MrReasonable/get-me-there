@@ -9,8 +9,8 @@ import { bootApp, type RunningApp, SHUTDOWN_DEADLINE_MS, shutdownHandler } from 
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
 import { EXIT } from '../../src/tools/types.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, silentLog } from '../helpers/env.js';
+import { bootEnv } from '../helpers/harness.js';
 import { fileTempDir, tempDir } from '../helpers/tmp.js';
 
 /** The one seeding boot below, and each test's boot of a copy, as a backstop on a loaded machine. */
@@ -58,7 +58,7 @@ function first(order: number[]): number {
 }
 
 function devConfig(dbPath: string) {
-  return loadConfigFromEnv(
+  return bootEnv(
     cleanEnv({
       NODE_ENV: 'development',
       DATABASE_PATH: dbPath,
@@ -102,7 +102,7 @@ let template = '';
 beforeAll(async () => {
   template = join(fileTempDir('gmt-sd-seed-'), 'seed.db');
   const running = await bootApp({
-    config: devConfig(template),
+    ...devConfig(template),
     clock: fixedClock(T0),
     log: silentLog,
     listen: false,
@@ -145,7 +145,7 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     const timers = intervalSpies();
     const running = tracked(
       await bootApp({
-        config: devConfig(dbPath),
+        ...devConfig(dbPath),
         clock: fixedClock(T0),
         log: createLogger({ logLevel: 'error' }),
         listen: false,
@@ -182,7 +182,7 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     const timers = intervalSpies();
     const running = tracked(
       await bootApp({
-        config: devConfig(dbPath),
+        ...devConfig(dbPath),
         clock: fixedClock(T0),
         log: createLogger({ logLevel: 'error' }),
         listen: false,
@@ -207,7 +207,7 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     // why: listen is the last step, after the lock and the heartbeat; this process's network guards refuse its address
     // lookup, so it fails here deterministically.
     await expect(
-      bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
+      bootApp({ ...devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
     ).rejects.toThrow(LISTEN_REFUSED);
     expect(lockRow(dbPath)).toBeNull();
     expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
@@ -229,7 +229,7 @@ describe('a failed boot whose engine shutdown hangs (CodeRabbit, PR #20)', {
     const errors = vi.spyOn(log, 'error');
     engines.stub = 'hang';
     const boot = bootApp({
-      config: devConfig(dbPath),
+      ...devConfig(dbPath),
       clock: fixedClock(T0),
       log,
       listen: true,
@@ -256,7 +256,7 @@ describe('a failed boot whose engine shutdown hangs (CodeRabbit, PR #20)', {
     const errors = vi.spyOn(log, 'error');
     engines.stub = 'throw';
     await expect(
-      bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
+      bootApp({ ...devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
     ).rejects.toThrow(LISTEN_REFUSED);
     expect(lockRow(dbPath)).toBeNull();
     expect(errors.mock.calls.map((c) => String(c[1]))).toContain(
@@ -273,7 +273,7 @@ describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s
     const dbPath = seededDb();
     const running = tracked(
       await bootApp({
-        config: devConfig(dbPath),
+        ...devConfig(dbPath),
         clock: fixedClock(T0),
         log: silentLog,
         listen: false,
@@ -321,6 +321,23 @@ describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s
     expect(order).toEqual(['engine closed', 'database closed']);
     vi.mocked(running.ports.db.close).mockRestore();
     running.ports.db.close();
+  });
+
+  it('an engine shutdown that ends past the deadline never checkpoints the handle the deadline closed', async () => {
+    const { running, exit } = await booted();
+    let finish: () => void = () => undefined;
+    vi.spyOn(running.engine, 'shutdown').mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const checkpoint = vi.spyOn(running.ports.db, 'checkpoint');
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS);
+    expect(exit).toHaveBeenCalledWith(EXIT.failed);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkpoint).not.toHaveBeenCalled();
   });
 
   it('a shutdown that finishes before the deadline exits 0 with no timeout line, and the timer is gone', async () => {

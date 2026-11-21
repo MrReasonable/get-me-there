@@ -2,13 +2,16 @@
 
 Every limit below is enforced by the app before a request leaves the process: the ledger
 (`provider_requests`) records each attempt, and a request that would cross a cap is refused
-before it is sent. Configuration lives in `.env` (see `.env.example`); this page explains
-what the values mean. Provider facts were measured on 2026-10-14 and 2026-10-15 and come from
+before it is sent. Configuration lives in `.env` (see `.env.example`), except the settings the
+app keeps on its Settings page from its first start (`.env.example` marks them `[Settings]`;
+docs/setup.md section 0): SearchApi's key, plan and billing day, the monthly spend limit and the
+SearchApi credits a new search starts with among them. This page explains what the values mean. Provider facts were measured on 2026-10-14 and 2026-10-15 and come from
 `docs/providers.md`; vendors change plans, so re-check their pages before relying on a number.
 
 ## Plan presets
 
-`SEARCHAPI_PLAN` selects a preset (`trial` by default, or `40usd`); Travelpayouts has one set of
+SearchApi's plan (Settings › Price sources: "Free trial" or "$40 a month"; `SEARCHAPI_PLAN`)
+selects a preset (`trial` by default, or `40usd`); Travelpayouts has one set of
 schema defaults. Each individual variable overrides its preset value. Money is configured in
 pence and held in micro-GBP (1p = 10,000 µGBP). This table is generated from the code
 (`PLAN_PRESETS`, `TRAVELPAYOUTS_DEFAULTS`) and a test fails if they drift apart.
@@ -36,19 +39,23 @@ How to read it:
 - **`trial`** is SearchApi's one-off allowance of 100 credits. The window is the lifetime of
   the install, not a month, and scheduled runs leave SearchApi out; use it for the smoke test
   only. If some credits were spent elsewhere, set `SEARCHAPI_TRIAL_USED` to the number used
-  (100 minus the dashboard's "Remaining free searches (credits)").
+  (100 minus the dashboard's "Remaining free searches (credits)"); it stays a `.env` line, and on
+  `40usd` a value above 0 is ignored with a warning.
 - **`40usd`** is the subscription. Each call costs 0 at the margin; the fee (£32, entered as
   3200p) is counted once in the global monthly cap, which defaults to 3500p, so
   `MONTHLY_SPEND_CAP_PENCE` reads as total monthly spend. The 10,000-call cap is the hard
   stop. The hourly rate of 2,000 is the vendor's "20% of the plan per hour" rule.
 - **Travelpayouts** is free and never billed; its call cap only bounds load. The vendor allows
   600 requests a minute on this endpoint; the app defaults to 200.
+- `EXECUTION_MAX_CALLS` is the SearchApi credits a new search may spend each run: New searches start from the limit in
+  Settings › Limits ("New searches: at most N SearchApi credits each run"), and a search that exists keeps its own,
+  changed on its Edit page. `MONTHLY_SPEND_CAP_PENCE` is Settings › Limits' "Spend at most £N a month".
 - `EXECUTION_MAX_FREE_CALLS` (default 2000), `SOFT_CONFIRM_PENCE` (100) and
   `CHILD_MAX_CALLS` (6) are not plan-dependent and are not in the table.
 - A billed provider whose calls cost money, enabled under a spend cap of 0, makes boot log a
-  warning, and Settings › Price sources says verification will not run. On the `trial` and `40usd`
-  plans calls cost £0 at the margin, so the spend cap cannot stop a call: Settings › Price sources
-  names the call cap that does, and that call cap and each search's call cap (Max billed
+  warning, and saving such a setting on the Settings page says verification will not run. On the `trial` and `40usd`
+  plans calls cost £0 at the margin, so the spend cap cannot stop a call: Calls and caps
+  (`/?view=providers`, linked from Settings › Price sources) names the call cap that does, and that call cap and each search's call cap (Max billed
   calls per run) are the stops; on the trial preset a new search's call cap is 0, so it
   cannot verify a cell on demand until that cap is raised. A `MONTHLY_SPEND_CAP_PENCE`
   below the subscription fees it counts makes boot log a warning naming the variable.
@@ -58,9 +65,9 @@ How to read it:
 
 Each provider's month starts on its `<PROVIDER>_BILLING_DAY` (UTC, 1–28, so every month has
 the day); the global month starts on `GLOBAL_BILLING_DAY` (UTC, default 1). Set SearchApi's
-billing day to the day your subscription renews so the app's month and the vendor's month
-line up. `trial` uses a lifetime window. Settings › Price sources and `GET /api/budget` show every
-window's start and end with calls and cost so far.
+billing day (Settings › Price sources, shown on the $40 plan) to the day your subscription renews so the app's month and the vendor's month
+line up. `trial` uses a lifetime window. Calls and caps (`/?view=providers`, linked from Settings › Price
+sources) and `GET /api/budget` show every window's start and end with calls and cost so far.
 
 ## Per-provider facts
 
@@ -106,10 +113,11 @@ window's start and end with calls and cost so far.
   before then names it only if you add it in its Edit page, Where to look). Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
 - Caps: none of its own on pages or scrolls, a run's or a month's: a run loads a page for every day pair (list) or block
-  (grid) it has to read, and Settings › Price sources shows the calendar month's pages, with no cap on them. Its pages count
+  (grid) it has to read, and Calls and caps (`/?view=providers`) shows the calendar month's pages, with no cap on them. Its pages count
   against no per-run call cap (neither `EXECUTION_MAX_FREE_CALLS` nor a search's own limit of free calls); its
   flight-list pages have none either. A run's flight-list step stops when reading more stops finding cheaper trips
-  (twelve reads in a row that leave the five cheapest trips with flights read unchanged), when it has no more dates to
+  (`FLIGHT_READ_PATIENCE` reads in a row, 12 by default and set in Settings › Price sources, that leave the five
+  cheapest trips with flights read unchanged; each run keeps the value it started with), when it has no more dates to
   read, when the return or booking reads stop, or at the browser window's end or an ending error. A run stopped at the
   per-run page cap an earlier version had is never resumed: Search again starts a fresh run that reuses the prices
   already found.
@@ -132,8 +140,10 @@ window's start and end with calls and cost so far.
 
 Once a week (or before raising a cap), compare the app with SearchApi's dashboard:
 
-1. Open Settings › Price sources (or `GET /api/budget`) and note SearchApi's calls in the current
-   window and the window's start date.
+1. Open Calls and caps (`/?view=providers`, linked from Settings › Price sources; or `GET /api/budget`)
+   and note SearchApi's calls in the current window and the window's start date. Settings › Price
+   sources' SearchApi block shows SearchApi's own count of credits left (`GET /api/searchapi/account`, read from the vendor at no charge; docs/providers.md),
+   and the app's own count when the vendor does not answer.
 2. Open SearchApi's dashboard and note the searches used in the same billing period
    (on `trial`, 100 minus "Remaining free searches (credits)").
 3. Expect **app ≥ dashboard**. The gap is cached repeats and retries the vendor did not bill.
@@ -141,8 +151,8 @@ Once a week (or before raising a cap), compare the app with SearchApi's dashboar
    database was restored from a backup (below). Lower `SEARCHAPI_MONTHLY_CALL_CAP` to
    `10000 − dashboard used` (or raise `SEARCHAPI_TRIAL_USED` on `trial`) in `.env` and run
    `docker compose up -d` until the next billing day.
-5. Travelpayouts is free; there is nothing to reconcile, only the call counts on the
-   Settings › Price sources page.
+5. Travelpayouts is free; there is nothing to reconcile, only the call counts on Calls and caps
+   (`/?view=providers`).
 6. Camoufox has no vendor dashboard; the ledger's camoufox rows are the only record of what it did. Rows of class
    `page` loaded a Google page (`200`, `423` blocked, `504`, and `502` after launch); rows of class `no-page` did not
    (`423` cooling-down, `429`, `409`, `400`, `401`, `502` at launch, and a refused connection). A `423` blocked row is a

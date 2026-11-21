@@ -1,5 +1,6 @@
-import { AWAKE_ENDPOINT_PATH, ProviderError, type Secret } from '@gmt/core';
+import { AWAKE_ENDPOINT_PATH, MIN_SECRET_LENGTH, ProviderError, type Secret } from '@gmt/core';
 import { FIXTURE_HOST } from '../fixture/constants.js';
+import { SEARCHAPI_ACCOUNT_PATH } from '../searchapi/params.js';
 import { CREDENTIAL_HEADERS } from './cacheKey.js';
 import { containsSecret } from './scrub.js';
 import { errorProviderId, type HttpKitDeps, type HttpKitRequest, type ProviderHttpLimits } from './types.js';
@@ -50,8 +51,8 @@ export function isCredentialParam(name: string): boolean {
     .split(/[^a-z]+/);
   return words.some((w) => CREDENTIAL_WORDS.has(w));
 }
-/** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). */
-export const MIN_SECRET_LENGTH = 8;
+/** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). Core owns it: its config refuses shorter. */
+export { MIN_SECRET_LENGTH };
 
 /**
  * Construction checks (ruling 7, sec-003): the in-process seam names fixture.local only; it and limits.fixture
@@ -72,7 +73,14 @@ export function assertKitConfig(
   const fixtureHosts = deps.limits.fixture?.hosts;
   if (fixtureHosts !== undefined && (fixtureHosts.length !== 1 || fixtureHosts[0] !== FIXTURE_HOST))
     throw new Error(`limits.fixture.hosts must be exactly ['${FIXTURE_HOST}']`);
-  for (const id of ['searchapi', 'travelpayouts', 'fx', 'camoufox', 'camoufox-status'] as const)
+  for (const id of [
+    'searchapi',
+    'travelpayouts',
+    'fx',
+    'camoufox',
+    'camoufox-status',
+    'searchapi-account',
+  ] as const)
     if (deps.limits[id]?.hosts.includes(FIXTURE_HOST))
       throw new Error(`limits.${id}.hosts may not include ${FIXTURE_HOST}`);
   const values = deps.secrets.map((s) => s.reveal()).filter((v) => v !== '');
@@ -143,6 +151,10 @@ export function assertEgress(
     if (!schemeOk) deny(`scheme ${u.protocol} not allowed`);
   }
   if (!limits.hosts.includes(u.hostname)) deny(`host ${u.hostname} not in the allowlist`);
+  // why: settings plan ruling 10: the unledgered account id reads the balance and nothing else, so it can never reach a
+  // search route without a reservation
+  if (r.providerId === 'searchapi-account' && `${r.method} ${u.pathname}` !== `GET ${SEARCHAPI_ACCOUNT_PATH}`)
+    deny(`searchapi-account is GET ${SEARCHAPI_ACCOUNT_PATH} only`);
   if (!PATH_ONLY.test(r.endpointPath) || r.endpointPath !== u.pathname)
     deny('endpointPath must equal the URL path');
   if (r.providerId === 'fx' || r.providerId === 'fixture') {

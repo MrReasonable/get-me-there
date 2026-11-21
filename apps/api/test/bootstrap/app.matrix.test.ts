@@ -18,11 +18,11 @@ import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
 import { type AssetPaths, assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
 import { API_TEXT } from '../../src/text.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
+import { loadBootConfig, loadConfigFromEnv } from '../../src/wiring.js';
 import { errorOf } from '../helpers/contract.js';
 import { cleanEnv, SENTINEL_AUTH, SENTINEL_SA, silentLog } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
-import { basic, captureLines, T0 } from '../helpers/harness.js';
+import { basic, bootEnv, captureLines, T0 } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 function envFor(overrides: Record<string, string>): Record<string, string> {
@@ -41,7 +41,7 @@ function envFor(overrides: Record<string, string>): Record<string, string> {
 
 function bootWith(env: Record<string, string>, assets: AssetPaths = assetPaths()): Promise<RunningApp> {
   return bootApp({
-    config: loadConfigFromEnv(env),
+    ...bootEnv(env),
     log: createLogger({ logLevel: 'error' }),
     listen: false,
     assets,
@@ -172,15 +172,16 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
 
   describe('bootApp re-asserts them on an injected config (78)', () => {
     // why: each test's own data directory (envFor makes one), so a refusal never shares a database with a boot
-    const noAuth = (over: Partial<Config> = {}): Config => ({
-      ...loadConfigFromEnv(envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' })),
-      ...over,
-    });
+    const noAuth = (over: Partial<Config> = {}) => {
+      const env = envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' });
+      return { config: { ...loadBootConfig(env), ...over }, env };
+    };
     const container = { inContainer: true, bindAddress: '0.0.0.0', publishedAddress: '127.0.0.1' };
     // why: a fresh fixed clock on every boot, so locking, migrations and the engine's boot never read wall-clock time
-    const boot = (config: Config, lines: string[] = []) =>
+    const boot = ({ config, env }: { config: Config; env: Record<string, string> }, lines: string[] = []) =>
       bootApp({
         config,
+        env,
         log: createLogger({ logLevel: 'warn' }, { destination: captureLines(lines) }),
         clock: fixedClock(T0),
         listen: false,
@@ -273,7 +274,7 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     async (_l, env, warns) => {
       const lines: string[] = [];
       const running = await bootApp({
-        config: loadConfigFromEnv(envFor({ SEARCHAPI_KEY: SENTINEL_SA, ...env })),
+        ...bootEnv(envFor({ SEARCHAPI_KEY: SENTINEL_SA, ...env })),
         log: createLogger({ logLevel: 'info' }, { destination: captureLines(lines) }),
         listen: false,
         assets: assetPaths(),
@@ -296,7 +297,7 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     async (_l, cap, warns) => {
       const lines: string[] = [];
       const running = await bootApp({
-        config: loadConfigFromEnv(
+        ...bootEnv(
           envFor({ SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: cap }),
         ),
         log: createLogger({ logLevel: 'info' }, { destination: captureLines(lines) }),

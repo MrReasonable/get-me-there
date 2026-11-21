@@ -24,6 +24,13 @@ name reaches it. On a Mac with Docker Desktop, double-click
 - [`docs/providers.md`](docs/providers.md): the provider research and the known vendor behaviour.
 - [`docs/release-notes.md`](docs/release-notes.md): what this release does and does not do.
 
+Once it is running, the app keeps its price sources' keys, its monthly spend limit, a new search's
+SearchApi credits per run, and email itself, on its Settings page (Price sources, Limits, Email and
+alerts, System), so they change there rather than in a settings file; [`docs/setup.md`](docs/setup.md)
+section 0 says how a settings-file line is read once. The other limits (the free-call and cost caps
+a run, each provider's call caps and rates) stay in the settings file, as
+[`.env.example`](.env.example) lists them (the names it marks `[Settings]` are the page's).
+
 Every price is shown with its source and age; nothing is invented, converted without saying so,
 or presented as more certain than its source. Coverage is stated cell by cell: a cell with no
 cached data is never counted as having no flights.

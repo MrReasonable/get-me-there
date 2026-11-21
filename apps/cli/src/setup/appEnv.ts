@@ -235,15 +235,19 @@ export function ownedDiff(
   return OWNED_NAMES.filter((k) => file[k] !== plan[k]);
 }
 
-/** A settings file read back the way the app reads it: parseEnv, then core's parseConfig (U9, ca-b1-012). */
+/**
+ * A settings file read back the way the app reads it: parseEnv, then core's parseConfig (U9, ca-b1-012). `warnings`:
+ * each variable the app ignores rather than refusing boot (settings plan ruling 1), as "NAME: the app's words", never a
+ * value.
+ */
 export type Settings =
-  | { ok: true; config: Config; record: Record<string, string> }
+  | { ok: true; config: Config; record: Record<string, string>; warnings: string[] }
   | { ok: false; fields: string[]; record: Record<string, string> };
 export function readSettings(text: string): Settings {
   const record = readEnvText(text);
   const r = parseConfig(record, { realpath: (p) => p });
   return r.ok
-    ? { ok: true, config: r.config, record }
+    ? { ok: true, config: r.config, record, warnings: r.warnings.map((w) => `${w.field}: ${w.message}`) }
     : { ok: false, fields: [...new Set(r.errors.map((e) => e.field))].sort(), record };
 }
 

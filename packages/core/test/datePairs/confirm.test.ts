@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   applyCheck,
   type Check,
-  CONFIRM_PATIENCE,
   CONFIRM_TARGET,
   checkOfRead,
+  DEFAULT_FLIGHT_READ_PATIENCE,
   EMPTY_STANDINGS,
   improves,
+  patienceOf,
   patienceSpent,
   type Standings,
   uncheckedCheaper,
@@ -26,7 +27,7 @@ const st = (prices: number[], sinceImprovement = 0): Standings => ({ prices, sin
 describe('constants', () => {
   it('are the design values', () => {
     expect(CONFIRM_TARGET).toBe(5);
-    expect(CONFIRM_PATIENCE).toBe(12);
+    expect(DEFAULT_FLIGHT_READ_PATIENCE).toBe(12);
     expect(EMPTY_STANDINGS).toEqual({ prices: [], sinceImprovement: 0 });
   });
 });
@@ -86,7 +87,7 @@ describe('patienceSpent', () => {
     const spent: boolean[] = [];
     for (const c of checks) {
       s = applyCheck(s, c, 'read');
-      spent.push(patienceSpent(s));
+      spent.push(patienceSpent(s, 12));
     }
     expect(spent).toHaveLength(18);
     expect(spent[16]).toBe(false);
@@ -96,9 +97,33 @@ describe('patienceSpent', () => {
   it('12 unread reads with no prices spend it', () => {
     let s = EMPTY_STANDINGS;
     for (let i = 0; i < 11; i++) s = applyCheck(s, UNREAD, 'read');
-    expect(patienceSpent(s)).toBe(false);
+    expect(patienceSpent(s, 12)).toBe(false);
     s = applyCheck(s, UNREAD, 'read');
-    expect(patienceSpent(s)).toBe(true);
+    expect(patienceSpent(s, 12)).toBe(true);
+  });
+});
+
+describe('patienceSpent follows the patience it is given', () => {
+  it('patience 3 stops after 3 unimproved reads, 12 only after 12', () => {
+    let s = EMPTY_STANDINGS;
+    const at3: boolean[] = [];
+    const at12: boolean[] = [];
+    for (let i = 0; i < 12; i++) {
+      s = applyCheck(s, UNREAD, 'read');
+      at3.push(patienceSpent(s, 3));
+      at12.push(patienceSpent(s, 12));
+    }
+    expect(at3.indexOf(true)).toBe(2);
+    expect(at12.indexOf(true)).toBe(11);
+  });
+});
+
+describe('patienceOf', () => {
+  it("is the summary's own patience, and 12 for a summary without one, a missing summary or null", () => {
+    expect(patienceOf({ patience: 3 })).toBe(3);
+    expect(patienceOf({})).toBe(12);
+    expect(patienceOf(null)).toBe(12);
+    expect(patienceOf(undefined)).toBe(12);
   });
 });
 

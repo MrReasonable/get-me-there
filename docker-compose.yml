@@ -6,6 +6,11 @@
 # from the Dockerfile, and ALLOW_FIXTURE_PROVIDER and FIXTURE_COST_MICRO_GBP are never passed. Do not
 # add `env_file:`, which would forward every line of .env and defeat the allowlist.
 #
+# The Settings page (docs/setup.md section 0): the names .env.example marks [Settings] are read once, on the first
+# start at which the app holds no value for one, and the Settings page owns them after that; a .env line that differs
+# is then reported on Settings › System and never applied. After the first start, check them on the Settings page,
+# then remove those lines from .env (docs/setup.md section 0, "Updating to a version with the Settings page").
+#
 # Signing in (docs/setup.md section 1): the app needs no password while only this machine can reach it, that is while
 # it is published on 127.0.0.1 and every ALLOWED_HOSTS name is this machine's. Before another device or name reaches
 # it (section 3), add APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS to .env; without them the app refuses to start.
@@ -79,6 +84,10 @@ services:
       GLOBAL_BILLING_DAY: "${GLOBAL_BILLING_DAY:-}"
       SOFT_CONFIRM_PENCE: "${SOFT_CONFIRM_PENCE:-}"
       EXECUTION_MAX_CALLS: "${EXECUTION_MAX_CALLS:-}"
+      FLIGHT_READ_PATIENCE: "${FLIGHT_READ_PATIENCE:-}"
+      DISCOVERY_REFRESH_DAYS: "${DISCOVERY_REFRESH_DAYS:-}"
+      NEW_SEARCH_DISCOVERY: "${NEW_SEARCH_DISCOVERY:-}"
+      NEW_SEARCH_VERIFICATION: "${NEW_SEARCH_VERIFICATION:-}"
       EXECUTION_MAX_FREE_CALLS: "${EXECUTION_MAX_FREE_CALLS:-}"
       EXECUTION_MAX_COST_PENCE: "${EXECUTION_MAX_COST_PENCE:-}"
       CHILD_MAX_CALLS: "${CHILD_MAX_CALLS:-}"

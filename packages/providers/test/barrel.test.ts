@@ -73,6 +73,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'loadParamsHistory',
       'withContentHash',
       'installNetworkGuards',
+      'allowLoopback',
       'hangUntilAborted',
       'respondAfter',
       'takeStrays',

@@ -10,6 +10,12 @@ import {
 // Operator-facing wording shared by notices and refusal messages (spec §8.1 "409 naming the cap and numbers"):
 // money through core's formatPence, call scopes as counts, scopes in plain English, instants in local time.
 
+/**
+ * Settings plan ruling 6: the refusal of anything new asked while a saved setting waits for the app to restart in place
+ * (StartResult and FlightReadStart code `reload-pending`).
+ */
+export const RELOAD_PENDING_TEXT = 'Applying new settings: try again in a minute';
+
 /** True for the scopes whose figures are micro-GBP; the others count calls. */
 export function isCostScope(scope: BudgetScopeKind): boolean {
   return scope === 'execution-cost' || scope === 'global-month';

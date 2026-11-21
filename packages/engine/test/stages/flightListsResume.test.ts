@@ -107,6 +107,39 @@ describe('a resumed flight-list step', () => {
     await p.orch.shutdown();
   });
 
+  it("a run started at patience 3 keeps 3 when the setting is 12 by the resume (a recorded value is the run's own)", async () => {
+    const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+    const { e, id, cam2, plan } = await interruptedAt(2, { FLIGHT_READ_PATIENCE: '3' }, BOTH);
+    expect(plan?.confirm?.patience).toBe(3);
+    // why: the fresh process reads 12 (the default) from its own configuration; the stored summary's 3 decides
+    const ctx = buildContext(
+      { ...e.deps, config: { ...e.deps.config, flightReadPatience: 12 }, providers: [cam2] },
+      { rankedDatePairs: rankedPairs(15) },
+    );
+    cam2.bind(() => ctx);
+    const orch = createOrchestrator(ctx);
+    expect((await orch.resume(id, { manual: false })).ok).toBe(true);
+    const done = await e.settled(id);
+    // one read was made before the interruption (it counts as unread, never as patience); 3 more reads, not 12
+    expect(cam2.flightCalls).toHaveLength(3);
+    expect(done.flightLists?.confirm).toMatchObject({ stop: 'patience', patience: 3 });
+    await orch.shutdown();
+  });
+
+  it('a stored summary without patience (a run stored before the setting) resumes at 12', async () => {
+    const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+    const { e, id, cam2, plan } = await interruptedAt(2, { FLIGHT_READ_PATIENCE: '3' }, BOTH);
+    if (plan === null || plan.confirm === null) throw new Error('a stored confirm-mode plan');
+    const { patience: _recorded, ...older } = plan.confirm;
+    e.ctx.repos.executions.patch(id, { flightLists: { ...plan, confirm: older } });
+    const p = restart(e, [cam2]);
+    expect((await p.orch.resume(id, { manual: false })).ok).toBe(true);
+    const done = await e.settled(id);
+    expect(cam2.flightCalls).toHaveLength(12);
+    expect(done.flightLists?.confirm?.patience).toBe(12);
+    await p.orch.shutdown();
+  });
+
   it('skips (no row) a planned cell that has departed by the resume', async () => {
     // why: the browser window is unbounded here, so moving the clock days on does not leave the browser cells
     const { e, id, cam2, plan } = await interruptedAt(5, { CAMOUFOX_BROWSER_WINDOW: 'any' });

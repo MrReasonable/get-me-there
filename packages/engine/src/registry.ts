@@ -11,10 +11,28 @@ export interface RunRegistry {
   settleAll(): Promise<void>;
 }
 
-/** Told when a pass starts and when it settles (spec §2 "The keep-awake lease": the engine's AwakeKeeper). */
+/**
+ * Told when a pass starts and when it settles (spec §2 "The keep-awake lease": the engine's AwakeKeeper; settings plan
+ * ruling 6: the app's restart in place, EngineOptions.runWatch). `ended` follows the pass's own status write.
+ */
 export interface RunWatch {
   started(): void;
   ended(): void;
+}
+
+/** Both observers, in order: each is told of every start and end. */
+export function bothWatches(first: RunWatch, second: RunWatch | undefined): RunWatch {
+  if (second === undefined) return first;
+  return {
+    started: () => {
+      first.started();
+      second.started();
+    },
+    ended: () => {
+      first.ended();
+      second.ended();
+    },
+  };
 }
 
 export function createRegistry(log: Logger, watch?: RunWatch): RunRegistry {

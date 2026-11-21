@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alertRuleListedSchema,
   alertRulesQuerySchema,
   bookingSchema,
   coverageResponseSchema,
@@ -65,6 +66,30 @@ describe('WP8 contract additions, round 2', () => {
     expect(mark.safeParse({ ageHours: 'unknown' }).success).toBe(true);
     expect(resultRowSchema.shape.superseded.safeParse(true).success).toBe(true);
     expect(resultRowSchema.shape.superseded.safeParse(null).success).toBe(false);
+  });
+
+  it('a listed alert rule carries when it last sent: a time, or null when it never has (settings plan R13)', () => {
+    const rule = {
+      id: 'r1',
+      definitionId: 'd1',
+      type: 'absolute',
+      thresholdPence: 40_000,
+      pct: null,
+      basis: 'verified',
+      requireAllVerified: null,
+      cooldownHours: 336,
+      enabled: true,
+    };
+    expect(alertRuleListedSchema.safeParse({ ...rule, lastSentAt: null }).success).toBe(true);
+    expect(alertRuleListedSchema.safeParse({ ...rule, lastSentAt: '2026-10-14T12:00:00.000Z' }).success).toBe(
+      true,
+    );
+    expect(alertRuleListedSchema.safeParse(rule).success).toBe(false);
+    expect(alertRuleListedSchema.safeParse({ ...rule, lastSentAt: 'yesterday' }).success).toBe(false);
+    // the rule's own refinements still hold
+    expect(alertRuleListedSchema.safeParse({ ...rule, thresholdPence: null, lastSentAt: null }).success).toBe(
+      false,
+    );
   });
 
   it('alert rules take an optional definitionId; a create body is optional', () => {

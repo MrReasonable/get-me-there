@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 71.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 72.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -23,7 +23,9 @@ booking options on 2026-11-01; revision 56 folds those rulings, the recorded
 research behind them and the rulings on the work brief's reviews into the
 sections they change (§17), which work package 21 builds. Ian approved the UX redesign's direction and mockups on 2026-11-08
 (`docs/superpowers/specs/2026-11-08-ux-redesign-design.md`); revisions 69 and 70 fold its first two stages into the sections they change (§17): 69 the Trip page, one label per
-price and the price as a booking link; 70 the Trips and Search pages, the nav, the top bar and the breadcrumbs.
+price and the price as a booking link; 70 the Trips and Search pages, the nav, the top bar and the breadcrumbs. Revision 72
+folds its third stage, the Settings page (plan `docs/superpowers/plans/2026-11-19-settings.md`, approved by Ian on
+2026-11-19), into the sections it changes (§17).
 
 This document is the single source of truth for what gets built. The
 implementation plan and every per-package work brief derive from it. Where
@@ -1894,7 +1896,13 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   `host.docker.internal` with an explicit port, with `CAMOUFOX_WORKER_KEY` in
   the `x-gmt-worker-key` header (a credential header by name); the never-
   ledgered id `camoufox-status` (like `fx`) reaches only that origin's
-  `GET /v1/status` and `POST /v1/awake` (§2 "The keep-awake lease"); the worker, not http-kit, holds the Google allowlist (§2). Every credential travels in a
+  `GET /v1/status` and `POST /v1/awake` (§2 "The keep-awake lease"); the worker, not http-kit, holds the Google allowlist (§2).
+  The never-ledgered id `searchapi-account` reaches only SearchApi's
+  `GET /api/v1/me` (the account's balance, §10 `GET /searchapi/account`),
+  with the key as a Bearer header, `billable: 'never'`, no response cache,
+  its own limiter (6 a minute, one at a time), a 10 s timeout and no
+  transport retry, so it writes no ledger row, takes no reservation and still
+  answers once the app's own call cap is spent. Every credential travels in a
   header, so http-kit refuses a query parameter named like one (`api_key`,
   `key`, `token`, `access_token`, `password`, `secret` and the like) whatever
   its value, before the ledger or the network; SearchApi's `departure_token`
@@ -2738,6 +2746,13 @@ are `toISOString()` text; booleans are integers 0/1.
   first), seller (1 to 80 characters), fare NULL (1 to 80 characters),
   price_pence (above 0: the seller's stated price); PRIMARY KEY (list_id,
   position); at most 40 a list.
+- `settings` (migration 0014, additive: one new table): name TEXT PRIMARY KEY
+  (an owned name, §12 "The Settings page's names", checked by the repository
+  through `z.enum(SETTINGS_NAMES)`, not by a CHECK, so a later name needs no
+  rebuild), value TEXT NOT NULL (as `.env` holds it, `''` unset; secrets
+  unencrypted, Ian 2026-11-19), updated_at NOT NULL (an ISO instant by CHECK).
+  Written only by `PUT /settings` and by a boot's imports, each in one
+  transaction; a test round-trips every owned name.
 - `itineraries` (hash PK, kind default 'flight', origin, destination,
   departure_date, return_date, nights, outbound_minutes, inbound_minutes,
   stops_out, stops_in, airport_change NULL, carriers_json, layovers_json,
@@ -3107,8 +3122,13 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   in London, with no fresh `verified` figure, one airport pair each (the figure's).
   There is no fixed count. **Rule A** (core, `datePairs/confirm.ts`;
   Ian, 2026-11-08: stop once more checking stops helping): `CONFIRM_TARGET = 5`
-  trips with flights read are wanted, and `CONFIRM_PATIENCE = 12` finished reads
-  in a row may fail to improve the standings before the step stops. The
+  trips with flights read are wanted, and the run's **patience** of finished
+  reads in a row may fail to improve the standings before the step stops. The
+  patience is `FLIGHT_READ_PATIENCE` (§12, default 12, 3 to 50, on Settings ›
+  Price sources) as the run started: the run records it in its summary
+  (`ConfirmSummary.patience`; a run stored before the setting has none and reads
+  12, `patienceOf`), and its step, its estimate and the page's words read the
+  run's own value, so a later change never moves a running step. The
   **standings** are the trips with flights read ("confirmed" is the code's term),
   cheapest first. A finished read is checked (`checkOfRead`) as `confirmed` (a
   pairing that fits the current limits, read under them; priced at its one price,
@@ -3123,10 +3143,10 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   read resets it on an improvement and otherwise adds 1 (`none` and `unread`
   included); a reused pair fills the standings at once and neither spends nor
   resets it, so a run that follows a recent one reuses what was read and spends its
-  patience on dates not yet checked. The step starts no new read once the last 12
-  finished reads held no improvement, whether or not 5 trips are held (while fewer
-  than 5 are held every new trip improves, so 12 reads in a row that find none mean
-  the rest are unlikely to), nor once the queue is empty or returns stop, and for
+  patience on dates not yet checked. The step starts no new read once the last
+  patience's worth of finished reads held no improvement (`patienceSpent`), whether
+  or not 5 trips are held (while fewer than 5 are held every new trip improves, so
+  that many reads in a row that find none mean the rest are unlikely to), nor once the queue is empty or returns stop, and for
   every stop the run has (cancel, the window, an ending error: the first stop met
   decides); reads in flight finish and are kept, and each read that finishes
   applies in the order reads finish. **Reuse**:
@@ -3307,13 +3327,15 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   open-ended queue until rule A stops it, so the line is a range. The **queue**
   is the one the step reads (`confirmQueue` over the date-pairs ranking), with the
   step's own reuse split applied over all of it. **At most** is every unreused pair in
-  the queue. **Typically** it is `max(min(unreused, CONFIRM_PATIENCE),
-  min(queue, CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA) − the
-  reusable pairs among the queue's first 25)` reads, never more than the unreused:
+  the queue. **Typically** it is `max(min(unreused, patience),
+  min(queue, CONFIRM_TARGET + patience + CONFIRM_TYPICAL_EXTRA) − the
+  reusable pairs among the queue's first `CONFIRM_TARGET + patience +
+  CONFIRM_TYPICAL_EXTRA`, 25 at the default patience of 12)` reads, never more than the unreused:
   the reads until the target is held and the patience has run out, with
   `CONFIRM_TYPICAL_EXTRA = 8` more for reads that improve on it, less the
-  reusable ones among them, but never fewer than `CONFIRM_PATIENCE`, since reuse
-  spends no patience. A saved search with no ranking yet (it never ran, so no date
+  reusable ones among them, but never fewer than the patience, since reuse
+  spends no patience. The patience is the run's own (above), or
+  `FLIGHT_READ_PATIENCE` for a run not yet started. A saved search with no ranking yet (it never ran, so no date
   pair has a figure) is estimated over the whole space with nothing reused, as an
   unsaved one is, never as 0; a queue that the filters empty (all departed, all
   read by this run) is a true 0. Each read costs `CAMOUFOX_MIN_SPACING_SECONDS +
@@ -3545,7 +3567,31 @@ writes nothing more: a notice it sends late is logged once and its row is
 not written, a skip disables no schedule, and a system job's network call
 is aborted. The app marks the engine closed before it closes the database
 in every case, so a shutdown cut off by the app's 25 s deadline is no
-exception. A catch-up keeps the `camoufox` provider in
+exception. **Applying saved settings** (§12 "The Settings page's names"): a
+save on the Settings page asks the app to restart in place. With no execution
+pending or running, no on-demand flight read and no tool run in the app, it
+restarts at once; otherwise the engine is **held**: from that moment a start,
+resume, single-cell verification, flight read or tool run is refused
+`reload-pending` (503, "Applying new settings: try again in a minute"), a
+tick's or the minute job's firing is left to the catch-up after the restart,
+and the runs in flight keep the settings they started with to their end (a run
+that pauses keeps its pause and resumes under the new settings). The restart
+follows the last such end of any kind (succeeded, failed, cancelled,
+budget-paused, interrupted), checked as each run, read and tool run settles
+through the engine's second observer (`EngineOptions.runWatch`); two saves
+during a run give one restart. A check that cannot read whether anything is
+in flight is logged and checked again 5 s later (again after each failure),
+so the restart is never lost and nothing in flight is stopped. The close is the shutdown above (scheduler,
+engine drain, checkpoint, lock release, the server's close awaited; once the
+server stops listening, each keep-alive connection is closed as soon as its
+response is written, so a client's kept-alive connection, a page asking
+`/health` over it every second above all, can neither hold the close nor be
+answered by the closing pass), and the next pass boots in the same process on the same port (§12's boot order,
+taking the lock without the other-holder wait), with a new `bootId`
+(`GET /health`). The process registers SIGTERM and SIGINT once and keeps
+both listeners until it exits (a second signal during the close is ignored); a signal during
+a pass's close or boot ends the loop, and a pass whose boot throws exits with
+the boot-failure code and log, for the supervisor to restart. A catch-up keeps the `camoufox` provider in
 its snapshot for the reuse step only: reuse copies camoufox's own outcomes
 that are still inside the refresh window with no page load, and its other
 cells are seeded `skipped` with the reason `scheduled_only` and the detail
@@ -4056,8 +4102,8 @@ points alike; a bare `true` is refused.
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ the number of scheduled definitions (`isScheduled`: enabled, a cron set, not deleted), or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
-| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the top bar's health line; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a removed search's card only: an unscheduled search is judged by its latest run and notes "not scheduled", so a search without a schedule never nags the bar for having none), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per live definition, scheduled or not, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`, and in its note, while the worker holds the keep-awake lease (§2), "keeping the machine awake until <time> while a search runs"; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ the number of scheduled definitions (`isScheduled`: enabled, a cron set, not deleted), or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded }, bootId }`, `bootId` random per pass of the process (§8.2 "Applying saved settings"), so the Settings page knows the app came back after a save |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, optional top-level `pagesAtOnce` (the pages the browser worker loads at once, as its own `/v1/status` reported them; absent when the worker was not read, did not answer or reported no shared settings; the Settings page shows it), each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command, settings? } \| null, expiresOn? }` (`fix.settings` names the Settings section the fix is made in, `sources`, `limits`, `email` or `system`: the page links to it and `gmt status` prints its address; the fixes for Travelpayouts, SearchApi, the price sources and email are made there, never `--reconfigure`; `expiresOn`, only on the consent check, is the consent record's expiry as a date in the app's time zone when it is known, which the Settings page words; `label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the top bar's health line; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a removed search's card only: an unscheduled search is judged by its latest run and notes "not scheduled", so a search without a schedule never nags the bar for having none), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per live definition, scheduled or not, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`, and in its note, while the worker holds the keep-awake lease (§2), "keeping the machine awake until <time> while a search runs"; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test, the Settings page's included; `fail` when it failed), `settings` (one check per owned name, §12, labelled with its Settings label: `warn` "<label> in .env is ignored: Settings holds it. Remove the line from .env." for a name in this boot's `envIgnored`, `fail` "<label> isn't valid: set it in Settings" for one in `setAside`, the same words whether the value was saved or came from an `.env` line; never a value); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
 | `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }`, a matched metro never cut short. Bands: exact code, a metro code's members, code prefix, a city word, a name word, any other substring; inside a band an airport in the install's own country (`POINT_OF_SALE`, when it is a code; the point of sale is the install's market, where a browser locale varies by viewer) first, then a large airport with scheduled service, then a medium one, then the rest, so Birmingham GB lists before Birmingham US on a GB install; every listed airport of a metro any row belongs to is returned as one block at its best member's place; an airport OurAirports lists with no scheduled service is left out unless its exact code is typed (§7) |
@@ -4082,7 +4128,11 @@ points alike; a bare `true` is refused.
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
 | `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3); `gmt smoke` prints all of it before it asks, and waits for the page's bound (§13) |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
-| `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
+| `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | `GET /alerts` gives each rule its `lastSentAt`, the fire time of its newest `notified` event (null when it never sent; queued and suppressed events are not sends), read for Settings › Email and alerts |
+| `GET /settings` | authenticated, the Settings page's read (`settingsViewSchema`): `values` (every owned plain name, §12, as stored, null when unset), `secrets` (each owned secret as `{ set, last4 }`, `last4` only for the two API keys, never a password; no route ever returns a secret), `newSearchSources { discovery, verification }` (the sources a new search starts with, an unset list as the draft gives it, through the same function as `/providers`' presets), `envOnly { camoufoxEnabled, searchApiTrialUsed }` (shown, not owned), this boot's `envIgnored` and `setAside` names, and `pending: { running } \| null` (the searches a saved change waits for) |
+| `PUT /settings` | body `{ changes }`, a partial record of owned names to a string or null (null unsets; a secret not named is kept; the body's secrets join the request's scrub list before anything can fail); a name that is not owned is 422 `unknown_setting` without echoing it; the changes are laid over the stored rows and parsed through the config schema with every refusal 422 `invalid_settings` whose `details.fields[]` are `{ field: <owned name>, message }` (core `settingRefusal`'s words, with no env name or value; the page labels them from `SETTING_LABELS`) and nothing saved, a half email setup named field by field; valid, the changed names are written in one transaction and the answer is `{ warnings, applies }`: `warnings` the boot-style warnings (a spend limit below the plan's fees), `applies` `'now'` (the app restarts in place at once), `'after-runs'` with `running` (it restarts after those searches end; §8.2) or `'unchanged'` (nothing differed: nothing written, nothing restarts); a stored value the save leaves untouched that now fails the parse is set aside as at boot, never a refusal of the save; an `.env` line of a name the page does not own that the save makes the parse read and refuse (a first SearchApi key makes it read `SEARCHAPI_MONTHLY_CALL_CAP`) is 422 `invalid_env` with `details.lines[]` naming each such variable (never its value), nothing saved; the page says "Nothing was saved: <names> in .env isn't valid with these settings. Fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again." |
+| `POST /settings/email-test` | body: the email form's `{ host, port, tls, user, pass?, from, to }`; the stored password is used only when host, port, TLS and user equal the stored ones, else the body must carry one (422 before any connection); TLS `none` follows the loopback rule (§8.3) and each address must be one mailbox; connect and socket timeouts 10 s, and the whole send 30 s (past it `timed-out` and the test limit handed back, the result recorded then final for that send; never retried, as the server may have taken it; the connection is not ended, as nodemailer cannot end one in flight, and closes at its socket timeout or when the server closes it; `POST /alerts/test-email` has the same deadline); `{ result: 'sent', at }`, or 502 `email_test_failed` with `details.reason` one of `refused`, `timed-out`, `sign-in-refused`, `not-a-mail-server` (never the server's reply or address); one test a minute shared with `POST /alerts/test-email` (429 past it) |
+| `GET /searchapi/account` | SearchApi's own balance, `{ account: { remaining, monthlyAllowance, periodEnd, fetchedAt } \| null }` from the vendor's `GET /api/v1/me` (§5.3's unledgered `searchapi-account` id: no ledger row, no reservation, no retry, a 10 s timeout; measured 2026-11-19 not to bill): `periodEnd` is the subscription's period end as a date in `SCHEDULER_TIMEZONE`, null on the trial; kept 10 minutes and refreshed after a run that called SearchApi; a failed refresh answers the last good read, its own `fetchedAt` showing its age, for up to 24 hours; null with no key or no read |
 | `GET /scheduler/jobs`, `GET /budget` | |
 
 Every route is an entry of `core`'s one route table (`ROUTES` in
@@ -4338,7 +4388,8 @@ that needs a search and has no `def=` (History, Alerts) takes it.
 **Breadcrumbs** are one component (a `nav` named "Breadcrumb" holding an ordered list, decorative separators, the last item
 `aria-current="page"`): a search's page "Trips › <name>", Edit "Trips › <name> › Edit", the Trip page "Trips › <name> ›
 <dates>" (the name links back to the search's page with its filters kept), History "Trips › <name> › Price over time", and
-the Settings sections "Settings › Price sources", "Settings › Alerts" and "Settings › System". Edit has no back link of its
+the Settings page "Settings › Price sources", "Settings › Limits", "Settings › Email and alerts" or "Settings › System" (its
+section), and the Alerts view "Settings › Alerts". Edit has no back link of its
 own and the Trip card has no second one.
 
 **The top bar** is on every view, plain text on the theme's tokens in light and dark. On the left, the **health line**
@@ -4349,10 +4400,13 @@ label, else its area; several "N things need you · fix" (red when any fails). A
 app is a `fail` on `schedule`, and the schedule check carries "schedule blocked since <date>", so that line lives here and on
 the Status view. After a failed refresh the line says "Status: stale, checked N min ago" and, with no report, "Status: app not
 answering" (or that sign-in was refused or the report failed), never a clean state from old data; nothing shows while the
-first answer is awaited. The line links to the Status view. On the right, the **limits**: "SearchApi: 51 of 100 calls left
-this month" (or "of 100 trial calls left", the window the plan uses, from one helper, `searchApiCallsLeft`, which the
-new-search panel's "M left" also uses; shown only while SearchApi is enabled; stage 3 of the UX redesign replaces it with the
-vendor's own balance) and "Spent £4.20 of £35 this month" (the `global-month` scope's call cost, a fixed fee not in it, marked
+first answer is awaited. The line links to Settings › System. On the right, the **limits** (a region named "This month's
+limits"): SearchApi's credits left, from one helper, `searchApiCreditsLine`, which the new-search panel, the search's form and
+Settings › Price sources use too, shown only while SearchApi is enabled: the vendor's own balance (`GET /searchapi/account`)
+"SearchApi: 38 credits left", with " · resets 1 Dec" on a monthly plan and " · as of 14:05" once the read is older than 10
+minutes, or, when the vendor's balance was not read, this app's count of the window its plan uses, "SearchApi: 51 of 100
+credits left (this app's count)", which the local cap, still the hard stop, is judged by; SearchApi's unit is "credits"
+wherever the app names it, never "searches" or "calls"; and "Spent £4.20 of £35 this month" (the `global-month` scope's call cost, a fixed fee not in it, marked
 `data-cost` so it is a cost, never a fare). While any search runs, "Searching: <name>" comes first and links to its page. At
 375 px the bar wraps under the nav: the health line, then the limits.
 
@@ -4369,11 +4423,58 @@ one more date: <status>"). A run's call and cost lines and the per-provider wind
 keeps the estimate against the ledger. The red synthetic banner (§5.5) shows on a view whose prices include a fixture or
 synthetic one.
 
-**Settings** (`?view=settings`) is an interim page until stage 3 of the UX redesign replaces it: an `h1` "Settings" and three
-linked sections, each with one line saying what is there, "Price sources" (the Providers view), "Alerts" and "System" (the
-Status view); those views' headings read the same. The three views keep rendering at their own URLs with their own plates
-and boards, on the shared tokens' page ground in light and dark like every view (the board's steel ground is gone); what
-they set straight on the ground, their heading and breadcrumbs, reads the tokens' ink.
+**Settings** (`?view=settings&section=sources|limits|email|system`, `sources` by default; the UX redesign's stage 3) is where
+the operator changes the settings the app keeps (§12 "The Settings page's names") instead of `.env` or `app.env`: a side list
+of four section links on a desktop, one row of links above the section at 375 px (the current one scrolled into view), each a
+link with `aria-current`; a section with unsaved edits is marked in the list, and the edits survive a switch between sections.
+Each section has one Save ("Save price sources", "Save limits", "Save email"; System has none) that sends only the fields the
+operator changed (`PUT /settings`); a refusal shows its words beside its field (`aria-describedby`), a save's result goes to a
+polite live region: "Saved. Restarting the app…" until `/health` answers with a new `bootId` (after 60 s "The app didn't come
+back: run pnpm gmt status"), or "Saved. Applies when <names> finish; new searches wait until then." (also shown on every load
+while `pending` is set) until `/health` answers with a new `bootId`, however long the searches take (a settings read without
+`pending` is never taken for the restart), or "Nothing changed, so nothing was saved.". Any owned name in the read's
+`setAside` always has its field on the page, whatever its block shows otherwise, with the note "This value isn't valid, so
+the default is used: set it here."; a set-aside source list (`NEW_SEARCH_DISCOVERY`, `NEW_SEARCH_VERIFICATION`) is said in each
+card whose switches write it, and the Every source block offers "Use the default" (unset) and "Use none" for it, each
+saved at once, so it can be fixed with every switch disabled. Labels come from `core`'s `SETTING_LABELS`, other words
+from `COPY`.
+  - **Price sources.** One block per source, each with its switch, "New searches use it" or "Off for new searches" (existing
+    searches keep their own choice and change it on their Edit form); a source's switch is disabled until it has a key, saved or
+    typed. Key fields are write-only (`type="password"`, `autocomplete="new-password"`, cleared after a save): "saved · ends
+    1234" or "not set", **Replace**, and **Remove**, which confirms in the page and then saves at once; a held key set aside at
+    boot says "The one the app has can't be used: paste it again." The Aviasales cache: its token and its calls this month.
+    SearchApi: its key, the plan ("Free trial" or "$40 a month"), the billing day (1 to 28, shown on "$40 a month", or on the trial when it was set aside), the
+    credits line above, and two boxes, "Check the cheapest trips each search finds" (`NEW_SEARCH_VERIFICATION`) and "Also use it
+    for the calendar (many credits per search)" (`NEW_SEARCH_DISCOVERY`): its switch is on when either is ticked, turning it on
+    ticks the first, and off unticks both and stores `none`. The browser's block, with `CAMOUFOX_ENABLED` false, says how to set
+    it up (`pnpm gmt setup --reconfigure browser`, docs/setup.md §14) and shows no controls but the field of any of its own
+    settings that was set aside; otherwise its state and the consent
+    record's expiry (the consent check's `expiresOn`), "Pages at once: N" from the status report's `pagesAtOnce` with "change
+    with `pnpm gmt setup --reconfigure browser`", the stopping rule ("Read flights for the cheapest dates until N reads in a row
+    don't improve the five cheapest trips", `FLIGHT_READ_PATIENCE`), "May run: only during scheduled searches / any time"
+    (`CAMOUFOX_BROWSER_WINDOW`). The unrecognised-page pause stays a fixed hour and is not on the page. Last, a block for every
+    source: "Each source's calls this month, its caps and when its window reopens are on Calls and caps", the link to the
+    Providers view (`?view=providers`; this section shows no window or cap), and, under Advanced, "Read a date's calendar
+    price again after N days (new searches)" (`DISCOVERY_REFRESH_DAYS`, every calendar source's, so shown with or without
+    the browser).
+  - **Limits.** "Spend at most £[ ] a month" (`MONTHLY_SPEND_CAP_PENCE`, the pounds parsed by `core`'s `poundsToPence`, never
+    `parseFloat`) with the month's spend so far from `/budget`, and "New searches: at most [ ] SearchApi credits each run"
+    (`EXECUTION_MAX_CALLS`; a search that exists keeps its own limit). An unset limit shows the running app's effective value;
+    a save's warnings (a spend limit below the plan's fees) are shown after it.
+  - **Email and alerts.** "Send email with" Gmail (the address, an app password and where to send alerts; saved as
+    `smtp.gmail.com`, 465, implicit TLS, user and sender the address) or "Other mail server" (server, port, encryption, user,
+    password, sender, recipient); a stored `smtp.gmail.com` opens as Gmail, unless a server name (host, port or encryption) was set aside, which opens as
+    Other with its field. **Send a test email** posts the form's values
+    (`POST /settings/email-test`) and words each fixed failure; **Remove email** confirms in the page and unsets the seven
+    names. Then the alert rules (`GET /alerts`), each in words with "last sent" (its `lastSentAt`), **Edit** (the Alerts view's
+    form) and **Delete** (confirmed in the page); with none, "No alerts yet. Alerts come from a search's page."; with no email,
+    "Alerts can't be sent until email is set up.".
+  - **System.** The status report's checks, one line each (what, its words, its fix), through `StatusCard`'s line form, refetched
+    as the Status view refetches; an off or failing line says so in words ("Off", "Failing", "To check"), never by colour alone;
+    a fix made on the Settings page links to its section.
+The Providers, Status and Alerts views keep rendering at their own URLs with their own plates and boards, on the shared tokens'
+page ground in light and dark like every view; what they set straight on the ground, their heading and breadcrumbs, reads the
+tokens' ink.
 
 The **coverage line** is **"discovery: P priced · E no fares · X no cached data · R error · S skipped · U not searched of M (R′
 reused) · itinerary-searched K of N selected (E outbounds each) +C on demand"** ("outbound" agrees with E; a run that selected
@@ -4385,7 +4486,8 @@ searched. Empty state for no providers. Red synthetic banner (§5.5).
 the number of searches), `dates` (a search's page, with `def=`; without `def=` it lands on Trips), `trip` (one pair of dates,
 with `depart=` and `return=` as `YYYY-MM-DD`, a multi-airport trip's own pair as `t.from` and `t.to`, and the search page's
 `d.*` carried as they were, so the breadcrumb back finds the page's own airport filter, or none), `history`,
-`definitions` (the Edit page, with `edit=<id>`; without `edit=` it lands on Trips), `settings` (the interim Settings page),
+`definitions` (the Edit page, with `edit=<id>`; without `edit=` it lands on Trips), `settings` (the Settings page, with
+`section=`),
 `providers`, `alerts` and `status` (its three sections); `def=` names the search, and `refused=<code>` on a search's page
 carries a refused Search now (below). A search's page keeps its state in `d.nights=10-14` (the stay filter; a stay equal to the
 search's own range is no filter and writes nothing), `d.from` and `d.to` (airports), `d.journey=<minutes>`, `d.week=best`,
@@ -4532,14 +4634,17 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   2027".
   **Where to look** is one checkbox for each price source the install has set up, each with its cost: "Google Flights, in your
   browser · free, takes a while" (`camoufox` in discovery), "Aviasales cache · free, prices from other people's searches, often
-  days old" (`travelpayouts` in discovery) and "SearchApi · uses calls, 91 left" (`searchapi` in both stages, with the booking
-  options §5.4 requires; the figure is the top bar's `searchApiCallsLeft`, and once the box is ticked the estimate sentence
-  gives the run's own calls, since the run budget's cap is not what a run uses). A source that is not set up has no checkbox;
+  days old" (`travelpayouts` in discovery) and "SearchApi · uses credits, 91 left" (`searchapi` in both stages, with the booking
+  options §5.4 requires; the figure and what follows it are the top bar's `searchApiCreditsLine`, and once the box is ticked
+  the estimate sentence gives the run's own credits, since the run budget's cap is not what a run uses). A source that is not set up has no checkbox;
   one sentence names it and links to Settings ("The browser isn't set up yet; set it up in Settings"). A source a search uses
   that has no checkbox of its own (the test source, or one no longer set up) is listed ticked with why, so a search never reads
   as having no source, and unticking it takes it out. A new draft ticks every set-up free source and leaves **SearchApi
-  unticked** (the UX design's standing default, §8 question 2: with a trial's few calls, checking every search's cheapest
-  trips by default would spend them in a few runs); the presets (§8.2) fill the rest, and Edit keeps a search's own sources.
+  unticked** (the UX design's standing default, §8 question 2: with a trial's few credits, checking every search's cheapest
+  trips by default would spend them in a few runs) unless Settings says otherwise: the draft's sources come only from
+  `/providers`' presets, which follow `NEW_SEARCH_DISCOVERY` and `NEW_SEARCH_VERIFICATION` (§12; unset, the default just
+  given; a listed source that is not set up drops out); the presets (§8.2) fill the rest, and Edit keeps a search's own
+  sources.
   **More options** holds only: the longest journey each way (25 h; hint "Trips over this are left out once their flights are
   read."), cabin (economy), **Repeat**, rolling instead of fixed dates ("starts in N days", "lasts M days") and the name
   (suggested from the airports). **Repeat** is one control over the schedule: Never (the default), Weekly (`DEFAULT_CRON`,
@@ -4548,25 +4653,26 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   confirmation, as Repeat weekly's Save does, and a repeating search whose runs would miss a provider's monthly cap is refused
   with Repeat weekly's words and the monthly figure before anything is stored (`core`'s `monthlyCapsMissed`, the rule the
   api's 422 `schedule_over_budget` uses too, so the two cannot drift). Policy and budget come from the plan preset:
-  `discoveryRefreshHours` 168, `maxCells 10, topN 10, expandTop 2, bookingLinks true` (forced for SearchApi), the execution
+  `discoveryRefreshHours` from `DISCOVERY_REFRESH_DAYS` × 24 (168 by default), `maxCells 10, topN 10, expandTop 2,
+  bookingLinks true` (forced for SearchApi), the execution
   budget from `EXECUTION_MAX_CALLS`, `EXECUTION_MAX_FREE_CALLS` and `EXECUTION_MAX_COST_PENCE`; no arrival or departure window
   is filled in. **The estimate sentence**: the estimate is asked for 400 ms after the last change (there is no Show estimate
   step) and shown above the button in a polite live region as one sentence built from its figures: a free run reads "About 25
   min, free. Then flights are read for the cheapest dates until the 5 cheapest stop changing." (the 5 is `core`'s
-  `CONFIRM_TARGET`; with the dates read as a note under it, "usually about 15 dates, at most 290"; a browser that reads outbound
+  `CONFIRM_TARGET`, and the reads it allows follow `FLIGHT_READ_PATIENCE`; with the dates read as a note under it, "usually about 15 dates, at most 290"; a browser that reads outbound
   flights only says "Then flights are read for up to 10 dates, about 12 min."). When only some dates are asked it adds "asks
   about 300 of 405 dates this run, the rest when you search again" ("the rest next Monday" on a search repeating on Mondays;
   "(20 on some airports only)" and "(105 kept from earlier searches)" when they apply); "Nothing new to ask: 405 dates kept
   from earlier searches." when nothing is asked; "cached prices only where travellers searched recently" when the Aviasales
-  cache is the only source used; "free" only when no source on a billable plan is used, and capped calls are named ("uses about
-  120 of the 9,880 SearchApi calls left this month"; on the trial, whose balance is a one-off, "…left on your trial", worded
-  from the entry's `window`); money reads "about £1.20". Notes under it: the flight note, a source not used and why, a blocked
-  paid line's cost as not included ("Google Flights via SearchApi is not used: no calls left this month (about £3.40 not
-  included)") and the soft confirmation in words ("This costs about £1.20, above your £1.00 check; pressing Search confirms
-  it"; "This uses more than a fifth of this month's SearchApi calls; pressing Search confirms it", "…of your SearchApi trial
-  calls" when the window is `lifetime`). The coverage is worded as what is asked, never as prices found ("priced", "prices
+  cache is the only source used; "free" only when no source on a billable plan is used, and capped credits are named ("uses
+  about 120 of the 9,880 SearchApi credits left this month"; on the trial, whose balance is a one-off, "…left on your trial",
+  worded from the entry's `window`); money reads "about £1.20". Notes under it: the flight note, a source not used and why, a
+  blocked paid line's cost as not included ("Google Flights via SearchApi is not used: no credits left this month (about £3.40
+  not included)") and the soft confirmation in words ("This costs about £1.20, above your £1.00 check; pressing Search confirms
+  it"; "This uses more than a fifth of this month's SearchApi credits; pressing Search confirms it", "…of your SearchApi trial
+  credits" when the window is `lifetime`). The coverage is worded as what is asked, never as prices found ("priced", "prices
   for", "all combinations", "will find", "date pairs" and "reused" never appear). The button says "Search", and carries the cost
-  when the run costs money ("Search · about £1.20") or capped calls ("Search · 120 SearchApi calls"); from the first change
+  when the run costs money ("Search · about £1.20") or capped credits ("Search · 120 SearchApi credits"); from the first change
   until the estimate for the current form arrives, or while the form is incomplete, it is disabled with the reason as its
   accessible description ("Working out the estimate…", "Enter From and To", "Enter the dates", "Enter the stay", "The shortest
   stay is longer than the longest", "The last date is before the first", or the refused date field named, "Leave between").
@@ -4707,7 +4813,8 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
     every 14 days", "calendar prices, limits not checked"); "Alerts watch calendar prices, not trips with flights read."
     shown only when a rule is listed and every listed rule watches calendar prices; **Change alerts**
     (`view=alerts&def=`); and, from the status report (`area: 'email'`, `offReason: 'not-set-up'`), "Email isn't set up yet"
-    linking to the Status view. A switch for alerts on trips with flights read waits for stage 4.
+    linking to Settings › Email and alerts (`?view=settings&section=email`). A switch for alerts on trips with flights read
+    waits for stage 4.
   - **The figure** of a date pair, chosen across the airport pairs in scope by the precedence the calendar day had: the cheapest
     class-verified price that is not stale (`STALE_AFTER_HOURS`), else the fresher of the cheapest stale verified price and the
     cheapest calendar price (unknown age loses to known; ties go to verified), else none; a calendar figure, or a stale
@@ -4896,10 +5003,12 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   with its coverage section open. Refreshes on focus and every 60 s; read only, except the
   email card's "Send test" (`POST /alerts/test-email`), disabled while
   sending, with distinct messages for sent, not configured (409), hourly
-  limit (429) and failed. Settings are not edited here.
+  limit (429) and failed. Settings are not edited here: the Settings page's System section shows the same checks, and each
+  fix made on the page links to its section.
 - **Edit / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown; Alerts and
-  Providers keep their set-up terms. Their pages read "Alerts" and "Price sources" under Settings, with the breadcrumb
+  Providers keep their set-up terms. Their pages read "Alerts" and "Calls and caps" under Settings (the Providers view is
+  Calls and caps, the name every window and cap pointer uses, never a second "Price sources"), with the breadcrumb
   above, and the Status view reads "System".
 - **Accessibility**: 375px layout as above, with no sideways scroll on any page at 375 px and 1280 px in light and dark;
   keyboard-operable rows, calendar (one tab stop, arrow keys), day panel and folds; visible focus; labelled controls; no
@@ -4911,12 +5020,15 @@ Charts follow the `dataviz` skill.
 
 ## 12. Configuration
 Parsed once in `api` bootstrap through the `core` zod schema; empty = unset;
-invalid or half-set config fails boot naming the field; nothing defaults to
-unlimited. Plan presets fill caps, rates, TTLs and costs; individual
+invalid or half-set config fails boot naming the field, except a stored value
+of a name the Settings page owns, which is set aside (below); nothing defaults
+to unlimited. Plan presets fill caps, rates, TTLs and costs; individual
 variables override. The full preset table (every field per plan) lives in
-`docs/api-limits.md` and the zod schema. Rule A's `CONFIRM_TARGET` 5 and `CONFIRM_PATIENCE` 12
+`docs/api-limits.md` and the zod schema. Rule A's `CONFIRM_TARGET` 5
 (`core/datePairs/confirm.ts`, §8.1) and the estimate's `FLIGHT_READ_SECONDS` 25 and
-`CONFIRM_TYPICAL_EXTRA` 8 are constants, not settings. The
+`CONFIRM_TYPICAL_EXTRA` 8 are constants, not settings; rule A's patience is the
+setting `FLIGHT_READ_PATIENCE` (default `DEFAULT_FLIGHT_READ_PATIENCE` 12, 3 to 50),
+each run keeping the value it started with. The
 flight-list counts (`FLIGHT_LIST_COUNT` 10, the outbound-only step's, `FLIGHT_LIST_MAX_FLIGHTS`
 30 a list, `FLIGHTS_SHOWN` 3) and the return phase's values are constants in
 `core/flights/limits.ts`, not settings: `FLIGHT_LIST_PAGES_PER_PAIR_MAX` 2
@@ -4939,6 +5051,8 @@ figures. No setting is added: the flags decide where returns are read.
 # For the container, write only the lines you set. NODE_ENV, IN_CONTAINER, DATABASE_PATH, PORT, BIND_ADDRESS and
 # PUBLISHED_ADDRESS are fixed by the image and docker-compose.yml; ALLOW_UNAUTHENTICATED and ALLOW_FIXTURE_PROVIDER are
 # not forwarded by compose (docs/setup.md sections 2 and 3). The development-only lines are marked below.
+# Names marked [Settings] are the Settings page’s from the app’s first start: a line for one is imported once, when
+# the app holds no value for it, then reported and never applied (docs/setup.md section 0).
 # --- core ---
 NODE_ENV=production                      # production | development | test (test refused by the app bootstrap)
 DATABASE_PATH=/data/get-me-there.db      # realpath-resolved at boot; .fixture.db required with ALLOW_FIXTURE_PROVIDER
@@ -4963,29 +5077,34 @@ MAX_WAIT_SECONDS=3900                    # limiter queue deadline and Retry-Afte
 REQUEST_TIMEOUT_SECONDS=60
 ESTIMATE_RETRY_FACTOR=1.2
 FX_MAX_RATE_AGE_DAYS=3
+# --- runs and new searches ---
+FLIGHT_READ_PATIENCE=12                  # [Settings] 3–50: a run stops reading flights after this many reads in a row without a cheaper trip; each run keeps the value it started with
+DISCOVERY_REFRESH_DAYS=7                 # [Settings] 1–30: how many days before a new search reads a date's calendar price again
+NEW_SEARCH_DISCOVERY=                    # [Settings] calendar sources a new search starts with: provider ids separated by commas (travelpayouts, camoufox, searchapi) or none; empty = every configured free source
+NEW_SEARCH_VERIFICATION=                 # [Settings] trip check sources a new search starts with: provider ids separated by commas or none; empty = none (SearchApi is ticked per search)
 # --- spend (operator writes pence; code holds micro-GBP) ---
-MONTHLY_SPEND_CAP_PENCE=                 # total monthly spend incl. subscription fees; empty = preset default (0 with no billed provider, 3500 on 40usd); 0 = no billable calls; free providers still run
+MONTHLY_SPEND_CAP_PENCE=                 # [Settings] total monthly spend incl. subscription fees; empty = preset default (0 with no billed provider, 3500 on 40usd); 0 = no billable calls; free providers still run
 GLOBAL_BILLING_DAY=1                     # 1–28
 SOFT_CONFIRM_PENCE=100
-EXECUTION_MAX_CALLS=                     # billed calls per execution; preset default (trial 0, 40usd 2000)
+EXECUTION_MAX_CALLS=                     # [Settings] billed calls (SearchApi credits) a new search starts with per run; preset default (trial 0, 40usd 2000); existing searches keep their own
 EXECUTION_MAX_FREE_CALLS=2000            # free-provider calls per execution
 EXECUTION_MAX_COST_PENCE=                # preset default (trial 0, 40usd 0: marginal cost is 0 on a subscription plan)
 CHILD_MAX_CALLS=6
 # --- travelpayouts (authorised, cached, free; schema defaults: cap 50000/mo, 200/min, 10000/h, concurrency 4, TTL 6h, cost 0) ---
-TRAVELPAYOUTS_TOKEN=                     # enables the provider
+TRAVELPAYOUTS_TOKEN=                     # [Settings] enables the provider; at least 8 characters
 TRAVELPAYOUTS_BILLING_DAY=1              # 1–28
 # overrides: TRAVELPAYOUTS_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _CACHE_TTL_HOURS
 # --- searchapi (scraping-derived; see docs/providers.md) ---
-SEARCHAPI_KEY=                           # enables the provider
-SEARCHAPI_PLAN=trial                     # trial (100 lifetime, 20/h, 2/min, concurrency 1, cost 0, fixed 0; excluded from scheduled runs)
+SEARCHAPI_KEY=                           # [Settings] enables the provider; at least 8 characters
+SEARCHAPI_PLAN=trial                     # [Settings] trial (100 lifetime, 20/h, 2/min, concurrency 1, cost 0, fixed 0; excluded from scheduled runs)
                                          # | 40usd (subscription: 10000/mo call cap is the hard stop, 2000/h, 10/min, concurrency 2,
                                          #   marginal cost 0 µGBP/call, fixed 3200p counted once in the global cap; sets MONTHLY_SPEND_CAP_PENCE=3500,
                                          #   EXECUTION_MAX_CALLS=2000, EXECUTION_MAX_COST_PENCE=0 unless overridden)
                                          # a per-call plan would set _COST_PER_CALL_MICRO_GBP > 0 and fixed 0; none is offered today
                                          # 100usd is above the approved ceiling and needs every value set explicitly
-SEARCHAPI_BILLING_DAY=1                  # 1–28
+SEARCHAPI_BILLING_DAY=1                  # [Settings] 1–28
 SEARCHAPI_CACHE_TTL_HOURS=1              # local cache window; the vendor does not bill a cached repeat (spike fact 4) but its window is undocumented
-SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime window when the trial was partly spent elsewhere; above 0 on 40usd fails boot
+SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime window when the trial was partly spent elsewhere; above 0 on 40usd is ignored, with a warning
 # overrides: SEARCHAPI_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _COST_PER_CALL_MICRO_GBP, _PLAN_FIXED_PENCE
 # the hourly rate is clamped to 20% of the call cap, the vendor's own hourly rule
 # --- camoufox (self-scraped Google Flights, list mode, discovery only plus the flight-list read, off by default; see docs/providers.md and §2) ---
@@ -4999,17 +5118,17 @@ CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (loa
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
-CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
+CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value is set aside at start (the log names it, the default scheduled applies) until Settings fixes it; app side only, not shared with the worker; a catch-up loads no browser page either way; [Settings]
 # worker side only (macOS and Linux; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
 # fixed, not configurable: concurrency = CAMOUFOX_PAGES_AT_ONCE, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0), no page or scroll cap a run or a month, and its pages count against no per-run call cap (EXECUTION_MAX_FREE_CALLS included; flight-list pages have their own allowance of 20), cost 0, cache never
 # --- email (all or nothing) ---
-SMTP_HOST=
-SMTP_PORT=
-SMTP_TLS=implicit                        # implicit (465) | starttls (587, requireTLS) | none (dev Mailpit or loopback only)
-SMTP_USER=
-SMTP_PASS=
-ALERT_EMAIL_TO=
-ALERT_EMAIL_FROM=
+SMTP_HOST=                               # [Settings]
+SMTP_PORT=                               # [Settings]
+SMTP_TLS=implicit                        # [Settings] implicit (465) | starttls (587, requireTLS) | none (dev Mailpit or loopback only)
+SMTP_USER=                               # [Settings]
+SMTP_PASS=                               # [Settings] at least 8 characters
+ALERT_EMAIL_TO=                          # [Settings]
+ALERT_EMAIL_FROM=                        # [Settings]
 ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling per hour, counted per process lifetime (a restart starts a fresh hour); digests and operator messages share it; only sent or in-flight emails count, a failed send does not; messages beyond it are logged and dropped
 # --- set by the Dockerfile and docker-compose.yml, never by the operator ---
 # IN_CONTAINER=1
@@ -5035,7 +5154,8 @@ use only `[A-Za-z0-9_-]`, operator values are double-quoted, and a value
 holding `"`, `\`, CR or LF is refused. Every reader (`gmt status`, `gmt
 password`, `gmt smoke`) uses the same `parseEnv`. Lines the operator added
 by hand under names the wizard does not own are kept values, not a
-difference. The worker keeps `<workerData>/worker.env`, where `<workerData>`
+difference. From the app's first start the names below ("The Settings page's
+names") are the database's, whichever file holds their lines. The worker keeps `<workerData>/worker.env`, where `<workerData>`
 is always `~/.local/state/get-me-there/camoufox` (the CLI ignores `XDG_*`
 for the worker's two directories, so the CLI and the worker always agree);
 `gmt setup` generates one `CAMOUFOX_WORKER_KEY` and writes it to both files,
@@ -5072,6 +5192,59 @@ hex to `worker.env` and then `app.env` (each through a 0600 temporary file and
 a rename), and starts the worker and then the app; a run interrupted midway
 leaves "keys differ", which a re-run repairs. `gmt start` and `gmt status` check both files' modes and owner; a
 file readable by others is a `fail` naming the `chmod`.
+
+**The Settings page's names** (`SETTINGS_NAMES` in `core/config/settings.ts`,
+each `{ name, secret }`; `.env.example` marks them `[Settings]`):
+`TRAVELPAYOUTS_TOKEN`\*, `SEARCHAPI_KEY`\*, `SEARCHAPI_PLAN`,
+`SEARCHAPI_BILLING_DAY`, `CAMOUFOX_BROWSER_WINDOW`, `FLIGHT_READ_PATIENCE`,
+`DISCOVERY_REFRESH_DAYS`, `NEW_SEARCH_DISCOVERY`, `NEW_SEARCH_VERIFICATION`,
+`MONTHLY_SPEND_CAP_PENCE`, `EXECUTION_MAX_CALLS`, `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_TLS`, `SMTP_USER`, `SMTP_PASS`\*, `ALERT_EMAIL_TO` and `ALERT_EMAIL_FROM`
+(\* secret). Every other name stays the environment's alone:
+`SEARCHAPI_TRIAL_USED`, `CAMOUFOX_ENABLED` and every setting shared with the
+worker among them. They live in the table `settings(name TEXT PRIMARY KEY,
+value TEXT NOT NULL, updated_at TEXT NOT NULL)` (migration `0014_settings`,
+`updated_at` an ISO instant by CHECK; names validated by the repository through
+`z.enum`, not by a CHECK), each value as `.env` holds it, unencrypted (Ian,
+2026-11-19): the database and its backups are 0600, and they now hold the keys
+and the mail password. Rows are written only by the page's `PUT /settings` and
+by imports. **One owner per name**: `core`'s pure `layerSettings(env, rows) →
+{ merged, imports, envIgnored }` gives a name with no row its environment line,
+if any, and lists it in `imports`; a name with a row takes the row (`''` is
+unset) and, when its environment line is present and differs, is listed in
+`envIgnored`, never applied; no digest is stored. **Boot order** (the app and
+the tool bootstrap alike): parse the environment without the owned names
+(`parseBootConfig`) and run the refusals (`NODE_ENV=test`, the moved-to-native
+marker, the lock held elsewhere), the lock wait, the backup and the
+migrations as before; then, under the lock, read the rows, lay them over the
+environment and parse the whole (`parseConfig`). A refusal of an owned name
+**sets aside** that name's stored or imported value for this boot (left
+unset, so its schema default applies, never its environment line) and the
+parse is retried, at most once a name; when email's all-or-nothing rule still
+refuses after a set-aside email name, the rest of email is left out too and
+email is off for the boot; a refusal of any other name fails boot as before.
+Once the parse succeeds the imports are written in one immediate transaction
+with the read, never for a set-aside name; the tool bootstrap reads the same
+layered config and writes nothing. The guard, the providers and the notifier
+are built only then, from the layered config (`openDatabase`, then
+`buildFromDb`). Boot logs the names imported, ignored and set aside, never a
+value, and the running app keeps that report for `GET /settings` and the
+status report's `settings` checks; every stored secret joins the boot's scrub
+list. `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY` and `SMTP_PASS` must be at least 8
+characters (`MIN_SECRET_LENGTH`): a save refuses a shorter one and a stored one
+is set aside. A `SEARCHAPI_TRIAL_USED` above 0 on the `40usd` plan is ignored
+with a warning naming it (the plan may now be the page's), where it failed boot
+before. `FLIGHT_READ_PATIENCE` (3 to 50, default 12) is rule A's patience;
+`DISCOVERY_REFRESH_DAYS` (1 to 30, default 7) is a new search's
+`discoveryRefreshHours` (× 24); `NEW_SEARCH_DISCOVERY` and
+`NEW_SEARCH_VERIFICATION` are provider ids separated by commas, or `none`
+(unset: every configured free source for discovery and SearchApi nowhere, on
+every plan; a listed source that is not configured, or lacks that role's
+capability, drops out, and an unknown id is refused naming it);
+`EXECUTION_MAX_CALLS` is what a new search's SearchApi limit starts at, and a
+search that exists keeps its own. A save is validated by laying its changes
+over the rows and parsing as at boot (§10 `PUT /settings`) and applies by the
+restart in place (§8.2 "Applying saved settings").
 
 On subscription plans the **call cap is the hard stop**, the marginal cost
 per call is 0, and the global cap and `/budget` count
@@ -5307,7 +5480,16 @@ credentials, as every CLI read of an app with no password is); it prints the Doc
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when an address compose publishes is not loopback, and says nothing when every one is. It judges every mapping: the effective configuration's (`docker compose config --format json`, every compose file and override included, parsed in process with only `services.app.ports` taken, each entry read alone, a mapping with a missing, empty or null `host_ip` being every interface and an entry that cannot be read being judged beyond loopback) beside the running container's (`docker compose port app 3000`, which names one mapping only); when the configuration cannot be read, a warning says only the running mapping was checked, with none of its text. When the checkout's `.env` has no auth lines and neither source of `ALLOW_UNAUTHENTICATED` says `true` (the checkout's `.env`, or compose's effective environment, `services.app.environment.ALLOW_UNAUTHENTICATED`, where the documented tailscale-only override sets it; that one key is the only part of the environment read), a mapping beyond loopback is a `fail` naming both fixes (publish only `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check.
+app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when an address compose publishes is not loopback, and says nothing when every one is. It judges every mapping: the effective configuration's (`docker compose config --format json`, every compose file and override included, parsed in process with only `services.app.ports` taken, each entry read alone, a mapping with a missing, empty or null `host_ip` being every interface and an entry that cannot be read being judged beyond loopback) beside the running container's (`docker compose port app 3000`, which names one mapping only); when the configuration cannot be read, a warning says only the running mapping was checked, with none of its text. When the checkout's `.env` has no auth lines and neither source of `ALLOW_UNAUTHENTICATED` says `true` (the checkout's `.env`, or compose's effective environment, `services.app.environment.ALLOW_UNAUTHENTICATED`, where the documented tailscale-only override sets it; that one key is the only part of the environment read), a mapping beyond loopback is a `fail` naming both fixes (publish only `127.0.0.1`, or add the two lines), since the app trusts `PUBLISHED_ADDRESS`, which an edited `ports:` line or a `docker-compose.override.yml` leaves behind. A native app keeps its `BIND_ADDRESS` check. A native install's price sources are never judged from
+`app.env`, whose key lines the app may be ignoring: with the app's report read
+(once, for the local facts and the report beside them), its own `price-sources`
+check says it and no local line repeats it; with no answer the local **price
+source** line is a `warn` saying "the app isn’t running; price sources are kept
+in its Settings", and with an answer that is not the report (a status, a body
+that is not JSON or not the report) "the app’s report could not be read
+(<reason>); price sources are kept in its Settings", never a false "no price
+source". Every fix the report names on the Settings page (`fix.settings`)
+prints that section's address after its words.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
 unknown: a `fail` saying so, the worker's facts, and no native fix. Every
@@ -5326,7 +5508,19 @@ states this, and a docs test pins it).
 the plan; `--reconfigure <group>` with the groups `port`, `timezone`,
 `email`, `travelpayouts`, `searchapi`, `browser`, `password` and `linger`,
 each replacing only its own lines, saying what changed, and restarting the
-app only when something did; `--import-docker`, `--import-db <path>`,
+app only when something did; once the app holds its settings (its database holds a settings row, read
+read-only by `scripts/settings-held.mjs`, so whether the app is running or
+not; no database, no settings table or no row is not holding them, and a
+database it cannot read refuses the group), `travelpayouts`,
+`searchapi` and `email` ask nothing, write nothing and restart nothing: they
+print "Change this in Settings: http://127.0.0.1:<port>/?view=settings&section=<sources|email>"
+and exit 0, and `browser` leaves its window question (the owned
+`CAMOUFOX_BROWSER_WINDOW`) to the page the same way, printing that line for
+`sources`, and still runs the browser provider's own step; before that they
+write `app.env` as on a first run, which the app imports on its first start
+(§12); a full re-run with the settings held keeps `app.env` as it is and, for
+an owned name its answers would change, notes the Settings address instead of
+a `--reconfigure` group; `--import-docker`, `--import-db <path>`,
 `--ignore-docker`), `status`, `start`, `stop`, `restart`, `logs`, `backup`,
 `restore <file>`, `password`, `smoke --from <IATA> --to <IATA>`, `consent` (with
 `export`, `import` and `check`), `update` and `uninstall`. Each command
@@ -5348,7 +5542,11 @@ gives a running app with no price source, and the closing screen then says
 so first and names Travelpayouts as the no-cost source, that it needs a free
 Travelpayouts account (register at `https://www.travelpayouts.com/`, then
 copy the token from the Profile's API token section, with `https://support.travelpayouts.com/hc/en-us/articles/203956083` as help)
-and `pnpm gmt setup --reconfigure travelpayouts`; on an interactive terminal,
+and to add it in Settings › Price sources at its address on this app
+(`http://127.0.0.1:<port>/?view=settings&section=sources`, the words `gmt
+smoke` uses too), the price source judged by the app's own report once it is
+up (its `price-sources` check; the answers only when the report does not say,
+since Settings may hold a key `app.env` has no line for); on an interactive terminal,
 before applying the plan, it asks once "Paste a token now? (Enter to finish
 without one)", so a first run can end with a source. Each provider prompt
 states in one line what it gives, from §1's configurations table
@@ -5358,9 +5556,12 @@ always asks how many trial searches are already used (default the current
 `SEARCHAPI_TRIAL_USED`, else 0) and writes `SEARCHAPI_TRIAL_USED`, a count no
 database holds; `40usd`: the $40 a month plan, Google Flights results through
 SearchApi); the email step asks for the SMTP settings with the password
-hidden (offering the test email at the end of setup is WP18's, once its route
-exists); the browser
-provider is offered only where its flags are set (the interruption question, "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]", is asked only by `--reconfigure browser`, yes writing `CAMOUFOX_BROWSER_WINDOW=any`, §8.2; unset means `scheduled`), after the §2 costs
+hidden (the test email offered at the end of setup is WP18's; its failure
+and not-set-up words point at Settings › Email and alerts with its address on
+this app); a variable the
+app ignores rather than refusing (`SEARCHAPI_TRIAL_USED` on `40usd`) is
+printed as a note naming it, in the app's own words; the browser
+provider is offered only where its flags are set (the interruption question, "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]", is asked only by `--reconfigure browser` before the app holds its settings, yes writing `CAMOUFOX_BROWSER_WINDOW=any`, §8.2; unset means `scheduled`), after the §2 costs
 summary, with the server sentence and a typed `yes` on a machine with no
 display, and its steps run in the order costs, consent method, download,
 `worker.env`, consent (interactive with a display, setup runs the capture
@@ -5472,8 +5673,15 @@ never over an earlier one, and puts the checked copy in place, through the same
 placement code as the imports); `pnpm gmt start`; `pnpm gmt setup` re-verifies
 the pinned Camoufox. An update's backup names its commit in the `.commit` file
 beside it. A restored ledger lacks any call made after its backup, so check the
-vendor's dashboard and raise `SEARCHAPI_TRIAL_USED` (trial) or lower
-`SEARCHAPI_MONTHLY_CALL_CAP` (`40usd`) to match; restore says which, and what
+vendor's dashboard and raise `SEARCHAPI_TRIAL_USED` (trial; then `pnpm gmt
+restart`) or lower `SEARCHAPI_MONTHLY_CALL_CAP` (`40usd`) to match, both
+`app.env` lines the Settings page does not own; restore says which, judging
+SearchApi's plan as the app would with the app stopped: the restored file's
+stored `SEARCHAPI_PLAN` (`check-backup.mjs` prints the stored settings whose
+names are not secrets) layered over `app.env` by `core`'s `layerSettings`, so
+a row wins (`''` is unset) and the `app.env` line counts only where no row
+exists; with no plan it gives the plan-free advice to check each vendor's
+dashboard; and what
 the next start will resume and catch up (`AUTO_RESUME=false` leaves the
 resumes to the operator).
 The checkout is then on a detached commit: run `git switch main` before the
@@ -5595,6 +5803,77 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 72: the Settings page (2026-11-20)
+
+Keys, the new-search sources, the browser's stopping rule, the limits and email could be changed only by editing `.env`
+or `app.env` (or rerunning a `gmt setup` group) and restarting, and the top bar counted SearchApi's balance from the
+app's own ledger in "calls". Stage 3 of the UX redesign (`docs/superpowers/specs/2026-11-08-ux-redesign-design.md` §7.2;
+plan `docs/superpowers/plans/2026-11-19-settings.md`, approved by Ian on 2026-11-19, review record of 106 findings all
+ruled) replaces the interim Settings page with the designed one. Folded into §5.3 (the `searchapi-account` id), §7 (the
+`settings` table), §8.1 (rule A's patience per run, the estimate), §8.2 (applying saved settings), §10 (`/settings`,
+`/settings/email-test`, `/searchapi/account`, `/health`'s `bootId`, `/status`'s `pagesAtOnce`, `expiresOn`, `settings`
+area and `fix.settings`, `/alerts`' `lastSentAt`), §11 (the top bar's credits line, the Settings page and its four
+sections, the new-search draft, the credits wording, the URLs and breadcrumbs), §12 (the owned names, one owner per
+name, the boot order, the set-aside rule, the new settings, the `.env.example` marks) and §13 (`--reconfigure` once the
+app holds its settings, the closing and smoke words, `gmt status`' price source, setup's warning notes). Supersedes
+revision 70's interim Settings page and its top-bar "calls left" line (`searchApiCallsLeft`), revision 68's constant
+`CONFIRM_PATIENCE` 12 (now the setting `FLIGHT_READ_PATIENCE`, default 12), cost-007's boot refusal of
+`SEARCHAPI_TRIAL_USED` above 0 on `40usd` (now ignored with a warning), the setup groups' ownership of the price-source,
+email and browser-window lines after the first start (revisions 36 and 37), and the operator docs' "the database holds
+no key or password".
+
+- **Ruling (plan 1): the owned names** are the eighteen of §12, three of them secrets; everything else stays env-only,
+  `SEARCHAPI_TRIAL_USED`, `CAMOUFOX_ENABLED` and every setting shared with the worker included.
+- **Ruling (plan 2): one owner per name.** `layerSettings`: a name with no row is imported from its env line once; a
+  row wins, and a differing env line is reported (`envIgnored`), never applied; no digest is stored.
+- **Ruling (plan 3): boot order.** The env without the owned names is parsed first and today's refusals, lock wait,
+  backup and migrations run unchanged; under the lock the rows are layered and the whole parsed; an owned name the
+  schema refuses is set aside for that boot and the parse retried; imports are written only after success. The tool
+  bootstrap reads the same layered config and writes nothing. (Execution, R4: a set-aside value falls back to the
+  schema default, not the env line; R5: a set-aside email name turns email off for the boot.)
+- **Ruling (Ian, plan 4): values are stored as `.env` stores them**, unencrypted; the database and its backups are
+  0600, and the docs say backups now hold the keys.
+- **Ruling (plan 5): saving.** `PUT /settings` sends only the changed names, is validated by the same parse, refuses with
+  per-field words (`settingRefusal`, labels from `SETTING_LABELS`) and saves nothing then. (Execution: `applies:
+  'unchanged'` when nothing differed; R8: an untouched stored value that now fails is set aside, as at boot.)
+- **Ruling (plan 6): restart in place.** A save restarts the app in its own process once nothing is in flight; while it
+  waits, starts, resumes, verifications, flight reads and tool runs are refused `reload-pending` and firings are left to
+  the catch-up. (Execution, R3: a hold flag separate from shutdown's `closing`; tool runs in the app hold the restart
+  too.)
+- **Ruling (plan 7): the new settings.** `FLIGHT_READ_PATIENCE` (each run records its own), `DISCOVERY_REFRESH_DAYS`,
+  `NEW_SEARCH_DISCOVERY` and `NEW_SEARCH_VERIFICATION` (unset is the old draft); `EXECUTION_MAX_CALLS` keeps its meaning.
+  (Execution, R2: the page's switches and the draft come from one function, `defaultDefinitionInput`.)
+- **Ruling (plan 8, 9): the source switches and the browser block** as §11 states; pages at once is shown and changed
+  through setup (Ian, 2026-11-19); the unrecognised-page pause stays a fixed hour (revision 38). (Execution, R11: a
+  confirmed Remove saves at once; R12: a source's switch is disabled until it has a key.)
+- **Ruling (plan 10): SearchApi's own balance** from `GET /api/v1/me`, measured 2026-11-19 not to bill, on its own
+  unledgered id; one helper words it everywhere; "credits" is SearchApi's unit in every touched sentence, the estimate's
+  included (R9). (Execution, R10: a failed refresh keeps the last good read up to 24 hours, shown with its time.)
+- **Ruling (plan 11, 12): email and alerts.** Gmail or another mail server; the email test route's fixed failure words
+  and shared one-a-minute limit (R15: core's default TLS; the button says "Save email"); the alert rules listed with
+  "last sent" (R13: `GET /alerts` carries `lastSentAt`); one alert kind and the repeat choice wait for stage 4.
+- **Ruling (plan 13): System** lists the status checks one per line; the two `settings` checks; fixes made on the page
+  point to its sections (R16: an optional `fix.settings`, one link target for the web and the CLI).
+- **Ruling (plan 14): the page** (URLs, one Save a section, unsaved edits kept and marked, the restart and pending lines,
+  write-only key fields). (Execution, R14: an unset limit shows the running app's effective value.)
+- **Ruling (plan 15): the CLI.** First runs still write the owned lines to `app.env`; once the app holds its settings,
+  `--reconfigure travelpayouts|searchapi|email` and the browser window question print the Settings address and change
+  nothing; `gmt status`' price source reads the app's report. (Execution: setup prints the app's ignored-variable
+  warnings as notes; the closing screen, the smoke and the test email's words point at Settings.)
+- **Ruling (controller R17, Task 8's review): the remaining pointers move to Settings.** The Providers view's empty
+  state links Travelpayouts and SearchApi to Settings › Price sources (the browser keeps its setup command); the search
+  page's Alert fold links "Email isn't set up yet" to Settings › Email and alerts; restore judges SearchApi's
+  plan as the app would (R18: the restored file's stored row layered over `app.env` by `layerSettings`), else the
+  plan-free advice; setup's closing screen judges the price source by
+  the app's report (a report that cannot be read, or one with no price-source check, over a settings file naming no
+  source, is said as not known, in words naming which, never as no source); `gmt status` adds a local price-source line only when the report cannot be read, naming why; the
+  operator docs give the one-time update steps (the container first, then native: check the imported values in
+  Settings, keep a private copy of the settings file, then remove the lines; a rollback to a version from before the
+  Settings page puts that copy back first, as that version reads these settings only from the file), and natively
+  `.env` in the Status words is `app.env`.
+- **Ruling (execution): secrets of fewer than 8 characters** (`MIN_SECRET_LENGTH`) are refused on save and set aside at
+  boot, so a short secret can never stop the app starting.
 
 ### Revision 71: no password while only this machine can reach the app (2026-11-17)
 

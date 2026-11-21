@@ -5,6 +5,7 @@ import { useSendTestEmail } from '../api/statusQuery.js';
 import { COPY } from '../copy.js';
 import { DATES_COVERAGE } from '../state/resultsState.js';
 import { hrefWith, navigateTo } from '../state/urlState.js';
+import { settingsPatch } from '../state/view.js';
 
 export type StatusCheck = apiContract.StatusCheck;
 
@@ -118,6 +119,52 @@ function SendTest() {
   );
 }
 
+/** A fix's words; one made on the Settings page is a link to its section (settings plan ruling 13). */
+function FixWords({ fix, plain = false }: { fix: NonNullable<StatusCheck['fix']>; plain?: boolean }) {
+  if (fix.settings === undefined) return <>{fix.text}</>;
+  const patch = settingsPatch(fix.settings);
+  return (
+    <a href={hrefWith(patch)} onClick={navigateTo(patch)} className={plain ? undefined : 'link'}>
+      {fix.text}
+    </a>
+  );
+}
+
+/**
+ * One check as a line of the Settings › System list (ruling 13): its dot, what it is, its state in words (every state
+ * but ok, so an off or failing line never rests on colour), the summary, and for a line not ok its fix and any note.
+ * The caller supplies the `<ul>`.
+ */
+export function StatusLine({ check }: { check: StatusCheck }) {
+  const name = cardName(check) ?? COPY.statusView.areaName[check.area];
+  return (
+    <li data-state={check.state} className="st-sys-line">
+      <span aria-hidden="true" className="st-dot" />
+      <span className="st-sys-what">{name}</span>
+      <span className="st-sys-words">
+        {check.state === 'ok' ? null : (
+          <span className="st-sys-state">{COPY.settingsView.sysState[check.state]}: </span>
+        )}
+        {check.summary}
+        {check.note === null ? null : <span className="st-sys-note"> · {check.note}</span>}
+        {check.state !== 'ok' && check.fix !== null ? (
+          <span className="st-sys-fix">
+            {/* why: a written separator and label, so the fix never runs on from the summary (also to a screen reader) */}
+            {' · '}
+            <span className="font-bold">{COPY.statusView.fixLabel}</span> <FixWords fix={check.fix} plain />
+            {check.fix.command === null ? null : (
+              <>
+                {' '}
+                <FixCommand key={check.fix.command} command={check.fix.command} />
+              </>
+            )}
+          </span>
+        ) : null}
+      </span>
+    </li>
+  );
+}
+
 /**
  * One check of the report as a labelled region (spec §11 Status). The state is written as text before the summary, never
  * colour alone. A card that is not ok shows its fix; a note shows on any card; a provider card links to the Providers
@@ -142,7 +189,7 @@ export function StatusCard({ check }: { check: StatusCheck }) {
       {check.state !== 'ok' && check.fix !== null ? (
         <div className="space-y-1">
           <p>
-            <span className="font-bold">{COPY.statusView.fixLabel}</span> {check.fix.text}
+            <span className="font-bold">{COPY.statusView.fixLabel}</span> <FixWords fix={check.fix} />
           </p>
           {/* why: V11 (ui-b1-005): keyed by the command, so "Copied" never outlives the command it was for */}
           {check.fix.command === null ? null : (

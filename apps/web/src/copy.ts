@@ -19,6 +19,7 @@ import {
 import type { z } from 'zod';
 import { DAY_PLURAL, listText } from './copy/setup.js';
 import { EXAMPLE_PAIR_CELLS } from './example.js';
+import type { SettingsSection } from './state/view.js';
 
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
@@ -45,6 +46,9 @@ const thousands = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))
 /** A small count in words ("five"), as mockup 02 says the trips the reading stopped at; digits past ten. */
 const SMALL_NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const countWord = (n: number): string => SMALL_NUMBERS[n] ?? thousands(n);
+/** SearchApi's credits left as a figure ("51 of 100 credits left"): the top bar's line and Settings' balance share it. */
+const creditsFigure = (left: number, cap: number | null): string =>
+  `${thousands(left)}${cap === null ? '' : ` of ${thousands(cap)}`} ${noun(cap ?? left, 'credit', 'credits')} left`;
 /** Review Focus 3's first sentence, said alone where flight lists can't be read for the search (Task 8 fix round 1). */
 const NO_TRIP_LEAD = 'No flights read yet for these dates.';
 
@@ -88,7 +92,8 @@ export const COPY = {
     edit: 'Edit',
     priceOverTime: 'Price over time',
     settings: 'Settings',
-    priceSources: 'Price sources',
+    // why: ruling R24: the Providers view is Calls and caps, the name every window and cap pointer uses
+    callsAndCaps: 'Calls and caps',
     alerts: 'Alerts',
     system: 'System',
   },
@@ -211,14 +216,200 @@ export const COPY = {
   stageName: { discovery: 'discovery', verification: 'itinerary search' } satisfies Record<Stage, string>,
 
   // --- The interim Settings page (design 2026-11-08 Ruling 9; stage 3 replaces it) ---
+  // --- The Settings page (UX redesign stage 3, settings plan rulings 8, 9, 10 and 14); field labels are core's
+  // SETTING_LABELS, the one copy the api's refusals share ---
   settingsView: {
     heading: 'Settings',
-    lede: 'Where prices come from, who gets emails, and whether everything is working.',
     sectionsLabel: 'Settings sections',
-    priceSources:
-      'Where prices come from: the browser, the Aviasales cache and SearchApi, and what each has left.',
-    alerts: 'The emails sent when a price you are watching drops.',
-    system: 'Whether everything is working, and what to do when something is not.',
+    section: {
+      sources: 'Price sources',
+      limits: 'Limits',
+      email: 'Email and alerts',
+      system: 'System',
+    } satisfies Record<SettingsSection, string>,
+    /** Beside a section link whose section holds edits not saved yet (said in words, never by a mark alone). */
+    unsaved: 'unsaved',
+    lede: {
+      sources:
+        "New searches use the sources switched on here. Existing searches keep their own choice; change it on a search's Edit form.",
+      limits: 'Hard stops. A search stops before it would pass one, and says so on the Trips page.',
+      email: 'Alerts email you when a search finds a trip, with flights read, under your price.',
+      system: "Only needs you when something isn't working; the top bar says so too.",
+    } satisfies Record<SettingsSection, string>,
+    // System (ruling 13): the status report's checks, one per line
+    systemLabel: 'Checks',
+    sysState: { warn: 'To check', fail: 'Failing', off: 'Off' } satisfies Record<
+      Exclude<apiContract.StatusState, 'ok'>,
+      string
+    >,
+    // the source switches (ruling 8)
+    switchOn: 'New searches use it',
+    switchOff: 'Off for new searches',
+    switchLabel: (source: string) => `Use ${source} for new searches`,
+    // the browser (ruling 9)
+    browserMeta:
+      "Free. Reads Google's calendar and flight lists on this machine; a full search takes a while.",
+    browserNotSetUp: "The browser isn't set up on this install. Set it up from the app's folder with",
+    browserSetUpDoc: '(docs/setup.md §14).',
+    browserCommand: 'pnpm gmt setup --reconfigure browser',
+    browserReady: 'Browser ready',
+    browserState: (state: string, summary: string) => `Browser ${state}: ${summary}`,
+    browserUnknown: "The browser's state couldn't be read.",
+    // the consent record, in the page's words from its state and expiry date (never the report's summary)
+    consentSaved: (date: string) => `Google's cookie choice saved until ${date}`,
+    consentEnding: (date: string) =>
+      `Google's cookie choice runs out on ${date}; System says how to save it again.`,
+    consentEnded: (date: string) =>
+      `Google's cookie choice ran out on ${date}; System says how to save it again.`,
+    consentHeld: "Google's cookie choice is saved",
+    consentProblem: "Google's cookie choice needs attention; System says what to do.",
+    consentUnchecked: "Google's cookie choice isn't checked yet.",
+    pagesAtOnce: (n: number) => `Pages at once: ${n}`,
+    pagesAtOnceUnknown: "Pages at once: not known (the browser worker didn't say)",
+    changeWith: 'change with',
+    patienceBefore: 'Read flights for the cheapest dates until',
+    patienceAfter: (target: number) => `reads in a row don't improve the ${countWord(target)} cheapest trips`,
+    mayRun: 'May run',
+    browserWindow: { scheduled: 'only during scheduled searches', any: 'any time' } satisfies Record<
+      'scheduled' | 'any',
+      string
+    >,
+    // what applies to every source (review I1 and I3): the link to the Providers view, and how often prices are read
+    everySource: 'Every source',
+    // a source list the app set aside (review residual (c)): said in each card whose switches write it, fixed here too
+    listSetAside: (label: string) =>
+      `${label}: the list isn't valid, so the default is used. Switch sources here, or choose under Every source.`,
+    listChoose: (label: string) => `${label}: the list isn't valid, so the default is used.`,
+    listUseDefault: 'Use the default',
+    listUseNone: 'Use none',
+    callsAndCapsBefore: "Each source's calls this month, its caps and when its window reopens are on",
+    callsAndCapsLink: 'Calls and caps',
+    advanced: 'Advanced',
+    refreshBefore: "Read a date's calendar price again after",
+    refreshAfter: 'days (new searches)',
+    // SearchApi (ruling 10)
+    searchapiMeta: 'Paid. Checks the cheapest trips with real sellers and their booking links.',
+    credits: (left: number, cap: number | null) => creditsFigure(left, cap),
+    balanceUnread: "SearchApi's balance couldn't be read, and this app has no count of its own to show.",
+    searchapiNoKey: 'No key saved. Add one to use SearchApi.',
+    plan: { trial: 'Free trial', '40usd': '$40 a month' } satisfies Record<'trial' | '40usd', string>,
+    verificationBox: 'Check the cheapest trips each search finds',
+    discoveryBox: 'Also use it for the calendar',
+    discoveryBoxNote: '(many credits per search)',
+    creditsPerSearch: 'Credits per search are set under',
+    needsKey: 'Save a key first to switch it on.',
+    // the Aviasales cache
+    travelpayoutsMeta:
+      'Free. Prices other people saw on Aviasales, often days old; quick, patchy on less busy routes.',
+    travelpayoutsNoKey: 'No token saved. Add one to use the Aviasales cache.',
+    callsThisMonth: (calls: number, cap: number | null) =>
+      `${thousands(calls)} ${noun(calls, 'call', 'calls')} this month${cap === null ? '' : ` (limit ${thousands(cap)})`}`,
+    // a key field: write-only (ruling 14)
+    secretSaved: 'saved',
+    secretEnds: (last4: string) => `saved · ends ${last4}`,
+    secretNotSet: 'not set',
+    secretSetAside: "The one the app has can't be used: paste it again.",
+    secretHint: 'Keys are never shown again once saved.',
+    replace: 'Replace',
+    remove: 'Remove',
+    cancel: 'Cancel',
+    confirmRemove: (label: string) =>
+      `Remove the saved ${label}? New searches can't use it until you add one again.`,
+    confirmRemoveYes: 'Remove it',
+    confirmRemoveNo: 'Keep it',
+    removing: 'Removing…',
+    /**
+     * A value the app set aside at boot (saved, or an `.env` line it read: review M8), so the default is used until it
+     * is set here.
+     */
+    valueSetAside: "This value isn't valid, so the default is used: set it here.",
+    // saving (ruling 14)
+    /** Each section's one Save (System has none); Email's saves the mail settings only, the rules are changed in place. */
+    saveLabel: {
+      sources: 'Save price sources',
+      limits: 'Save limits',
+      email: 'Save email',
+    } satisfies Record<Exclude<SettingsSection, 'system'>, string>,
+    saving: 'Saving…',
+    restarting: 'Saved. Restarting the app…',
+    restarted: 'Saved. The app restarted with the new settings.',
+    notBack: "The app didn't come back: run pnpm gmt status",
+    appliesAfter: (names: readonly string[]) =>
+      `Saved. Applies when ${names.length === 0 ? 'the running searches' : listText(names)} finish; new searches wait until then.`,
+    unchanged: 'Nothing changed, so nothing was saved.',
+    refused: 'Nothing was saved: fix the marked fields.',
+    envLine: (names: readonly string[]) =>
+      names.length === 0
+        ? "Nothing was saved: a line in .env isn't valid with these settings."
+        : `Nothing was saved: ${listText(names)} in .env isn't valid with these settings. Fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again.`,
+    failed: 'Not saved: the app answered with an error; its log has the cause.',
+    noAnswer: "Not saved: the app didn't answer.",
+    // Limits (rulings 5 and 14): sentences with a field in them; the money is typed in pounds and saved in pence
+    limits: {
+      spendBefore: 'Spend at most £',
+      spendAfter: 'a month',
+      /** The month's spend so far, from /budget (a cost, never a fare). */
+      spent: (used: string) => `${used} spent this month`,
+      creditsBefore: 'New searches: at most',
+      creditsAfter: 'SearchApi credits each run',
+      creditsHint: "A search that exists keeps its own limit; change it on the search's Edit form.",
+    },
+    // Email (ruling 11): Gmail, or another mail server; the test email's answers in the page's own words
+    email: {
+      sendWith: 'Send email with',
+      modeGmail: 'Gmail',
+      modeOther: 'Other mail server',
+      gmailAddress: 'Gmail address',
+      appPassword: 'App password',
+      appPasswordHint:
+        'Make one under Google account › Security › App passwords. Never shown again once saved.',
+      passwordHint: 'Never shown again once saved.',
+      tls: {
+        implicit: 'Encrypted from the start (usually port 465)',
+        starttls: 'Encrypted after connecting, STARTTLS (usually port 587)',
+        none: 'Not encrypted (only a mail server on this machine)',
+      } satisfies Record<'implicit' | 'starttls' | 'none', string>,
+      sendTest: 'Send a test email',
+      testSending: 'Sending a test email…',
+      testSent: (to: string) => `Test email sent to ${to}. If it isn't in the inbox, look in spam.`,
+      testFailed: {
+        refused: "Not sent: the mail server couldn't be reached. Check its name and port.",
+        'timed-out': "Not sent: the mail server didn't answer in time. Check its name and port.",
+        'sign-in-refused': 'Not sent: the mail server refused the sign-in. Check the user name and password.',
+        'not-a-mail-server':
+          "Not sent: that doesn't look like a mail server. Check its name, port and encryption.",
+      } satisfies Record<'refused' | 'timed-out' | 'sign-in-refused' | 'not-a-mail-server', string>,
+      testLimited: 'A test email went a moment ago: try again in a minute.',
+      testRefused: 'Not sent: fix the marked fields.',
+      testIncomplete: {
+        gmail: 'Fill in the Gmail address first.',
+        other: 'Fill in the mail server, its port and the user name first.',
+      } satisfies Record<'gmail' | 'other', string>,
+      testNoAnswer: "Not sent: the app didn't answer.",
+      testError: 'Not sent: the app answered with an error; its log has the cause.',
+      remove: 'Remove email',
+      confirmRemove: "Remove email? Alerts can't be sent until you set it up again.",
+    },
+    // the alert rules (ruling 12): each in words, its last send, Edit (the Alerts view's form) and Delete
+    alerts: {
+      heading: 'Alerts',
+      none: "No alerts yet. Alerts come from a search's page.",
+      noEmail: "Alerts can't be sent until email is set up.",
+      lastSent: (when: string) => `last sent: ${when}`,
+      /** A rule whose search is no longer listed. */
+      removedSearch: 'a removed search',
+      /** A rule's search when the searches couldn't be read: neutral, never "removed". */
+      unnamedSearch: 'a search',
+      never: 'never',
+      off: 'off',
+      edit: 'Edit',
+      delete: 'Delete',
+      confirmDelete: (search: string) =>
+        `Delete this alert on ${search}? It stops at once; what it sent is kept.`,
+      deleteYes: 'Delete it',
+      deleteNo: 'Keep it',
+      deleteFailed: 'Not deleted: the app answered with an error; its log has the cause.',
+    },
   },
 
   // --- The top bar and run progress (design 2026-11-08 Rulings 10 and 11); main-path words only ---
@@ -230,12 +421,19 @@ export const COPY = {
     severalNeedYou: (count: number) => `${count} things need you`,
     /** The link's tail: the Status page says what to do (the System page of Settings). */
     fix: 'fix',
-    limitsLabel: 'Limits',
-    /** The window in use: a monthly plan's month, or a trial's one-off allowance (`searchApiCallsLeft`). */
-    callsLeftMonth: (left: number, cap: number) =>
-      `SearchApi: ${thousands(left)} of ${thousands(cap)} ${noun(cap, 'call', 'calls')} left this month`,
-    callsLeftTrial: (left: number, cap: number) =>
-      `SearchApi: ${thousands(left)} of ${thousands(cap)} trial ${noun(cap, 'call', 'calls')} left`,
+    limitsLabel: "This month's limits",
+    /**
+     * SearchApi's credits left (settings plan ruling 10, `searchApiCreditsLine`): its own balance ("SearchApi: 38 credits
+     * left"), or, when it could not be asked, this app's count of the window in use ("51 of 100", with the tail below
+     * saying whose count it is). The unit is credits, never searches.
+     */
+    creditsLeft: (left: number, cap: number | null) => `SearchApi: ${creditsFigure(left, cap)}`,
+    /** What follows the figure when it is this app's own count, not SearchApi's balance. */
+    creditsLocalTail: "(this app's count)",
+    /** What follows SearchApi's own balance: the day the period ends (a monthly plan; the trial has none). */
+    creditsResets: (date: string) => `resets ${date}`,
+    /** What follows a balance read more than ten minutes ago, with the time it was read. */
+    creditsAsOf: (time: string) => `as of ${time}`,
     spent: (used: string, cap: string) => `Spent ${used} of ${cap} this month`,
     spentNoCap: (used: string) => `Spent ${used} this month`,
     nearCap: 'near cap',
@@ -359,7 +557,7 @@ export const COPY = {
     unavailable: 'browser worker not reachable',
     note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds, so a run takes hours (${EXAMPLE_PAIR_CELLS} day pairs). Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
-  providersHeading: 'Price sources',
+  providersHeading: 'Calls and caps',
   providerEnabled: 'configured',
   providerDisabled: 'not configured',
   plan: (p: string) => `plan: ${p}`,
@@ -557,6 +755,7 @@ export const COPY = {
         'No price source is set up, so nothing was searched. Set up a price source (Settings → Price sources).',
       window: 'None of the dates in this search are still ahead. Change the dates in Edit.',
       'shutting-down': 'The app is shutting down, so nothing was started.',
+      'reload-pending': 'Applying new settings: try again in a minute.',
       not_found: 'This search no longer exists.',
     } satisfies Record<string, string>,
   },
@@ -575,7 +774,9 @@ export const COPY = {
       travelpayouts: "free, prices from other people's searches, often days old",
     },
     // why: fix round 1 — the run budget's cap is not what a run uses; the sentence states the run's own calls once ticked
-    searchapiNote: (left: number | null) => `uses calls${left === null ? '' : `, ${thousands(left)} left`}`,
+    // why: settings plan ruling 10 — the same figure and tail as the top bar's line (`searchApiCreditsLine`)
+    searchapiNote: (left: number | null, tail: string) =>
+      `uses credits${left === null ? '' : `, ${thousands(left)} left${tail === '' ? '' : ` ${tail}`}`}`,
     /** A source not set up on this install, by the name the sentence gives it (lower case: the sentence capitalises). */
     sourceUnset: {
       camoufox: 'the browser',
@@ -1288,6 +1489,8 @@ export const COPY = {
     checkedAgo: (seconds: number) =>
       seconds < 60 ? `checked ${seconds} s ago` : `checked ${Math.floor(seconds / 60)} min ago`,
     stale: (checked: string) => `stale, ${checked}`,
+    /** What the live region says once a refresh fails: the change of state alone, never the ticking age. */
+    staleAnnounced: 'The status report could not be refreshed; the last one is shown, marked stale.',
     notAnswering: 'The app is not answering.',
     // why: V11 (po-b1-011, ui-b1-003): an answer that is an error is not "not answering"; each is said in plain words
     signInRefused: 'The app refused the sign-in, so the report cannot be read. Sign in again.',
@@ -1306,6 +1509,7 @@ export const COPY = {
       worker: 'Browser worker',
       consent: 'Consent',
       email: 'Email',
+      settings: 'Settings',
     } satisfies Record<apiContract.StatusArea, string>,
     /** What an off check is called in the folded line. */
     offName: {
@@ -1318,6 +1522,7 @@ export const COPY = {
       worker: 'browser provider',
       consent: 'consent',
       email: 'email',
+      settings: 'settings',
     } satisfies Record<apiContract.StatusArea, string>,
     offLine: {
       'not-set-up': (names: string) => `not set up: ${names}`,
@@ -1332,7 +1537,7 @@ export const COPY = {
     copy: 'Copy',
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
-    providersLink: 'Price sources',
+    providersLink: 'Calls and caps',
     coverageLink: 'Its full search log',
     sendTest: 'Send test',
     sending: 'Sending…',

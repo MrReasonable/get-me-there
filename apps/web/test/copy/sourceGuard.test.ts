@@ -56,6 +56,9 @@ const MONEY_FILES = new Set([
   // ([data-indicative] rows). The charts print fares only through PriceCell and their axes without "£"
   // (format.ts formatAxisPounds), so they are not here. (WP19 retired the heatmap legend with the Calendar view.)
   'src/views/History/RouteTable.tsx',
+  // settings plan Task 6 (ruling 5): Settings › Limits says the month's spend from /budget, a cost, never a fare
+  // ([data-cost])
+  'src/views/Settings/Limits.tsx',
 ]);
 
 function parse(file: string, text: string): ts.SourceFile {

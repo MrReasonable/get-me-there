@@ -120,7 +120,7 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   read"; the six buckets stay in the full search log.
 - **Main-path words:** Search, Search again, Searching, Searched, Reading flights, Checking
   fares, Repeat weekly, More options; set-up terms (stages, cells, discovery, verification) stay
-  in the full search log and the Price sources view.
+  in the full search log and the Calls and caps view (`?view=providers`).
 - **Budgets:** caps per run and per month on calls and spend, and per run on browser pages;
   estimates before spending; a ledger of every call.
 - **Route-agnostic:** any airports in the airports table; nothing in the product is tied to a

@@ -20,6 +20,7 @@ describe('migration 0010', () => {
         '0011_wp20_flight_lists',
         '0012_wp21_return_leg',
         '0013_booking_url',
+        '0014_settings',
       ]),
     );
     db.raw
@@ -32,6 +33,7 @@ describe('migration 0010', () => {
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]);
     expect(db.raw.prepare('SELECT kind, scheduled FROM airports').all()).toEqual([
       { kind: null, scheduled: null },

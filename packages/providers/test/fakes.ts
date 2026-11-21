@@ -303,6 +303,15 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       connectRefusedKind: 'provider-unavailable',
       ...over['camoufox-status'],
     },
+    'searchapi-account': {
+      ...base,
+      hosts: ['www.searchapi.io'],
+      billable: 'never',
+      costPerCallMicroGbp: 0,
+      concurrency: 1,
+      requestTimeoutSeconds: 10,
+      ...over['searchapi-account'],
+    },
     fixture: {
       ...base,
       hosts: ['fixture.local'],

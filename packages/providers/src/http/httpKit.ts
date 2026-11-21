@@ -33,6 +33,7 @@ const HTTP_PROVIDER_IDS = [
   'fixture',
   'fx',
   'camoufox-status',
+  'searchapi-account',
 ] as const satisfies readonly HttpProviderId[];
 
 /** Only a ProviderError marked retryable is retried; auth, quota, parse and BudgetExceeded never are. */

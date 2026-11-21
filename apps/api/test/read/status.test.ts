@@ -377,6 +377,17 @@ describe('the checks table (brief WP18 §6)', () => {
     expect(buildStatus(f)).toMatchObject({ mode: 'native', version: 'abc1234', generatedAt: NOW });
     expect(apiContract.statusResponseSchema.safeParse(buildStatus(f)).success).toBe(true);
   });
+
+  it("gives the worker's pages at once when it reported them, and leaves the field out otherwise (settings ruling 9)", () => {
+    const worker = (pagesAtOnce: number | null) =>
+      healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ pagesAtOnce }) } });
+    expect(buildStatus(healthyFacts({ worker: worker(3) })).pagesAtOnce).toBe(3);
+    expect(buildStatus(healthyFacts({ worker: worker(null) }))).not.toHaveProperty('pagesAtOnce');
+    for (const read of [{ kind: 'unreachable' }, { kind: 'disabled' }] as const)
+      expect(buildStatus(healthyFacts({ worker: healthyWorker({ read }) }))).not.toHaveProperty(
+        'pagesAtOnce',
+      );
+  });
 });
 
 describe('agreement of the card and the bar', () => {
@@ -614,7 +625,11 @@ describe('the data check: honest and complete (review V6)', () => {
       "the schedule is now off: change the dates in the search's Edit page, then set it to repeat again",
     );
     expect(fixOf('skipped_confirm')).toContain('confirm the new estimate');
-    expect(fixOf('skipped_budget')).toContain('Settings → Price sources shows when its window reopens');
+    // why: review I1 (ruling R19): windows and caps are on the Providers view, never on Settings › Price sources
+    expect(fixOf('skipped_budget')).toContain(
+      'Calls and caps (/?view=providers) shows when its window reopens',
+    );
+    expect(fixOf('skipped_budget')).not.toContain('Price sources');
     expect(fixOf('skipped_missed', 'half-cadence')).toContain('the next scheduled run goes ahead as normal');
     expect(fixOf('skipped_missed', 'browser-only-definition')).toBe(STATUS_TEXT.browserOnlyFix);
   });
@@ -720,9 +735,11 @@ describe('the schedule note (pa-b1-008)', () => {
 describe('price sources', () => {
   it('a fixture-only or awaiting-verification browser setup leaves usable empty and warns with the Travelpayouts fix', () => {
     const c = checkOf(healthyFacts({ priceSources: { usable: [] } }), 'price-sources');
+    // why: settings plan ruling 13: the fix points to Settings, not to `--reconfigure`
     expect(c.fix).toEqual({
-      text: 'Travelpayouts is the no-cost source: add its token',
-      command: 'pnpm gmt setup --reconfigure travelpayouts',
+      text: 'Travelpayouts is the no-cost source: add its token in Settings › Price sources',
+      command: null,
+      settings: 'sources',
     });
     expect(
       checkOf(healthyFacts({ priceSources: { usable: ['travelpayouts', 'searchapi'] } }), 'price-sources')
@@ -973,7 +990,14 @@ describe('providers', () => {
     expect(tpCheck({ lastCall: null }).summary).toContain('configured; not used yet');
     expect(tpCheck({ lastCall: { at: ago(HOUR), result: 'other' } }).state).toBe('warn');
   });
-  it('the trial warns at 10 credits left and words its lifetime usage as Settings → Price sources does', () => {
+  it('a warning provider points at Calls and caps, the Providers view, for its window and its last call (review I1)', () => {
+    const trial = saCheck({ usage: { used: 90, cap: 100, window: 'lifetime' }, trialLeft: 10 });
+    expect(trial.fix?.text).toContain('watch Calls and caps (/?view=providers)');
+    const failed = tpCheck({ lastCall: { at: ago(HOUR), result: 'other' } });
+    expect(failed.fix?.text).toContain('check Calls and caps (/?view=providers) and the app log');
+    for (const c of [trial, failed]) expect(c.fix?.text).not.toContain('Price sources');
+  });
+  it('the trial warns at 10 credits left and words its lifetime usage as the Providers view does', () => {
     const usage = { used: 90, cap: 100, window: 'lifetime' as const };
     expect(saCheck({ usage, trialLeft: 10 }).state).toBe('warn');
     expect(saCheck({ usage, trialLeft: 10 }).summary).toContain('10 trial credits left');
@@ -987,7 +1011,11 @@ describe('providers', () => {
   it('an unconfigured provider is off and names its setup command', () => {
     const off = checkOf(healthyFacts(), 'provider-searchapi');
     expect(off).toMatchObject({ state: 'off', offReason: 'not-set-up' });
-    expect(off.fix?.command).toBe('pnpm gmt setup --reconfigure searchapi');
+    expect(off.fix).toEqual({
+      text: 'add SearchApi in Settings › Price sources',
+      command: null,
+      settings: 'sources',
+    });
   });
   it('a usage without a cap says so and does not warn', () => {
     const c = tpCheck({ usage: { used: 5, cap: null, window: 'month' } });
@@ -1013,9 +1041,60 @@ describe('email', () => {
         'email',
       ),
     ).toMatchObject({ state: 'ok' });
-    expect(checkOf(healthyFacts({ email: { configured: false, last: null } }), 'email').fix?.command).toBe(
-      'pnpm gmt setup --reconfigure email',
+    expect(checkOf(healthyFacts({ email: { configured: false, last: null } }), 'email').fix).toEqual({
+      text: 'set email up to get alerts and notices in Settings › Email and alerts',
+      command: null,
+      settings: 'email',
+    });
+  });
+  it('a failed send points to Settings › Email and alerts, not to --reconfigure', () => {
+    const c = checkOf(
+      healthyFacts({ email: { configured: true, last: { at: ago(HOUR), kind: 'test', result: 'failed' } } }),
+      'email',
     );
+    expect(c.fix).toEqual({
+      text: 'check the mail server settings in Settings › Email and alerts, then send a test again',
+      command: null,
+      settings: 'email',
+    });
+  });
+});
+
+describe('settings checks (settings plan ruling 13)', () => {
+  it('an env line the page now owns is a warn naming the label and where to remove it', () => {
+    const c = checkOf(
+      healthyFacts({ settings: { envIgnored: ['SEARCHAPI_KEY'], setAside: [] } }),
+      'settings-env-searchapi-key',
+    );
+    expect(c).toMatchObject({
+      area: 'settings',
+      state: 'warn',
+      summary: 'SearchApi key in .env is ignored: Settings holds it. Remove the line from .env.',
+      label: 'SearchApi key',
+      fix: { text: 'Open Settings › Price sources', command: null, settings: 'sources' },
+    });
+  });
+  it('a value the app set aside (saved, or an .env line never saved) is a fail naming the label and the section that fixes it', () => {
+    const c = checkOf(
+      healthyFacts({ settings: { envIgnored: [], setAside: ['MONTHLY_SPEND_CAP_PENCE', 'SMTP_PORT'] } }),
+      'settings-aside-monthly-spend-cap-pence',
+    );
+    expect(c).toMatchObject({
+      area: 'settings',
+      state: 'fail',
+      summary: "Monthly spend limit isn't valid: set it in Settings",
+      label: 'Monthly spend limit',
+      fix: { text: 'Open Settings › Limits', command: null, settings: 'limits' },
+    });
+    expect(
+      checkOf(
+        healthyFacts({ settings: { envIgnored: [], setAside: ['SMTP_PORT'] } }),
+        'settings-aside-smtp-port',
+      ).fix?.settings,
+    ).toBe('email');
+  });
+  it('no names, no checks', () => {
+    expect(buildChecks(healthyFacts()).filter((c) => c.area === 'settings')).toEqual([]);
   });
 });
 
@@ -1041,11 +1120,44 @@ describe('container and dev mode', () => {
   });
 });
 
+describe('settings checks in every mode', () => {
+  it('a Settings fix is the same in container and dev mode as in native: no docs section, no command', () => {
+    const settings: StatusFacts['settings'] = { envIgnored: ['SEARCHAPI_KEY'], setAside: ['SMTP_PORT'] };
+    const pick = (f: StatusFacts) =>
+      buildChecks(f)
+        .filter((c) => c.area === 'settings' || c.id === 'email' || c.id === 'price-sources')
+        .map((c) => ({ id: c.id, fix: c.fix }));
+    const native = pick(
+      healthyFacts({ settings, email: { configured: false, last: null }, priceSources: { usable: [] } }),
+    );
+    for (const mode of ['container', 'dev'] as const)
+      expect(
+        pick(
+          healthyFacts({
+            mode,
+            settings,
+            email: { configured: false, last: null },
+            priceSources: { usable: [] },
+          }),
+        ),
+      ).toEqual(native);
+    for (const c of native) expect(c.fix?.text).not.toContain('docs/setup.md');
+  });
+});
+
 describe('words', () => {
   it('no summary, note or fix text uses a banned word, "fresh", "complete" or "all"', () => {
     const variants: StatusFacts[] = [
       ...CASES.map((c) => c.facts),
       healthyFacts({ mode: 'container' }),
+      healthyFacts({
+        settings: {
+          envIgnored: ['SEARCHAPI_KEY', 'SMTP_HOST'],
+          setAside: ['MONTHLY_SPEND_CAP_PENCE', 'SMTP_PASS'],
+        },
+        email: { configured: false, last: null },
+        priceSources: { usable: [] },
+      }),
       healthyFacts({ synthetic: true, data: [healthyData({ ages: null })] }),
     ];
     const forbidden = /\b(fresh|complete|all)\b/i;

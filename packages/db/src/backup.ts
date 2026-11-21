@@ -1,6 +1,6 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { BACKUP_FILE_PATTERN, type Clock } from '@gmt/core';
+import { BACKUP_FILE_PATTERN, type Clock, SETTINGS_NAMES, type SettingRow } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { ACTIVE_STATUS_SQL } from './schema/checks.js';
 
@@ -27,9 +27,14 @@ export function checkBackup(file: string, verify: (file: string) => string = int
  * What starting the app on this database will do (cb-b1-010), read without writing: `resumable` counts the top-level
  * runs left active (the boot sweep marks a `running` one interrupted, then AUTO_RESUME resumes it), `scheduled` the
  * enabled, undeleted searches with a schedule (each may catch up its latest missed firing once). A database with no
- * such tables (never migrated) counts none.
+ * such tables (never migrated) counts none. `settings`: the stored settings whose names are not secrets, in SETTINGS_NAMES
+ * order (none before migration 0014).
  */
-export function backupSummary(file: string): { resumable: number; scheduled: number } {
+export function backupSummary(file: string): {
+  resumable: number;
+  scheduled: number;
+  settings: SettingRow[];
+} {
   const db = new Database(file, { readonly: true, fileMustExist: true });
   try {
     const columns = (t: string): Set<string> => {
@@ -46,7 +51,22 @@ export function backupSummary(file: string): { resumable: number; scheduled: num
     // why: an imported or restored file may predate later migrations, so each filter is used only where its column is
     const ex = columns('search_executions');
     const def = columns('search_definitions');
+    // why: controller ruling R18: the stored settings as the app layers them (core layerSettings), so restore can judge
+    // SearchApi's plan with the app stopped; only names that are not secrets, so no key or password leaves the file
+    const stored: unknown = columns('settings').has('value')
+      ? db.prepare('SELECT name, value FROM settings').all()
+      : [];
+    const rows = new Map<string, string>();
+    if (Array.isArray(stored))
+      for (const r of stored)
+        if (typeof r === 'object' && r !== null && 'name' in r && 'value' in r)
+          rows.set(String(r.name), String(r.value));
+    const settings: SettingRow[] = SETTINGS_NAMES.filter((n) => !n.secret).flatMap(({ name }) => {
+      const value = rows.get(name);
+      return value === undefined ? [] : [{ name, value }];
+    });
     return {
+      settings,
       resumable: ex.has('status')
         ? n(
             `SELECT COUNT(*) AS n FROM search_executions WHERE status IN (${ACTIVE_STATUS_SQL})${ex.has('is_child') ? ' AND is_child = 0' : ''}`,
@@ -58,6 +78,26 @@ export function backupSummary(file: string): { resumable: number; scheduled: num
           )
         : 0,
     };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Settings plan ruling 15 (review I2, controller ruling R20): how many settings rows this database holds, read without
+ * writing and without a value leaving the file; 0 before migration 0014 (no settings table). From the app's first
+ * start the table holds a row for each name it imported, so `gmt setup` (through scripts/settings-held.mjs) knows the
+ * app holds its settings whether the app is running or not.
+ */
+export function storedSettingCount(file: string): number {
+  const db = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const table: unknown = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'")
+      .get();
+    if (table === undefined) return 0;
+    const row: unknown = db.prepare('SELECT COUNT(*) AS n FROM settings').get();
+    return typeof row === 'object' && row !== null && 'n' in row && typeof row.n === 'number' ? row.n : 0;
   } finally {
     db.close();
   }

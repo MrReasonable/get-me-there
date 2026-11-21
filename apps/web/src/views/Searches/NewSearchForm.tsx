@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type Ref, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
-import { qk, useBudget } from '../../api/queries.js';
+import { qk } from '../../api/queries.js';
 import type {
   BudgetFit,
   CreateAndStartBody,
@@ -12,7 +12,7 @@ import type {
 } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { newRequestKey } from '../../lib/requestKey.js';
-import { searchApiCallsLeft } from '../../lib/searchApiCallsLeft.js';
+import { useSearchApiCredits } from '../../lib/searchApiCreditsLine.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { type Draft, defaultDraft, EMPTY_ABSOLUTE } from '../Definitions/draft.js';
@@ -25,26 +25,15 @@ const IDS = sentenceIds('new-search');
 const N = COPY.newSearch;
 
 /**
- * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the plan preset's sources, policy and
- * budget without SearchApi (design §8 question 2: it is ticked per search) and without the test source when a real one
- * is left, no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave from and Leave
- * by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
+ * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the api's presets (`/providers`), whose
+ * sources are the ones its single rule gives (`newSearchSourcesFor`: the Settings page's lists, or today's draft:
+ * every configured free source, SearchApi unticked, the test source only when nothing real is left), so this page
+ * decides none of that; no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave
+ * from and Leave by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
  */
 export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
-  const d = defaultDraft(presets);
-  const off = (ids: readonly Draft['providers']['discovery'][number][]) =>
-    ids.filter((id) => id !== 'searchapi');
-  const discovery = off(d.providers.discovery);
-  // why: Task 7 minor: in fixture mode beside a real source a new search starts on the real ones; the test source is
-  // ticked only when it is the only source left, so a search is never started with none
-  const real = discovery.filter((id) => id !== 'fixture');
   return {
-    ...d,
-    providers: {
-      ...d.providers,
-      discovery: real.length > 0 ? real : discovery,
-      verification: off(d.providers.verification),
-    },
+    ...defaultDraft(presets),
     window: EMPTY_ABSOLUTE,
     scheduleCron: null,
     enabled: false,
@@ -78,9 +67,8 @@ export function NewSearchForm({
   const qc = useQueryClient();
   const [initial] = useState(() => newSearchDraft(providers.presets));
   const form = useSearchForm(initial, { nameTouched: false, debounceMs });
-  const budget = useBudget();
   // why: Ruling 13 — the panel's "M left" is the top bar's figure, from the one helper
-  const callsLeft = budget.data === undefined ? null : searchApiCallsLeft(budget.data, providers);
+  const credits = useSearchApiCredits(providers);
   const est = form.estimate;
   const { draft } = form;
   const repeats = draft.enabled && draft.scheduleCron !== null;
@@ -136,7 +124,7 @@ export function NewSearchForm({
       <SearchFields
         form={form}
         providers={providers}
-        callsLeft={callsLeft}
+        credits={credits}
         edit={false}
         budgetFit={null}
         {...(fromRef === undefined ? {} : { fromRef })}

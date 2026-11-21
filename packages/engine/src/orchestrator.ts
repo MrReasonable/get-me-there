@@ -2,11 +2,12 @@ import { ACTIVE_STATUSES, type CellKey, type IsoDateTime, PAUSED_STATUSES } from
 import { verifyCellExecution } from './child.js';
 import type { EngineContext } from './context.js';
 import { scheduledNow } from './execute.js';
-import { createRegistry } from './registry.js';
+import { bothWatches, createRegistry, type RunWatch } from './registry.js';
 import { type ResumeOptions, resumeExecution } from './resume.js';
 import { type CancelCause, stopRun } from './run.js';
 import { refused, startExecution } from './start.js';
 import { stopPatch } from './stopCause.js';
+import { RELOAD_PENDING_TEXT } from './text.js';
 import { type Blocked, tickDefinition } from './tick.js';
 import type { StartOptions, StartResult, VerifyCellOptions } from './types.js';
 
@@ -37,14 +38,17 @@ export interface Orchestrator {
   /**
    * Aborts every pass as SIGTERM (cells in flight → not_run, status interrupted) and waits for them; from then on (or
    * from `ctx.lifecycle.closing`, which the engine's shutdown sets first) start, resume and verifyCell are refused.
+   * While `ctx.lifecycle.reloadPending` (settings plan ruling 6) they are refused `reload-pending`, and a tick does
+   * nothing, so its firing is left to the catch-up after the restart in place.
    */
   shutdown(): Promise<void>;
   running(): string[];
 }
 
-export function createOrchestrator(ctx: EngineContext): Orchestrator {
-  // why: spec §2 "The keep-awake lease": the machine is held awake while any run of this engine is in progress
-  const reg = createRegistry(ctx.log, ctx.awake);
+export function createOrchestrator(ctx: EngineContext, watch?: RunWatch): Orchestrator {
+  // why: spec §2 "The keep-awake lease": the machine is held awake while any run of this engine is in progress; settings
+  // plan ruling 6: the app's restart in place is told of each run's end too (EngineOptions.runWatch)
+  const reg = createRegistry(ctx.log, bothWatches(ctx.awake, watch));
   const blocked = new Map<string, Blocked>();
   // why: decision 83 — after a detected suspension every run in flight checks its browser window before its next page
   ctx.heartbeat.onSuspension(() => {
@@ -52,18 +56,24 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
   });
   // why: once shutdown begins nothing new launches, so a job still in flight (the minute catch-up, a tick, a one-shot
   // resume) cannot start a run the shutdown would never stop or wait for
-  const closing = async (): Promise<StartResult> =>
-    refused('shutting-down', 'the app is shutting down; nothing new starts', {});
+  // why: controller ruling R3 — a save waiting for the restart refuses new work as shutdown does, in its own words, and
+  // stops nothing that is running
+  const held = (): Promise<StartResult> | null =>
+    ctx.lifecycle.closing
+      ? Promise.resolve(refused('shutting-down', 'the app is shutting down; nothing new starts', {}))
+      : ctx.lifecycle.reloadPending
+        ? Promise.resolve(refused('reload-pending', RELOAD_PENDING_TEXT, {}))
+        : null;
   const self: Orchestrator = {
     start: async (id, opts) => {
-      if (ctx.lifecycle.closing) return closing();
+      const no = held();
+      if (no !== null) return no;
       const r = await startExecution(ctx, reg, id, opts);
       if (r.ok) blocked.delete(id); // why: review S1 — the run that starts is the one the schedule was waiting for
       return r;
     },
-    resume: (id, opts) => (ctx.lifecycle.closing ? closing() : resumeExecution(ctx, reg, id, opts)),
-    verifyCell: (id, cell, opts) =>
-      ctx.lifecycle.closing ? closing() : verifyCellExecution(ctx, reg, id, cell, opts),
+    resume: (id, opts) => held() ?? resumeExecution(ctx, reg, id, opts),
+    verifyCell: (id, cell, opts) => held() ?? verifyCellExecution(ctx, reg, id, cell, opts),
     cancel: async (id, cause) => {
       const live = reg.get(id);
       if (live !== undefined) {
@@ -89,7 +99,9 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
       });
       return true;
     },
-    tick: (id) => tickDefinition(ctx, self, id, blocked),
+    // why: settings plan ruling 6 — a firing while a restart in place waits is left to the catch-up after it, so no run
+    // starts under the settings being replaced and no skip row claims the firing
+    tick: (id) => (ctx.lifecycle.reloadPending ? Promise.resolve() : tickDefinition(ctx, self, id, blocked)),
     blockedSince: () => {
       for (const [definitionId, b] of blocked)
         if (ctx.repos.executions.activeParent(definitionId)?.id !== b.executionId)

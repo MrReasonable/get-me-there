@@ -1,14 +1,29 @@
+import { appUrl, settingsPath } from '../appClient.js';
 import type { Answers } from './answers.js';
 import { searchSource } from './answers.js';
 import type { SignIn } from './appEnv.js';
 import { TP_SIGNUP_URL, TP_TOKEN_URL } from './prompts.js';
 
-export const NO_SOURCE_TEXT = `No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}) and run \`pnpm gmt setup --reconfigure travelpayouts\`.`;
+/**
+ * Settings plan ruling 15: the token is added on the Settings page (the app imports app.env's lines on its first start,
+ * then holds them), so the words name its Price sources section on this app.
+ */
+const addSourceText = (port: number): string =>
+  `The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}) and add it in Settings › Price sources: ${appUrl(port, settingsPath('sources'))}`;
+export const noSourceText = (port: number): string =>
+  `No price source is set up yet, so searches will find nothing. ${addSourceText(port)}`;
+/**
+ * The app's report did not say whether it has a price source and app.env names none: its Settings page may still hold
+ * one, so this neither says it has none nor that it has one (CodeRabbit, PR #64). `unread`: the report could not be
+ * read; `unsaid`: it was read but carried no price-source check.
+ */
+export const unknownSourceText = (port: number, why: 'unread' | 'unsaid'): string =>
+  `${why === 'unread' ? 'Setup could not ask the app whether it has a price source' : "The app's report did not say whether it has a price source"} (pnpm gmt status shows it); with none, searches find nothing. ${addSourceText(port)}`;
 export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';
 export const NO_SCHEDULE_TEXT =
-  'Nothing runs on a schedule until you give a search one; a scheduled search spends within the caps Settings → Price sources shows.';
+  'Nothing runs on a schedule until you give a search one; a scheduled search spends within its own run limit and the caps and limits in Settings.';
 
 /** The line naming where to go next (U3: always printed, with or without a price source). */
 export const nextStep = (port: number): string =>
@@ -55,12 +70,26 @@ export function closingScreen(x: {
   os: 'darwin' | 'linux';
   /** How the app signs people in, from app.env (spec §4: no password while only this machine can reach it). */
   signIn: SignIn;
+  /**
+   * Whether the app has a price source, from its own report (settings plan ruling 15: its Settings page may hold a key
+   * app.env has no line for). `unread` (the report could not be read) or `unsaid` (it had no price-source check): a
+   * source app.env names counts, and without one the screen says it could not tell rather than that there is none.
+   * Left out (no report asked), the answers decide.
+   */
+  appSource?: boolean | 'unread' | 'unsaid';
 }): string {
-  const source = searchSource(x.answers);
+  const fromAnswers = searchSource(x.answers);
+  const source =
+    x.appSource === undefined
+      ? fromAnswers
+      : typeof x.appSource === 'boolean'
+        ? x.appSource
+        : fromAnswers || x.appSource;
+  const trialLine = x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : [];
   const lines = [
-    ...(source
+    ...(source === true
       ? []
-      : [NO_SOURCE_TEXT, ...(x.answers.searchApi?.plan === 'trial' ? [TRIAL_ONLY_TEXT] : []), '']),
+      : [source === false ? noSourceText(x.port) : unknownSourceText(x.port, source), ...trialLine, '']),
     `get-me-there is running at http://127.0.0.1:${x.port}`,
     ...(x.signIn === 'password'
       ? [

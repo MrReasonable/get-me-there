@@ -1,13 +1,13 @@
 import { DEFAULT_CRON } from '@gmt/core';
 import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DefinitionResponse, ProvidersResponse } from '../../../src/api/types.js';
 import { Limits } from '../../../src/components/TopBar.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
-import { searchApiCallsLeft } from '../../../src/lib/searchApiCallsLeft.js';
+import { searchApiCreditsLine } from '../../../src/lib/searchApiCreditsLine.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
 import {
@@ -32,8 +32,12 @@ const N = COPY.newSearch;
 const W = COPY.repeatWeekly;
 
 beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.useRealTimers());
 
-/** Every install source set up: the Aviasales cache and SearchApi (the fixture's), and the browser. */
+/**
+ * Every install source set up: the Aviasales cache and SearchApi (the fixture's), and the browser. The presets are what
+ * the api gives with no stored lists: SearchApi ticked nowhere (the page takes the presets as they are).
+ */
 function allSources(): ProvidersResponse {
   const base = providersResponse();
   const browser = freeProviders().providers.find((p) => p.providerId === 'camoufox');
@@ -43,9 +47,9 @@ function allSources(): ProvidersResponse {
     presets: {
       ...base.presets,
       providers: {
-        discovery: ['travelpayouts', 'camoufox', 'searchapi'],
-        verification: ['searchapi'],
-        discoveryRefreshHours: { travelpayouts: 168, camoufox: 168, searchapi: 168 },
+        discovery: ['travelpayouts', 'camoufox'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168, camoufox: 168 },
       },
     },
   });
@@ -105,14 +109,14 @@ const more = () => {
 const source = (name: RegExp) => screen.getByRole('checkbox', { name });
 const BROWSER = /^Google Flights, in your browser · free, takes a while$/;
 const CACHE = /^Aviasales cache · free, prices from other people's searches, often days old$/;
-const SEARCHAPI = /^SearchApi · uses calls/;
+const SEARCHAPI = /^SearchApi · uses credits/;
 
 describe('the panel: what is in view (Ruling 13)', () => {
   it('outside More options only From, To, Leave from, Leave by, Stay, Where to look and Search', async () => {
     serve();
     renderPanel();
-    // the calls left arrive with the budget read
-    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName(/9,385 left$/));
+    // the credits left arrive with the budget read
+    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName(/9,385 left \(this app's count\)$/));
     const form = press().closest('form');
     if (form === null) throw new Error('no form');
     const fold = more();
@@ -133,7 +137,7 @@ describe('the panel: what is in view (Ruling 13)', () => {
       PLAN_COPY.longest,
       `${N.source.camoufox} · ${N.sourceNote.camoufox}`,
       `${N.source.travelpayouts} · ${N.sourceNote.travelpayouts}`,
-      expect.stringMatching(/^SearchApi · uses calls, 9,385 left$/),
+      expect.stringMatching(/^SearchApi · uses credits, 9,385 left \(this app's count\)$/),
       N.search,
     ]);
     expect(fold).not.toHaveAttribute('open');
@@ -195,12 +199,48 @@ describe('the panel: what is in view (Ruling 13)', () => {
         <NewSearchForm providers={allSources()} debounceMs={0} />
       </>,
     );
-    const left = searchApiCallsLeft(searchApiMonth(), allSources());
+    const left = searchApiCreditsLine(null, searchApiMonth(), allSources());
     expect(left?.left).toBe(9385);
     const bar = await screen.findByRole('region', { name: COPY.topBar.limitsLabel });
     // the same figure, grouped alike in both
-    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9,385 of 10,000 calls left this month'));
-    await waitFor(() => expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · uses calls, 9,385 left'));
+    await waitFor(() =>
+      expect(bar).toHaveTextContent("SearchApi: 9,385 of 10,000 credits left (this app's count)"),
+    );
+    await waitFor(() =>
+      expect(source(SEARCHAPI)).toHaveAccessibleName(
+        "SearchApi · uses credits, 9,385 left (this app's count)",
+      ),
+    );
+  });
+});
+
+describe('the panel and the top bar say SearchApi’s own balance alike (settings plan ruling 10)', () => {
+  it('both show its credits and its reset day, and Where to look uses credits, not calls', async () => {
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
+    serve();
+    server.use(
+      http.get(`${API}/searchapi/account`, () =>
+        HttpResponse.json({
+          account: {
+            remaining: 9_988,
+            monthlyAllowance: 10_000,
+            periodEnd: '2026-12-01',
+            fetchedAt: '2026-10-14T14:55:00.000Z',
+          },
+        }),
+      ),
+    );
+    renderWithProviders(
+      <>
+        <Limits />
+        <NewSearchForm providers={allSources()} debounceMs={0} />
+      </>,
+    );
+    const bar = await screen.findByRole('region', { name: COPY.topBar.limitsLabel });
+    await waitFor(() => expect(bar).toHaveTextContent('SearchApi: 9,988 credits left · resets 1 Dec'));
+    await waitFor(() =>
+      expect(source(SEARCHAPI)).toHaveAccessibleName('SearchApi · uses credits, 9,988 left · resets 1 Dec'),
+    );
   });
 });
 
@@ -475,9 +515,9 @@ describe('the sentence and the press (Ruling 13)', () => {
     await user.click(source(SEARCHAPI));
     await ready();
     expect(screen.getByRole('status', { name: N.estimateRegion })).toHaveTextContent(
-      'uses about 140 of the 9,385 SearchApi calls left this month',
+      'uses about 140 of the 9,385 SearchApi credits left this month',
     );
-    expect(press()).toHaveAccessibleName('Search · 140 SearchApi calls');
+    expect(press()).toHaveAccessibleName('Search · 140 SearchApi credits');
   });
 });
 
@@ -527,9 +567,9 @@ describe('a source the search uses with no checkbox of its own (fix round 2)', (
   });
 });
 
-// Task 7 minor: an install in fixture mode beside real sources starts a new search on the real ones; the test source is
-// ticked on a new panel only when it is the only source the presets leave
-describe('the test source on a new panel', () => {
+// The rule that an install in fixture mode beside real sources starts a new search on the real ones is the api's
+// (`newSearchSourcesFor`, tested there); the panel ticks what the presets name
+describe('the sources on a new panel', () => {
   const withFixture = (discovery: Array<'fixture' | 'travelpayouts' | 'searchapi'>): ProvidersResponse => {
     const free = freeProviders();
     const first = free.providers[0];
@@ -549,25 +589,42 @@ describe('the test source on a new panel', () => {
   };
   const testSource = () => screen.queryByRole('checkbox', { name: `The test source · ${N.sourceInSearch}` });
 
-  it('is left out beside a real source', async () => {
-    const { estimates, creates } = serve();
-    const { user } = renderPanel(withFixture(['fixture', 'travelpayouts']));
-    expect(testSource()).toBeNull();
+  it('follows the presets exactly: the test source and SearchApi are ticked when the api names them', () => {
+    serve();
+    const first = renderPanel(withFixture(['fixture', 'travelpayouts']));
+    expect(testSource()).toBeChecked();
     expect(source(CACHE)).toBeChecked();
-    await fill(user);
-    await waitFor(() =>
-      expect(estimates.at(-1)).toMatchObject({ providers: { discovery: ['travelpayouts'] } }),
-    );
-    expect(creates).toEqual([]);
+    first.unmount();
+    const base = allSources();
+    renderPanel({
+      ...base,
+      presets: {
+        ...base.presets,
+        providers: {
+          discovery: ['travelpayouts', 'searchapi'],
+          verification: ['searchapi'],
+          discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 },
+        },
+      },
+    });
+    expect(source(SEARCHAPI)).toBeChecked();
   });
 
-  it('is ticked when it is the only source the presets leave (SearchApi starts unticked)', () => {
+  it('an empty list from the api ticks nothing (the Settings page set it to none)', () => {
     serve();
-    const first = renderPanel(withFixture(['fixture', 'searchapi']));
-    expect(testSource()).toBeChecked();
-    first.unmount();
-    renderPanel(withFixture(['fixture']));
-    expect(testSource()).toBeChecked();
+    renderPanel(withFixture([]));
+    // why: every source box on the panel, the browser's included, is left unticked
+    const boxes = screen.getAllByRole('checkbox', { name: /·/ });
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(source(BROWSER)).not.toBeChecked();
+    expect(source(CACHE)).not.toBeChecked();
+    expect(boxes.filter((b) => b instanceof HTMLInputElement && b.checked)).toEqual([]);
+  });
+
+  it('the test source is not offered once the presets leave it out', () => {
+    serve();
+    renderPanel(withFixture([]));
+    expect(testSource()).toBeNull();
   });
 });
 

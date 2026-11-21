@@ -18,10 +18,12 @@ import {
   isScheduled,
   onlyThisMachine,
   type ProviderId,
+  readSharedSettings,
   runModeOf,
   type SearchDefinition,
   START_REFUSAL_FILE,
   scheduledOnlyText,
+  sharedInt,
   startRefusalSchema,
   withAssumedBound,
   workerDataDir,
@@ -288,6 +290,19 @@ function readRefusal(home: string | null): RefusalRead {
   }
 }
 
+/**
+ * The worker's reported pages at once as a number, read through core's one shared-settings rule; null when the worker
+ * reported none, or a value that rule refuses (never the default in its place: the page shows only what was reported).
+ */
+function pagesAtOnceOf(shared: Readonly<Partial<Record<string, string>>> | undefined): number | null {
+  const given = shared?.CAMOUFOX_PAGES_AT_ONCE;
+  if (given === undefined) return null;
+  const read = readSharedSettings({ CAMOUFOX_PAGES_AT_ONCE: given });
+  return read.invalid.includes('CAMOUFOX_PAGES_AT_ONCE')
+    ? null
+    : sharedInt(read.settings, 'CAMOUFOX_PAGES_AT_ONCE');
+}
+
 async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
   const cf = ports.config.providers.camoufox;
   if (cf === null) return { kind: 'disabled' };
@@ -336,6 +351,7 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
               },
         socsCapturedAt: st.socsCapturedAt,
         awakeUntil: st.awake?.until ?? null,
+        pagesAtOnce: pagesAtOnceOf(st.sharedSettings),
       },
     };
   } catch {
@@ -448,5 +464,6 @@ export async function gatherFacts(ctx: RouteContext, env: StatusEnv): Promise<St
     synthetic: registered(ports, 'fixture'),
     worker,
     email: { configured: ports.config.smtp !== null, last: env.emailLast() },
+    settings: { envIgnored: ports.settingsReport.envIgnored, setAside: ports.settingsReport.setAside },
   };
 }

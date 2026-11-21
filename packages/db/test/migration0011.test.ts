@@ -16,7 +16,7 @@ beforeEach(() => {
 
 const TAG = '0011_wp20_flight_lists';
 // why: 0012 (WP21) builds on 0011's tables, so a world at 0010 lacks it too and gets it after 0011
-const NEXT = ['0012_wp21_return_leg', '0013_booking_url'] as const;
+const NEXT = ['0012_wp21_return_leg', '0013_booking_url', '0014_settings'] as const;
 const SEEDED = ['search_definitions', 'search_executions', 'calendar_prices', 'provider_requests'] as const;
 
 /** A database at 0010 with a definition, a paused run holding the old free-text error, a completed run, a price, a ledger row. */

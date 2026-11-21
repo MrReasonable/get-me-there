@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { apiContract, FIXTURE_OPT_IN_PHRASE, fixedClock, Secret } from '@gmt/core';
-import { EmailNotifier } from '@gmt/engine';
+import { EmailNotifier, TestSendLimit } from '@gmt/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modeOf as modeOfConfig } from '../../src/read/statusSources.js';
 import { API_TEXT } from '../../src/text.js';
@@ -465,18 +465,20 @@ describe('the report never spends, waits on a vendor or loads a page (spec §10)
       (await expectContract(await get(x), 'GET', '/api/status', STATUS)).checks.find((c) => c.id === id);
 
     it.each([
-      ['401, key refused', 401, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['401, key refused', 401, 'auth', 'fail', 'sources'],
       ['403 whose words name the credits: quota, not a bad key', 403, 'quota', 'fail', null],
-      ['403 that is the key', 403, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['403 that is the key', 403, 'auth', 'fail', 'sources'],
       ['429 whose words name the credits: quota, fail not warn', 429, 'quota', 'fail', null],
       ['5xx', 503, 'upstream', 'warn', null],
       ['a socket failure with no status', null, 'network', 'warn', null],
-    ] as const)('%s', async (_n, status, kind, state, command) => {
+    ] as const)('%s', async (_n, status, kind, state, section) => {
       const x = await harness(KEYS);
       insert(x, { provider: 'searchapi', status, outcome: 'error', kind, t: '2026-10-14T08:00:00.000Z' });
       const c = await cardOf(x, 'provider-searchapi');
       expect(c?.state).toBe(state);
-      expect(c?.fix?.command ?? null).toBe(command);
+      // why: ruling 13: a refused key's fix points to Settings, not to `--reconfigure`; no fix of these carries a command
+      expect(c?.fix?.command ?? null).toBeNull();
+      expect(c?.fix?.settings ?? null).toBe(section);
     });
 
     it('a success after a failure is ok with its time; a failure after a success fails', async () => {
@@ -575,6 +577,8 @@ describe('POST /api/alerts/test-email (spec §10)', () => {
       log: silentLog,
       clock,
       maxPerHour: o.maxPerHour ?? 20,
+      // why: settings plan ruling 11 — the process holds one test limit; each test here starts with its own
+      testLimit: new TestSendLimit(),
       createTransport: () => ({
         sendMail: async (m) => {
           await o.gate;
@@ -834,6 +838,30 @@ describe('the worker read, through the real facts (V5)', () => {
     const x = await harness(WORKER_ENV);
     const b = await body(x);
     expect(byId(b, 'price-sources')?.summary).toBe('price sources: Camoufox');
+  });
+
+  it("gives the worker's own pages at once, and none when the worker reported none, or one past its rule (settings ruling 9)", async () => {
+    // why: app and worker hold the same value or the worker refuses pages; the page shows the worker's, as it reported it
+    stubWorker(() =>
+      Response.json(workerBody({ sharedSettings: { ...SHARED, CAMOUFOX_PAGES_AT_ONCE: '3' } })),
+    );
+    const x = await harness({ ...WORKER_ENV, CAMOUFOX_PAGES_AT_ONCE: '3' });
+    expect((await body(x)).pagesAtOnce).toBe(3);
+    await x.close();
+    h = undefined;
+    vi.unstubAllGlobals();
+    stubWorker(() =>
+      Response.json(workerBody({ sharedSettings: { ...SHARED, CAMOUFOX_PAGES_AT_ONCE: '9' } })),
+    );
+    const z = await harness(WORKER_ENV);
+    expect(await body(z)).not.toHaveProperty('pagesAtOnce');
+    await z.close();
+    h = undefined;
+    vi.unstubAllGlobals();
+    const { sharedSettings: _omitted, ...older } = workerBody();
+    stubWorker(() => Response.json(older));
+    const y = await harness(WORKER_ENV);
+    expect(await body(y)).not.toHaveProperty('pagesAtOnce');
   });
 
   it('concurrent reports share one worker read, and its result is reused for 10 s (sec-b1-002)', async () => {

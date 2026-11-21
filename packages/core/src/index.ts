@@ -3,7 +3,7 @@
 
 export { dedupKey, identityKey, isSuppressed } from './alerts/dedup.js';
 export { buildDigest } from './alerts/digest.js';
-export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/evaluate.js';
+export { evaluateAlertRules } from './alerts/evaluate.js';
 // Inferred contract types that other packages name in signatures (the schemas stay under `apiContract`).
 export type {
   AlertEventPayload,
@@ -19,6 +19,7 @@ export type {
   ResultRow,
   RouteSeriesPoint,
   SchedulerJob,
+  SearchApiAccount,
   SearchCard,
   SearchCardsResponse,
   StartRefusalCode,
@@ -42,6 +43,7 @@ export * from './config/access.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';
+export * from './config/settings.js';
 export * from './config/synthetic.js';
 export { evaluateConstraints } from './constraints/evaluate.js';
 export { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from './constraints/labels.js';

@@ -6,6 +6,7 @@
  * header of one in-process request.
  */
 import { apiContract } from '@gmt/core';
+import { settingsPath } from './appClient.js';
 import { type AppEndpoint, nativeEndpoint } from './appEndpoint.js';
 import type { Flags } from './args.js';
 import { type Deps, EXIT } from './deps.js';
@@ -13,7 +14,13 @@ import { type Check, describeChecks } from './services/checks.js';
 
 export type StatusReport = apiContract.StatusResponse;
 export type StatusCheck = apiContract.StatusCheck;
-export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; reason: string };
+/**
+ * The report, or why there is none. `answered`: the app answered, with something that is not the report (a status, a
+ * body), as against no answer at all or no settings to ask with.
+ */
+export type ReportRead =
+  | { kind: 'ok'; report: StatusReport }
+  | { kind: 'down'; reason: string; answered: boolean };
 
 /** The areas `--only` accepts. */
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
@@ -43,7 +50,7 @@ function barLine(checks: readonly apiContract.StatusCheck[]): string {
 
 /** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
 export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(deps)): Promise<ReportRead> {
-  if (a.kind === 'none') return { kind: 'down', reason: a.reason };
+  if (a.kind === 'none') return { kind: 'down', reason: a.reason, answered: false };
   const r = await deps.http({
     method: 'GET',
     url: `${a.baseUrl}/api/status`,
@@ -51,30 +58,41 @@ export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(dep
     // why: the app's own worker read is bounded at 2 s; the rest is local reads
     timeoutMs: 15_000,
   });
-  if ('error' in r) return { kind: 'down', reason: `no answer from the app on port ${a.port}` };
-  if (r.status !== 200) return { kind: 'down', reason: `the app answered ${r.status}` };
+  if ('error' in r)
+    return { kind: 'down', reason: `no answer from the app on port ${a.port}`, answered: false };
+  if (r.status !== 200) return { kind: 'down', reason: `the app answered ${r.status}`, answered: true };
   let json: unknown;
   try {
     json = JSON.parse(r.body);
   } catch {
-    return { kind: 'down', reason: 'the app’s answer was not JSON' };
+    return { kind: 'down', reason: 'the app’s answer was not JSON', answered: true };
   }
   const parsed = apiContract.statusResponseSchema.safeParse(json);
   return parsed.success
     ? { kind: 'ok', report: parsed.data }
-    : { kind: 'down', reason: 'the app’s answer was not the status report' };
+    : { kind: 'down', reason: 'the app’s answer was not the status report', answered: true };
 }
 
-/** One row per check: state as text, area, summary; then its note and its fix. */
-export function describeReport(checks: readonly StatusCheck[]): string {
+/**
+ * One row per check: state as text, area, summary; then its note and its fix. A fix made on the Settings page names
+ * its section's address on the app (settings plan ruling 13), so the person can open it.
+ */
+export function describeReport(checks: readonly StatusCheck[], baseUrl: string | null = null): string {
   const width = Math.max(10, ...checks.map((c) => c.area.length));
   const pad = ' '.repeat(width + 8);
   return `${checks
     .map((c) => {
       const lines = [`${c.area.padEnd(width)}  ${c.state.padEnd(4)}  ${c.summary}`];
       if (c.note !== null) lines.push(`${pad}note: ${c.note}`);
-      if (c.fix !== null)
-        lines.push(`${pad}fix: ${c.fix.command === null ? c.fix.text : `${c.fix.command} (${c.fix.text})`}`);
+      if (c.fix !== null) {
+        const where =
+          c.fix.settings === undefined || baseUrl === null
+            ? ''
+            : ` (${baseUrl}${settingsPath(c.fix.settings)})`;
+        lines.push(
+          `${pad}fix: ${c.fix.command === null ? c.fix.text : `${c.fix.command} (${c.fix.text})`}${where}`,
+        );
+      }
       return lines.join('\n');
     })
     .join('\n')}\n`;
@@ -121,8 +139,10 @@ export async function finishStatus(
   rf: Extract<ReportFlags, { ok: true }>,
   local: readonly Check[],
   target: StatusTarget = nativeTarget(deps),
+  /** The report already read for the local facts (settings plan ruling 15), so the app is asked once. */
+  read?: ReportRead,
 ): Promise<number> {
-  const read = await readReport(deps, target.endpoint);
+  read ??= await readReport(deps, target.endpoint);
   const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
     const step = target.nextStep(local, target.endpoint.kind === 'none' ? null : target.endpoint.port);
@@ -140,7 +160,9 @@ export async function finishStatus(
   const checks = rf.only === null ? read.report.checks : read.report.checks.filter((c) => c.area === rf.only);
   if (rf.json) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
   else {
-    deps.io.out(`\n${describeReport(checks)}`);
+    deps.io.out(
+      `\n${describeReport(checks, target.endpoint.kind === 'none' ? null : target.endpoint.baseUrl)}`,
+    );
     deps.io.out(`${barLine(checks)} (app ${read.report.version}, ${read.report.mode} mode)\n`);
   }
   // why: CodeRabbit on PR #14 — the exit code never depends on what was printed: a failing check anywhere, local or in

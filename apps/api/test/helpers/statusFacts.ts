@@ -49,6 +49,7 @@ export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerSta
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture', mark: 'reject' },
     socsCapturedAt: ago(10 * DAY),
     awakeUntil: null,
+    pagesAtOnce: 1,
     ...over,
   };
 }
@@ -105,6 +106,7 @@ export function healthyFacts(over: Partial<StatusFacts> = {}): StatusFacts {
     synthetic: false,
     worker: healthyWorker(),
     email: { configured: true, last: null },
+    settings: { envIgnored: [], setAside: [] },
     ...over,
   };
 }

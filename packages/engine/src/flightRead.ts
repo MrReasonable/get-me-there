@@ -31,6 +31,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
+import type { RunWatch } from './registry.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
 import { airportNamesOf, cellAirportNames } from './stages/discovery.js';
 import { FLIGHT_LIST_PROVIDER, type FlightRowBase, failedRowOf, readRowOf } from './stages/flightLists.js';
@@ -55,7 +56,7 @@ export type FlightReadUnavailable = 'not-named' | 'not-configured' | 'cabin';
 export type FlightReadStart =
   | { ok: true; done: Promise<void> }
   | { ok: false; code: 'not_available'; reason: FlightReadUnavailable }
-  | { ok: false; code: 'busy' | 'not_found' | 'outside_space' | 'shutting-down' };
+  | { ok: false; code: 'busy' | 'not_found' | 'outside_space' | 'shutting-down' | 'reload-pending' };
 
 /** The read in flight, as `GET /definitions/:id/flight-lists` reports it (`reading`). */
 export interface FlightReadMark {
@@ -124,8 +125,12 @@ function phaseOf(
   return { returnLimits: flightLimitsOf(def.constraints), booking: flags?.BOOKING_SELECT_VERIFIED === true };
 }
 
-/** The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. */
-export function createFlightReader(ctx: EngineContext): FlightReader {
+/**
+ * The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. `watch`
+ * (settings plan ruling 6, EngineOptions.runWatch) is told when a read starts and once it has settled and is no longer
+ * in flight.
+ */
+export function createFlightReader(ctx: EngineContext, watch?: RunWatch): FlightReader {
   let current: { mark: FlightReadMark; done: Promise<void>; abort: AbortController } | null = null;
 
   /** The read itself, once every refusal is behind it. Never rejects. */
@@ -198,6 +203,8 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
     read: async (definitionId, pair) => {
       // why: nothing in this function is awaited before `lease.hold`, so the checks and the lease are one turn
       if (ctx.lifecycle.closing) return { ok: false, code: 'shutting-down' };
+      // why: controller ruling R3 — a save waiting for the restart in place refuses a new read, in its own code
+      if (ctx.lifecycle.reloadPending) return { ok: false, code: 'reload-pending' };
       const def = ctx.repos.definitions.get(definitionId);
       if (def === null || def.deletedAt !== null) return { ok: false, code: 'not_found' };
       const unavailable = flightReadUnavailable(ctx, def);
@@ -252,9 +259,11 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         departureDate: pair.departureDate,
         returnDate: pair.returnDate,
       };
+      watch?.started();
       const done = run(def, cell, signal).finally(() => {
         current = null;
         free();
+        watch?.ended();
       });
       current = { mark, done, abort };
       return { ok: true, done };

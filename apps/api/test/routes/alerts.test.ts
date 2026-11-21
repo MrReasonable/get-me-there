@@ -29,6 +29,49 @@ const rule = (definitionId: string) => ({
 });
 
 describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
+  it('GET lists every rule with when it last sent: the newest notified event, null with only queued or suppressed ones or none (settings plan R13)', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const make = async () =>
+      expectContract(await x.request('/api/alerts', { json: rule(def.id) }), 'POST', '/api/alerts', RULE);
+    const sent = await make();
+    const unsent = await make();
+    const quiet = await make();
+    let n = 0;
+    const event = (ruleId: string, status: 'queued' | 'notified' | 'suppressed', hoursAgo: number) => {
+      n += 1;
+      x.ports.repos.alerts.insertEvent({
+        ruleId,
+        identityKey: 'k',
+        observationId: null,
+        calendarPriceId: null,
+        dedupKey: `d${n}`,
+        firedAt: at(-hoursAgo),
+        status,
+        reason: null,
+        payload: {},
+      });
+    };
+    event(sent.id, 'notified', 30);
+    event(sent.id, 'notified', 20);
+    event(sent.id, 'queued', 10);
+    event(unsent.id, 'queued', 5);
+    event(unsent.id, 'suppressed', 4);
+    const listed = await expectContract(
+      await x.request('/api/alerts'),
+      'GET',
+      '/api/alerts',
+      apiContract.alertRuleListedSchema.array(),
+    );
+    expect(listed.map((r) => [r.id, r.lastSentAt])).toEqual(
+      [
+        [sent.id, at(-20)],
+        [unsent.id, null],
+        [quiet.id, null],
+      ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+  });
+
   it('create, list, update, delete', async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(exampleDefinitionInput());

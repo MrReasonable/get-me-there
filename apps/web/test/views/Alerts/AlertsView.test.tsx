@@ -1,7 +1,8 @@
 import { type AlertEventPayload, BANNED_WORD_ALLOWLIST, CONSTRAINT_LABELS, findBannedWords } from '@gmt/core';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { alertKeys } from '../../../src/api/queries.js';
 import { COPY } from '../../../src/copy.js';
 import { AlertsView, describeRule } from '../../../src/views/Alerts/index.js';
 import { API, provCalendar, provSearch } from '../../fixtures.js';
@@ -20,6 +21,8 @@ const rules = [
     requireAllVerified: null,
     cooldownHours: 336,
     enabled: true,
+    // settings plan R13: GET /alerts says when each rule last sent
+    lastSentAt: null,
   },
   {
     id: 'r2',
@@ -31,6 +34,7 @@ const rules = [
     requireAllVerified: false,
     cooldownHours: 336,
     enabled: true,
+    lastSentAt: null,
   },
 ] as const;
 /** Core's payload shape (decision 56), in its wire form. */
@@ -213,6 +217,18 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json(events)));
     await user.click(screen.getByRole('button', { name: COPY.retryLoad }));
     expect(await screen.findByRole('table', { name: C.eventsTable })).toBeInTheDocument();
+  });
+
+  it('a delete here marks Settings’ list of every rule out of date, so it reads again (settings plan fix round 1, minor 3)', async () => {
+    withData();
+    server.use(http.delete(`${API}/alerts/:id`, () => HttpResponse.json({ ...rules[0] })));
+    const { user, client } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    // Settings › Email and alerts read every rule a moment ago
+    client.setQueryData(alertKeys.every, [...rules]);
+    const [first] = await screen.findAllByRole('button', { name: C.deleteRule });
+    if (first === undefined) throw new Error('a rule');
+    await user.click(first);
+    await waitFor(() => expect(client.getQueryState(alertKeys.every)?.isInvalidated).toBe(true));
   });
 
   it('a delete that failed is announced and the rule stays listed', async () => {

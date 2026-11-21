@@ -1,4 +1,5 @@
 import dns from 'node:dns';
+import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { setupServer } from 'msw/node';
 
@@ -66,6 +67,33 @@ function refuseDnsLookups(): void {
     if (typeof callback === 'function') process.nextTick(() => callback(error));
   };
   Object.defineProperty(dns, 'lookup', { value: refuseLookup, writable: true, configurable: true });
+}
+
+/**
+ * Lets one test reach a real server this process listens on at `127.0.0.1:<port>` (the api's restart in place on a
+ * real listener): the loopback literal resolves, for the listen and for msw's passthrough socket, which looks up even
+ * an IP literal, and msw passes that origin's requests through. Every other name stays refused and every other origin
+ * still reaches the catch-all. Returns the undo of the lookup; the passthrough goes with the test's handlers.
+ */
+export function allowLoopback(port: number): () => void {
+  const refused = dns.lookup;
+  const lookup = (hostname: string, ...rest: unknown[]): void => {
+    const cb = rest.find((x) => typeof x === 'function');
+    const opts = rest[0];
+    const all = typeof opts === 'object' && opts !== null && 'all' in opts && opts.all === true;
+    if (hostname !== '127.0.0.1' || typeof cb !== 'function') {
+      Reflect.apply(refused, dns, [hostname, ...rest]);
+      return;
+    }
+    process.nextTick(() =>
+      all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4),
+    );
+  };
+  Object.defineProperty(dns, 'lookup', { value: lookup, writable: true, configurable: true });
+  guardedServer.use(http.all(`http://127.0.0.1:${port}/*`, () => passthrough()));
+  return () => {
+    Object.defineProperty(dns, 'lookup', { value: refused, writable: true, configurable: true });
+  };
 }
 
 /** The test-runner hooks installNetworkGuards registers (vitest's beforeAll, afterEach and afterAll fit). */

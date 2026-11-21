@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from 'node:path/posix';
-import { isLoopbackHost } from '@gmt/core';
-import { authFrom, targetFrom } from '../appClient.js';
+import { isLoopbackHost, isOwnedName, SETTING_SECTION } from '@gmt/core';
+import { authFrom, changeInSettings, type SettingsSection, targetFrom } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';
 import { browserSetup } from '../camoufox/browserSetup.js';
@@ -42,7 +42,7 @@ import {
   type Settings,
   signInOf,
 } from '../setup/appEnv.js';
-import { closingScreen, NO_SOURCE_TEXT, nextStep } from '../setup/closing.js';
+import { closingScreen, nextStep, noSourceText } from '../setup/closing.js';
 import { type DockerFacts, gatherDocker, judgeDocker } from '../setup/docker.js';
 import {
   backupAction,
@@ -74,7 +74,9 @@ import { describeProblems, gatherPrereqs, judgePrereqs, nextFreePort } from '../
 import { askAnswers, askPasteToken, type PromptRow } from '../setup/prompts.js';
 import { readSetupRecord, recordAction, type SetupRecord } from '../setup/record.js';
 import { generatePassword } from '../setup/secrets.js';
+import { settingsHeld } from '../setup/settingsHeld.js';
 import { offeredFor, offerTestEmail } from '../setup/testEmail.js';
+import { readReport } from '../statusReport.js';
 import { type GuardTarget, guardActiveRun } from './guard.js';
 
 /** The rows each `--reconfigure` group asks (brief §6); `password` asks none and generates a new one. */
@@ -87,6 +89,17 @@ const GROUP_ROWS: Record<ReconfigureGroup, PromptRow[]> = {
   browser: [9],
   password: [],
   linger: [7],
+};
+
+/**
+ * Settings plan ruling 15: the groups whose names the Settings page owns, and its section for each. `browser` owns only
+ * its window line (row 9); the browser provider's own step stays here.
+ */
+const SETTINGS_SECTION: Partial<Record<ReconfigureGroup, SettingsSection>> = {
+  travelpayouts: 'sources',
+  searchapi: 'sources',
+  email: 'email',
+  browser: 'sources',
 };
 
 const failed = (deps: Deps, message: string): number => {
@@ -240,6 +253,9 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       deps,
       `${envPath} would not pass the app’s settings check (${settings.fields.join(', ')}); setup does not guess. Correct those lines, then run setup again`,
     );
+  // why: settings plan ruling 1 (Task 1's review): a variable the app ignores rather than refusing boot is said here,
+  // by name and in the app's own words, as the app logs it on each start
+  if (settings !== null) notes.push(...settings.warnings.map((w) => `app.env: ${w}`));
   const record = readSetupRecord(deps);
 
   // 1. checks, all before any action
@@ -319,6 +335,24 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
 
   // 2. answers
   const current = settings?.ok === true ? answersFromConfig(settings.config, settings.record, record) : null;
+  // why: settings plan ruling 15: from the app's first start its Settings page owns these groups' names, and an
+  // app.env line for one is reported, never applied; so once the app holds its settings, setup names the page and
+  // writes nothing (before that, as on a first run, it writes app.env, which the app imports on its first start).
+  // Review I2 (controller ruling R20): whether it holds them is read from its database, so a stopped app counts too
+  const section = group === null ? undefined : SETTINGS_SECTION[group];
+  const app = target.app;
+  let held = false;
+  if (settings?.ok === true && app !== null && (section !== undefined || (group === null && !moving))) {
+    const h = await settingsHeld(deps, settings.config.databasePath);
+    // why: a group the page owns must not be written blind; a full run only words its note by it, and goes on
+    if (!h.ok && section !== undefined) return refuse(deps, h.error);
+    held = h.ok && h.held;
+  }
+  const settingsLine = section !== undefined && held && app !== null ? changeInSettings(app, section) : null;
+  if (settingsLine !== null && group !== 'browser') {
+    deps.io.out(`${settingsLine}\n`);
+    return EXIT.ok;
+  }
   let answers: Answers;
   let extra: Entries = [];
   if (group !== null && current !== null) {
@@ -327,7 +361,22 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       const g = await guardActiveRun(deps, target, guardFlags);
       if (!g.ok) return refuse(deps, g.message, EXIT.lockRefused);
       // why: decision 83: the interrupted run reads the new value when it resumes
-      if (g.forced && group === 'browser') deps.io.out('The new value applies when the run resumes.\n');
+      if (g.forced && group === 'browser' && settingsLine === null)
+        deps.io.out('The new value applies when the run resumes.\n');
+    }
+    if (group === 'browser' && settingsLine !== null) {
+      // why: ruling 15: the window is the Settings page's; the browser provider's own step (turn it on, a new bundle,
+      // a new key) is still this command's, with an answers file's browser choices
+      deps.io.out(`${settingsLine}\n`);
+      let choice = current.browser;
+      try {
+        if (answersPath !== null) choice = (await fromFile(answersPath, deps, current)).browser;
+      } catch (e) {
+        return refuse(deps, e instanceof Error ? e.message : String(e));
+      }
+      if (dryRun) return EXIT.ok;
+      const out = await browserSetup(deps, { interactive, ask, choice, reconfigure: true });
+      return out === 'failed' ? EXIT.failed : EXIT.ok;
     }
     if (group === 'browser' && settings?.ok === true && settings.record.CAMOUFOX_ENABLED !== 'true')
       deps.io.out(
@@ -414,9 +463,19 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     const differs = ownedDiff(settings.record, intended);
     if (differs.length > 0) {
       effective = settings.record;
-      notes.push(
-        `app.env differs from what setup would write: ${differs.join(', ')}. Setup keeps the file as it is; to change a value, run pnpm gmt setup --reconfigure <group> (for PORT: pnpm gmt setup --reconfigure port).`,
-      );
+      // why: review I2: once the app holds its settings, a name its Settings page owns is changed there, never by a
+      // --reconfigure that would only print the page's address
+      const inSettings = held && app !== null ? differs.filter(isOwnedName) : [];
+      const rest = differs.filter((n) => !inSettings.some((o) => o === n));
+      if (rest.length > 0)
+        notes.push(
+          `app.env differs from what setup would write: ${rest.join(', ')}. Setup keeps the file as it is; to change a value, run pnpm gmt setup --reconfigure <group> (for PORT: pnpm gmt setup --reconfigure port).`,
+        );
+      if (app !== null)
+        for (const where of new Set(inSettings.map((n) => SETTING_SECTION[n])))
+          notes.push(
+            `app.env differs from what setup would write: ${inSettings.filter((n) => SETTING_SECTION[n] === where).join(', ')}. The app holds these in its Settings page and ignores app.env for them. ${changeInSettings(app, where)}`,
+          );
     }
     // why: U8 (sec-b1-002): an operator may bind wider for a tunnel (docs section 3); said plainly, never refused
     if (!isLoopbackHost(settings.config.bindAddress))
@@ -568,7 +627,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
         : `${command}: ${changed === '' ? 'app.env' : changed} written; the app restarted\n`,
     );
     if (group === 'travelpayouts' || group === 'searchapi')
-      deps.io.out(`${searchSource(answers) ? nextStep(port) : NO_SOURCE_TEXT}\n`);
+      deps.io.out(`${searchSource(answers) ? nextStep(port) : noSourceText(port)}\n`);
     if (group === 'email') await offerTest();
     return browserPart(EXIT.ok);
   }
@@ -680,7 +739,15 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     );
   // why: spec §4: the closing words follow the file as it now stands, by core's rule, never the mere absence of a line
   const written = envText !== null ? readEnvText(envText) : (settings?.record ?? effective);
-  deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written) }));
+  // why: review IMPORTANT 5: once the app holds its settings, its own report says whether it has a price source
+  const report = await readReport(deps);
+  const sourcesCheck =
+    report.kind === 'ok' ? report.report.checks.find((c) => c.id === 'price-sources') : undefined;
+  const appSource =
+    report.kind !== 'ok' ? 'unread' : sourcesCheck === undefined ? 'unsaid' : sourcesCheck.state === 'ok';
+  deps.io.out(
+    closingScreen({ port, answers, appEnv: envPath, backupOk, os, signIn: signInOf(written), appSource }),
+  );
   await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';

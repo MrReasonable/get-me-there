@@ -1,5 +1,5 @@
 // Design 2026-11-08 Ruling 10: the top bar's health line (from the same query as the Status page, brief WP18 Task 18.6)
-// and its limits: SearchApi's calls left, the month's spend and "Searching: <name>".
+// and its limits: SearchApi's credits left, the month's spend and "Searching: <name>".
 import { act, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,7 +52,7 @@ describe('the health line (Ruling 10)', () => {
     const link = await screen.findByRole('link', { name: 'Backups needs attention · fix' });
     expect(link).toHaveClass('health-link-warn');
     expect(link).not.toHaveClass('health-link-bad');
-    expect(link).toHaveAttribute('href', expect.stringContaining('view=status'));
+    expect(link).toHaveAttribute('href', '/?view=settings&section=system');
   });
 
   it('one failure is red "<name> failing · fix"', async () => {
@@ -110,11 +110,11 @@ describe('the health line (Ruling 10)', () => {
     expect(link.textContent).toContain('✕');
   });
 
-  it('goes to the Status view when clicked', async () => {
+  it('goes to Settings › System when clicked (settings plan ruling 14)', async () => {
     serve(statusReport([failing('app')]));
     const { user } = renderWithProviders(<HealthLine />);
     await user.click(await screen.findByRole('link', { name: 'App failing · fix' }));
-    expect(window.location.search).toContain('view=status');
+    expect(window.location.search).toBe('?view=settings&section=system');
   });
 
   it('after a failed refresh it says the report is stale and how old, even when the old report was clean', async () => {
@@ -268,16 +268,49 @@ describe('the limits (Ruling 10)', () => {
     ],
   });
 
-  it('SearchApi: the calls left in this month on the $40 plan, read from the window in use', async () => {
+  const serveAccount = (account: object | null) =>
+    server.use(http.get(`${API}/searchapi/account`, () => HttpResponse.json({ account })));
+
+  it('SearchApi: its own balance, with the day a monthly plan resets', async () => {
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
     serveLimits(bothWindows);
+    serveAccount({
+      remaining: 9_988,
+      monthlyAllowance: 10_000,
+      periodEnd: '2026-12-01',
+      fetchedAt: '2026-10-14T14:55:00.000Z',
+    });
     renderWithProviders(<Limits />);
-    expect(await screen.findByText('SearchApi: 51 of 100 calls left this month')).toBeInTheDocument();
+    expect(await screen.findByText('SearchApi: 9,988 credits left · resets 1 Dec')).toBeInTheDocument();
   });
 
-  it('SearchApi: the trial allowance, in its own words, from the other window', async () => {
+  it('SearchApi: a balance read more than ten minutes ago says when', async () => {
+    // why: eleven minutes before the page's pinned clock (NOW, 15:00 UTC); London time is BST in October
+    serveLimits(bothWindows, providers('trial'));
+    serveAccount({
+      remaining: 38,
+      monthlyAllowance: 0,
+      periodEnd: null,
+      fetchedAt: '2026-10-14T14:49:00.000Z',
+    });
+    renderWithProviders(<Limits />);
+    expect(await screen.findByText('SearchApi: 38 credits left · as of 15:49')).toBeInTheDocument();
+  });
+
+  it('SearchApi: with no balance, this app’s count of the month on the $40 plan, says whose it is', async () => {
+    serveLimits(bothWindows);
+    renderWithProviders(<Limits />);
+    expect(
+      await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)"),
+    ).toBeInTheDocument();
+  });
+
+  it('SearchApi: with no balance, the trial allowance from the other window', async () => {
     serveLimits(bothWindows, providers('trial'));
     renderWithProviders(<Limits />);
-    expect(await screen.findByText('SearchApi: 15 of 24 trial calls left')).toBeInTheDocument();
+    expect(
+      await screen.findByText("SearchApi: 15 of 24 credits left (this app's count)"),
+    ).toBeInTheDocument();
   });
 
   it('says nothing of SearchApi when it is not enabled', async () => {

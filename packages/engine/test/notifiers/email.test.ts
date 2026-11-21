@@ -15,6 +15,7 @@ import {
   TEST_EMAIL_BODY,
   TEST_EMAIL_MIN_GAP_MS,
   TEST_EMAIL_SUBJECT,
+  TestSendLimit,
   type TransportFactory,
 } from '../../src/notifiers/email.js';
 import { buildNotifiers } from '../../src/notifiers/index.js';
@@ -79,6 +80,8 @@ function notifier(over: Partial<EmailNotifierOptions> = {}) {
     clock,
     maxPerHour: 20,
     createTransport: t.factory,
+    // why: settings plan ruling 11 — the process holds one test limit; each test here starts with its own
+    testLimit: new TestSendLimit(),
     ...over,
   });
   return { n, t, log, clock };

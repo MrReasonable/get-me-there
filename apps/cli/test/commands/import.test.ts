@@ -140,7 +140,9 @@ describe('--import-docker (spec §13 "One app per ledger"; brief Task 16b.7)', (
   it('a stopped container is not asked; its run cannot be active', async () => {
     const m = dockerMachine({ running: false });
     expect(await runCli(['setup', '--import-docker', ...NI], m.deps)).toBe(0);
-    expect(m.http.requests).toEqual([]);
+    // why: review IMPORTANT 5: the closing screen reads the native app's own report once it is up; nothing asks the
+    // stopped container whether a run is active
+    expect(m.http.requests.map((r) => r.url)).toEqual(['http://127.0.0.1:3000/api/status']);
   });
 
   it('a failed integrity check plans no marker and no rename; a failed backup copies nothing', async () => {

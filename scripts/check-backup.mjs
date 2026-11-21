@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Checks a backup before a restore (spec §13 Restore; docs/setup.md section 6): opens the file read-only and runs
 // SQLite's `PRAGMA integrity_check`, the check backupDatabase runs on every copy it writes. On success it prints one JSON
-// line: `{ ok, file, resumable, scheduled }`, what starting the app on that file will resume or catch up (cb-b1-010).
+// line: `{ ok, file, resumable, scheduled, settings }`, what starting the app on that file will resume or catch up
+// (cb-b1-010) and its stored settings whose names are not secrets (controller ruling R18; restore reads SearchApi's plan).
 //   node scripts/check-backup.mjs <file>
 // Exit codes from the plan's single table (apps/api EXIT): 0 ok, 64 usage, 74 the backup is unusable; 1 when the
 // built packages cannot be loaded.

@@ -6,6 +6,7 @@
  * No airport code appears here (spec §1; the boundary script's airport-literal check, decisions 36 and 46).
  */
 import { formatPence } from '@gmt/core';
+import { RELOAD_PENDING_TEXT } from '@gmt/engine';
 
 export const API_TEXT = {
   internal: 'internal error; see the server log',
@@ -48,6 +49,32 @@ export const API_TEXT = {
   browserBusy: 'the browser worker is busy with a search or another flight list; try again when it finishes',
   flightsNotAvailable: 'flight lists cannot be read for this search',
   shuttingDown: 'the app is shutting down; nothing new starts',
+  // why: settings plan ruling 6 — the engine's own words for anything new asked while a save waits for the restart
+  applyingSettings: RELOAD_PENDING_TEXT,
+  // why: settings plan rulings 5 and 11 — the Settings page's refusals and warnings, in its words (no variable names)
+  unknownSetting: 'that is not a setting the Settings page saves',
+  settingsRefused: 'nothing was saved: some settings need changing',
+  emailTestRefused: 'nothing was sent: some email settings need changing',
+  settingsZeroSpendLimit:
+    'With a monthly spend limit of £0, SearchApi checks that cost money will not run. Raise the limit for them to run.',
+  settingsSpendBelowFees: (capPence: number, feesPence: number) =>
+    `The monthly spend limit (${formatPence(capPence)}) is below the ${formatPence(feesPence)} of subscription fees it counts, so it cannot stop a check: SearchApi's credits are the hard stop.`,
+  // why: settings plan ruling 5 — the config's own warnings, in the page's words
+  settingsTrialUsedIgnored:
+    "SEARCHAPI_TRIAL_USED in .env counts only the free trial's credits, so it is ignored on the $40 plan: remove the line from .env.",
+  // why: review M7: an env-only line a save makes the app read, refused by the schema; named, never quoted
+  settingsEnvRefused: (names: readonly string[]) =>
+    `nothing was saved: ${names.join(', ')} in .env is not valid with these settings: fix the line in .env and restart the app so it reads .env again (pnpm gmt restart, or docker compose up -d in Docker), then save again`,
+  settingsEnvWarning: (name: string) =>
+    `${name} in .env is ignored with these settings: remove the line from .env.`,
+  // why: settings plan ruling 6 — a tool run the restart waits for, named as a search would be
+  toolRunLabel: { record: 'Fixture recording', smoke: 'Smoke test' },
+  emailTestFailed: {
+    refused: "The mail server couldn't be reached: check its name and port.",
+    'timed-out': "The mail server didn't answer in time: check its name and port.",
+    'sign-in-refused': 'The mail server refused the sign-in: check the user name and password.',
+    'not-a-mail-server': "That doesn't look like a mail server: check its name, port and encryption.",
+  },
   draftNotice: 'Set at least one origin and one destination before running or scheduling this search.',
   draftCannotEnable: 'a definition without origins and destinations cannot be enabled',
   draftNoEstimate: 'set origins and destinations before asking for an estimate',

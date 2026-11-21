@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { PAGES_AT_ONCE_MAX } from '../camoufox/settings.js';
 import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
-import { iataSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
+import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
 import {
   capabilityInfoSchema,
   cronSchema,
@@ -17,6 +18,8 @@ export const healthPublicSchema = z.strictObject({ ok: z.boolean(), degraded: z.
 export const healthDetailSchema = z.object({
   ok: z.boolean(),
   degraded: z.boolean(),
+  /** Settings plan ruling 6: random per pass of the app, so the page sees a restart in place has finished. */
+  bootId: z.string(),
   db: z.object({ ok: z.boolean(), sizeBytes: count }),
   providers: z.array(
     z.object({ providerId: providerIdSchema, configured: z.boolean(), healthy: z.boolean().nullable() }),
@@ -70,6 +73,19 @@ export const budgetResponseSchema = z.object({
   fixedFeesMicroGbp: microGbpSchema,
   ceilingNote: z.string(),
 });
+/**
+ * SearchApi's own account balance (settings plan ruling 10): credits left, the plan's monthly allowance (0 on the trial)
+ * and the day the period ends as a date in SCHEDULER_TIMEZONE (null on the trial, which has no subscription).
+ */
+export const searchApiAccountSchema = z.object({
+  remaining: count,
+  monthlyAllowance: count,
+  periodEnd: isoDateSchema.nullable(),
+  fetchedAt: isoDateTimeSchema,
+});
+/** `GET /searchapi/account`: the balance, or null with no key set or when SearchApi could not be asked. */
+export const searchApiAccountResponseSchema = z.object({ account: searchApiAccountSchema.nullable() });
+export type SearchApiAccount = z.output<typeof searchApiAccountSchema>;
 export const schedulerJobSchema = z.object({
   id: z.string(),
   kind: z.enum(['definition', 'resume']),
@@ -151,7 +167,10 @@ export const statusAreaSchema = z.enum([
   'worker',
   'consent',
   'email',
+  'settings',
 ]);
+/** The Settings sections a fix can point to (settings plan ruling 13); the page's own `section=` values. */
+export const statusFixSectionSchema = z.enum(['sources', 'limits', 'email', 'system']);
 export const statusCheckSchema = z
   .strictObject({
     id: z.string().regex(/^[a-z0-9-]+$/),
@@ -170,8 +189,18 @@ export const statusCheckSchema = z
       .strictObject({
         text: z.string().max(200),
         command: z.string().startsWith('pnpm gmt ').nullable(),
+        /**
+         * Ruling 13: the Settings section where the fix is made. The page links to it; the CLI prints the Settings
+         * address with it. Absent when the fix is made elsewhere.
+         */
+        settings: statusFixSectionSchema.exactOptional(),
       })
       .nullable(),
+    /**
+     * Settings plan ruling 9: the consent check's record expiry as a date in the app's time zone, set only when the
+     * record's expiry is known (held, expiring or expired); the Settings page words it, never the summary.
+     */
+    expiresOn: isoDateSchema.exactOptional(),
   })
   .refine((c) => (c.state === 'off') === (c.offReason !== null), {
     message: 'offReason is set exactly when the state is off',
@@ -182,6 +211,11 @@ export const statusResponseSchema = z.strictObject({
   mode: z.enum(['native', 'container', 'dev']),
   version: z.string(),
   checks: z.array(statusCheckSchema),
+  /**
+   * Settings plan ruling 9: the pages the browser worker loads at once, as its own status reported them; absent when the
+   * worker was not read, did not answer or reported no shared settings. The Settings page shows it; setup changes it.
+   */
+  pagesAtOnce: z.number().int().min(1).max(PAGES_AT_ONCE_MAX).exactOptional(),
 });
 /** Spec §10 `POST /api/alerts/test-email`: the class of the send (a refusal at the hourly ceiling is a 429, not this). */
 export const testEmailResponseSchema = z.strictObject({

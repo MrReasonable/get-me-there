@@ -25,10 +25,15 @@ async function runInProcess<A>(
   args: A,
 ): Promise<Response> {
   if (runner === undefined) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable(name));
+  // why: settings plan ruling 6 — from a save until this pass closes nothing new starts, tools included; `held`, not
+  // `pending`, so a tool asked after the restart has begun (pending already false) is refused too
+  if (ctx.reload?.held() === true) throw new ApiError(503, 'reload-pending', API_TEXT.applyingSettings);
   return oneAtATime(
     ctx,
     TOOL_KEY,
     async () => {
+      // why: a tool run is outside the engine, so the restart in place is told of it to wait for its end
+      ctx.reload?.toolStarted(API_TEXT.toolRunLabel[name]);
       try {
         return c.json(await runner(args, c.req.raw.signal));
       } catch (err) {
@@ -37,6 +42,8 @@ async function runInProcess<A>(
           'tool failed',
         );
         throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed(name));
+      } finally {
+        ctx.reload?.toolEnded();
       }
     },
     () => new ApiError(409, 'tool_busy', API_TEXT.toolBusy(name)),

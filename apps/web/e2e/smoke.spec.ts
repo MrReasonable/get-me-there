@@ -296,7 +296,7 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
   // why: Settings is three links, each a heading
-  settings: (p) => p.getByRole('heading', { name: COPY.crumbs.priceSources }),
+  settings: (p) => p.getByRole('heading', { name: COPY.settingsView.section.sources }),
   // why: the report's area headings draw only once the report has loaded
   status: (p) => p.getByRole('heading', { level: 3 }),
 };
@@ -577,6 +577,38 @@ for (const width of [375, 900, 1280] as const)
       });
     });
 
+// Settings plan ruling 10, Global Constraints layout check: the top bar with its longest SearchApi line ("SearchApi:
+// 9,988 credits left · resets 1 Dec · as of 14:05": a balance with its reset day, read more than ten minutes ago) on the
+// Settings page, at 375 and 1280 px in light and dark, never scrolling sideways. Screenshots go to
+// test-results/credits-shots/ for the report, beside mockup 04's top bar.
+for (const width of [375, 1280] as const)
+  for (const colorScheme of ['light', 'dark'] as const)
+    test(`the top bar's longest SearchApi line on Settings at ${width}px, ${colorScheme}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await showEverySource(page);
+      await page.route('**/api/searchapi/account', async (route) => {
+        await route.fulfill({
+          json: {
+            account: {
+              remaining: 9988,
+              monthlyAllowance: 10000,
+              periodEnd: '2026-12-01',
+              // why: long past, so it is always older than ten minutes; January's London time is GMT
+              fetchedAt: '2026-01-15T14:05:00.000Z',
+            },
+          },
+        });
+      });
+      await page.goto('/?view=settings');
+      const line = page.getByText('SearchApi: 9,988 credits left · resets 1 Dec · as of 14:05');
+      await expect(line).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await page.screenshot({ path: `test-results/credits-shots/settings-${width}-${colorScheme}.png` });
+    });
+
 test('"+ New search" moves focus to From in the panel', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/');
@@ -689,7 +721,7 @@ for (const [width, colorScheme] of [
     await expect(panel.getByRole('status', { name: COPY.newSearch.estimateRegion })).toContainText(
       'Then flights are read for the cheapest dates until the 5 cheapest stop changing.',
     );
-    await expect(panel.getByRole('button', { name: 'Search · 12 SearchApi calls' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Search · 12 SearchApi credits' })).toBeVisible();
     await expectNoSidewaysScroll(page);
     await panel.screenshot({ path: `test-results/panel-shots/panel-filled-${width}-${colorScheme}.png` });
     await page.screenshot({

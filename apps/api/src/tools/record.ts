@@ -64,7 +64,7 @@ export const RECORDED_BY = '@gmt/api record:fixtures';
 /** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
 export function recordPrecheck(c: Config): string | null {
   if (c.providers.travelpayouts === null || c.providers.searchapi === null)
-    return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY in the environment (.env)';
+    return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY, set in Settings or .env';
   // why: the recorded tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
   if (c.pointOfSale !== 'GB') return `record:fixtures records at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
   return null;

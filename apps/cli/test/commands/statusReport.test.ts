@@ -7,8 +7,12 @@ import type { z } from 'zod';
 import { runCli } from '../../src/cli.js';
 import type { HttpRequest } from '../../src/deps.js';
 import { offeredFor, TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
+
 import { scriptedAsk, stubHttp, testIo, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
+
+/** Review MINOR 11: the test email's next steps carry Settings › Email and alerts' address on this app. */
+const EMAIL_AT = 'http://127.0.0.1:3000/?view=settings&section=email';
 
 type Report = z.input<typeof apiContract.statusResponseSchema>;
 type Check = Report['checks'][number];
@@ -128,6 +132,23 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(await runCli(['status'], m.deps)).toBe(0);
     expect(m.io.stdout).toContain('Status: provider to check');
     expect(m.io.stdout).toContain('fix: add Travelpayouts');
+  });
+
+  it('a fix made on the Settings page prints the page address of its section, and a settings check keeps parsing (ruling 13)', async () => {
+    const { m } = await installed([
+      check({
+        id: 'settings-aside-smtp-port',
+        area: 'settings',
+        state: 'fail',
+        summary: "Mail server port isn't valid: set it in Settings",
+        fix: { text: 'set it again in Settings › Email and alerts', command: null, settings: 'email' },
+      }),
+    ]);
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(/settings +fail +Mail server port isn.t valid/);
+    expect(m.io.stdout).toContain(
+      'fix: set it again in Settings › Email and alerts (http://127.0.0.1:3000/?view=settings&section=email)',
+    );
   });
 
   it('the bar line counts every concern and says how many fail, naming a lone one by its label, provider or area', async () => {
@@ -427,11 +448,18 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     expect(posts(http)).toHaveLength(0);
   });
 
+  it('the test email’s next steps point at Settings › Email and alerts, not a setup group (settings plan ruling 15)', () => {
+    for (const w of [TEST_EMAIL_WORDS.failed(EMAIL_AT), TEST_EMAIL_WORDS.notConfigured(EMAIL_AT)]) {
+      expect(w).toContain(`Settings › Email and alerts (${EMAIL_AT})`);
+      expect(w).not.toContain('--reconfigure email');
+    }
+  });
+
   it.each([
     [
       'failed',
       () => ({ status: 200, body: { result: 'failed', at: '2026-10-24T09:30:00.000Z' } }),
-      TEST_EMAIL_WORDS.failed,
+      TEST_EMAIL_WORDS.failed(EMAIL_AT),
     ],
     [
       'refused',
@@ -444,7 +472,7 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     [
       'not set up',
       () => ({ status: 409, body: { error: { code: 'email_not_configured', message: 'x' } } }),
-      TEST_EMAIL_WORDS.notConfigured,
+      TEST_EMAIL_WORDS.notConfigured(EMAIL_AT),
     ],
     ['an unreadable answer', () => ({ status: 200, body: { hello: 1 } }), TEST_EMAIL_WORDS.silent],
     ['not JSON', () => ({ status: 200, body: 'plain' }), TEST_EMAIL_WORDS.silent],

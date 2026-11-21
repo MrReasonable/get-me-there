@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMANDS, isConsentAction, parseCommandLine } from '../src/args.js';
-import { NO_SOURCE_TEXT } from '../src/setup/closing.js';
+import { noSourceText } from '../src/setup/closing.js';
 import { PASTE_TOKEN_QUESTION, PROMPTS, TP_SIGNUP_URL, TP_TOKEN_URL } from '../src/setup/prompts.js';
 
 // why: brief §6 and Task 16b.12: docs/setup.md section 0 states the wizard as the CLI asks it, so a change to either
@@ -32,8 +32,9 @@ describe('docs/setup.md section 0 is the CLI’s own text', () => {
 
   it('row 4’s help and the closing text carry both Travelpayouts URLs, word for word', () => {
     expect(section0).toContain(PROMPTS.find((p) => p.row === 4)?.help ?? 'missing');
-    expect(flat).toContain(NO_SOURCE_TEXT);
-    for (const url of [TP_SIGNUP_URL, TP_TOKEN_URL]) expect(NO_SOURCE_TEXT).toContain(url);
+    // why: settings plan ruling 15: the token is added on the Settings page, at the default port's address
+    expect(flat).toContain(noSourceText(3000));
+    for (const url of [TP_SIGNUP_URL, TP_TOKEN_URL]) expect(noSourceText(3000)).toContain(url);
     expect(section0).toContain(`"${PASTE_TOKEN_QUESTION}"`);
   });
 

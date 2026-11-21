@@ -1,14 +1,14 @@
 import { asIsoDate, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
 import { RunProgress, type RunProgressRun } from '../../src/components/RunProgress.js';
 import { CalendarRow } from '../../src/components/rows/CalendarRow.js';
 import { TripRow } from '../../src/components/rows/TripRow.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
-import { VIEWS } from '../../src/state/view.js';
+import { SETTINGS_SECTIONS, VIEWS } from '../../src/state/view.js';
 import {
   at,
   calendarFig,
@@ -155,8 +155,77 @@ describe('the main path in the shell says no set-up term (spec rev 55 §3, §11;
   }
 });
 
+afterEach(() => vi.useRealTimers());
+
+// Global Constraints: the rendered sweep covers each Settings section and bans "searches left" (settings plan ruling 10)
+describe('each Settings section says no banned word, no "searches left" and no "£" outside a cost', () => {
+  it.each([...SETTINGS_SECTIONS])('section=%s', async (section) => {
+    server.use(
+      http.get(`${API}/status`, () =>
+        HttpResponse.json(
+          statusReport(
+            [
+              { id: 'worker', area: 'worker', providerId: 'camoufox', summary: 'ready' },
+              { id: 'consent', area: 'consent', summary: 'consent rejected, expires 18 Nov 2027 (cookie)' },
+            ],
+            { pagesAtOnce: 2 },
+          ),
+        ),
+      ),
+      http.get(`${API}/budget`, () =>
+        HttpResponse.json(
+          budgetResponse({
+            // Task 6: the month's spend too, which Settings › Limits says
+            scopes: [
+              usage('provider-month:searchapi', 49, 100),
+              usage('global-month', 0, 35_000_000, 32_000_000),
+            ],
+          }),
+        ),
+      ),
+    );
+    // Task 6: a rule (its threshold a price quoted in text) and its last send, so the alert lines are swept too
+    server.use(
+      http.get(`${API}/alerts`, () =>
+        HttpResponse.json([
+          {
+            id: 'rule-1',
+            definitionId: 'def-0001',
+            type: 'absolute',
+            thresholdPence: 40000,
+            pct: null,
+            basis: 'verified',
+            requireAllVerified: null,
+            cooldownHours: 336,
+            enabled: true,
+            lastSentAt: null,
+          },
+        ]),
+      ),
+    );
+    renderWithProviders(<App />, { search: `?view=settings&section=${section}` });
+    await screen.findByRole('heading', { level: 2, name: COPY.settingsView.section[section] });
+    if (section === 'sources') {
+      await screen.findByText(COPY.settingsView.browserReady);
+      await screen.findByText(COPY.settingsView.credits(51, 100));
+    }
+    if (section === 'limits') await screen.findByText(COPY.settingsView.limits.spent('£32'));
+    // Task 7: the System lines (the report's checks, one per line) are swept too
+    if (section === 'system') await screen.findByRole('list', { name: COPY.settingsView.systemLabel });
+    if (section === 'email') {
+      const rules = await screen.findByRole('list', { name: COPY.settingsView.alerts.heading });
+      await within(rules).findByText(COPY.settingsView.alerts.lastSent(COPY.settingsView.alerts.never));
+    }
+    // why: the top bar's limits are in (on Settings › Limits the section shares their name)
+    await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)");
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/searches left/i);
+    expect(poundsOutsidePrices()).toEqual([]);
+  });
+});
+
 describe('the top bar and run progress say no banned word, no set-up term and no "£" outside a cost (Task 4)', () => {
-  it('the health line with problems, SearchApi’s calls left, the spend and a running search', async () => {
+  it('the health line with problems, SearchApi’s credits left, the spend and a running search', async () => {
     server.use(
       http.get(`${API}/status`, () =>
         HttpResponse.json(
@@ -180,12 +249,37 @@ describe('the top bar and run progress say no banned word, no set-up term and no
     );
     renderWithProviders(<App />, { search: '?view=settings' });
     await screen.findByRole('link', { name: '2 things need you · fix' });
-    await screen.findByText('SearchApi: 51 of 100 calls left this month');
+    await screen.findByText("SearchApi: 51 of 100 credits left (this app's count)");
     await screen.findByText('Spent £32 of £35 this month');
     await screen.findByRole('link', { name: 'Searching: Worked example' });
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    // why: settings plan ruling 10 — SearchApi's unit is credits; "searches left" is never its words
+    expect(renderedCopy()).not.toMatch(/searches left/i);
     expect(jargonIn(mainPathWords())).toEqual([]);
     expect(poundsOutsidePrices()).toEqual([]);
+  });
+
+  it('SearchApi’s own balance, with its reset day, says credits and no banned word', async () => {
+    // why: the age of a balance read is judged on the page's clock, which renderWithProviders pins (NOW, 15:00 UTC)
+    server.use(
+      http.get(`${API}/budget`, () =>
+        HttpResponse.json(budgetResponse({ scopes: [usage('global-month', 0, 35_000_000, 0)] })),
+      ),
+      http.get(`${API}/searchapi/account`, () =>
+        HttpResponse.json({
+          account: {
+            remaining: 9_988,
+            monthlyAllowance: 10_000,
+            periodEnd: '2026-12-01',
+            fetchedAt: '2026-10-14T14:55:00.000Z',
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=settings' });
+    await screen.findByText('SearchApi: 9,988 credits left · resets 1 Dec');
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/searches left/i);
   });
 
   it.each<[string, RunProgressRun]>([
@@ -518,6 +612,7 @@ describe('the new-search panel says no banned word, no main-path term and no "£
             requireAllVerified: null,
             cooldownHours: 336,
             enabled: true,
+            lastSentAt: null,
           },
         ]),
       ),

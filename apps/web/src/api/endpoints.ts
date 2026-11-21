@@ -23,7 +23,18 @@ export const api = {
   status: () => call(c.statusResponseSchema, 'GET', '/api/status'),
   // spec §10: the month's spend and each provider's window, for the status bar's always-on month line
   budget: () => call(c.budgetResponseSchema, 'GET', '/api/budget'),
+  // settings plan ruling 10: SearchApi's own balance (cached ten minutes by the api), null when it could not be read
+  searchApiAccount: () => call(c.searchApiAccountResponseSchema, 'GET', '/api/searchapi/account'),
   testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
+  // settings plan ruling 6: the page reads the app's boot id before a save and until a new one answers (the restart)
+  health: () => call(c.healthResponseSchema, 'GET', '/api/health'),
+  // settings plan rulings 5, 8 and 14: the Settings page's read and its save of only the names the operator changed
+  settings: () => call(c.settingsViewSchema, 'GET', '/api/settings'),
+  saveSettings: (changes: c.SettingChanges) =>
+    call(c.settingsUpdateResponseSchema, 'PUT', '/api/settings', { body: { changes } }),
+  // settings plan ruling 11: a test email through the server the email form names (its password only when typed)
+  settingsEmailTest: (body: c.SettingsEmailTestRequest) =>
+    call(c.settingsEmailTestResponseSchema, 'POST', '/api/settings/email-test', { body }),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
   // WP20 (spec §10): the first screen's cards in the order the api owns; remove (soft delete, then cancel) and undo
   cards: () => call(c.searchCardsResponseSchema, 'GET', '/api/definitions/cards'),
@@ -103,8 +114,11 @@ export const api = {
       params: { origin, destination },
       query: { cabin },
     }),
+  // settings plan R13: each listed rule says when it last sent
   alertRules: (definitionId: string) =>
-    call(c.alertRuleSchema.array(), 'GET', '/api/alerts', { query: { definitionId } }),
+    call(c.alertRuleListedSchema.array(), 'GET', '/api/alerts', { query: { definitionId } }),
+  // settings plan ruling 12: every search's rules at once, for Settings › Email and alerts
+  everyAlertRule: () => call(c.alertRuleListedSchema.array(), 'GET', '/api/alerts'),
   createAlertRule: (body: AlertRuleBody) => call(c.alertRuleSchema, 'POST', '/api/alerts', { body }),
   // why: DELETE soft-deletes the rule (AlertsRepo.softDelete); its events stay listed.
   deleteAlertRule: (id: string) => call(c.alertRuleSchema, 'DELETE', '/api/alerts/:id', { params: { id } }),

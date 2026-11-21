@@ -8,7 +8,7 @@ export {
   type ReadOnlyLockState,
   readOnlyLockState,
 } from './appLock.js';
-export { backupDatabase, backupSummary, checkBackup } from './backup.js';
+export { backupDatabase, backupSummary, checkBackup, storedSettingCount } from './backup.js';
 export { type BudgetConfig, budgetConfigFromConfig, effectiveCallCap } from './budgetConfig.js';
 export { SqliteBudgetGuard } from './budgetGuard.js';
 export { type Db, openDatabase, WalUnavailableError } from './client.js';
@@ -35,6 +35,7 @@ export {
   type RouteHistoryTrip,
   RoutePriceHistoryRepo,
 } from './repositories/routePriceHistory.js';
+export { SettingsRepo } from './repositories/settings.js';
 export { SqliteResponseCache } from './responseCache.js';
 export {
   AIRPORTS_MIN_ROWS,

@@ -251,7 +251,7 @@ describe('app.env edges', () => {
         port: 465,
         tls: 'none',
         user: 'u',
-        pass: 'p',
+        pass: 'p-0123456789',
         to: 'a@example.com',
         from: 'b@example.com',
       },
@@ -269,19 +269,19 @@ describe('app.env edges', () => {
       if (!r.ok) throw new Error(r.fields.join(','));
       return answersFromConfig(r.config, r.record, { linger: 'skip' });
     };
-    expect(read('SEARCHAPI_KEY="k"\nSEARCHAPI_PLAN="40usd"\n').searchApi).toEqual({
+    expect(read('SEARCHAPI_KEY="k-0123456789"\nSEARCHAPI_PLAN="40usd"\n').searchApi).toEqual({
       plan: '40usd',
-      key: 'k',
+      key: 'k-0123456789',
       billingDay: 1,
       trialUsed: null,
     });
-    expect(read('SEARCHAPI_KEY="k"\n').searchApi).toEqual({
+    expect(read('SEARCHAPI_KEY="k-0123456789"\n').searchApi).toEqual({
       plan: 'trial',
-      key: 'k',
+      key: 'k-0123456789',
       billingDay: 1,
       trialUsed: null,
     });
-    expect(read('SEARCHAPI_KEY="k"\nSEARCHAPI_TRIAL_USED="7"\n').searchApi?.trialUsed).toBe(7);
+    expect(read('SEARCHAPI_KEY="k-0123456789"\nSEARCHAPI_TRIAL_USED="7"\n').searchApi?.trialUsed).toBe(7);
     const smtp =
       'SMTP_HOST="127.0.0.1"\nSMTP_PORT="25"\nSMTP_USER="u"\nSMTP_PASS="p-0123456789"\nALERT_EMAIL_TO="a@example.com"\nALERT_EMAIL_FROM="b@example.com"\n';
     for (const t of ['none', 'starttls', 'implicit'] as const)

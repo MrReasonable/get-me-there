@@ -9,13 +9,12 @@ import { bootApp } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { backupsDirFor, pendingOnExistingDb } from '../../src/bootstrap/preflight.js';
 import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
-import { T0 } from '../helpers/harness.js';
+import { bootEnv, T0 } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 function config(dbPath: string) {
-  return loadConfigFromEnv(
+  return bootEnv(
     cleanEnv({
       NODE_ENV: 'production',
       DATABASE_PATH: dbPath,
@@ -58,7 +57,7 @@ function hasProbe(dbPath: string): boolean {
 
 async function bootOnce(dbPath: string, migrationsDir = assetPaths().migrationsDir): Promise<void> {
   const running = await bootApp({
-    config: config(dbPath),
+    ...config(dbPath),
     log: createLogger({ logLevel: 'error' }),
     listen: false,
     assets: { ...assetPaths(), migrationsDir },
@@ -122,7 +121,7 @@ describe('backup preflight (spec §7 Migrations, §13 Backup)', { timeout: BOOT_
       expect(pendingOnExistingDb(dbPath, probeDir)).toEqual(['9999_wp8_probe']);
       await expect(
         bootApp({
-          config: config(dbPath),
+          ...config(dbPath),
           log: createLogger({ logLevel: 'error' }),
           clock,
           listen: false,

@@ -1,14 +1,17 @@
 /** The single HTTP surface of spec §10, mounted from `@gmt/core` api-contract ROUTES. */
-import { apiContract } from '@gmt/core';
+import { randomUUID } from 'node:crypto';
+import { apiContract, MIN_SECRET_LENGTH, type Secret } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
-import type { Engine } from '@gmt/engine';
+import { type Engine, TEST_SEND_LIMIT, type TestSendLimit, type TransportFactory } from '@gmt/engine';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
+import type { ReloadPort } from './bootstrap/reload.js';
 import { envelope, notFound, onError } from './errors.js';
 import { basicAuthGate, clientIpFrom, FailedAuthLimiter } from './middleware/auth.js';
 import { hostAllowlist, mutatingRequestCheck, noStore, originCheck } from './middleware/hardening.js';
 import { securityHeaders } from './middleware/headers.js';
+import { type SearchApiAccountPort, searchApiAccountFor } from './read/searchApiAccount.js';
 import type { StatusEnv } from './read/statusSources.js';
 import { NO_INPUT } from './routes/define.js';
 import { HANDLERS } from './routes/index.js';
@@ -22,7 +25,7 @@ import {
 } from './routes/types.js';
 import { mountStatic } from './static.js';
 import { API_TEXT } from './text.js';
-import type { Ports } from './wiring.js';
+import { addSecrets, type Ports } from './wiring.js';
 
 export { API_PREFIX };
 
@@ -44,6 +47,23 @@ export interface AppOptions {
   status?: Partial<Omit<StatusEnv, 'emailLast'>>;
   /** The email notifier (spec §10 `/alerts/test-email`, the email check); absent means email is not configured. */
   email?: EmailPort;
+  /** Settings plan ruling 6: this pass's id (`GET /api/health` `bootId`); a random one when absent. */
+  bootId?: string;
+  /** Settings plan ruling 6: the restart in place a save asks for; absent, a save restarts nothing (tests). */
+  reload?: ReloadPort;
+  /** The environment the stored settings are laid over (settings plan ruling 2); `{}` when absent. */
+  settingsEnv?: Record<string, string | undefined>;
+  /**
+   * Adds a request's secrets to every scrub list (only those of MIN_SECRET_LENGTH or more reach it); absent, they join
+   * `ports.secrets` only.
+   */
+  scrub?: (more: readonly Secret[]) => void;
+  /** SearchApi's balance cache (settings plan ruling 10); the bootstrap builds it to tell it of each run's end. */
+  searchApiAccount?: SearchApiAccountPort;
+  /** The test-send limit (settings plan ruling 11); the process's one when absent. */
+  testSendLimit?: TestSendLimit;
+  /** The Settings test's mail transport; nodemailer's when absent. */
+  emailTransport?: TransportFactory;
 }
 
 export function publicRouteKeys(routes: readonly apiContract.RouteDef[]): Set<string> {
@@ -84,6 +104,19 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
       emailLast: () => options.email?.lastResult() ?? null,
     },
     email: options.email ?? null,
+    bootId: options.bootId ?? randomUUID(),
+    reload: options.reload ?? null,
+    settingsEnv: options.settingsEnv ?? {},
+    // why: only a value as long as a secret can be (core MIN_SECRET_LENGTH, which the config refuses below) joins the
+    // shared lists: a shorter one would rewrite every provider body and log line that holds it, for good
+    scrub: (more) => {
+      const kept = more.filter((s) => s.reveal().length >= MIN_SECRET_LENGTH);
+      if (options.scrub === undefined) addSecrets(ports.secrets, kept);
+      else options.scrub(kept);
+    },
+    searchApiAccount: options.searchApiAccount ?? searchApiAccountFor(ports),
+    testSendLimit: options.testSendLimit ?? TEST_SEND_LIMIT,
+    emailTransport: options.emailTransport,
   };
   const app = new Hono<AppEnv>();
   app.onError(onError(ports.log, ports.secrets));

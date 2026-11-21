@@ -15,6 +15,8 @@ import type { ParseWhere } from '../shared/errors.js';
 export const SEARCHAPI_HOST = 'www.searchapi.io';
 /** Both engines share one endpoint; `engine` selects calendar or itinerary (vendor docs, 2026-10-14). */
 export const SEARCHAPI_ENDPOINT = `https://${SEARCHAPI_HOST}/api/v1/search`;
+/** SearchApi's account read (vendor docs, account API): the balance, which costs no credit. */
+export const SEARCHAPI_ACCOUNT_PATH = '/api/v1/me';
 /** Path only, as written to `provider_requests.endpoint_path` (spec §5.3: no query). */
 export const SEARCHAPI_ENDPOINT_PATH = '/api/v1/search';
 

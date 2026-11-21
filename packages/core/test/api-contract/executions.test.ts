@@ -52,6 +52,16 @@ describe('flightListsStateSchema.confirm (design 2026-11-08 §7)', () => {
       }
   });
 
+  it("carries the run's own patience when present and reads a summary without it (a run stored before)", () => {
+    const withPatience = { ...plan, confirm: { ...confirm, patience: 3 } };
+    expect(flightListsStateSchema.parse(withPatience)).toEqual(withPatience);
+    expect(flightListsStateSchema.parse({ ...plan, confirm }).confirm).not.toHaveProperty('patience');
+    for (const patience of [-1, 2.5, undefined])
+      expect(flightListsStateSchema.safeParse({ ...plan, confirm: { ...confirm, patience } }).success).toBe(
+        false,
+      );
+  });
+
   it('refuses another mode or stop, a negative or fractional count, a missing count, an extra key and undefined', () => {
     const bad = [
       { ...confirm, mode: 'returns' },

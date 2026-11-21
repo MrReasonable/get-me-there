@@ -163,19 +163,24 @@ describe('parseConfig (spec §12)', () => {
       expect(errors({ ...noAuth, APP_BASIC_AUTH_USER: 'ian' })).toEqual(['APP_BASIC_AUTH_PASS']);
     });
   });
-  it('refuses SEARCHAPI_TRIAL_USED on a monthly plan, naming both fields: it would be silently ignored (cost-007)', () => {
+  it('ignores SEARCHAPI_TRIAL_USED on a monthly plan with a warning naming both fields, so a plan saved in Settings never stops boot (cost-007; settings plan ruling 1)', () => {
     const sa = { ...minimal, SEARCHAPI_KEY: 'k'.repeat(32) };
-    expect(errors({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' })).toEqual([
-      'SEARCHAPI_TRIAL_USED',
-    ]);
     const r = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
-    expect(r.ok ? '' : r.errors[0]?.message).toContain('SEARCHAPI_PLAN');
-    expect(
-      ok({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }).providers.searchapi?.trialUsed,
-    ).toBe(0);
-    expect(
-      ok({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }).providers.searchapi?.trialUsed,
-    ).toBe(9);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.config.providers.searchapi?.trialUsed).toBe(0);
+    expect(r.warnings).toEqual([
+      {
+        field: 'SEARCHAPI_TRIAL_USED',
+        message:
+          "applies only to the trial's lifetime window; SEARCHAPI_PLAN=40usd counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0",
+      },
+    ]);
+    const zero = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }, { realpath });
+    expect(zero.ok && zero.warnings).toEqual([]);
+    expect(zero.ok && zero.config.providers.searchapi?.trialUsed).toBe(0);
+    const trial = parseConfig({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
+    expect(trial.ok && trial.warnings).toEqual([]);
+    expect(trial.ok && trial.config.providers.searchapi?.trialUsed).toBe(9);
   });
   it('fills the 40usd preset and lets variables override', () => {
     const c = ok({ ...minimal, SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });
@@ -288,7 +293,7 @@ describe('parseConfig (spec §12)', () => {
       SMTP_HOST: 'smtp.example.com',
       SMTP_PORT: '465',
       SMTP_USER: 'u',
-      SMTP_PASS: 'p',
+      SMTP_PASS: 'p'.repeat(12),
       ALERT_EMAIL_TO: 'a@example.com',
       ALERT_EMAIL_FROM: 'x@example.com',
     };
@@ -344,7 +349,7 @@ describe('parseConfig (spec §12)', () => {
       SMTP_HOST: 'smtp.example.com',
       SMTP_PORT: 'abc',
       SMTP_USER: 'u',
-      SMTP_PASS: 'p',
+      SMTP_PASS: 'p'.repeat(12),
       ALERT_EMAIL_TO: 'a@example.com',
       ALERT_EMAIL_FROM: 'x@example.com',
     };
@@ -419,5 +424,54 @@ describe('parseConfig (spec §12)', () => {
     });
     expect(errors({ ...minimal, POINT_OF_SALE: 'gb' })).toContain('POINT_OF_SALE');
     expect(errors({ ...minimal, SCHEDULER_TIMEZONE: 'Mars/Olympus' })).toContain('SCHEDULER_TIMEZONE');
+  });
+});
+
+describe('the settings that shape runs and new searches (settings plan ruling 7)', () => {
+  it('defaults: patience 12, refresh 7 days, no stored source lists', () => {
+    const c = ok(minimal);
+    expect(c.flightReadPatience).toBe(12);
+    expect(c.discoveryRefreshDays).toBe(7);
+    expect(c.newSearchSources).toEqual({ discovery: null, verification: null });
+  });
+  it('reads FLIGHT_READ_PATIENCE and DISCOVERY_REFRESH_DAYS within their bounds', () => {
+    expect(ok({ ...minimal, FLIGHT_READ_PATIENCE: '3' }).flightReadPatience).toBe(3);
+    expect(ok({ ...minimal, FLIGHT_READ_PATIENCE: '50' }).flightReadPatience).toBe(50);
+    expect(ok({ ...minimal, DISCOVERY_REFRESH_DAYS: '1' }).discoveryRefreshDays).toBe(1);
+    expect(ok({ ...minimal, DISCOVERY_REFRESH_DAYS: '30' }).discoveryRefreshDays).toBe(30);
+  });
+  it.each([
+    ['FLIGHT_READ_PATIENCE', '2'],
+    ['FLIGHT_READ_PATIENCE', '51'],
+    ['FLIGHT_READ_PATIENCE', '4.5'],
+    ['FLIGHT_READ_PATIENCE', 'many'],
+    ['DISCOVERY_REFRESH_DAYS', '0'],
+    ['DISCOVERY_REFRESH_DAYS', '31'],
+    ['DISCOVERY_REFRESH_DAYS', 'weekly'],
+  ])('refuses %s=%s naming the field', (name, value) => {
+    expect(errors({ ...minimal, [name]: value })).toEqual([name]);
+  });
+  it('reads source lists as provider ids, `none` as an empty list, and trims and drops repeats', () => {
+    const c = ok({
+      ...minimal,
+      NEW_SEARCH_DISCOVERY: 'travelpayouts, camoufox,travelpayouts',
+      NEW_SEARCH_VERIFICATION: 'none',
+    });
+    expect(c.newSearchSources).toEqual({ discovery: ['travelpayouts', 'camoufox'], verification: [] });
+  });
+  it('refuses an unknown provider id naming it, and `none` mixed with ids, and an empty entry', () => {
+    const r = parseConfig({ ...minimal, NEW_SEARCH_DISCOVERY: 'travelpayouts,skyscanner' }, { realpath });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors).toEqual([
+        { field: 'NEW_SEARCH_DISCOVERY', message: expect.stringContaining('skyscanner') },
+      ]);
+    }
+    expect(errors({ ...minimal, NEW_SEARCH_VERIFICATION: 'none,searchapi' })).toEqual([
+      'NEW_SEARCH_VERIFICATION',
+    ]);
+    expect(errors({ ...minimal, NEW_SEARCH_DISCOVERY: 'travelpayouts,,camoufox' })).toEqual([
+      'NEW_SEARCH_DISCOVERY',
+    ]);
   });
 });

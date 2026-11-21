@@ -1,7 +1,6 @@
 import {
   type Cell,
   type CellKey,
-  CONFIRM_PATIENCE,
   CONFIRM_TARGET,
   cellKeyString,
   type DefinitionSnapshot,
@@ -14,6 +13,7 @@ import {
   flightLimitsOf,
   microGbpToPence,
   type ProviderId,
+  patienceOf,
   RETURN_SECOND_OUTBOUND_RATE,
   type SourceKind,
   type Stage,
@@ -103,11 +103,12 @@ interface FlightReads {
 /**
  * The reads a fresh step would make for a saved search. Out and back (design 2026-11-08 §4.1, §6): the confirm queue
  * (`confirmQueue` over the board's ranking), the step's own reuse split over all of it; at most every unreused pair,
- * typically `max(min(unreused, CONFIRM_PATIENCE), min(queue, CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA)
+ * typically `max(min(unreused, patience), min(queue, CONFIRM_TARGET + patience + CONFIRM_TYPICAL_EXTRA)
  * - reusable among those)`, capped at the unreused count. Why: a typical run reads the first pairs until the target
  * is held and the patience has run out, with a few more for reads that improve on it; each reusable pair among them is
  * a read not made. Outbound-only keeps its first 10 less the reusable ones. An unsaved search, or an engine without the
- * ranking, reuses none. `own` leaves out the cells a resumed confirm-mode pass has already read (§4.7: its queue is
+ * ranking, reuses none. `patience` is the run's own (FLIGHT_READ_PATIENCE when it started; the setting for a run not
+ * yet started). `own` leaves out the cells a resumed confirm-mode pass has already read (§4.7: its queue is
  * rebuilt without them).
  */
 function flightPairsWanted(
@@ -115,15 +116,16 @@ function flightPairsWanted(
   snapshot: DefinitionSnapshot,
   definitionId: string | null,
   phase: FlightPhase,
+  patience: number,
   own: ReadonlySet<string> = new Set(),
 ): FlightReads {
   const space = datePairCount(snapshot.resolved);
   const reader = ctx.rankedDatePairs;
   const count = phase.returns ? Number.POSITIVE_INFINITY : FLIGHT_LIST_COUNT;
-  const queueTop = CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA;
+  const queueTop = CONFIRM_TARGET + patience + CONFIRM_TYPICAL_EXTRA;
   const reads = (queue: number, unreused: number, reusableInTop: number): FlightReads => {
     if (!phase.returns) return { typical: unreused, max: unreused };
-    const typical = Math.max(Math.min(unreused, CONFIRM_PATIENCE), Math.min(queue, queueTop) - reusableInTop);
+    const typical = Math.max(Math.min(unreused, patience), Math.min(queue, queueTop) - reusableInTop);
     return { typical: Math.min(typical, unreused), max: unreused };
   };
   if (definitionId === null || reader === undefined) {
@@ -194,7 +196,7 @@ export const FLIGHT_READ_SECONDS = 25;
 
 /**
  * The estimate's allowance for reads beyond the target that still improve on it (design 2026-11-08 §6): a typical run
- * reads about `CONFIRM_TARGET + CONFIRM_PATIENCE + CONFIRM_TYPICAL_EXTRA` pairs.
+ * reads about `CONFIRM_TARGET + patience + CONFIRM_TYPICAL_EXTRA` pairs.
  */
 export const CONFIRM_TYPICAL_EXTRA = 8;
 
@@ -571,7 +573,12 @@ export function estimateStart(
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
   if (!flightsApply(ctx, snapshot)) return est;
   const phase = estimatePhaseOf(ctx, snapshot);
-  return withFlights(ctx, est, flightPairsWanted(ctx, snapshot, definitionId, phase), phase);
+  return withFlights(
+    ctx,
+    est,
+    flightPairsWanted(ctx, snapshot, definitionId, phase, ctx.config.flightReadPatience),
+    phase,
+  );
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -627,7 +634,12 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
   if (plan === null) {
     const fresh = estimatePhaseOf(ctx, snapshot);
-    return withFlights(ctx, est, flightPairsWanted(ctx, snapshot, exec.definitionId, fresh), fresh);
+    return withFlights(
+      ctx,
+      est,
+      flightPairsWanted(ctx, snapshot, exec.definitionId, fresh, ctx.config.flightReadPatience),
+      fresh,
+    );
   }
   // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
   const phase = {
@@ -640,7 +652,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   if (plan.returns) {
     const wanted = confirmFinished(plan)
       ? { typical: 0, max: 0 }
-      : flightPairsWanted(ctx, snapshot, exec.definitionId, phase, done);
+      : flightPairsWanted(ctx, snapshot, exec.definitionId, phase, patienceOf(plan.confirm), done);
     return withFlights(ctx, est, wanted, phase);
   }
   const left = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
@@ -842,7 +854,7 @@ export interface BilledCalls {
 
 /**
  * The runnable (unblocked) lines of billable-plan providers, one entry a provider with its calls summed over stages
- * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 searches left".
+ * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 credits left".
  */
 export function billedCallsOf(
   ctx: EngineContext,

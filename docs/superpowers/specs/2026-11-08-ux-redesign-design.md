@@ -2,8 +2,8 @@
 
 Written 2026-11-08. Status: stage 1 (the Trip page, the labels and the booking link, §5 and §6) is folded into the
 main design spec (`2026-10-14-flight-price-optimiser-design.md`) as revision 69; the main spec governs what is built.
-Stage 2 (the Trips and Search pages, §7.1) is folded into revision 70. Stages 3 and 4 (§7.2) are folded in as their own
-revisions when they ship; until then, where the two differ, the main spec governs. Choices marked *(my call)* were made by
+Stage 2 (the Trips and Search pages, §7.1) is folded into revision 70, and stage 3 (Settings, §7.2) into revision 72.
+Stage 4 (§7.2) is folded in as its own revision when it ships; until then, where the two differ, the main spec governs. Choices marked *(my call)* were made by
 the author, not the operator. The operator approved the direction and the mockups on 2026-11-08 ("that's MUCH
 better"); the mockups are in `2026-11-08-ux-redesign-mockups/` (London → New York example data, light and dark,
 375 px and desktop; pink dashed boxes are notes, not design). Where a mockup and this document differ (labels of the other returns, the connecting city), this
@@ -275,10 +275,11 @@ real run after the merge is the check that the address is captured.
 - The main spec's §11 says what the Trip page shows, in a new revision; the Results view's description is removed.
 - The banned-word and main-path-word sweeps pass over the new copy.
 
-## 7. Stage 2, built, and the later stages
+## 7. Stages 2 and 3, built, and stage 4
 
-Stage 2 is built and folded into the main spec's revision 70, which governs what is shown; this section keeps the design
-in one place. Stages 3 and 4 each get their own plan, from this design and the mockups, when the previous one has shipped.
+Stage 2 is built and folded into the main spec's revision 70, and stage 3 into revision 72; the main spec governs what is
+shown, and this section keeps the design in one place. Stage 4 gets its own plan, from this design and the mockups, now that
+stage 3 has shipped.
 
 ### 7.1 Stage 2: Trips and Search (`01-searches.html`, `02-search.html`)
 
@@ -342,12 +343,24 @@ left and the month's spend; while a search runs, "Searching: <name>". Settings i
 the qualifier lines, "cached from", the per-row flights block, tie lines, the phone card key, Update board, the calendar-gap
 banner (and its route), the 15-entry legend, the readout and the stay-strip overview.
 
-### 7.2 Later stages
+### 7.2 Stage 3, built, and stage 4
 
-- **Stage 3: Settings** (`04-settings.html`): price sources with on/off, keys stored in the database and write-only
-  in the UI, SearchApi credit read from its `/me` endpoint, the browser's stopping rule, limits, email (Gmail app
-  password or SMTP, send only, a test email), alert rules, and System health. New searches inherit the source
-  switches; each search has its own and existing searches don't change when Settings does.
+- **Stage 3: Settings** (`04-settings.html`; plan `docs/superpowers/plans/2026-11-19-settings.md`), built: four sections,
+  Price sources, Limits, Email and alerts and System, each a link with its own Save. Price sources: each source with "New
+  searches use it" / "Off for new searches", keys stored in the database (as `.env` stores them) and write-only in the UI,
+  SearchApi's plan, billing day and its own credits left read from its `/me` endpoint (not billed), the browser's block
+  with its stopping rule, when it may run and how often a date's calendar price is read again. Limits: the monthly spend
+  limit and the SearchApi credits a new search starts with. Email and alerts: Gmail (an app password) or another mail
+  server, send only, a test email, Remove email, and the alert rules with when each last sent. System: the status checks,
+  one per line. A save restarts the app in place, after the running searches when there are any. New searches inherit the
+  source switches; each search has its own and existing searches don't change when Settings does. The settings the page
+  owns are imported once from the settings file on the first start; a line that differs after that is reported, never
+  applied. SearchApi's unit is "credits" everywhere it is named.
+- **Left out of stage 3:** pages at once is shown with the command that changes it (`pnpm gmt setup --reconfigure
+  browser`), not edited on the page, since the worker holds it too; the unrecognised-page pause stays a fixed hour and is
+  not on the page; alerts keep their current kinds, and the single kind of §8 decision 4 ("email me when a trip with
+  flights read is under £X"), the line on the Search page that adds one, and the repeat choice for an alert wait for
+  stage 4.
 - **Stage 4: folding the rest.** History becomes Price over time on the Search page (the cheapest read trip per
   run, the calendar low as a faint dashed line); Alerts become one line on the Search page plus the rules list in
   Settings; Providers becomes Settings › Price sources; Status becomes Settings › System and the top bar's line;
@@ -361,7 +374,8 @@ otherwise:
 1. **Booking page address**: recorded (§6.3), and tested by the operator clicking a price.
 2. **SearchApi's job**: answered by Where to look (§7.1): SearchApi is a checkbox on each search, unticked in a new
    search, with its calls left beside it; Edit keeps a search's own choice. With 38 credits left, checking every
-   search's cheapest trips by default would spend them in a few runs. Stage 3 adds the install-wide switch.
+   search's cheapest trips by default would spend them in a few runs. Stage 3 added the install-wide switch (Settings ›
+   Price sources), which new searches start from.
 3. **The word "Seller"** for a seller's price as Google's booking page lists it, not checked with the seller: kept.
    The tap detail says it wasn't checked with the seller or airline.
 4. **Alerts**: one kind, "email me when a trip with flights read is under £X", from stage 4; the percentage and

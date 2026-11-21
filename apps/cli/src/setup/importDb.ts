@@ -1,5 +1,5 @@
 import { basename, dirname, join } from 'node:path/posix';
-import { asIsoDateTime, MOVED_MARKER, movedMarkerText } from '@gmt/core';
+import { asIsoDateTime, MOVED_MARKER, movedMarkerText, ownedNameSchema, type SettingRow } from '@gmt/core';
 import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import { type Action, runAction } from '../plan/action.js';
@@ -62,6 +62,24 @@ const checkedSchema = z.object({
   scheduled: z.number().int().nonnegative(),
 });
 
+const storedSchema = z.object({
+  ok: z.literal(true),
+  settings: z.array(z.object({ name: ownedNameSchema, value: z.string() })),
+});
+
+/**
+ * Controller ruling R18: the stored settings (names that are not secrets) scripts/check-backup.mjs printed about a
+ * checked file, for core's layerSettings; none when it printed none or something else (a file before migration 0014).
+ */
+export function checkedSettings(stdout: string): SettingRow[] {
+  try {
+    const r = storedSchema.safeParse(JSON.parse(stdout.trim().split('\n').at(-1) ?? ''));
+    return r.success ? r.data.settings : [];
+  } catch {
+    return [];
+  }
+}
+
 /** What scripts/check-backup.mjs printed about a checked file: the runs a start resumes and the schedules it may catch up. */
 export function checkedSummary(stdout: string): { resumable: number; scheduled: number } | null {
   try {
@@ -106,7 +124,7 @@ export function startNote(
  */
 export function dashboardText(plan: string | undefined): string {
   if (plan === 'trial')
-    return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and raise SEARCHAPI_TRIAL_USED in app.env to match (pnpm gmt setup --reconfigure searchapi), and check each other vendor’s dashboard.';
+    return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and raise SEARCHAPI_TRIAL_USED in app.env to match (then pnpm gmt restart), and check each other vendor’s dashboard.';
   if (plan === '40usd')
     return 'A restored ledger lacks any call made after its backup: check SearchApi’s dashboard and lower SEARCHAPI_MONTHLY_CALL_CAP in app.env by the calls it shows since the backup, and check each other vendor’s dashboard.';
   return 'A restored ledger lacks any call made after its backup, so check each vendor’s dashboard.';

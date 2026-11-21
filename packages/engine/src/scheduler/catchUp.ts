@@ -203,16 +203,16 @@ export async function autoResumeYields(
  * The automatic resume of a paused or interrupted run, as the resume_after one-shot and the boot's auto-resume make it
  * (spec §8.1, §8.2 rev 36; review T1): a paused catch-up first yields to a firing since it paused (`autoResumeYields`),
  * then the run resumes through the compare-and-set. A throw while deciding is logged with the run and the resume goes
- * ahead as it would have (review T5). Once the engine is closing nothing is read or started (review T12). Null when it
- * did not resume (yielded, deferred, closing, or a search that is not scheduled, revision 55 §8.1); else the resume's
- * result.
+ * ahead as it would have (review T5). Once the engine is closing, or held for a restart in place (settings plan ruling
+ * 6), nothing is read or started (review T12). Null when it did not resume (yielded, deferred, closing, held, or a search
+ * that is not scheduled, revision 55 §8.1); else the resume's result.
  */
 export async function autoResume(
   ctx: EngineContext,
   orch: Pick<Orchestrator, 'start' | 'resume'>,
   exec: Execution,
 ): Promise<StartResult | null> {
-  if (ctx.lifecycle.closing) return null;
+  if (ctx.lifecycle.closing || ctx.lifecycle.reloadPending) return null;
   let decision: Awaited<ReturnType<typeof autoResumeYields>> | 'unscheduled';
   try {
     // why: revision 55 §8.1 (Ian's ruling 2) — nothing runs unattended without the operator's say: a run of a search
@@ -228,7 +228,7 @@ export async function autoResume(
     ctx.log
       .child({ executionId: exec.id, definitionId: exec.definitionId })
       .info({}, 'auto-resume: the search is not scheduled; left for the operator');
-  if (decision !== 'resume' || ctx.lifecycle.closing) return null;
+  if (decision !== 'resume' || ctx.lifecycle.closing || ctx.lifecycle.reloadPending) return null;
   return orch.resume(exec.id, { manual: false });
 }
 
@@ -251,13 +251,14 @@ export async function catchUpIsolated(
 
 /**
  * The minute job (decision 79): every scheduled definition's missed firing, if any (`findMissedFiring` answers `none`
- * for an unscheduled, disabled or deleted one), each isolated from the others. Once the engine is shutting down it
- * takes no further definition. Makes no network call itself.
+ * for an unscheduled, disabled or deleted one), each isolated from the others. Once the engine is shutting down, or held
+ * for a restart in place (settings plan ruling 6), it takes no further definition. Makes no network call itself.
  */
 export async function catchUpAll(ctx: EngineContext, orch: Pick<Orchestrator, 'start'>): Promise<void> {
   const now = ctx.clock.now();
   for (const def of ctx.repos.definitions.list()) {
-    if (ctx.lifecycle.closing) return;
+    // why: settings plan ruling 6 — while a restart in place waits, the firing is left to the catch-up after it
+    if (ctx.lifecycle.closing || ctx.lifecycle.reloadPending) return;
     await catchUpIsolated(ctx, orch, def, now);
   }
 }

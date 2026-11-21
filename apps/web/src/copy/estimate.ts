@@ -14,7 +14,7 @@ import type { ProviderId } from '@gmt/core';
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
 
 export const ESTIMATE_COPY = {
-  /** Joins the cost tags of several billed sources on a button ("Search · 120 SearchApi calls · …"). */
+  /** Joins the cost tags of several billed sources on a button ("Search · 120 SearchApi credits · …"). */
   separator: ' · ',
   /** Joins the clauses of one sentence ("About 3 hours, about £1.20, asks about …"). */
   clause: ', ',
@@ -52,12 +52,14 @@ export const ESTIMATE_COPY = {
     `Then flights are read for the cheapest dates until the ${target} cheapest stop changing`,
   flightsDates: (typical: string, most: string) =>
     `usually about ${typical} ${noun(typical, 'date', 'dates')}, at most ${most}`,
-  billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime') =>
+  // why: controller ruling R9 — SearchApi's unit is credits; the other sources keep "calls"
+  unit: (id: ProviderId, n: string) => (id === 'searchapi' ? noun(n, 'credit', 'credits') : 'calls'),
+  billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime', unit: string) =>
     window === 'month'
-      ? `uses about ${calls} of the ${left} ${name} calls left this month`
-      : `uses about ${calls} of the ${left} ${name} calls left on your trial`,
-  billedNoCap: (calls: string, name: string) => `uses about ${calls} ${name} calls`,
-  callsTag: (calls: string, name: string) => `${calls} ${name} calls`,
+      ? `uses about ${calls} of the ${left} ${name} ${unit} left this month`
+      : `uses about ${calls} of the ${left} ${name} ${unit} left on your trial`,
+  billedNoCap: (calls: string, name: string, unit: string) => `uses about ${calls} ${name} ${unit}`,
+  callsTag: (calls: string, name: string, unit: string) => `${calls} ${name} ${unit}`,
   withTag: (verb: string, tag: string) => `${verb} · ${tag}`,
   notUsed: (source: string, why: string, cost: string | null) =>
     `${source} is not used: ${why}${cost === null ? '' : ` (about ${cost} not included)`}`,
@@ -74,13 +76,18 @@ export const ESTIMATE_COPY = {
     'global-month': "this month's spending limit is reached",
     unknown: 'a limit stops it this run',
   },
+  /** The two provider windows' stop words when the source is SearchApi, whose unit is credits. */
+  blockedWhySearchApi: {
+    'provider-month': 'no credits left this month',
+    'provider-lifetime': 'no trial credits left',
+  },
   softCost: (estimate: string, threshold: string, press: string) =>
     `This costs about ${estimate}, above your ${threshold} check; pressing ${press} confirms it`,
-  softShare: (name: string, window: 'month' | 'lifetime', press: string) =>
+  softShare: (name: string, window: 'month' | 'lifetime', press: string, unit: string) =>
     window === 'month'
-      ? `This uses more than a fifth of this month's ${name} calls; pressing ${press} confirms it`
-      : `This uses more than a fifth of your ${name} trial calls; pressing ${press} confirms it`,
-  /** The billable-plan sources by the name their calls are counted in ("120 SearchApi calls"). */
+      ? `This uses more than a fifth of this month's ${name} ${unit}; pressing ${press} confirms it`
+      : `This uses more than a fifth of your ${name} trial ${unit}; pressing ${press} confirms it`,
+  /** The billable-plan sources by the name their calls are counted in ("120 SearchApi credits"). */
   callsOf: {
     searchapi: 'SearchApi',
     travelpayouts: 'Aviasales',

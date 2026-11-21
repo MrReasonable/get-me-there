@@ -5,8 +5,15 @@ import { REFUSED_COPY } from '../../copy/refused.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { settingsPatch } from '../../state/view.js';
 import { SearchAgainButton } from './SearchAgainButton.js';
 import type { StateLine } from './stateLines.js';
+
+/**
+ * Where "Set up a price source (Settings → Price sources)" goes: the Settings section that sets sources up (review
+ * residual (b)), never the Providers view, which only shows them; the search's own parameters are dropped.
+ */
+const SET_UP_SOURCE = { ...settingsPatch('sources'), def: null, refused: null };
 
 // Spec §11 Dates "States", each in words, never colour alone. The page composes them; `RunProgress`, the sections and
 // the calendar carry the rest of each state.
@@ -47,11 +54,7 @@ export function NeverRun({
     <div className="plate notice flex flex-wrap items-center gap-3">
       <p className="font-bold">{line.text}</p>
       {fix !== null ? (
-        <a
-          href={hrefWith({ view: 'providers', def: null, refused: null })}
-          onClick={navigateTo({ view: 'providers', def: null, refused: null })}
-          className="font-bold underline"
-        >
+        <a href={hrefWith(SET_UP_SOURCE)} onClick={navigateTo(SET_UP_SOURCE)} className="font-bold underline">
           {fix}
         </a>
       ) : (
@@ -77,8 +80,8 @@ export function TooManyCells({ cells, bound }: { cells: number; bound: number })
  * A refused Search now on the new search's page (`refused=<code>`; spec rev 55 §11, Review Focus 1, ruling A24), in
  * words from the code alone, never the engine's: `disabled` with the fix "Set up a price source (Providers)"; `confirm`
  * with the estimate asked again and its sentence inline beside "Search again · about £X"; `cap` with the day the month's
- * limit resets when the press's answer named one (a reload has only the code); `window` with Edit; `shutting-down`;
- * `failed` with Search again.
+ * limit resets when the press's answer named one (a reload has only the code); `window` with Edit; `shutting-down`,
+ * `reload-pending` (a saved setting waits for the app to restart) and `failed` with Search again.
  */
 export function Refused({ definitionId, code }: { definitionId: string; code: StartRefusalCode }) {
   const R = REFUSED_COPY;
@@ -102,11 +105,7 @@ export function Refused({ definitionId, code }: { definitionId: string; code: St
           : R[code]}
       </p>
       {code === 'disabled' ? (
-        <a
-          href={hrefWith({ view: 'providers', def: null, refused: null })}
-          onClick={navigateTo({ view: 'providers', def: null, refused: null })}
-          className="font-bold underline"
-        >
+        <a href={hrefWith(SET_UP_SOURCE)} onClick={navigateTo(SET_UP_SOURCE)} className="font-bold underline">
           {R.disabledFix}
         </a>
       ) : null}
@@ -115,7 +114,7 @@ export function Refused({ definitionId, code }: { definitionId: string; code: St
           {R.edit}
         </a>
       ) : null}
-      {code === 'failed' || code === 'shutting-down' ? (
+      {code === 'failed' || code === 'shutting-down' || code === 'reload-pending' ? (
         <SearchAgainButton definitionId={definitionId} />
       ) : null}
     </div>

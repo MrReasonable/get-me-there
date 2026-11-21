@@ -84,7 +84,12 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
     const p = ports(testEnv({ ...extra, DATABASE_PATH: join(dir, extra.DATABASE_PATH) }));
     expect(p.providers.map((x) => x.id)).toEqual(['travelpayouts', 'searchapi']);
     expect(p.fixtureRoot).toBeNull();
-    expect(Object.keys(httpLimitsFor(p.config)).sort()).toEqual(['fx', 'searchapi', 'travelpayouts']);
+    expect(Object.keys(httpLimitsFor(p.config)).sort()).toEqual([
+      'fx',
+      'searchapi',
+      'searchapi-account',
+      'travelpayouts',
+    ]);
   });
 
   it('fails, closing the handle, when the migrations directory is missing', () => {
@@ -96,7 +101,13 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
   it('httpLimitsFor at WP4b: fixture (WP4 fixtureHttpLimits at the configured cost) only under syntheticAllowed, fx always', () => {
     const config = loadConfigFromEnv(testEnv(FIXTURE_COST));
     const limits = httpLimitsFor(config);
-    expect(Object.keys(limits).sort()).toEqual(['fixture', 'fx', 'searchapi', 'travelpayouts']);
+    expect(Object.keys(limits).sort()).toEqual([
+      'fixture',
+      'fx',
+      'searchapi',
+      'searchapi-account',
+      'travelpayouts',
+    ]);
     // why: the guard refuses any reserve whose cost differs from its configured rate (WP3 rule 'cost'), so both read config
     expect(limits.fixture?.costPerCallMicroGbp).toBe(3200);
     expect(limits.fixture?.costPerCallMicroGbp).toBe(

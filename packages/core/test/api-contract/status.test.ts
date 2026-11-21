@@ -57,6 +57,14 @@ describe('statusResponseSchema', () => {
     expect(statusResponseSchema.safeParse({ ...base, mode: 'other' }).success).toBe(false);
     expect(statusResponseSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
   });
+  it("carries the worker's pages at once only when the worker reported them, a whole number from 1 to 8", () => {
+    // why: settings plan ruling 9 — the Settings page shows "Pages at once: N" read from the worker's own status
+    const base = { generatedAt: '2026-10-14T09:00:00.000Z', mode: 'native', version: 'abc1234', checks: [] };
+    expect(statusResponseSchema.safeParse({ ...base, pagesAtOnce: 2 }).success).toBe(true);
+    expect(statusResponseSchema.safeParse({ ...base, pagesAtOnce: 8 }).success).toBe(true);
+    for (const bad of [0, 9, 1.5, null, '2'])
+      expect(statusResponseSchema.safeParse({ ...base, pagesAtOnce: bad }).success, String(bad)).toBe(false);
+  });
   it('is mounted as GET /api/status, and the test email as a POST', () => {
     expect(ROUTES.find((r) => r.method === 'GET' && r.path === '/api/status')?.response).toBe(
       statusResponseSchema,

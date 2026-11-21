@@ -7,7 +7,9 @@ import {
   sharedMode,
   sharedSettingMessage,
 } from '../camoufox/settings.js';
+import { DEFAULT_FLIGHT_READ_PATIENCE } from '../datePairs/confirm.js';
 import { DEFAULT_MAX_CELLS } from '../space/limits.js';
+import { type ProviderId, providerIdSchema } from '../types/provenance.js';
 import { isLoopbackHost, reachBeyondThisMachine, reachRefusal } from './access.js';
 import {
   type CappedProviderLimits,
@@ -18,6 +20,17 @@ import {
   TRAVELPAYOUTS_DEFAULTS,
 } from './presets.js';
 import { Secret } from './secret.js';
+import {
+  DEFAULT_CAMOUFOX_BROWSER_WINDOW,
+  DEFAULT_DISCOVERY_REFRESH_DAYS,
+  DEFAULT_SEARCHAPI_PLAN,
+  DEFAULT_SMTP_TLS,
+  MIN_SECRET_LENGTH,
+  OWNED_NAMES,
+  SECRET_TOO_SHORT,
+  SMTP_ALL_OR_NOTHING,
+  SMTP_REQUIRED_NAMES,
+} from './settings.js';
 
 /**
  * Parsed configuration. Spec §12: parsed once in the api bootstrap; empty = unset; invalid or
@@ -57,6 +70,15 @@ export interface Config {
    * App side only (the engine decides), so not a shared worker setting; a catch-up loads none either way.
    */
   camoufoxBrowserWindow: 'scheduled' | 'any';
+  /** FLIGHT_READ_PATIENCE (settings plan ruling 7): reads in a row without a cheaper trip before a run stops (3–50). */
+  flightReadPatience: number;
+  /** DISCOVERY_REFRESH_DAYS (ruling 7): new searches' calendar refresh, in days (1–30); × 24 is their hours. */
+  discoveryRefreshDays: number;
+  /**
+   * NEW_SEARCH_DISCOVERY / NEW_SEARCH_VERIFICATION (ruling 7): the provider ids new searches start with; `null` when
+   * unset (the install's default draft), `[]` for `none`. A listed source that is not configured drops out at use.
+   */
+  newSearchSources: { discovery: ProviderId[] | null; verification: ProviderId[] | null };
   spend: {
     monthlyCapMicroGbp: number;
     globalBillingDay: number;
@@ -119,7 +141,13 @@ export interface ParseConfigOptions {
   realpath: (p: string) => string;
 }
 export type ConfigError = { field: string; message: string };
-export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: ConfigError[] };
+/**
+ * `warnings`: a variable that cannot apply and is ignored rather than failing boot (settings plan ruling 1), named with
+ * the words the boot logs; never a value.
+ */
+export type ConfigResult =
+  | { ok: true; config: Config; warnings: ConfigError[] }
+  | { ok: false; errors: ConfigError[] };
 
 type Env = Record<string, string | undefined>;
 /**
@@ -152,6 +180,7 @@ const smtpTuple = z.tuple([z.string(), z.string(), z.string(), z.string(), z.str
 /** Field readers: each validates one variable, records an error under its name, and returns undefined when unset. */
 class Reader {
   readonly errors: ConfigError[] = [];
+  readonly warnings: ConfigError[] = [];
   constructor(private readonly env: Env) {}
 
   /** Empty string means unset (spec §12). */
@@ -190,8 +219,45 @@ class Reader {
     const v = this.int(name, 0);
     return v === undefined ? undefined : v * PENCE_TO_MICRO;
   }
+  /**
+   * A comma list of provider ids, or `none` for an empty list; undefined when unset. An unknown id is refused naming it,
+   * and so is `none` beside others or an empty entry. Repeats are dropped, order kept.
+   */
+  sourceList(name: string): ProviderId[] | undefined {
+    const v = this.raw(name);
+    if (v === undefined) return undefined;
+    const parts = v.split(',').map((p) => p.trim());
+    if (parts.length === 1 && parts[0] === 'none') return [];
+    const ids: ProviderId[] = [];
+    for (const part of parts) {
+      const id = providerIdSchema.safeParse(part);
+      if (!id.success) {
+        this.fail(
+          name,
+          part === ''
+            ? `${name} has an empty entry`
+            : `${name} names an unknown provider: ${part} (use ${providerIdSchema.options.join(', ')}, or none alone)`,
+        );
+        return undefined;
+      }
+      if (!ids.includes(id.data)) ids.push(id.data);
+    }
+    return ids;
+  }
+  /**
+   * A secret setting: refused when it is shorter than MIN_SECRET_LENGTH (http-kit refuses to build with one, so a short
+   * stored secret would stop every boot; refused here, it is set aside instead), else as read.
+   */
+  secret(name: string): string | undefined {
+    const v = this.raw(name);
+    if (v !== undefined && v.length < MIN_SECRET_LENGTH) this.fail(name, SECRET_TOO_SHORT);
+    return v;
+  }
   fail(field: string, message: string): void {
     this.errors.push({ field, message });
+  }
+  warn(field: string, message: string): void {
+    this.warnings.push({ field, message });
   }
   /** A variable that must be set; records the error and returns '' so parsing can continue and report every field. */
   required(name: string): string {
@@ -412,7 +478,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     r.fail('SCHEDULER_TIMEZONE', `unknown IANA time zone: ${schedulerTimezone}`);
 
   // providers
-  const tpToken = r.str('TRAVELPAYOUTS_TOKEN');
+  const tpToken = r.secret('TRAVELPAYOUTS_TOKEN');
   const travelpayouts =
     tpToken === undefined
       ? null
@@ -420,55 +486,52 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
           token: new Secret(tpToken),
           limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS, 48),
         };
-  const saKey = r.str('SEARCHAPI_KEY');
-  const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
+  const saKey = r.secret('SEARCHAPI_KEY');
+  const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? DEFAULT_SEARCHAPI_PLAN;
   const preset = PLAN_PRESETS[plan];
+  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
+  // switch to the subscription would be silently ignored; it is named in a warning instead. Settings plan ruling 1: the
+  // plan is the Settings page's now, and a plan saved there never stops boot over an env-only line, so this warns.
+  const trialUsedRead = saKey === undefined ? 0 : (r.int('SEARCHAPI_TRIAL_USED', 0) ?? 0);
+  const trialUsedIgnored = preset.window === 'month' && trialUsedRead > 0;
+  if (trialUsedIgnored)
+    r.warn(
+      'SEARCHAPI_TRIAL_USED',
+      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
+    );
   const searchapi =
     saKey === undefined
       ? null
       : {
           key: new Secret(saKey),
           plan,
-          trialUsed: r.int('SEARCHAPI_TRIAL_USED', 0) ?? 0,
+          trialUsed: trialUsedIgnored ? 0 : trialUsedRead,
           limits: {
             ...providerLimits(r, 'SEARCHAPI', preset),
             costPerCallMicroGbp: r.int('SEARCHAPI_COST_PER_CALL_MICRO_GBP', 0) ?? preset.costPerCallMicroGbp,
             planFixedMicroGbp: r.pence('SEARCHAPI_PLAN_FIXED_PENCE') ?? preset.planFixedMicroGbp,
           },
         };
-  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
-  // switch to the subscription would be silently ignored; spec §12: a variable that cannot apply fails boot, named.
-  if (searchapi !== null && searchapi.limits.window === 'month' && searchapi.trialUsed > 0)
-    r.fail(
-      'SEARCHAPI_TRIAL_USED',
-      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
-    );
   const billedPreset = searchapi === null ? null : preset;
   const camoufox = camoufoxConfig(r, shared);
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
 
   // smtp: all or nothing (spec §8.3)
-  const smtpNames = [
-    'SMTP_HOST',
-    'SMTP_PORT',
-    'SMTP_USER',
-    'SMTP_PASS',
-    'ALERT_EMAIL_TO',
-    'ALERT_EMAIL_FROM',
-  ] as const;
+  const smtpNames = SMTP_REQUIRED_NAMES;
   const smtpValues = smtpNames.map((n) => r.raw(n));
   const smtpSetCount = smtpValues.filter((v) => v !== undefined).length;
   let smtp: Config['smtp'] = null;
   if (smtpSetCount > 0 && smtpSetCount < smtpNames.length) {
     smtpNames.forEach((n, i) => {
-      if (smtpValues[i] === undefined) r.fail(n, 'SMTP settings are all or nothing');
+      if (smtpValues[i] === undefined) r.fail(n, SMTP_ALL_OR_NOTHING);
     });
   } else if (smtpSetCount === smtpNames.length) {
     // why: every value is known set here; the tuple parse gives typed strings without defaulted branches.
     const [host, , user, pass, to, from] = smtpTuple.parse(smtpValues);
+    r.secret('SMTP_PASS');
     const smtpPort = r.int('SMTP_PORT', 1, 65535);
-    const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? 'implicit';
+    const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? DEFAULT_SMTP_TLS;
     if (!isMailbox(to))
       r.fail(
         'ALERT_EMAIL_TO',
@@ -511,10 +574,18 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const requestTimeoutSeconds = r.int('REQUEST_TIMEOUT_SECONDS', 1) ?? 60;
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
-  const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
+  const camoufoxBrowserWindow =
+    r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? DEFAULT_CAMOUFOX_BROWSER_WINDOW;
+  const flightReadPatience = r.int('FLIGHT_READ_PATIENCE', 3, 50) ?? DEFAULT_FLIGHT_READ_PATIENCE;
+  const discoveryRefreshDays = r.int('DISCOVERY_REFRESH_DAYS', 1, 30) ?? DEFAULT_DISCOVERY_REFRESH_DAYS;
+  const newSearchSources = {
+    discovery: r.sourceList('NEW_SEARCH_DISCOVERY') ?? null,
+    verification: r.sourceList('NEW_SEARCH_VERIFICATION') ?? null,
+  };
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
 
   if (r.errors.length > 0) return { ok: false, errors: r.errors };
+  const warnings = r.warnings;
   const databasePath = databasePathRaw === ':memory:' ? ':memory:' : opts.realpath(databasePathRaw);
   return {
     ok: true,
@@ -543,6 +614,9 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       estimateRetryFactor,
       fxMaxRateAgeDays,
       camoufoxBrowserWindow,
+      flightReadPatience,
+      discoveryRefreshDays,
+      newSearchSources,
       spend,
       providers: { travelpayouts, searchapi, camoufox, fixture },
       alertEmailMaxPerHour,
@@ -550,5 +624,17 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       inContainer,
       allowFixtureProvider,
     },
+    warnings,
   };
+}
+
+/**
+ * Settings plan ruling 3: the first parse at boot, of the environment with every name the Settings page owns left out,
+ * so the refusals, the lock wait, the backup and the migrations run on what the environment alone fixes; the full
+ * config is parsed under the lock, with the stored settings laid over the environment (layerSettings).
+ */
+export function parseBootConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
+  const bootEnv: Env = { ...env };
+  for (const name of OWNED_NAMES) delete bootEnv[name];
+  return parseConfig(bootEnv, opts);
 }

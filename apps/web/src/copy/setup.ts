@@ -50,8 +50,9 @@ export const SETUP_COPY = {
     refreshHint:
       "A price older than this is asked for again by the next run, and until then reads as older than this search's refresh.",
     maxCallsZero:
-      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
-    maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
+      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from the limit in Settings › Limits.',
+    maxCallsHint:
+      'Calls to paid sources (SearchApi). New searches start from the limit in Settings › Limits.',
     maxFreeCallsHint:
       "Requests to free sources (the Aviasales cache) a run may make before it stops. The browser worker's pages never count.",
     maxCostHint: 'A run stops before it would spend more than this. 0 means it spends nothing.',
@@ -110,14 +111,15 @@ export const SETUP_COPY = {
       "Vendor's cache age unknown: the vendor does not say how old its answer may be, so each price shows when this app fetched it.",
     emptyHeading: 'No price source is set up',
     emptyLead:
-      'Searches find nothing until one is. Each source is set up with pnpm gmt setup (or in the .env file); docs/setup.md has the steps.',
+      'Searches find nothing until one is. Add a key in Settings › Price sources, or set the browser up with pnpm gmt setup; docs/setup.md has the steps.',
     sources: [
       {
         id: 'travelpayouts',
         name: 'Travelpayouts (Aviasales cache)',
         what: "Cached prices from other people's recent searches, up to 48 hours old. Discovery only.",
         cost: 'Free; needs a free Travelpayouts token.',
-        command: 'pnpm gmt setup --reconfigure travelpayouts',
+        // why: settings plan ruling 15 (review R17a): the app keeps its key on the Settings page
+        setUp: { kind: 'link', label: 'Settings › Price sources', href: '?view=settings&section=sources' },
         doc: 'or docs/setup.md section 2.',
       },
       {
@@ -125,7 +127,7 @@ export const SETUP_COPY = {
         name: 'SearchApi (Google Flights)',
         what: 'The Google date grid for discovery, and Google Flights itinerary search with booking options.',
         cost: 'Paid: one-off trial credits, or the $40-a-month plan; each run stops at its call cap.',
-        command: 'pnpm gmt setup --reconfigure searchapi',
+        setUp: { kind: 'link', label: 'Settings › Price sources', href: '?view=settings&section=sources' },
         doc: 'or docs/setup.md section 2.',
       },
       {
@@ -133,7 +135,7 @@ export const SETUP_COPY = {
         name: 'Camoufox (Google Flights in a browser on your machine)',
         what: 'Reads Google Flights prices one date pair a page, while this machine is on. Discovery only; off by default.',
         cost: 'Free; paced by its page spacing (30 s by default).',
-        command: 'pnpm gmt setup --reconfigure browser',
+        setUp: { kind: 'command', command: 'pnpm gmt setup --reconfigure browser' },
         doc: 'after reading docs/setup.md section 14.',
       },
     ],

@@ -31,9 +31,21 @@ describe('Providers', () => {
       expect(item).toHaveTextContent(source.name);
       expect(item).toHaveTextContent(source.what);
       expect(item).toHaveTextContent(source.cost);
-      expect(within(item).getByText(source.command)).toBeInTheDocument();
+      // why: review R17a (settings plan ruling 15): the two keyed sources are set up on Settings › Price sources; the
+      // browser keeps its setup command. The source decides which is expected, never the copy's own kind.
+      if (source.id === 'camoufox') {
+        if (source.setUp.kind !== 'command') throw new Error('the browser keeps its setup command');
+        expect(within(item).getByText('pnpm gmt setup --reconfigure browser')).toBeInTheDocument();
+        expect(within(item).queryByRole('link', { name: 'Settings › Price sources' })).toBeNull();
+      } else {
+        expect(source.setUp.kind).toBe('link');
+        const link = within(item).getByRole('link', { name: 'Settings › Price sources' });
+        expect(link).toHaveAttribute('href', '?view=settings&section=sources');
+      }
       expect(item).toHaveTextContent(source.doc);
     }
+    expect(empty).not.toHaveTextContent('--reconfigure travelpayouts');
+    expect(empty).not.toHaveTextContent('--reconfigure searchapi');
     expect(empty).toHaveTextContent('docs/setup.md section 2');
     expect(empty).toHaveTextContent('docs/setup.md section 14');
   });

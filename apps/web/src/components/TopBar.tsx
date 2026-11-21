@@ -6,8 +6,9 @@ import { failureOf, useStatus } from '../api/statusQuery.js';
 import { COPY } from '../copy.js';
 import { formatMicroGbp } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
-import { searchApiCallsLeft } from '../lib/searchApiCallsLeft.js';
+import { useSearchApiCredits } from '../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../state/urlState.js';
+import { settingsPatch } from '../state/view.js';
 
 const T = COPY.topBar;
 const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
@@ -33,9 +34,9 @@ function subjectWords(subject: NonNullable<ReturnType<typeof apiContract.barSumm
 /**
  * The health line (Ruling 10): one line from the same query as the Status page and core's `barSummary`. All working
  * with a dot; one problem "<name> needs attention · fix" (amber) or "<name> failing · fix" (red); several "N things need
- * you · fix" (red when any fails); `off` checks never count. The line links to the Status page. After a failed refresh
- * it says the report is stale and how old; with no report, that the app is not answering, was refused or failed: never a
- * clean state from old data. Nothing while the first answer is awaited.
+ * you · fix" (red when any fails); `off` checks never count. The line links to Settings › System (settings plan ruling
+ * 14). After a failed refresh it says the report is stale and how old; with no report, that the app is not answering,
+ * was refused or failed: never a clean state from old data. Nothing while the first answer is awaited.
  */
 export function HealthLine() {
   const q = useStatus();
@@ -87,8 +88,8 @@ export function HealthLine() {
         <span className="health-words">{words}</span>
       ) : (
         <a
-          href={hrefWith({ view: 'status' })}
-          onClick={navigateTo({ view: 'status' })}
+          href={hrefWith(settingsPatch('system'))}
+          onClick={navigateTo(settingsPatch('system'))}
           className={`health-words ${toneClass}`}
         >
           {words}
@@ -138,8 +139,8 @@ function SearchingNow() {
 }
 
 /**
- * The remaining limits (Ruling 10), on every view: SearchApi's calls left in the window in use (only while SearchApi is
- * enabled, from `searchApiCallsLeft`, which the new-search panel shares), and the month's spend against its cap
+ * The remaining limits (Ruling 10), on every view: SearchApi's credits left (only while SearchApi is enabled, from
+ * `searchApiCreditsLine`, which the new-search panel and the search form share), and the month's spend against its cap
  * (`global-month` call cost, a fixed fee not in it; `data-cost` marks it a cost, never a fare). While a search runs,
  * "Searching: <name>" comes first.
  */
@@ -148,20 +149,11 @@ export function Limits() {
   const providers = useProviders();
   const month =
     budget.data?.scopes.find((u) => u.scope === budgetScopeLabel({ kind: 'global-month' })) ?? null;
-  const calls =
-    budget.data === undefined || providers.data === undefined
-      ? null
-      : searchApiCallsLeft(budget.data, providers.data);
+  const credits = useSearchApiCredits(providers.data);
   return (
     <section aria-label={T.limitsLabel} className="limits">
       <SearchingNow />
-      {calls === null ? null : (
-        <span className="limit-item">
-          {calls.window === 'trial'
-            ? T.callsLeftTrial(calls.left, calls.cap)
-            : T.callsLeftMonth(calls.left, calls.cap)}
-        </span>
-      )}
+      {credits === null ? null : <span className="limit-item">{credits.line}</span>}
       {month === null ? null : (
         // why: data-cost marks a cost or cap figure, never a fare; the rendered sweep allows "£" only in a PriceCell or here.
         <span data-cost="" className="limit-item">

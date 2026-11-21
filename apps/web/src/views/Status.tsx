@@ -1,7 +1,8 @@
 import { apiContract } from '@gmt/core';
-import { failureOf, useStatus } from '../api/statusQuery.js';
+import { useStatus } from '../api/statusQuery.js';
 import { Loading } from '../components/LoadState.js';
 import { cardName, StatusCard } from '../components/StatusCard.js';
+import { CheckedLine, failureWords } from '../components/StatusNotices.js';
 import { COPY } from '../copy.js';
 import { Flaps } from '../flaps/Flaps.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
@@ -62,15 +63,7 @@ export function StatusView() {
             <span aria-hidden="true" className="tag tag-bad">
               ✕
             </span>
-            <span>
-              {
-                {
-                  'not-answering': COPY.statusView.notAnswering,
-                  'sign-in-refused': COPY.statusView.signInRefused,
-                  'report-failed': COPY.statusView.reportFailed,
-                }[failureOf(q.error)]
-              }
-            </span>
+            <span>{failureWords(q.error)}</span>
             <button type="button" className="btn btn-sm min-h-11" onClick={() => void q.refetch()}>
               {COPY.retryLoad}
             </button>
@@ -87,10 +80,7 @@ export function StatusView() {
       <div className="space-y-1">
         <h1 className="h-view">{COPY.statusView.heading}</h1>
         {/* why: V11 (ui-b1-001): the ticking age is plain text; only a change of state (stale or not) is announced */}
-        <p className="lede">{q.isRefetchError ? null : checked}</p>
-        <p role="status" className="warn-text">
-          {q.isRefetchError && checked !== null ? COPY.statusView.stale(checked) : null}
-        </p>
+        <CheckedLine checked={checked} refetchError={q.isRefetchError} />
       </div>
       <div className="status-layout">
         <StationBoard checks={groups.flatMap((g) => g.cards)} />

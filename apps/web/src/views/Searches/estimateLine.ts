@@ -28,9 +28,9 @@ export interface SentenceSchedule {
  */
 export interface EstimateSentence {
   line: string;
-  /** "Search · about £1.20", "Search · 120 SearchApi calls", or the bare verb on a free run. */
+  /** "Search · about £1.20", "Search · 120 SearchApi credits", or the bare verb on a free run. */
   button: string;
-  /** The cost tag the button carries ("about £1.20", "120 SearchApi calls"), or null on a free run. */
+  /** The cost tag the button carries ("about £1.20", "120 SearchApi credits"), or null on a free run. */
   tag: string | null;
   notes: string[];
   /**
@@ -97,10 +97,13 @@ function flightsNote(f: NonNullable<EstimateResponse['estimate']['flightLists']>
 const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** The words for a blocked line's scope (engine `checkBudget` names it). */
-function blockedWhy(scope: string, c: Copy): string {
+function blockedWhy(scope: string, c: Copy, id: ProviderId): string {
   const W = c.blockedWhy;
   const kind = BUDGET_SCOPE_KINDS.find((k) => k === scope);
   if (kind === undefined) return W.unknown;
+  // why: controller ruling R9 — SearchApi's windows are counted in credits
+  if (id === 'searchapi' && (kind === 'provider-month' || kind === 'provider-lifetime'))
+    return c.blockedWhySearchApi[kind];
   return W[kind];
 }
 
@@ -149,7 +152,7 @@ const sentenceFrom = (clauses: readonly string[], c: Copy): string =>
  *
  * - the first sentence: the duration ("About 2½ hours"); "free" only when no billable-plan source is used and the run
  *   costs nothing, else "about £1.20" when it costs money; each billable-plan source's calls against what its window
- *   has left ("uses about 120 of the 9,880 SearchApi calls left this month", "…left on your trial" for a lifetime
+ *   has left ("uses about 120 of the 9,880 SearchApi credits left this month", "…left on your trial" for a lifetime
  *   window); when only some dates are asked, "asks about 300 of 405 dates this run, the rest when you search again"
  *   ("the rest next Monday" on a search repeating on Mondays, po-011), with "(20 on some airports only)" and "(105 kept
  *   from earlier searches)" beside the count (20.4 minor 7); and "cached prices only where travellers searched
@@ -189,8 +192,18 @@ export function estimateSentence(
   const cachedOnly = sources.size === 1 && sources.has('travelpayouts');
   const billedClauses = billed.map((b) =>
     b.left === null
-      ? L.billedNoCap(groupThousands(b.calls), L.callsOf[b.providerId])
-      : L.billed(groupThousands(b.calls), groupThousands(b.left), L.callsOf[b.providerId], b.window),
+      ? L.billedNoCap(
+          groupThousands(b.calls),
+          L.callsOf[b.providerId],
+          L.unit(b.providerId, groupThousands(b.calls)),
+        )
+      : L.billed(
+          groupThousands(b.calls),
+          groupThousands(b.left),
+          L.callsOf[b.providerId],
+          b.window,
+          L.unit(b.providerId, groupThousands(b.left)),
+        ),
   );
   const spends = covers.pence > 0 || billed.length > 0;
   const runClauses = [
@@ -216,7 +229,15 @@ export function estimateSentence(
     covers.pence > 0
       ? L.about(money(covers.pence))
       : billed.length > 0
-        ? billed.map((b) => L.callsTag(groupThousands(b.calls), L.callsOf[b.providerId])).join(L.separator)
+        ? billed
+            .map((b) =>
+              L.callsTag(
+                groupThousands(b.calls),
+                L.callsOf[b.providerId],
+                L.unit(b.providerId, groupThousands(b.calls)),
+              ),
+            )
+            .join(L.separator)
         : null;
   return {
     line: [...sentences, ...flights].join(' '),
@@ -230,7 +251,12 @@ export function estimateSentence(
         : [
             e.softConfirm.reason === 'cost'
               ? L.softCost(money(e.softConfirm.estimatePence), money(e.softConfirm.thresholdPence), press)
-              : L.softShare(L.callsOf[e.softConfirm.providerId], e.softConfirm.window, press),
+              : L.softShare(
+                  L.callsOf[e.softConfirm.providerId],
+                  e.softConfirm.window,
+                  press,
+                  L.unit(e.softConfirm.providerId, '2'),
+                ),
           ]),
     ],
     covers,
@@ -255,7 +281,7 @@ function notUsedNotes(lines: readonly Line[], c: Copy, money: (pence: number) =>
     const pence = microGbpToPence(b.micro);
     return c.notUsed(
       capitalised(mainPathSource(id)),
-      blockedWhy(b.scope, c),
+      blockedWhy(b.scope, c, id),
       pence > 0 ? money(pence) : null,
     );
   });

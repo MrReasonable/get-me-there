@@ -11,6 +11,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import { navigateToQuery } from '../../state/urlState.js';
 import { SettingsCrumbs } from '../Settings/SettingsView.js';
 import './providers.css';
 
@@ -54,7 +55,14 @@ function NoProviders() {
               <span className="font-bold">{P.costLabel}</span> {s.cost}
             </p>
             <p>
-              <span className="font-bold">{P.setupLabel}</span> <code className="cmd">{s.command}</code>{' '}
+              <span className="font-bold">{P.setupLabel}</span>{' '}
+              {s.setUp.kind === 'command' ? (
+                <code className="cmd">{s.setUp.command}</code>
+              ) : (
+                <a href={s.setUp.href} onClick={navigateToQuery(s.setUp.href)}>
+                  {s.setUp.label}
+                </a>
+              )}{' '}
               {s.doc}
             </p>
           </li>
@@ -96,7 +104,7 @@ export function ProvidersView() {
   if (q.data === undefined) return <Loading />;
   return (
     <div className="providers pt-5">
-      <SettingsCrumbs title={COPY.crumbs.priceSources} />
+      <SettingsCrumbs title={COPY.crumbs.callsAndCaps} />
       <div className="space-y-2">
         <h1 className="h-view">{COPY.providersHeading}</h1>
         <p className="lede">{P.intro}</p>

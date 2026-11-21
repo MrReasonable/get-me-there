@@ -6,7 +6,9 @@ import {
   NAV_VIEW,
   navItemOf,
   navPatch,
+  parseSettingsSection,
   parseView,
+  settingsPatch,
   VIEWS,
   type ViewId,
 } from '../../src/state/view.js';
@@ -244,7 +246,7 @@ describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () =
     for (const v of VIEWS) expect(NAV_ITEMS).toContain(navItemOf(v));
   });
 
-  it("a nav link names its view and drops the detail's date pair, its airport pair and row, keeping every filter", () => {
+  it("a nav link names its view and drops the detail's date pair, its airport pair, row and Settings section, keeping every filter", () => {
     expect(navPatch('history')).toEqual({
       view: 'history',
       depart: null,
@@ -252,6 +254,14 @@ describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () =
       row: null,
       't.from': null,
       't.to': null,
+      section: null,
     });
+  });
+
+  it('a Settings section link names the section; an absent or unknown section is Price sources (settings ruling 14)', () => {
+    expect(settingsPatch('limits')).toMatchObject({ view: 'settings', section: 'limits' });
+    expect(parseSettingsSection('email')).toBe('email');
+    expect(parseSettingsSection(null)).toBe('sources');
+    expect(parseSettingsSection('alerts')).toBe('sources');
   });
 });

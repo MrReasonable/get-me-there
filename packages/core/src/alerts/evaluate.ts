@@ -1,15 +1,10 @@
+import { DEFAULT_DISCOVERY_REFRESH_HOURS } from '../config/settings.js';
 import { hoursSince } from '../labels/age.js';
 import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { Cabin, ProviderId } from '../types/provenance.js';
 import { dedupKey, identityKey, isSuppressed, priceOf, type Suppression, span } from './dedup.js';
-
-/**
- * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one
- * owner of the default: the engine imports it from `@gmt/core` for its reuse cutoff.
- */
-export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
 
 /** Per-run context for `evaluateAlertRules` (the plan's inline ctx type, named). */
 export interface AlertEvalContext {

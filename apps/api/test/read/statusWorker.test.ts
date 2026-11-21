@@ -135,6 +135,29 @@ describe('the cause behind the consent card (V2)', () => {
       ).toBe(want);
     expect(cause({ read: { kind: 'disabled' } })).toBe('none');
   });
+  it('carries the record’s expiry as a date in the report’s zone when it is known, and only then (settings ruling 9)', () => {
+    const at = (expiresAt: string, mark: 'reject' | 'accept' = 'reject') =>
+      consentOutcome(
+        { now: asIsoDateTime('2026-11-19T12:00:00.000Z'), tz: 'America/New_York', mode: 'native' },
+        healthyWorker({
+          read: {
+            kind: 'ok',
+            status: okWorkerStatus({
+              consent: { kind: 'socs', expiresAt: asIsoDateTime(expiresAt), boundedBy: 'cookie', mark },
+            }),
+          },
+        }),
+      ).check;
+    // 02:00 UTC on 18 Nov is still the 17th in New York
+    expect(at('2027-11-18T02:00:00.000Z')).toMatchObject({ state: 'ok', expiresOn: '2027-11-17' });
+    expect(at('2026-12-01T12:00:00.000Z')).toMatchObject({ state: 'warn', expiresOn: '2026-12-01' });
+    expect(at('2026-11-01T12:00:00.000Z')).toMatchObject({ state: 'fail', expiresOn: '2026-11-01' });
+    expect(at('2027-11-18T12:00:00.000Z', 'accept')).not.toHaveProperty('expiresOn');
+    expect(consentOutcome(frame, healthyWorker({ read: { kind: 'unreachable' } })).check).not.toHaveProperty(
+      'expiresOn',
+    );
+  });
+
   it('the fix is the one command that exists, with no pnpm gmt consent (po-b1-003)', () => {
     const c = consentOutcome(
       frame,

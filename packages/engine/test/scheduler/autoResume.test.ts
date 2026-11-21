@@ -221,4 +221,51 @@ describe('autoResume: isolated, and silent once the engine is closing (T5, T12)'
     ctx.lifecycle.closed = false;
     expect(await autoResumeYields(ctx, orch, paused(h, catchUp.id))).toBe('yielded');
   });
+
+  it('held for a restart in place (settings plan ruling 6) it reads and resumes nothing; unheld, the same run resumes', {
+    timeout: 30_000,
+  }, async () => {
+    const { h, catchUp } = world('paused_error', null);
+    vi.setSystemTime(new Date('2027-03-01T09:00:00.000Z')); // no firing since it stopped: unheld, it resumes
+    const ctx = buildContext(h.deps, h.options);
+    const orch = h.track(createOrchestrator(ctx));
+    const resume = vi.spyOn(orch, 'resume');
+    const get = vi.spyOn(ctx.repos.definitions, 'get');
+    ctx.lifecycle.reloadPending = true;
+    expect(await autoResume(ctx, orch, paused(h, catchUp.id))).toBeNull();
+    expect(get).not.toHaveBeenCalled();
+    expect(resume).not.toHaveBeenCalled();
+    ctx.lifecycle.reloadPending = false;
+    expect(await autoResume(ctx, orch, paused(h, catchUp.id))).toMatchObject({
+      ok: true,
+      executionId: catchUp.id,
+    });
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('a hold that lands while the decision awaits its firing’s rule stops the resume; without it the run resumes', {
+    timeout: 30_000,
+  }, async () => {
+    for (const holdDuringAwait of [true, false]) {
+      const { h, catchUp } = world('paused_error', null);
+      vi.setSystemTime(new Date('2027-03-01T18:30:00.000Z')); // past F2's grace: the decision awaits F2's rule
+      const ctx = buildContext(h.deps, h.options);
+      const orch = h.track(createOrchestrator(ctx));
+      // why: F2's start is refused, so the catch-up is still paused and the decision answers `resume`
+      const start = vi.spyOn(orch, 'start').mockImplementation(async () => {
+        if (holdDuringAwait) ctx.lifecycle.reloadPending = true;
+        return { ok: false, code: 'reload-pending', message: 'held', details: {} };
+      });
+      const resume = vi.spyOn(orch, 'resume');
+      const r = await autoResume(ctx, orch, paused(h, catchUp.id));
+      expect(start).toHaveBeenCalledTimes(1);
+      if (holdDuringAwait) {
+        expect(r).toBeNull();
+        expect(resume).not.toHaveBeenCalled();
+      } else {
+        expect(r).toMatchObject({ ok: true, executionId: catchUp.id });
+        expect(resume).toHaveBeenCalledTimes(1);
+      }
+    }
+  });
 });

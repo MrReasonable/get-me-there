@@ -4,8 +4,8 @@ import { COPY } from '../../src/copy.js';
 // why: every user-facing count agrees with its noun at 1 and at more than 1 (CodeRabbit finding on copy.ts).
 const cases: ReadonlyArray<[string, string, string]> = [
   ['runProgress.calendar', COPY.runProgress.calendar(0, 1, null), COPY.runProgress.calendar(0, 2, null)],
-  ['topBar.callsLeftMonth', COPY.topBar.callsLeftMonth(0, 1), COPY.topBar.callsLeftMonth(0, 100)],
-  ['topBar.callsLeftTrial', COPY.topBar.callsLeftTrial(0, 1), COPY.topBar.callsLeftTrial(0, 24)],
+  ['topBar.creditsLeft', COPY.topBar.creditsLeft(1, null), COPY.topBar.creditsLeft(2, null)],
+  ['topBar.creditsLeft (a cap)', COPY.topBar.creditsLeft(0, 1), COPY.topBar.creditsLeft(0, 100)],
   ['requestRow', COPY.requestRow(1, '1', 1, '£1'), COPY.requestRow(2, '2', 2, '£1')],
   ['requestRowTiles', COPY.requestRowTiles(1, '1', 1, 1, '£1'), COPY.requestRowTiles(2, '2', 2, 2, '£1')],
   ['usageWindow', COPY.usageWindow(0, '1', 'a', 'b'), COPY.usageWindow(0, '5', 'a', 'b')],

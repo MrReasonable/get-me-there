@@ -7,9 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { bootApp } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
+import { bootEnv } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
@@ -30,7 +30,7 @@ function withUnknownAirport(deleted: boolean): string {
 
 const boot = (path: string) =>
   bootApp({
-    config: loadConfigFromEnv(
+    ...bootEnv(
       cleanEnv({
         NODE_ENV: 'production',
         DATABASE_PATH: path,

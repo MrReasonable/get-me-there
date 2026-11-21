@@ -1,7 +1,13 @@
 // Spec §8.2 plan preset and §11 form defaults.
-import type { FlightProvider, ProviderId } from '@gmt/core';
+import type {
+  CapabilityInfo,
+  DiscoveryCapability,
+  FlightProvider,
+  ProviderId,
+  VerificationCapability,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { defaultDefinitionInput } from '../src/defaults.js';
+import { defaultDefinitionInput, newSearchSourcesFor } from '../src/defaults.js';
 import { loadConfigFromEnv } from '../src/wiring.js';
 import { cleanEnv, SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP } from './helpers/env.js';
 
@@ -16,13 +22,32 @@ const config = (env: Record<string, string>) =>
       ...env,
     }),
   );
-const stub = (id: ProviderId): FlightProvider => ({
-  id,
-  displayName: id,
-  suppliedFields: [],
-  cabins: ['economy'],
-  healthcheck: async () => ({ ok: true, detail: '' }),
-});
+const INFO: CapabilityInfo = { sourceKind: 'scraped-aggregate', provenanceNote: 'test', maxAgeHours: 24 };
+const refuse = (): never => {
+  throw new Error('not called');
+};
+const DISCOVERY: DiscoveryCapability = { info: INFO, plan: () => [], fetchTile: async () => refuse() };
+const VERIFICATION: VerificationCapability = { info: INFO, estimate: refuse, search: async () => refuse() };
+/** Which providers carry which role, as the real ones do: Travelpayouts and the browser discover; SearchApi both. */
+const ROLES: Record<ProviderId, readonly ('discovery' | 'verification')[]> = {
+  travelpayouts: ['discovery'],
+  camoufox: ['discovery'],
+  searchapi: ['discovery', 'verification'],
+  fixture: ['discovery', 'verification'],
+};
+const stub = (id: ProviderId): FlightProvider => {
+  const base = {
+    id,
+    displayName: id,
+    suppliedFields: [],
+    cabins: ['economy'] satisfies FlightProvider['cabins'],
+    healthcheck: async () => ({ ok: true, detail: '' }),
+  };
+  const roles = ROLES[id];
+  if (roles.includes('discovery') && roles.includes('verification'))
+    return { ...base, discovery: DISCOVERY, verification: VERIFICATION };
+  return roles.includes('discovery') ? { ...base, discovery: DISCOVERY } : base;
+};
 
 describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', () => {
   it('£0: Travelpayouts discovery only, no verification, the core refresh default', () => {
@@ -39,15 +64,15 @@ describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', 
       defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]).providers.verification,
     ).toEqual([]);
   });
-  it('40usd: both providers discover, SearchApi verifies, maxCells 10 / expandTop 2', () => {
+  it('40usd with no stored lists: SearchApi is ticked nowhere (the operator ticks it per search); policy maxCells 10 / expandTop 2', () => {
     const c = config({
       TRAVELPAYOUTS_TOKEN: SENTINEL_TP,
       SEARCHAPI_KEY: SENTINEL_SA,
       SEARCHAPI_PLAN: '40usd',
     });
     const d = defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]);
-    expect(d.providers.discovery).toEqual(['travelpayouts', 'searchapi']);
-    expect(d.providers.verification).toEqual(['searchapi']);
+    expect(d.providers.discovery).toEqual(['travelpayouts']);
+    expect(d.providers.verification).toEqual([]);
     expect(d.verification).toEqual({
       maxCells: 10,
       topN: 10,
@@ -91,5 +116,72 @@ describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', 
       defaultDefinitionInput(config({ TRAVELPAYOUTS_TOKEN: SENTINEL_TP }), [stub('travelpayouts')]).providers
         .discovery,
     ).toEqual(['travelpayouts']);
+  });
+});
+
+// Settings plan ruling 7 and controller ruling R2: the one place that decides the sources a new search starts with.
+describe('new-search sources (NEW_SEARCH_DISCOVERY, NEW_SEARCH_VERIFICATION) and the refresh days', () => {
+  const PAID = {
+    TRAVELPAYOUTS_TOKEN: SENTINEL_TP,
+    SEARCHAPI_KEY: SENTINEL_SA,
+    SEARCHAPI_PLAN: '40usd',
+  };
+  const ALL = [stub('travelpayouts'), stub('searchapi'), stub('camoufox')];
+
+  it("unset: today's draft, every configured free source and SearchApi on neither list, on trial and on 40usd", () => {
+    for (const plan of ['trial', '40usd']) {
+      const c = config({ ...PAID, SEARCHAPI_PLAN: plan });
+      expect(newSearchSourcesFor(c, ALL)).toEqual({
+        discovery: ['travelpayouts', 'camoufox'],
+        verification: [],
+      });
+      expect(defaultDefinitionInput(c, ALL).providers.discovery).toEqual(['travelpayouts', 'camoufox']);
+    }
+  });
+  it('unset with the test source beside a real one: a new search starts on the real ones; alone, on the test source', () => {
+    const c = config({ TRAVELPAYOUTS_TOKEN: SENTINEL_TP, NODE_ENV: 'development' });
+    expect(newSearchSourcesFor(c, [stub('travelpayouts'), stub('fixture')])).toEqual({
+      discovery: ['travelpayouts'],
+      verification: ['fixture'],
+    });
+    expect(newSearchSourcesFor(c, [stub('fixture')])).toEqual({
+      discovery: ['fixture'],
+      verification: ['fixture'],
+    });
+  });
+  it("lists: exactly those sources, in the list's order, minus any that is not configured", () => {
+    const c = config({
+      ...PAID,
+      NEW_SEARCH_DISCOVERY: 'searchapi,travelpayouts,camoufox',
+      NEW_SEARCH_VERIFICATION: 'searchapi',
+    });
+    expect(newSearchSourcesFor(c, [stub('travelpayouts'), stub('searchapi')])).toEqual({
+      discovery: ['searchapi', 'travelpayouts'],
+      verification: ['searchapi'],
+    });
+  });
+  it("a listed source without the role's capability drops out: Travelpayouts and the browser cannot check trips", () => {
+    const c = config({
+      ...PAID,
+      NEW_SEARCH_VERIFICATION: 'travelpayouts,camoufox,searchapi',
+    });
+    expect(newSearchSourcesFor(c, ALL).verification).toEqual(['searchapi']);
+  });
+  it('`none` gives nothing for that role and leaves the other role alone', () => {
+    const c = config({ ...PAID, NEW_SEARCH_DISCOVERY: 'none', NEW_SEARCH_VERIFICATION: 'searchapi' });
+    const d = defaultDefinitionInput(c, ALL);
+    expect(d.providers.discovery).toEqual([]);
+    expect(d.providers.verification).toEqual(['searchapi']);
+    expect(d.providers.discoveryRefreshHours).toEqual({});
+  });
+  it('a stored list can tick SearchApi on a trial plan: the operator asked for it', () => {
+    const c = config({ ...PAID, SEARCHAPI_PLAN: 'trial', NEW_SEARCH_VERIFICATION: 'searchapi' });
+    expect(newSearchSourcesFor(c, ALL).verification).toEqual(['searchapi']);
+  });
+  it('DISCOVERY_REFRESH_DAYS=3 gives every ticked calendar source 72 hours; unset 168', () => {
+    const c = config({ TRAVELPAYOUTS_TOKEN: SENTINEL_TP, DISCOVERY_REFRESH_DAYS: '3' });
+    expect(defaultDefinitionInput(c, [stub('travelpayouts')]).providers.discoveryRefreshHours).toEqual({
+      travelpayouts: 72,
+    });
   });
 });

@@ -66,7 +66,7 @@ later.
 
 Row 8 is the browser provider, offered after the app is running and only where this machine has
 verified recordings (section 14: its costs come first, and it stays off unless you say yes). One
-more question is asked by `pnpm gmt setup --reconfigure browser` only: "Browser provider after an interruption". If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]
+more question is asked by `pnpm gmt setup --reconfigure browser` only, and only before the app's first start: "Browser provider after an interruption". If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no] After that it is the browser block's **May run** on Settings › Price sources.
 
 When no price source was chosen and the terminal is interactive, setup asks once, before it
 changes anything: "Paste a token now? (Enter to finish without one)". A pasted token is the
@@ -102,7 +102,7 @@ so the services point at the new binary; `pnpm gmt status` flags a missing one.
 
 With no price source, the closing screen says so first:
 
-> No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.
+> No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and add it in Settings › Price sources: http://127.0.0.1:3000/?view=settings&section=sources
 
 Then it gives the address (`http://127.0.0.1:3000`) and says there is no password: only this
 machine can reach the app. Before another device or name reaches it (section 3), turn sign-in on
@@ -130,6 +130,68 @@ awake by hand for a long run (on macOS, `caffeinate -i -s` in a terminal while i
 it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
 section 3 for Tailscale and TLS.
 
+### Settings in the app
+
+From its first start the app keeps these settings itself, on its Settings page: the Travelpayouts
+token, the SearchApi key, plan and billing day, when the browser may run, the stopping rule for
+flight reads, how often a date’s calendar price is read again, the sources new searches start
+with, the monthly spend limit, the SearchApi credits a new search starts with, and email. Setup
+writes your answers for them into `app.env` for that first start. A settings-file line for one of
+them is read once, on the first start at which the app holds no value for it; after that the app
+keeps its own value, and a line that differs is ignored and reported on Settings › System ("… in
+.env is ignored: Settings holds it. Remove the line from .env."): remove the line. A value the app
+holds or reads from the settings file but does not accept (an update tightened its rule, or the
+line was never valid) is set aside for that start, so the app still starts, and Settings › System
+names it ("… isn’t valid: set it in Settings"). Tokens, keys and the mail password must be at least 8 characters; a shorter one is
+refused when you save it, and one already held is set aside. Natively, `.env` in those words means
+`~/.config/get-me-there/app.env`. Once the app holds these settings, remove their lines from the
+settings file: a line left there does nothing, and it is reported once it differs.
+
+**Updating to a version with the Settings page.** Do this once, in this order:
+
+1. **In the container:** back up (section 6), then `git pull` and
+   `docker compose up -d --build --wait --wait-timeout 240` (section 11, Upgrade). On that first
+   start each of these settings' lines in `.env` is imported once. Open Settings, check each
+   section's values and keep a private copy of the file as it is (`cp -p .env .env.pre-settings`,
+   which keeps the file's own mode), then remove those lines from `.env` (`.env.example` marks
+   them `[Settings]`) and run `docker compose up -d`.
+2. **Natively:** `pnpm gmt update`. On the first start after it, each of these settings' lines in
+   `~/.config/get-me-there/app.env` is imported once. Open Settings, check each section's values,
+   and keep a private copy of the file as it is (`cp -p ~/.config/get-me-there/app.env
+   ~/.config/get-me-there/app.env.pre-settings`), then remove those lines from `app.env` and run
+   `pnpm gmt restart`. From then on change them in Settings; `pnpm gmt setup --reconfigure
+   travelpayouts`, `searchapi` and `email` print the Settings address.
+
+The copy holds your keys and mail password, as the settings file does, so keep it as private. A
+version from before the Settings page reads these settings only from the settings file: to go
+back to one, put the copy back in place of the settings file (section 11, "Roll back a failed
+upgrade") before you start it. Once you are sure you will stay on this version, delete the copy.
+
+Settings has four sections: **Price sources** (each source's key, whether new searches use it,
+SearchApi's plan, billing day and its own count of credits left, and the browser's block),
+**Limits** (the monthly spend limit and the SearchApi credits a new search starts with),
+**Email and alerts** (Gmail or another mail server, a test email, and your alerts) and **System**
+(the app's own checks, as `pnpm gmt status` prints them). A search keeps the sources and limits it
+was saved with; change those on its Edit page. Saving restarts the app in place, at once when no
+search is running ("Saved. Restarting the app…"); while one runs the page says "Saved. Applies when
+<searches> finish; new searches wait until then.", and a search started meanwhile is refused with
+"Applying new settings: try again in a minute". The browser's pages at once is shown there and
+changed with `pnpm gmt setup --reconfigure browser` (section 14).
+
+The database and its backups hold those keys and the mail password as the settings file holds
+them, readable by you alone (0600): keep every copy of a backup as private as the settings file.
+
+`pnpm gmt setup --reconfigure travelpayouts`, `searchapi` and `email`, and the browser window
+question of `--reconfigure browser`, then print the Settings address instead (Change this in
+Settings: http://127.0.0.1:3000/?view=settings&section=sources), whether the app is running or
+not: setup reads the app's database (read-only) and does this once it holds any of these settings,
+which it does from the first start at which `app.env` had a line for one (the app imports it then)
+or from the first save on the Settings page. Until then (no database yet, or none of these settings in it) they write
+`app.env` as on a first run. A full `pnpm gmt setup` re-run keeps `app.env` as it is and names the
+Settings address for any of these settings it would have changed. `pnpm gmt status` reads the price sources from the app's
+report (its own **price sources** line), and with the app down says "the app isn’t running; price
+sources are kept in its Settings".
+
 ### Your first search, and a search's page
 
 Trips is the first screen: your searches as cards (the route, the dates, the stay, its state
@@ -150,14 +212,14 @@ where the browser is set up), a calendar of the window (each day prints its chea
 else its lowest calendar price; pick a day to see its stays) and three folds, Price over time,
 What was searched and Alert. **Repeat weekly…** adds a schedule: it registers when you press
 Save, and the page shows when it next runs. Where the browser worker is not set up, the page says
-"Flight times need the browser worker; set it up in Settings → Price sources".
+"Flight times need the browser worker; set it up in Settings › Price sources".
 
 ### The commands
 
 ```bash
 pnpm gmt setup                          # install, or re-check an install
 pnpm gmt setup --dry-run                # print the plan with the real launchctl or systemctl commands
-pnpm gmt setup --reconfigure email      # one group again: port, timezone, email, travelpayouts, searchapi, browser, password, linger
+pnpm gmt setup --reconfigure port       # one group again: port, timezone, password, linger, browser; travelpayouts, searchapi and email name the Settings page
 pnpm gmt status                         # the services, the settings files, the newest backup, the app's own report, anything to fix
 pnpm gmt status --only worker           # the app's report for one area; --json prints it as JSON
 pnpm gmt start
@@ -185,7 +247,8 @@ such as the browser worker's directory when `XDG_STATE_HOME` moved the state els
 
 Re-running `pnpm gmt setup` changes nothing that is already right: a settings file that differs
 from what setup would write is reported, never overwritten, and `--reconfigure <group>` is the
-way to change one group's lines. Lines you add to `app.env` under other names are kept. Setup
+way to change one group's lines (the Settings page, for the settings the app keeps). A variable the
+app ignores rather than refusing (such as `SEARCHAPI_TRIAL_USED` on the $40 plan) is named in a note. Lines you add to `app.env` under other names are kept. Setup
 calls no vendor. Every command that stops or restarts the app (`stop`, `restart`, `update`,
 `--reconfigure`, the imports) first asks the app whether a search is running, refuses while one
 is (or when the app cannot say) unless `--wait` or `--force`, and with `--force` first says what
@@ -209,8 +272,11 @@ the next commit's Camoufox before it stops anything (section 14). It then stops 
 into `backups/update` (with a `.commit` file naming the commit it was taken at), merges,
 installs, builds, switches the browser to the new Camoufox, restarts, waits for health and shows
 the status. If a step fails it prints the commit it started from, the backup (or why there is
-none), and the ways back; running `pnpm gmt update` again carries on from the failed step. A
-failed browser step never keeps the app down: the app starts without the browser worker, the
+none), and the ways back; running `pnpm gmt update` again carries on from the failed step. The
+first update to a version with the Settings page imports the settings it keeps from `app.env` once;
+check them in Settings, keep a private copy of `app.env`, then remove those lines ("Updating to a
+version with the Settings page", above). Going back to a version from before the Settings page,
+put that copy back as `app.env` first: that version reads these settings only from `app.env`. A failed browser step never keeps the app down: the app starts without the browser worker, the
 update exits 1, and `pnpm gmt browser install` retries the browser.
 
 ### Moving from Docker or from a checkout
@@ -243,7 +309,8 @@ native one up first; the replaced ledger's calls then stop counting toward the c
 ### Backups
 
 A daily job at 03:30 writes a backup into `~/.local/share/get-me-there/backups/daily` and keeps
-14; setup takes the first one before it finishes, and `pnpm gmt backup` takes one by hand.
+14; setup takes the first one before it finishes, and `pnpm gmt backup` takes one by hand. A
+backup holds the keys and the mail password the app keeps (see "Settings in the app").
 `pnpm gmt update` keeps 5 in `backups/update`. List them with
 `ls -l ~/.local/share/get-me-there/backups/*/`. These backups sit on the same disk as the
 database: they protect against a bad update or a deletion, not against losing the disk, so copy
@@ -343,9 +410,10 @@ yourself.
 
 ## 2. The £0 configuration: one line
 
-*Applies to: the container path. Natively, this is row 4 of section 0, or `pnpm gmt setup --reconfigure travelpayouts`.*
+*Applies to: the container path. Natively, this is row 4 of section 0, or Settings › Price sources once the app has started.*
 
-Get a free Travelpayouts token (Travelpayouts account → API token) and add it:
+Get a free Travelpayouts token (Travelpayouts account → API token) and add it, either in the
+app's Settings › Price sources once it is running, or before its first start as one `.env` line:
 
 ```dotenv
 TRAVELPAYOUTS_TOKEN=your-travelpayouts-token
@@ -367,31 +435,35 @@ the 4-minute start period.
 Open <http://127.0.0.1:3000> (with the section 1 lines set, sign in with them). Then set up the
 daily backup of section 6 before you rely on the app.
 
+The `.env` line is read once, on the first start at which the app holds no token; after that
+Settings › Price sources holds it, and a `.env` line that differs is ignored and reported on
+Settings › System until you remove it (section 0, "Settings in the app", says which settings the
+app keeps this way; the same holds in the container). Change those settings on the Settings page.
+
 What £0 gives: calendar prices from the Aviasales cache only, every row labelled "constraints
 not checked", and coverage that depends on what Aviasales users searched recently. Before you
 search, open a saved search's Edit page and press **Coverage check** at its foot: it shows
 cached rows per airport pair and month, at no cost.
 
-To add SearchApi later (the $40 plan, scraping-derived; see `docs/api-limits.md`):
-
-```dotenv
-SEARCHAPI_KEY=your-searchapi-key
-SEARCHAPI_PLAN=40usd
-SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1–28)
-```
-
-then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
-`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new searches
+To add SearchApi later (the $40 plan, scraping-derived; see `docs/api-limits.md`), open
+Settings › Price sources, paste the key, choose "$40 a month" and the day of the month your
+subscription renews (1–28), and save; the app restarts in place. Before the app's first start the
+same can go in `.env` (`SEARCHAPI_KEY`, `SEARCHAPI_PLAN=40usd`, `SEARCHAPI_BILLING_DAY`), read once
+as above. On the "Free trial" plan the key runs on the one-off allowance and scheduled runs leave
+SearchApi out. On the trial plan new searches
 allow 0 billed calls per run, so the Trip page's "Check with SearchApi" is unavailable until you raise the
 search's call cap in its Edit page → Limits and checks → Run budget (Max billed calls per run); 6 covers one
 cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
-on `40usd` the app refuses to start with it (exit 78).
+on `40usd` the app ignores it and logs a warning naming it.
 
-**Secrets are kept only in `.env`.** The repository's `.gitignore` keeps `.env` and every
-`.env.*` file except `.env.example` out of git, `.dockerignore` keeps them out of the image,
-and compose passes the container only the variables it lists (never the whole file), so a key
-reaches the app and nothing else. Never put a key in `docker-compose.yml`, in a command line or
-in a search. The database holds no key or password; back up `.env` separately and keep it
+**Where secrets are kept.** The keys and the mail password are kept in the app's database once the
+app holds them (section 0, "Settings in the app"), and so in every backup of it (section 6), and
+`.env` keeps the sign-in lines and any key line not yet imported. The repository's `.gitignore`
+keeps `.env` and every `.env.*` file except `.env.example` out of git, `.dockerignore` keeps them
+out of the image, and compose passes the container only the variables it lists (never the whole
+file), so a key reaches the app and nothing else. No route of the app ever gives a key back: the
+Settings page shows whether one is set and its last four characters. Never put a key in
+`docker-compose.yml`, in a command line or in a search. Back up `.env` separately and keep it
 private.
 
 Never put `NODE_ENV`, `IN_CONTAINER` or `ALLOW_FIXTURE_PROVIDER` in `.env` for the container:
@@ -504,11 +576,15 @@ the moment the host is reachable any other way.
 
 ## 4. Alert email
 
-*Applies to the container path; natively, `pnpm gmt setup --reconfigure email` asks the same settings.*
+*Applies to both paths: Settings › Email and alerts holds these settings once the app has started.*
 
 Without email settings, alerts and operator messages go to the log only, and the Alerts view
-records each such alert as suppressed ("email not configured"). To send email, set all of
-these (all or nothing; boot names any that is missing):
+records each such alert as suppressed ("email not configured"). To send email, open Settings ›
+Email and alerts and choose Gmail (the address, an app password and where to send alerts) or
+another mail server; **Send a test email** tries the form's values before you save, and **Save email**
+saves them (all or nothing: the page names any that is missing). **Remove email** turns it off
+after you confirm. The same settings can go in `.env` before the app's first start, read once
+(section 0, "Settings in the app"):
 
 ```dotenv
 SMTP_HOST=smtp.example.com
@@ -596,6 +672,12 @@ The database is one file on the named volume `get-me-there_gmt-data`, `/data/get
 inside the container, and its backups go to `/data/backups` (the `backups` folder beside
 `DATABASE_PATH`). The image runs as the unprivileged user `node` (uid 1000), which owns
 `/data`; backups are readable by that user only.
+
+**Backups hold your keys.** The app keeps the price sources' keys and the mail password it was
+given on its Settings page (section 0, "Settings in the app"). The database and its backups hold
+those keys and the mail password as the settings file holds them, readable by you alone (0600):
+keep every copy of a backup as private as the settings file. That includes the host copies and the
+off-box copy below.
 
 **The volume is the only copy until you copy backups off it.** `/data/backups` lives in the
 same volume as the database, so it dies with it. `docker compose stop`, `restart` and `down`
@@ -802,7 +884,8 @@ section 0.*
 The app reports on itself. Open **Settings › System**, or run `pnpm gmt status` (add
 `--only <area>` for one area, `--json` for the report as the app sent it). Both show the same checks, worst first,
 each with a plain summary and what to do about it; in a native install the fix is a `pnpm gmt` command with a
-copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The health line at the
+copy button, and a fix made on the Settings page links to its section (`pnpm gmt status` prints that section's
+address). Reading it never spends a call, never waits on a vendor and never loads a page. The health line at the
 top of every view links to it: "All working", "Browser needs attention · fix" or "Browser failing · fix" for one problem,
 "2 things need you · fix" for several, and "Status: stale, checked 3 min ago" or "Status: app not answering" when the
 report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or the app does not answer; with the app
@@ -826,8 +909,12 @@ failing check.
   A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
   at the scheduled time (once a run starts, the app keeps it from idle sleep, but it cannot wake a sleeping machine), or
   move the schedule.
-- **Provider.** One card per price source with its last successful call and its use against its cap (in Settings ›
-  Price sources' wording, linked to it), and **price sources**, which warns when no usable source is set up.
+- **Provider.** One card per price source with its last successful call and its use against its cap (in the wording
+  of Calls and caps, `/?view=providers`, linked to it), and **price sources**, which warns when no usable source is set up; its fix
+  is Settings › Price sources.
+- **Settings.** A warning for each setting whose `.env` line the app ignores ("Travelpayouts token in .env is ignored:
+  Settings holds it. Remove the line from .env."), and a failure for each value the app holds or read from `.env` but set
+  aside at this start ("Travelpayouts token isn't valid: set it in Settings").
 - **Browser worker and consent.** Whether the worker answers, any cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
   window: "browser pages: only inside a run's window" or "also when a run resumes"; while a search runs, its note also
   says "keeping the machine awake until <time>". The consent card gives the
@@ -835,9 +922,9 @@ failing check.
   provider is on, the app emails you at most once a London day (a plain notice from the app, with no separate reminder
   service). A check that cannot be made, because the worker is down, sends nothing: the worker card says that.
 - **Email.** Configured or not, and the newest send of any kind since the app started (an alert, a notice or a test);
-  the card fails when that send failed. **Send test** (or the offer at the end of a full `pnpm gmt setup` and of
-  `pnpm gmt setup --reconfigure email`) sends one fixed message; tests have their own limit of one a minute and never
-  use up the hourly alert limit.
+  the card fails when that send failed, and its fix is Settings › Email and alerts. **Send test** (or the offer at the
+  end of a full `pnpm gmt setup`) sends one fixed message, and Settings › Email and alerts' **Send a test email** sends
+  one with the form's values; tests share their own limit of one a minute and never use up the hourly alert limit.
 - **Off.** A check that is not set up, is waiting for a verified browser build, or belongs to a disabled search folds
   into one line that says why ("not set up: SearchApi"; "awaiting verification for this build: browser provider";
   "disabled: <search name>").
@@ -866,10 +953,18 @@ failing check.
   backs the database up again before applying them and logs `backup before N migration(s):
   <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
-  `docker compose cp` that file out) so a copy exists off the volume.
+  `docker compose cp` that file out) so a copy exists off the volume. The first upgrade to a
+  version with the Settings page imports the settings it keeps from `.env` once: check them in
+  Settings, keep a private copy of `.env` (git ignores `.env.pre-settings`), then remove those
+  lines from `.env` (section 0, "Updating to a version with the Settings page").
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
   named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 240`. An older version
-  cannot use a database a newer one has migrated, so the restore is required.
+  cannot use a database a newer one has migrated, so the restore is required. Going back to a
+  version from before the Settings page, first put back the `.env` copy kept when the Settings
+  lines were removed (`cp -p .env.pre-settings .env`; section 0, "Updating to a version with the
+  Settings page"): that version reads its keys, limits and email only from `.env`. Without the
+  copy, write those lines into `.env` again by hand from Settings before going back (a saved
+  key is shown only by its last four characters, so have the keys themselves to hand).
 - **Base image updates.** The `Dockerfile` pins `node:22-slim` by digest, so security fixes to
   Node and Debian arrive only when the pin moves. Once a month, run
   `docker buildx imagetools inspect node:22-slim`, put the new top-level digest in every `FROM`
@@ -893,7 +988,7 @@ Mailpit, export these in that shell, never in `.env`: the container would accept
 them (loopback host), but there loopback is the container itself, so mail fails when it is sent:
 
 ```bash
-export SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_TLS=none SMTP_USER=dev SMTP_PASS=dev
+export SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_TLS=none SMTP_USER=dev SMTP_PASS=dev-mailpit
 export ALERT_EMAIL_TO=operator@example.com ALERT_EMAIL_FROM=get-me-there@example.com
 ```
 
@@ -1026,6 +1121,16 @@ sets the flag back, and empty routes then read as not searched again.
   `CAMOUFOX_LOG_DEBUG=true` to `worker.env`, restart the worker and read that date's flights again. The worker's log
   then has an `options skipped` line that lists up to 30 options the page did not count and why (with a count of any
   more), with Google's airport names where the option states them.
+
+### What Settings changes
+
+Settings › Price sources has the browser's block once it is set up: whether it is ready and the consent record's
+expiry, its pages at once (changed with `pnpm gmt setup --reconfigure browser`, since the worker holds it too), **May
+run** (When the browser may run: only during scheduled searches, or any time, when a resumed run keeps loading pages),
+the stopping rule for flight reads ("Read flights for the cheapest dates until N reads in a row don't improve the five
+cheapest trips": default 12, 3 to 50; each run keeps the value it started with) and, under **Advanced**, "Read a date's
+calendar price again after N days (new searches)" (default 7, 1 to 30). The 1-hour pause after a page it does not recognise is fixed. With
+the browser not set up the block says how (this section) and shows no controls.
 
 ### Set it up
 
@@ -1234,7 +1339,7 @@ loopback, so the Docker path on Linux leaves the provider off; the native app re
 
 Every app and recorder that calls the worker waits on its one page spacing and stops at its one cool-down. There is no
 page or scroll cap, a run's or a month's: every page waits for the spacing, a run's flight lists have their own
-allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. Settings › Price sources
+allowance, and a grid page makes at most `CAMOUFOX_GRID_SCROLL_CAP` scrolls. Calls and caps (`/?view=providers`)
 shows the browser's pages this calendar month, with no cap on them. A second app calling the same worker in one
 calendar month is reported in the status, not refused.
 

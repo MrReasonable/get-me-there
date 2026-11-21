@@ -28,8 +28,11 @@ To stop: run `docker compose stop app` from this folder. To restart: double-clic
 `Start.command`. Keep Docker Desktop running while searching. Do not use
 `docker compose down -v`: it deletes the database and its usage ledger.
 
-If a provider reports an invalid or expired key, replace only its value in `.env` and run the
-launcher again. Do not paste credentials into chat or commit them.
+The app keeps its price sources' keys, its limits and email on its Settings page from its first
+start: a `.env` line for one of them is read once, then the page holds it ([`setup.md`](setup.md)
+section 0, "Settings in the app"). If a provider reports an invalid or expired key, replace it in
+Settings › Price sources; the app restarts in place. Do not paste credentials into chat or commit
+them. The database and its backups hold those keys, so keep every copy of a backup private.
 
 Backups sit on the compose volume at `/data/backups`, not under a host `data/backups/`
 folder. To keep a copy off this machine, follow [`setup.md`](setup.md) section 6: run

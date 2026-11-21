@@ -27,6 +27,7 @@ describe('migration 0009', () => {
         '0011_wp20_flight_lists',
         '0012_wp21_return_leg',
         '0013_booking_url',
+        '0014_settings',
       ]),
     );
     expect(indexes(db)).not.toContain('calendar_prices_latest_idx');
@@ -37,6 +38,7 @@ describe('migration 0009', () => {
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]);
     expect(indexes(db)).toContain('calendar_prices_latest_idx');
     const columns = db.raw

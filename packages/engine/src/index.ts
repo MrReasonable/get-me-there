@@ -30,12 +30,19 @@ export {
   SMTP_TIMEOUTS,
   type SmtpConfig,
   type SmtpTransportOptions,
+  sendTestEmail,
   smtpTransportOptions,
+  TEST_SEND_LIMIT,
+  TEST_SEND_TIMEOUTS,
+  type TestSendFailure,
+  TestSendLimit,
   type TransportFactory,
+  testSendFailureOf,
 } from './notifiers/email.js';
 export { buildNotifiers } from './notifiers/index.js';
 export { LogNotifier } from './notifiers/log.js';
 export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
+export type { RunWatch } from './registry.js';
 export {
   type BrowserWindowSetting,
   loadsBrowserPages,
@@ -52,6 +59,7 @@ export {
   SOFT_CONFIRM_CALL_SHARE,
   type SoftConfirmWhy,
 } from './start.js';
+export { RELOAD_PENDING_TEXT } from './text.js';
 export type {
   AlertsPass,
   AlertsStepHook,

@@ -10,6 +10,7 @@ import type {
   ExecutionStatus,
   IsoDateTime,
   ProviderId,
+  SettingsReport,
   SkipCode,
   StartRefusalReason,
 } from '@gmt/core';
@@ -130,6 +131,8 @@ export interface WorkerStatusFacts {
   socsCapturedAt: IsoDateTime | null;
   /** Spec §2 "The keep-awake lease": the end of the lease the worker is holding the machine awake for, or null. */
   awakeUntil: IsoDateTime | null;
+  /** Settings plan ruling 9: the worker's own CAMOUFOX_PAGES_AT_ONCE, or null from a worker that reports no shared settings. */
+  pagesAtOnce: number | null;
 }
 
 export type WorkerRead =
@@ -174,4 +177,6 @@ export interface StatusFacts {
   synthetic: boolean;
   worker: WorkerFacts;
   email: EmailFacts;
+  /** What the boot did with the names the Settings page owns (ruling 13): the env lines ignored, the values set aside. */
+  settings: Pick<SettingsReport, 'envIgnored' | 'setAside'>;
 }

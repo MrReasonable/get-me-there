@@ -16,12 +16,17 @@ import {
   consentWindowState,
   coverageGapWarn,
   coverageLine,
+  dateIn as dateInZone,
   formatAgeShort,
   formatDuration,
   formatInstant,
   hoursSince,
+  type IsoDate,
   type IsoDateTime,
+  type OwnedName,
   PROVIDER_NAMES,
+  SETTING_LABELS,
+  SETTING_SECTION,
   SKIP_CODE_TEXT,
   START_REFUSAL_TEXT,
   TRIAL_WARN_CREDITS,
@@ -35,6 +40,9 @@ export type StatusResponse = apiContract.StatusResponse;
 /** The fixed words of the report; one table so the banned-word test reads them all. */
 export const STATUS_TEXT = {
   docs: 'docs/setup.md section 11',
+  // why: review I1 (ruling R19): each source's calls, caps and windows are on the Providers view, linked from
+  // Settings › Price sources as "Calls and caps"; Settings › Price sources itself shows none of them
+  callsAndCaps: 'Calls and caps (/?view=providers)',
   /** Revision 55 §7 (data-004): the note of a search that runs only when pressed. */
   notScheduled: 'not scheduled',
   browserWindow: {
@@ -55,6 +63,7 @@ interface CheckInput {
   note?: string | null;
   offReason?: StatusCheck['offReason'];
   fix?: StatusCheck['fix'];
+  expiresOn?: IsoDate;
 }
 function check(i: CheckInput): StatusCheck {
   return {
@@ -67,6 +76,7 @@ function check(i: CheckInput): StatusCheck {
     note: i.note ?? null,
     offReason: i.state === 'off' ? (i.offReason ?? 'not-set-up') : null,
     fix: i.fix ?? null,
+    ...(i.expiresOn === undefined ? {} : { expiresOn: i.expiresOn }),
   };
 }
 
@@ -93,9 +103,32 @@ function fixer(f: Pick<StatusFacts, 'mode'>) {
     f.mode === 'native' ? { text, command } : { text: `${text}: see ${STATUS_TEXT.docs}`, command: null };
 }
 
+/** Settings plan ruling 13: a fix made on the Settings page, the same in every mode (the page works in each). */
+type SettingsSection = NonNullable<NonNullable<StatusCheck['fix']>['settings']>;
+const SETTINGS_WHERE: Readonly<Record<SettingsSection, string>> = {
+  sources: 'Settings › Price sources',
+  limits: 'Settings › Limits',
+  email: 'Settings › Email and alerts',
+  system: 'Settings › System',
+};
+const settingsFix = (text: string, section: SettingsSection, tail = ''): StatusCheck['fix'] => ({
+  text: `${text} in ${SETTINGS_WHERE[section]}${tail}`,
+  command: null,
+  settings: section,
+});
+
+/** The fix of a settings check: its summary already says what to do, so the fix only says where. */
+const openSettings = (section: SettingsSection): StatusCheck['fix'] => ({
+  text: `Open ${SETTINGS_WHERE[section]}`,
+  command: null,
+  settings: section,
+});
+
 /** What the time and mode words of a check need of the facts. */
 export type Frame = Pick<StatusFacts, 'now' | 'tz' | 'mode'>;
 const at = (f: Frame, iso: IsoDateTime) => formatInstant(iso, f.tz);
+/** An instant's calendar date in the report's time zone. */
+const dateIn = (f: Frame, iso: IsoDateTime): IsoDate => dateInZone(iso, f.tz);
 
 /** The app check's words for an app with no password that only this machine can reach (spec §4). */
 export const NO_PASSWORD_LOCAL = 'no password: only this machine can reach the app';
@@ -272,7 +305,7 @@ function scheduleCheck(f: StatusFacts): StatusCheck {
 const SKIPPED: Readonly<Record<string, { reason: string; fix: string }>> = {
   skipped_budget: {
     reason: 'it would exceed a budget cap',
-    fix: 'a budget cap was reached: Settings → Price sources shows when its window reopens; raise the cap or search less, or the next firing skips again',
+    fix: `a budget cap was reached: ${STATUS_TEXT.callsAndCaps} shows when its window reopens; raise the cap or search less, or the next firing skips again`,
   },
   skipped_confirm: {
     reason: 'its cost estimate needs your confirmation',
@@ -383,7 +416,6 @@ function dataChecks(f: StatusFacts): StatusCheck[] {
 }
 
 function priceSourcesCheck(f: StatusFacts): StatusCheck {
-  const fix = fixer(f);
   const names = f.priceSources.usable.map((id) => PROVIDER_NAMES[id]);
   return names.length > 0
     ? check({
@@ -397,17 +429,9 @@ function priceSourcesCheck(f: StatusFacts): StatusCheck {
         area: 'provider',
         state: 'warn',
         summary: 'No price source is set up, so searches find nothing',
-        fix: fix(
-          'Travelpayouts is the no-cost source: add its token',
-          'pnpm gmt setup --reconfigure travelpayouts',
-        ),
+        fix: settingsFix('Travelpayouts is the no-cost source: add its token', 'sources'),
       });
 }
-
-const RECONFIGURE: Readonly<Record<string, Cmd>> = {
-  travelpayouts: 'pnpm gmt setup --reconfigure travelpayouts',
-  searchapi: 'pnpm gmt setup --reconfigure searchapi',
-};
 
 /** The Providers view's usage wording ("this month: 2 of 50000 calls", "7 of 24 calls over the plan's lifetime"). */
 function usageWords(u: NonNullable<ProviderFacts['usage']>): string {
@@ -429,7 +453,7 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       state: 'off',
       offReason: 'not-set-up',
       summary: `${name} is not set up`,
-      fix: fix(`add ${name}`, RECONFIGURE[p.id] ?? null),
+      fix: settingsFix(`add ${name}`, 'sources'),
     });
   const usage = p.usage === null ? '' : `; ${usageWords(p.usage)}`;
   const last = p.lastCall;
@@ -438,7 +462,7 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       ...base,
       state: 'fail',
       summary: `${name}: the last call was refused, the key is not accepted (${at(f, last.at)})`,
-      fix: fix(`replace the ${name} key`, RECONFIGURE[p.id] ?? null),
+      fix: settingsFix(`replace the ${name} key`, 'sources'),
     });
   if (last !== null && last.result === 'quota')
     return check({
@@ -462,8 +486,8 @@ function providerCheck(f: StatusFacts, p: ProviderFacts): StatusCheck {
       summary: `${name}: ${why}${usage}`,
       fix: fix(
         failedOther
-          ? 'check Settings → Price sources and the app log'
-          : 'watch Settings → Price sources; raise the plan or wait for the window to reopen',
+          ? `check ${STATUS_TEXT.callsAndCaps} and the app log`
+          : `watch ${STATUS_TEXT.callsAndCaps}; raise the plan or wait for the window to reopen`,
       ),
     });
   }
@@ -568,7 +592,13 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
     // why: whatever the choice, a record past its latest expiry has expired
     if (consentWindowState(upper, f.now) === 'fail')
       return out(
-        check({ ...base, state: 'fail', summary: `consent expired on ${at(f, upper)}`, fix: consentFix }),
+        check({
+          ...base,
+          state: 'fail',
+          summary: `consent expired on ${at(f, upper)}`,
+          fix: consentFix,
+          expiresOn: dateIn(f, upper),
+        }),
         'expired',
       );
     return cannot(
@@ -589,13 +619,16 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
   const bound = upper;
   const state = consentWindowState(bound, f.now);
   const words = `consent rejected, expires ${at(f, bound)} (${c.boundedBy === 'cookie' ? 'cookie' : 'capture'})`;
-  if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words }), 'none');
+  // why: settings plan ruling 9 — the Settings page words the record's expiry itself, so it carries the date
+  const expiresOn = dateIn(f, bound);
+  if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words, expiresOn }), 'none');
   return out(
     check({
       ...base,
       state,
       summary: state === 'fail' ? `consent expired on ${at(f, bound)}` : `${words}; 30 days or less left`,
       fix: consentFix,
+      expiresOn,
     }),
     state === 'fail' ? 'expired' : 'expiring',
   );
@@ -742,7 +775,6 @@ const SEND_KIND: Readonly<Record<string, string>> = {
 };
 
 function emailCheck(f: StatusFacts): StatusCheck {
-  const fix = fixer(f);
   const e = f.email;
   if (!e.configured)
     return check({
@@ -751,7 +783,7 @@ function emailCheck(f: StatusFacts): StatusCheck {
       state: 'off',
       offReason: 'not-set-up',
       summary: 'email is not set up',
-      fix: fix('set email up to get alerts and notices', 'pnpm gmt setup --reconfigure email'),
+      fix: settingsFix('set email up to get alerts and notices', 'email'),
     });
   if (e.last?.result === 'failed')
     return check({
@@ -759,13 +791,45 @@ function emailCheck(f: StatusFacts): StatusCheck {
       area: 'email',
       state: 'fail',
       summary: `the last ${SEND_KIND[e.last.kind] ?? 'email'} email failed (${at(f, e.last.at)}), since the app started`,
-      fix: fix('check the SMTP settings and send a test again', 'pnpm gmt setup --reconfigure email'),
+      fix: settingsFix('check the mail server settings', 'email', ', then send a test again'),
     });
   const last =
     e.last === null
       ? 'no email sent since the app started'
       : `the last ${SEND_KIND[e.last.kind] ?? 'email'} email was ${e.last.result === 'sent' ? 'sent' : 'held back at the hourly limit'} at ${at(f, e.last.at)}, since the app started`;
   return check({ id: 'email', area: 'email', state: 'ok', summary: `configured; ${last}` });
+}
+
+const idOf = (name: OwnedName) => name.toLowerCase().replaceAll('_', '-');
+
+/**
+ * Ruling 13, one check per name: an `.env` line the Settings page now owns is ignored (warn); a stored or imported
+ * value the schema refused is set aside for this boot (fail), worded the same whether it was saved or came from
+ * `.env`. The words come from the label table, never from a value.
+ */
+function settingsChecks(f: StatusFacts): StatusCheck[] {
+  return [
+    ...f.settings.envIgnored.map((name) =>
+      check({
+        id: `settings-env-${idOf(name)}`,
+        area: 'settings',
+        state: 'warn',
+        summary: `${SETTING_LABELS[name]} in .env is ignored: Settings holds it. Remove the line from .env.`,
+        label: SETTING_LABELS[name],
+        fix: openSettings(SETTING_SECTION[name]),
+      }),
+    ),
+    ...f.settings.setAside.map((name) =>
+      check({
+        id: `settings-aside-${idOf(name)}`,
+        area: 'settings',
+        state: 'fail',
+        summary: `${SETTING_LABELS[name]} isn't valid: set it in Settings`,
+        label: SETTING_LABELS[name],
+        fix: openSettings(SETTING_SECTION[name]),
+      }),
+    ),
+  ];
 }
 
 /** Every check of brief WP18 §6 for these facts, worst first (core's `sortChecks`). */
@@ -782,10 +846,20 @@ export function buildChecks(f: StatusFacts): StatusCheck[] {
     workerCheckOf(f, f.worker),
     consentOutcome(f, f.worker).check,
     emailCheck(f),
+    ...settingsChecks(f),
   ];
   return apiContract.sortChecks(checks);
 }
 
 export function buildStatus(f: StatusFacts): StatusResponse {
-  return { generatedAt: f.now, mode: f.mode, version: f.version, checks: buildChecks(f) };
+  const r = f.worker.read;
+  // why: settings plan ruling 9 — the Settings page's "Pages at once", only as the worker itself reported it
+  const pagesAtOnce = r.kind === 'ok' ? r.status.pagesAtOnce : null;
+  return {
+    generatedAt: f.now,
+    mode: f.mode,
+    version: f.version,
+    checks: buildChecks(f),
+    ...(pagesAtOnce === null ? {} : { pagesAtOnce }),
+  };
 }

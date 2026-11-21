@@ -153,7 +153,7 @@ describe('estimateSentence: the line', () => {
       }),
     );
     expect(s.line).toBe(
-      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, about £1.20, uses about 100 of the 9,880 SearchApi calls left this month.',
+      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, about £1.20, uses about 100 of the 9,880 SearchApi credits left this month.',
     );
     expect(s.button).toBe('Search now · about £1.20');
     const calls = sentence(
@@ -165,7 +165,7 @@ describe('estimateSentence: the line', () => {
       }),
     );
     expect(calls.line).toBe(
-      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, uses about 100 SearchApi calls.',
+      'Nothing new to ask: 405 dates kept from earlier searches. About 2½ hours, uses about 100 SearchApi credits.',
     );
     // a cost alone, with no billed-plan calls named, is spending too
     expect(
@@ -207,9 +207,9 @@ describe('estimateSentence: the line', () => {
         billed: [{ providerId: 'searchapi', calls: 120, left: 9880, window: 'month' }],
       }),
     );
-    expect(s.line).toBe('About 2½ hours, uses about 120 of the 9,880 SearchApi calls left this month.');
+    expect(s.line).toBe('About 2½ hours, uses about 120 of the 9,880 SearchApi credits left this month.');
     expect(s.line).not.toMatch(/free/);
-    expect(s.button).toBe('Search now · 120 SearchApi calls');
+    expect(s.button).toBe('Search now · 120 SearchApi credits');
   });
 
   it('on the trial, whose balance is one-off, the calls left are the trial’s', () => {
@@ -220,7 +220,7 @@ describe('estimateSentence: the line', () => {
           billed: [{ providerId: 'searchapi', calls: 12, left: 91, window: 'lifetime' }],
         }),
       ).line,
-    ).toMatch(/, uses about 12 of the 91 SearchApi calls left on your trial\.$/);
+    ).toMatch(/, uses about 12 of the 91 SearchApi credits left on your trial\.$/);
   });
 
   it('a billable plan without a cap names the calls alone; a paid run’s button carries the money, not the calls', () => {
@@ -230,7 +230,7 @@ describe('estimateSentence: the line', () => {
         billed: [{ providerId: 'searchapi', calls: 300, left: null, window: 'month' }],
       }),
     );
-    expect(s.line).toBe('About 2½ hours, about £1.20, uses about 300 SearchApi calls.');
+    expect(s.line).toBe('About 2½ hours, about £1.20, uses about 300 SearchApi credits.');
     expect(s.button).toBe('Search now · about £1.20');
   });
 
@@ -384,7 +384,7 @@ describe('estimateSentence: the notes under it', () => {
         }),
       ).notes,
     ).toEqual([
-      'Google Flights via SearchApi is not used: no calls left this month (about £3.40 not included)',
+      'Google Flights via SearchApi is not used: no credits left this month (about £3.40 not included)',
     ]);
   });
 
@@ -410,8 +410,8 @@ describe('estimateSentence: the notes under it', () => {
       'camoufox',
       'The browser worker is not used: a limit on its pages stops it this run',
     ],
-    ['provider-month', 'searchapi', 'Google Flights via SearchApi is not used: no calls left this month'],
-    ['provider-lifetime', 'searchapi', 'Google Flights via SearchApi is not used: no trial searches left'],
+    ['provider-month', 'searchapi', 'Google Flights via SearchApi is not used: no credits left this month'],
+    ['provider-lifetime', 'searchapi', 'Google Flights via SearchApi is not used: no trial credits left'],
     [
       'global-month',
       'searchapi',
@@ -442,7 +442,7 @@ describe('estimateSentence: the notes under it', () => {
         }),
       ).notes,
     ).toEqual([
-      "This uses more than a fifth of this month's SearchApi calls; pressing Search now confirms it",
+      "This uses more than a fifth of this month's SearchApi credits; pressing Search now confirms it",
     ]);
     expect(
       sentence(
@@ -456,7 +456,9 @@ describe('estimateSentence: the notes under it', () => {
           },
         }),
       ).notes,
-    ).toEqual(['This uses more than a fifth of your SearchApi trial calls; pressing Search now confirms it']);
+    ).toEqual([
+      'This uses more than a fifth of your SearchApi trial credits; pressing Search now confirms it',
+    ]);
   });
 });
 

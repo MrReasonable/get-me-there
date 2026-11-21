@@ -47,6 +47,7 @@ function populatedAt0006(): Db {
       '0011_wp20_flight_lists',
       '0012_wp21_return_leg',
       '0013_booking_url',
+      '0014_settings',
     ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}) => db.raw.prepare(sql).run(p);
@@ -350,6 +351,7 @@ describe('migration 0007 (spec §7 rev 36)', () => {
           '0011_wp20_flight_lists',
           '0012_wp21_return_leg',
           '0013_booking_url',
+          '0014_settings',
         ]),
       ).applied,
     ).toEqual(['0007_catch_up']);
@@ -390,6 +392,7 @@ describe('migration 0007 (spec §7 rev 36)', () => {
           '0011_wp20_flight_lists',
           '0012_wp21_return_leg',
           '0013_booking_url',
+          '0014_settings',
         ]),
       ).applied,
     ).toEqual([]);
