@@ -273,6 +273,22 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
     expect(c?.fix?.text).toMatch(/^run the search again to read the 1 date pair left/);
   });
 
+  it('rows stored before the marks (an unmarked query pair, no price) are not shown, never page failures', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [days(1), days(2)]);
+    s.tile('E1', days(1), { status: 'no_data', fetchedAt: at(-3), tileIndex: 0 });
+    s.tileError('E1', [days(2)], 'parse', `${NO_FLIGHTS_UNSEEN} the page answered no flights`);
+    const c = await dataOf(x, def.id);
+    expect(c?.summary).toContain(
+      'prices for 0 of 2 date pairs; 1 with no price found; 1 not shown: their page said no flights for another date pair',
+    );
+    expect(c?.summary).not.toContain('the page failed');
+    expect(c?.fix?.text).toMatch(/^run the search again to read the 1 date pair left/);
+  });
+
   it("notes the cheapest dates a credit limit left unchecked, by the run's own limit and the search's now (revision 74)", async () => {
     for (const [ran, now, words] of [
       [
