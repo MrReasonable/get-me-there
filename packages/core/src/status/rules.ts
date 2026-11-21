@@ -57,8 +57,11 @@ export function coverageGapWarn(b: Pick<Buckets, 'error' | 'skipped' | 'not_run'
 export interface UnseenCells {
   /** Error cells on a route whose every page said no flights (core's `noFlightsRoutes`, `everyPage`). */
   cells: number;
-  /** The origins of those routes in words ("Heathrow (LHR) or Gatwick (LGW)"). */
-  from: string;
+  /**
+   * Where no flights were found, in words after "found": "from Gatwick (LGW)" for whole origins, "on Gatwick (LGW) →
+   * Newark Liberty (EWR)" for single routes.
+   */
+  where: string;
 }
 
 const pairs = (n: number): string => `${n} ${n === 1 ? 'date pair' : 'date pairs'}`;
@@ -74,7 +77,7 @@ export function lastRunLine(b: Buckets, total: number, unseen: UnseenCells): str
   const counted: [number, string][] = [
     [b.empty, 'with no flights'],
     [b.no_data, 'with no price found'],
-    [unseen.cells, `not shown because no flights were found from ${unseen.from}`],
+    [unseen.cells, `not shown because no flights were found ${unseen.where}`],
     [b.error - unseen.cells, 'not read (the page failed)'],
     [b.skipped, 'skipped'],
     [b.not_run, 'not searched yet'],

@@ -79,9 +79,9 @@ describe('coverageGapWarn', () => {
 
 describe('lastRunLine', () => {
   const b = { priced: 12, empty: 3, no_data: 4, error: 3, skipped: 1, not_run: 2, reused: 0 };
-  const none = { cells: 0, from: '' };
+  const none = { cells: 0, where: '' };
   it('words every part in order, the error bucket split into not shown and not read', () => {
-    expect(lastRunLine(b, 25, { cells: 2, from: 'Gatwick (LGW)' })).toBe(
+    expect(lastRunLine(b, 25, { cells: 2, where: 'from Gatwick (LGW)' })).toBe(
       'prices for 12 of 25 date pairs; 3 with no flights; 4 with no price found; 2 not shown because no flights were found from Gatwick (LGW); 1 not read (the page failed); 1 skipped; 2 not searched yet',
     );
   });
@@ -92,7 +92,7 @@ describe('lastRunLine', () => {
     expect(lastRunLine({ ...b, reused: 7 }, 25, none)).toMatch(
       /; 3 not read \(the page failed\); 1 skipped; 2 not searched yet \(7 reused from earlier runs\)$/,
     );
-    expect(lastRunLine({ ...b, error: 2 }, 25, { cells: 2, from: 'QQA' })).not.toMatch(/not read/);
+    expect(lastRunLine({ ...b, error: 2 }, 25, { cells: 2, where: 'from QQA' })).not.toMatch(/not read/);
   });
   it('says one date pair in the singular', () => {
     expect(

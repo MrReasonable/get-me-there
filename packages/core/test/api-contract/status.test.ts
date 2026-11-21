@@ -44,10 +44,10 @@ describe('statusCheckSchema', () => {
   });
   it('bounds the id, the summary, the note and the fix', () => {
     expect(statusCheckSchema.safeParse(check({ id: 'Bad Id' })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(4001) })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(4000) })).success).toBe(true);
-    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(1001) })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(1000) })).success).toBe(true);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(20_001) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(20_000) })).success).toBe(true);
+    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(12_001) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(12_000) })).success).toBe(true);
     const fix = (n: number) => check({ fix: { text: 'x'.repeat(n), command: null } });
     expect(statusCheckSchema.safeParse(fix(4000)).success).toBe(true);
     expect(statusCheckSchema.safeParse(fix(4001)).success).toBe(false);

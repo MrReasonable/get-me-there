@@ -179,11 +179,14 @@ export const statusCheckSchema = z
     state: statusStateSchema,
     /** What distinguishes the card when its area has several (a search definition's name); null otherwise. */
     label: z.string().max(200).nullable(),
-    // why: never cut a fact a state rests on (review V6): the longest summary is well under this, a data check's naming
-    // up to nine airports in words (revision 74; the airports table's longest name is 92 characters) included
-    summary: z.string().max(4000),
-    /** An aside on any check, such as "first daily backup due 03:30"; it never counts toward the status bar. */
-    note: z.string().max(1000).nullable(),
+    // why: never cut a fact a state rests on (review V6): the longest summary is under this, a data check's naming every
+    // route of nine airports a side in words (revision 74; the airports table's longest name is 92 characters) included
+    summary: z.string().max(20_000),
+    /**
+     * An aside on any check, such as "first daily backup due 03:30"; it never counts toward the status bar. Bounded, like
+     * the summary, by a data check's naming routes in words (revision 74).
+     */
+    note: z.string().max(12_000).nullable(),
     /** Only when `state` is `off`: why nothing is checked. */
     offReason: z.enum(['not-set-up', 'not-visible', 'awaiting-verification', 'disabled']).nullable(),
     fix: z

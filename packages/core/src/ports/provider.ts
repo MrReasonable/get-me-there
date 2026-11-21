@@ -129,6 +129,12 @@ export type DiscoveryTileResult =
       /** Per-cell shortfalls the engine must record (spec §8.1); absent or empty when every covered cell is clean. */
       cellIssues?: CellIssue[];
       /**
+       * Why a covered cell with no price, no "no fares" and no issue is `no_data`, when the adapter knows (spec §2: a
+       * "no flights" page's own query pair, or a pair past the sale window's end, core's no-flights marks); the engine
+       * writes `detail` as the outcome's `lastError`. Absent: no cell has one.
+       */
+      noDataNotes?: { cell: CellKey; detail: string }[];
+      /**
        * True when the adapter stopped at its page cap: a priced cell's minimum is then the cheapest of the rows read,
        * not of the vendor's whole cache, and the engine labels it so. Absent: every page was read.
        */

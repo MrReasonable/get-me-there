@@ -397,7 +397,7 @@ describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)'
           ...base,
           errors: base.errors.map((e) => ({ ...e, retryable: false })),
           noFlights: [
-            { ...route, origin: 'LCY', cells: 1, everyPage: true },
+            { ...route, origin: 'LGW', destination: 'EWR', cells: 1, everyPage: true },
             { ...route, origin: 'LGW', cells: 360, everyPage: true },
             { ...route, origin: 'LHR', cells: 1, everyPage: false },
             { ...route, origin: 'QQA', cells: 2, everyPage: false },
@@ -412,7 +412,7 @@ describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)'
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual([
-      'LCY → JFK (Camoufox): every page said no flights, so its other 1 date pair was never shown. If there are never flights from this airport, take it out of the search.',
+      'LGW → EWR (Camoufox): every page said no flights, so its other 1 date pair was never shown. If there are never flights from this airport, take it out of the search.',
       'LGW → JFK (Camoufox): every page said no flights, so its other 360 date pairs were never shown. If there are never flights from this airport, take it out of the search.',
       'LHR → JFK (Camoufox): 1 date pair not shown: its page said no flights for the date pair it asked.',
       'QQA → JFK (Camoufox): 2 date pairs not shown: their page said no flights for the date pair it asked.',

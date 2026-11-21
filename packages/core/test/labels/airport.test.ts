@@ -23,6 +23,11 @@ describe('airportLabel', () => {
     expect(airportLabel('QQA', null)).toBe('QQA');
     expect(airportLabel('QQB', { name: 'Testville Airport', city: 'Testville' })).toBe('Testville');
   });
+  it('is the code for a blank name', () => {
+    expect(airportLabel('QQC', { name: '', city: 'Testville' })).toBe('QQC');
+    expect(airportLabel('QQC', { name: '   ', city: 'Testville' })).toBe('QQC');
+    expect(airportWithCode('QQC', { name: '', city: 'Testville' })).toBe('QQC');
+  });
 });
 
 describe('airportWithCode', () => {

@@ -162,42 +162,47 @@ function scheduleFacts(
 
 /**
  * The six discovery buckets over a finished run's cells after the §6.6 roll-up (null when the run holds no cells), and
- * revision 74's no-flights facts: the routes every page of which said no flights, and how many error cells are day pairs
- * those pages did not show (a cell whose roll-up is `error` with a no-flights-unseen outcome on such a route). No cell
- * changes bucket: `unseen` only says what part of the error bucket is.
+ * revision 74's no-flights facts per origin–destination: the routes every page of which said no flights (every route ×
+ * provider of it with unseen pairs is `everyPage`), and how many error cells are day pairs those pages did not show (a
+ * cell whose roll-up is `error` with a no-flights-unseen outcome there). An origin is whole when every destination of the
+ * run's search is such a route. No cell changes bucket: `unseen` only says what part of the error bucket is.
  */
-function coverageOf(ports: Ports, executionId: string): Pick<DataFacts, 'coverage' | 'noFlights'> {
-  const none = { origins: [], destinations: [], unseen: 0 };
-  const rollUps = ports.repos.cells.rollUps(executionId);
-  if (rollUps.size === 0) return { coverage: null, noFlights: none };
-  const discovery = ports.repos.cells.outcomes(executionId, { stage: 'discovery' });
+function coverageOf(ports: Ports, run: Execution): Pick<DataFacts, 'coverage' | 'noFlights'> {
+  const rollUps = ports.repos.cells.rollUps(run.id);
+  if (rollUps.size === 0) return { coverage: null, noFlights: [] };
+  const discovery = ports.repos.cells.outcomes(run.id, { stage: 'discovery' });
   const reused = new Set(discovery.filter((o) => o.reusedFromExecutionId !== null).map(cellKeyString)).size;
   const coverage = coverageBuckets(
     [...rollUps.values()].map((r) => r.discovery.status),
     reused,
   );
-  const everyPage = noFlightsRoutes(discovery).filter((r) => r.everyPage);
-  if (everyPage.length === 0) return { coverage, noFlights: none };
-  const onEveryPage = new Set(everyPage.map((r) => `${r.origin}|${r.destination}|${r.providerId}`));
-  const unseen = new Set(
-    discovery
-      .filter(
-        (o) =>
-          isNoFlightsUnseen(o) &&
-          onEveryPage.has(`${o.origin}|${o.destination}|${o.providerId}`) &&
-          rollUps.get(cellKeyString(o))?.discovery.status === 'error',
-      )
-      .map(cellKeyString),
-  ).size;
-  const named = (codes: readonly string[]) =>
-    [...new Set(codes)].map((c) => airportWithCode(c, ports.repos.airports.get(c)));
+  const groups = noFlightsRoutes(discovery);
+  const od = (r: { origin: string; destination: string }) => `${r.origin}|${r.destination}`;
+  const routes = new Map<string, { origin: string; destination: string }>();
+  for (const g of groups) routes.set(od(g), { origin: g.origin, destination: g.destination });
+  // why: a route counts only when no provider's pages on it showed anything but "no flights"
+  for (const g of groups) if (!g.everyPage) routes.delete(od(g));
+  if (routes.size === 0) return { coverage, noFlights: [] };
+  const unseen = new Map<string, Set<string>>();
+  for (const o of discovery) {
+    const key = od(o);
+    if (!routes.has(key) || !isNoFlightsUnseen(o)) continue;
+    if (rollUps.get(cellKeyString(o))?.discovery.status !== 'error') continue;
+    const set = unseen.get(key) ?? new Set<string>();
+    set.add(cellKeyString(o));
+    unseen.set(key, set);
+  }
+  const destinations = run.snapshot.destinations;
+  const whole = (origin: string) => destinations.every((d) => routes.has(`${origin}|${d}`));
+  const named = (code: string) => airportWithCode(code, ports.repos.airports.get(code));
   return {
     coverage,
-    noFlights: {
-      origins: named(everyPage.map((r) => r.origin)),
-      destinations: named(everyPage.map((r) => r.destination)),
-      unseen,
-    },
+    noFlights: [...routes.entries()].map(([key, r]) => ({
+      origin: named(r.origin),
+      destination: named(r.destination),
+      unseen: unseen.get(key)?.size ?? 0,
+      wholeOrigin: whole(r.origin),
+    })),
   };
 }
 
@@ -278,12 +283,11 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
     name: d.name,
     window: d.window,
     maxCalls: d.budget.maxCalls,
+    runMaxCalls: lastRun === null ? null : lastRun.snapshot.budget.maxCalls,
     scheduled: isScheduled(d),
     latest: latest === null ? null : runFacts(latest),
     lastRun: lastRun === null ? null : runFacts(lastRun),
-    ...(lastRun === null
-      ? { coverage: null, noFlights: { origins: [], destinations: [], unseen: 0 } }
-      : coverageOf(ports, lastRun.id)),
+    ...(lastRun === null ? { coverage: null, noFlights: [] } : coverageOf(ports, lastRun)),
     budgetSkips: lastRun === null ? [] : budgetSkipsOf(ports, lastRun.id),
     ages: lastRun === null ? null : agesOf(ctx, d, lastRun.id, now),
     leftNotes: lastRun === null ? [] : leftNotes(ctx, d, lastRun.id),

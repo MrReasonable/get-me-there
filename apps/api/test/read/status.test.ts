@@ -744,11 +744,17 @@ describe('the data check in plain words (revision 74)', () => {
     const { reused: _reused, ...six } = buckets;
     return { buckets, total: Object.values(six).reduce((n, x) => n + x, 0) };
   };
-  const noFlights = (origins: string[], destinations: string[], unseen: number) => ({
-    origins,
-    destinations,
+  /** A route every page of which said no flights; `wholeOrigin` when every destination of the search is one. */
+  const route = (origin: string, destination: string, unseen: number, wholeOrigin = true) => ({
+    origin,
+    destination,
     unseen,
+    wholeOrigin,
   });
+  const LGW = 'Gatwick (LGW)';
+  const LHR = 'Heathrow (LHR)';
+  const JFK = 'John F Kennedy (JFK)';
+  const EWR = 'Newark Liberty (EWR)';
 
   it('labels the search by its name and its dates, worded as the Trips card words them', () => {
     expect(dataOf({}).label).toBe('London to New York · leave 15 Dec 2026 – 15 Jun 2027');
@@ -763,7 +769,7 @@ describe('the data check in plain words (revision 74)', () => {
   it('a route every page of which said no flights: its unseen pairs are named, and the fix is to take the airport out', () => {
     const c = dataOf({
       coverage: cov({ priced: 600, empty: 20, no_data: 10, error: 370 }),
-      noFlights: noFlights(['Gatwick (LGW)'], ['John F Kennedy (JFK)'], 360),
+      noFlights: [route(LGW, JFK, 360)],
     });
     expect(c.summary).toContain(
       'prices for 600 of 1000 date pairs; 20 with no flights; 10 with no price found; 360 not shown because no flights were found from Gatwick (LGW); 10 not read (the page failed)',
@@ -777,18 +783,49 @@ describe('the data check in plain words (revision 74)', () => {
   it('names two or more origins with "or" in the summary, "and" in the fix, and "them"', () => {
     const c = dataOf({
       coverage: cov({ priced: 600, error: 400 }),
-      noFlights: noFlights(
-        ['City (LCY)', 'Gatwick (LGW)'],
-        ['Newark Liberty (EWR)', 'John F Kennedy (JFK)'],
-        400,
-      ),
+      noFlights: [route(LHR, EWR, 100), route(LHR, JFK, 100), route(LGW, EWR, 100), route(LGW, JFK, 100)],
     });
     expect(c.summary).toContain(
-      '400 not shown because no flights were found from City (LCY) or Gatwick (LGW)',
+      '400 not shown because no flights were found from Heathrow (LHR) or Gatwick (LGW)',
     );
     expect(c.summary).not.toContain('not read');
     expect(c.fix?.text).toBe(
-      'take City (LCY) and Gatwick (LGW) out of this search on its Edit page: no page showed flights from them to Newark Liberty (EWR) or John F Kennedy (JFK)',
+      'take Heathrow (LHR) and Gatwick (LGW) out of this search on its Edit page: no page showed flights from them to Newark Liberty (EWR) or John F Kennedy (JFK)',
+    );
+  });
+
+  it('a route that is not every destination of its origin is named and noted, never offered for taking out (F3)', () => {
+    const c = dataOf({
+      coverage: cov({ priced: 900, error: 100 }),
+      noFlights: [route(LGW, EWR, 60, false), route(LGW, JFK, 30, false), route(LHR, EWR, 10, false)],
+    });
+    expect(c.summary).toContain(
+      '100 not shown because no flights were found on Gatwick (LGW) → Newark Liberty (EWR), Gatwick (LGW) → John F Kennedy (JFK) or Heathrow (LHR) → Newark Liberty (EWR)',
+    );
+    expect(c.note).toBe(
+      'no page showed flights from Gatwick (LGW) to Newark Liberty (EWR) or John F Kennedy (JFK) (90 date pairs not shown); no page showed flights from Heathrow (LHR) to Newark Liberty (EWR) (10 date pairs not shown)',
+    );
+    expect(c.fix).toBeNull();
+    expect(c.state).toBe('ok');
+    const one = dataOf({ coverage: cov({ priced: 999, error: 1 }), noFlights: [route(LGW, EWR, 1, false)] });
+    expect(one.note).toBe(
+      'no page showed flights from Gatwick (LGW) to Newark Liberty (EWR) (1 date pair not shown)',
+    );
+  });
+
+  it('names whole origins "from" and other routes "on" together, and offers only the whole origins', () => {
+    const c = dataOf({
+      coverage: cov({ priced: 800, error: 200 }),
+      noFlights: [route(LHR, JFK, 150), route(LGW, EWR, 50, false)],
+    });
+    expect(c.summary).toContain(
+      '200 not shown because no flights were found from Heathrow (LHR) or on Gatwick (LGW) → Newark Liberty (EWR)',
+    );
+    expect(c.fix?.text).toBe(
+      'take Heathrow (LHR) out of this search on its Edit page: no page showed flights from it to John F Kennedy (JFK)',
+    );
+    expect(c.note).toBe(
+      'no page showed flights from Gatwick (LGW) to Newark Liberty (EWR) (50 date pairs not shown)',
     );
   });
 
@@ -807,9 +844,16 @@ describe('the data check in plain words (revision 74)', () => {
     expect(dataOf({ coverage: cov({ priced: 800, error: 150, skipped: 50 }) }).state).toBe('ok');
     const unseen = dataOf({
       coverage: cov({ priced: 700, error: 250, skipped: 50 }),
-      noFlights: noFlights(['Gatwick (LGW)'], ['John F Kennedy (JFK)'], 100),
+      noFlights: [route(LGW, JFK, 100)],
     });
     expect(unseen.fix?.text).toMatch(/^take Gatwick \(LGW\) out/);
+    // a route that is not a whole origin keeps its unseen pairs out of the gap too: a rerun gets the same answer
+    expect(
+      dataOf({
+        coverage: cov({ priced: 700, error: 250, skipped: 50 }),
+        noFlights: [route(LGW, JFK, 100, false)],
+      }).state,
+    ).toBe('ok');
   });
 
   it('a run whose answered cells all had no price found points to another price source', () => {
@@ -831,6 +875,24 @@ describe('the data check in plain words (revision 74)', () => {
     );
   });
 
+  it('a run that priced nothing with pairs left unread says to read them, however few (F4)', () => {
+    const fewLeft = dataOf({ coverage: cov({ empty: 99, not_run: 1 }), ages: null });
+    expect(fewLeft.fix?.text).toBe(
+      "run the search again to read the 1 date pair left; the search's page lists them under What was searched",
+    );
+    const errors = dataOf({ coverage: cov({ no_data: 97, error: 2, skipped: 1 }), ages: null });
+    expect(errors.fix?.text).toMatch(/^run the search again to read the 3 date pairs left;/);
+    // unseen pairs of a route every page of which said no flights are not left to read
+    const unseen = dataOf({
+      coverage: cov({ empty: 90, error: 10 }),
+      noFlights: [route(LGW, EWR, 10, false)],
+      ages: null,
+    });
+    expect(unseen.fix?.text).toBe(
+      "no flights were found for any of these dates: check the airports and dates on the search's Edit page",
+    );
+  });
+
   it('a run whose cells were all answered with no flights points to the airports and dates', () => {
     const c = dataOf({ coverage: cov({ empty: 100 }), ages: null });
     expect(c.summary).toContain('prices for 0 of 100 date pairs; 100 with no flights');
@@ -846,20 +908,25 @@ describe('the data check in plain words (revision 74)', () => {
     expect(c.fix?.text).toBe('start a run, or check that a price source is set up');
   });
 
-  it("notes the cheapest dates a credit limit left unchecked, naming the search's own limit of 0", () => {
-    const zero = dataOf({ maxCalls: 0, budgetSkips: [{ providerId: 'searchapi', cells: 3 }] });
-    expect(zero.note).toBe(
-      '3 cheapest dates not checked with SearchApi: this search allows 0 SearchApi credits a run (raise it on its Edit page)',
+  it("notes the cheapest dates a credit limit left unchecked, by the run's own limit and the search's now (F1, F2)", () => {
+    const skip = (cells: number) => [{ providerId: 'searchapi' as const, cells }];
+    // the run allowed 0, and the search still does
+    expect(dataOf({ runMaxCalls: 0, maxCalls: 0, budgetSkips: skip(3) }).note).toBe(
+      '3 cheapest dates not checked with SearchApi: this search allowed 0 SearchApi credits a run (raise it on its Edit page)',
     );
-    const ran = dataOf({
-      maxCalls: 30,
-      budgetSkips: [{ providerId: 'searchapi', cells: 1 }],
-      scheduled: false,
-    });
-    expect(ran.note).toBe(
-      "1 cheapest date not checked with SearchApi: this search's credit limit ran out; runs only when you start it",
+    // the run allowed 0; the search has been raised since
+    expect(dataOf({ runMaxCalls: 0, maxCalls: 30, budgetSkips: skip(3) }).note).toBe(
+      '3 cheapest dates not checked with SearchApi: this search allowed 0 SearchApi credits a run',
     );
-    expect(ran.state).toBe('ok');
+    // the run allowed some: which limit was reached is not recorded, so none is named
+    expect(dataOf({ runMaxCalls: 30, maxCalls: 30, budgetSkips: skip(1), scheduled: false }).note).toBe(
+      '1 cheapest date not checked with SearchApi: a credit limit was reached; runs only when you start it',
+    );
+    // the run allowed some; the search allows 0 now
+    expect(dataOf({ runMaxCalls: 30, maxCalls: 0, budgetSkips: skip(2) }).note).toBe(
+      '2 cheapest dates not checked with SearchApi: a credit limit was reached; this search now allows 0 SearchApi credits a run (raise it on its Edit page)',
+    );
+    expect(dataOf({ runMaxCalls: 30, budgetSkips: skip(2) }).state).toBe('ok');
   });
 
   it('stays inside the contract with nine long airport names a side, the longest numbers and every note', () => {
@@ -885,7 +952,10 @@ describe('the data check in plain words (revision 74)', () => {
             not_run: big,
             reused: big,
           }),
-          noFlights: noFlights(nine, nine, big),
+          // why: nine origins with eight such routes each (a ninth would make the origin whole) and nothing whole
+          noFlights: nine.flatMap((o, i) =>
+            nine.filter((_, k) => k !== i).map((dest) => route(o, dest, big, false)),
+          ),
           ages: {
             newest: { kind: 'unknown', fetchedHours: 5 },
             oldest: { kind: 'unknown', fetchedHours: 5 },
@@ -901,12 +971,19 @@ describe('the data check in plain words (revision 74)', () => {
             { providerId: 'fixture', cells: big },
           ],
           maxCalls: 0,
+          runMaxCalls: 0,
           scheduled: false,
         },
         { mode },
       );
       expect(apiContract.statusCheckSchema.safeParse(c).error?.issues ?? []).toEqual([]);
-      const nf = dataOf({ noFlights: noFlights(nine, nine, 0), coverage: cov({ error: big }) }, { mode });
+      const nf = dataOf(
+        {
+          noFlights: nine.flatMap((o) => nine.map((dest) => route(o, dest, 0))),
+          coverage: cov({ error: big }),
+        },
+        { mode },
+      );
       expect(nf.fix?.text).toContain(`take ${nine.slice(0, 8).join(', ')} and ${long(8)} out`);
       expect(apiContract.statusCheckSchema.safeParse(nf).error?.issues ?? []).toEqual([]);
     }

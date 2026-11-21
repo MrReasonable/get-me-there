@@ -71,14 +71,26 @@ export interface RunFacts {
   skipCode: SkipCode | null;
 }
 
+/** One route every page of which said no flights (revision 74). */
+export interface NoFlightsRouteFacts {
+  origin: string;
+  destination: string;
+  /** The route's error cells that are day pairs a "no flights" page did not show. */
+  unseen: number;
+  /** Every destination of the run's search is such a route from this origin, so the origin itself has no flights. */
+  wholeOrigin: boolean;
+}
+
 export interface DataFacts {
   definitionId: string;
   /** The definition's name: the card's label (with its dates), never part of its summary. */
   name: string;
   /** The definition's window, worded in the label as the Trips card words it (revision 74). */
   window: WindowSpec;
-  /** The search's own paid-call cap a run (`budget.maxCalls`): 0 means a run checks no date with SearchApi. */
+  /** The search's own paid-call cap a run (`budget.maxCalls`) now: 0 means a run checks no date with SearchApi. */
   maxCalls: number;
+  /** The same cap as the last run's own snapshot held it; null without a last run. */
+  runMaxCalls: number | null;
   /**
    * Revision 55 §7 (data-004): whether the search is scheduled (`isScheduled`). An unscheduled search's card is judged by
    * its latest run like any other and notes that it runs only when started; a card is off only for a deleted search, which has none.
@@ -90,11 +102,12 @@ export interface DataFacts {
   lastRun: RunFacts | null;
   coverage: { buckets: Buckets; total: number } | null;
   /**
-   * Revision 74: the last run's routes every page of which said no flights (core's `noFlightsRoutes`, `everyPage`), the
-   * airports named in words ("Heathrow (LHR)"), and how many of its error cells are day pairs those pages did not show.
-   * Empty lists and 0 when there is none.
+   * Revision 74: the last run's origin–destination routes every page of which said no flights (core's `noFlightsRoutes`,
+   * `everyPage`, for every provider with unseen pairs on the route), airports named in words ("Gatwick (LGW)"), each with
+   * its error cells that are day pairs those pages did not show, and `wholeOrigin` when every destination of the run's
+   * search is such a route from that origin. Empty when there is none.
    */
-  noFlights: { origins: string[]; destinations: string[]; unseen: number };
+  noFlights: NoFlightsRouteFacts[];
   /** The last run's cheapest dates not checked because a credit limit was reached (`skipped:budget`), per provider. */
   budgetSkips: { providerId: ProviderId; cells: number }[];
   ages: AgeFacts | null;

@@ -1,6 +1,6 @@
 // Spec §10 coverage, calendar gap and cell detail (the Dates view's coverage section and the date pair detail's
 // per-airport-pair panels; WP19 retired the calendar and duration-analysis routes).
-import { apiContract, NO_FLIGHTS_UNSEEN } from '@gmt/core';
+import { apiContract, NO_FLIGHTS_ASKED, NO_FLIGHTS_UNSEEN, noFlightsDetail } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
@@ -44,6 +44,34 @@ async function world() {
   s.verified('E1', C2, [{ hash: 'hP', pricePence: 40_000, fetchedAt: at(-1), baggage: null }]);
   s.verified('E1', C3, [{ hash: 'hF', pricePence: 30_000, fetchedAt: at(-1), stopsOut: 2 }]);
   return { x, def, s };
+}
+
+/**
+ * Revision 74: C1 the query pair of a "no flights" page (`no_data`, marked unless `queryMark` is null), C2 and C3 the
+ * pairs it did not show (`error`, no-flights-unseen), C4 not run.
+ */
+async function noFlightsWorld(queryMark: string | null = noFlightsDetail(NO_FLIGHTS_ASKED)) {
+  const x = await createHarness();
+  h = x;
+  const s = seeder(x.ports);
+  const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+  s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+  s.cells('E1', [C1, C2, C3, C4]);
+  s.tile('E1', C1, { status: 'no_data', fetchedAt: at(-1), tileIndex: 0, lastError: queryMark });
+  s.tileError(
+    'E1',
+    [C2, C3],
+    'parse',
+    `${NO_FLIGHTS_UNSEEN} the page answered no flights for the pair it asked`,
+  );
+  const read = () =>
+    get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+  return { x, def, s, read };
 }
 
 const get = <S extends Parameters<typeof expectContract>[3]>(
@@ -122,26 +150,7 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
   });
 
   it('lists the day pairs a "no flights" page did not show per route, out of the errors (revision 74)', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E1', [C1, C2, C3, C4]);
-    s.tile('E1', C1, { status: 'no_data', fetchedAt: at(-1), tileIndex: 0 });
-    s.tileError(
-      'E1',
-      [C2, C3],
-      'parse',
-      `${NO_FLIGHTS_UNSEEN} the page answered no flights for the pair it asked`,
-    );
-    const read = () =>
-      get(
-        x,
-        `/api/definitions/${def.id}/coverage`,
-        '/api/definitions/:id/coverage',
-        apiContract.coverageResponseSchema,
-      );
+    const { s, read } = await noFlightsWorld();
     const every = await read();
     expect(every.errors).toEqual([]);
     expect(every.noFlights).toEqual([
@@ -173,6 +182,28 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
         retryable: true,
       },
     ]);
+  });
+
+  it('a page that showed flights with unknown prices (an unmarked no_data) keeps the route from "every page" (F0)', async () => {
+    const { read } = await noFlightsWorld(null);
+    expect((await read()).noFlights.map((g) => g.everyPage)).toEqual([false]);
+  });
+
+  it('a no-flights group whose pairs have departed, or a browser group past its window, offers no Retry', async () => {
+    const departed = await noFlightsWorld();
+    departed.x.clock.advance(25 * 24 * 3_600_000); // 2026-11-08: C2 and C3 (out 3 and 4 Nov) have departed
+    expect((await departed.read()).noFlights.map((g) => g.retryable)).toEqual([false]);
+    await departed.x.close();
+    h = undefined;
+    const browser = await noFlightsWorld();
+    const raw = browser.x.ports.db.raw;
+    raw.prepare("UPDATE cell_outcomes SET provider_id = 'camoufox' WHERE status = 'error'").run();
+    const groups = async () => (await browser.read()).noFlights.map((g) => [g.providerId, g.retryable]);
+    expect(await groups()).toEqual([['camoufox', true]]);
+    raw
+      .prepare('UPDATE search_executions SET browser_window_end = ? WHERE id = ?')
+      .run(at(-1), browser.s.id('E1'));
+    expect(await groups()).toEqual([['camoufox', false]]);
   });
 
   it('names the scheduled_only cells per stage × provider and detail (spec §3, §8.2 rev 36)', async () => {

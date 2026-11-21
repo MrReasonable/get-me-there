@@ -19,7 +19,17 @@ describe('dateWords', () => {
     expect(dateWordsShort('2027-01-31')).toBe('31 Jan');
   });
   it('returns anything malformed as given', () => {
-    for (const d of ['', '2027', '2027-13-01', '2027-00-01', '2027-03']) {
+    for (const d of [
+      '',
+      '2027',
+      '2027-13-01',
+      '2027-00-01',
+      '2027-03',
+      '2027-03-xx',
+      '2027-03-04-05',
+      '2027-02-30',
+      '27-03-04',
+    ]) {
       expect(dateWords(d)).toBe(d);
       expect(dateWordsShort(d)).toBe(d);
     }

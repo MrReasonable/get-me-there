@@ -11,13 +11,14 @@ export function airportShortName(name: string): string {
 }
 
 /**
- * "Heathrow", "Newark Liberty": the short name without its city in front, or the code when the table has no row. The
- * short name is trimmed, so a name that starts with its city and a space always has more after it.
+ * "Heathrow", "Newark Liberty": the short name without its city in front, or the code when the table has no row or the
+ * name is blank (the airports response allows an empty name).
  */
 export function airportLabel(code: string, row: { name: string; city: string } | null | undefined): string {
   if (row === null || row === undefined) return code;
-  const short = airportShortName(row.name);
-  return short.startsWith(`${row.city} `) ? short.slice(row.city.length + 1).trim() : short;
+  const short = airportShortName(row.name).trim();
+  const label = short.startsWith(`${row.city} `) ? short.slice(row.city.length + 1).trim() : short;
+  return label === '' ? code : label;
 }
 
 /** "Heathrow (LHR)" when the table names the airport, else the code alone ("QQA"). */

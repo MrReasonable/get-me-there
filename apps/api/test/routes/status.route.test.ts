@@ -3,7 +3,16 @@
 // in-process last result. The worked example only.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, asIata, FIXTURE_OPT_IN_PHRASE, fixedClock, NO_FLIGHTS_UNSEEN, Secret } from '@gmt/core';
+import {
+  apiContract,
+  asIata,
+  FIXTURE_OPT_IN_PHRASE,
+  fixedClock,
+  NO_FLIGHTS_ASKED,
+  NO_FLIGHTS_UNSEEN,
+  noFlightsDetail,
+  Secret,
+} from '@gmt/core';
 import { EmailNotifier, TestSendLimit } from '@gmt/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modeOf as modeOfConfig } from '../../src/read/statusSources.js';
@@ -202,7 +211,13 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
       );
     s.cells('E1', [days(1), lgw(1), lgw(2), lgw(3), lgw(4)]);
     s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
-    s.tile('E1', lgw(1), { status: 'no_data', fetchedAt: at(-3), tileIndex: 1 });
+    // why: the query pair of the no-flights page carries its mark; an unmarked no_data is a page that showed flights
+    s.tile('E1', lgw(1), {
+      status: 'no_data',
+      fetchedAt: at(-3),
+      tileIndex: 1,
+      lastError: noFlightsDetail(NO_FLIGHTS_ASKED),
+    });
     s.tileError('E1', [lgw(2), lgw(3), lgw(4)], 'parse', `${NO_FLIGHTS_UNSEEN} the page answered no flights`);
     const c = await dataOf(x, def.id);
     expect(c?.summary).toContain(
@@ -213,6 +228,33 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
     expect(c?.fix?.text).toBe(
       'take Gatwick (LGW) out of this search on its Edit page: no page showed flights from it to John F Kennedy (JFK)',
     );
+  });
+
+  it('a route of an origin with another destination is noted, not offered for taking out (revision 74, F3)', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ destinations: [asIata('JFK'), asIata('EWR')] }),
+    );
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    const ewr = (n: number) => cell('LHR', 'EWR', `2026-11-0${n}`, `2026-11-1${n}`);
+    s.cells('E1', [days(1), ewr(1), ewr(2)]);
+    s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
+    s.tile('E1', ewr(1), {
+      status: 'no_data',
+      fetchedAt: at(-3),
+      tileIndex: 1,
+      lastError: noFlightsDetail(NO_FLIGHTS_ASKED),
+    });
+    s.tileError('E1', [ewr(2)], 'parse', noFlightsDetail(NO_FLIGHTS_UNSEEN));
+    const c = await dataOf(x, def.id);
+    expect(c?.summary).toContain(
+      '1 not shown because no flights were found on Heathrow (LHR) → Liberty (EWR)',
+    );
+    expect(c?.note).toBe(
+      'no page showed flights from Heathrow (LHR) to Liberty (EWR) (1 date pair not shown); runs only when you start it',
+    );
+    expect(c?.fix?.text ?? '').not.toContain('take');
   });
 
   it('a no-flights page on a route that priced elsewhere is not every page: its unseen pairs stay not read', async () => {
@@ -228,20 +270,27 @@ describe('the data check over a stored run (brief WP18 §6)', () => {
     expect(c?.fix?.text).toMatch(/^run the search again to read the 1 date pair left/);
   });
 
-  it("notes the cheapest dates a credit limit left unchecked, by the search's own limit (revision 74)", async () => {
-    for (const [maxCalls, words] of [
+  it("notes the cheapest dates a credit limit left unchecked, by the run's own limit and the search's now (revision 74)", async () => {
+    for (const [ran, now, words] of [
       [
         0,
-        '1 cheapest date not checked with Fixture: this search allows 0 Fixture credits a run (raise it on its Edit page)',
+        0,
+        '1 cheapest date not checked with Fixture: this search allowed 0 Fixture credits a run (raise it on its Edit page)',
       ],
-      [1000, "1 cheapest date not checked with Fixture: this search's credit limit ran out"],
+      [1000, 1000, '1 cheapest date not checked with Fixture: a credit limit was reached'],
+      [
+        1000,
+        0,
+        '1 cheapest date not checked with Fixture: a credit limit was reached; this search now allows 0 Fixture credits a run (raise it on its Edit page)',
+      ],
     ] as const) {
       const x = await harness();
       const s = seeder(x.ports);
-      const def = x.ports.repos.definitions.create(
-        exampleDefinitionInput({ budget: { maxCalls, maxFreeCalls: 2000, maxCostMicroGbp: 10_000_000 } }),
-      );
+      const budget = (maxCalls: number) => ({ maxCalls, maxFreeCalls: 2000, maxCostMicroGbp: 10_000_000 });
+      const def = x.ports.repos.definitions.create(exampleDefinitionInput({ budget: budget(ran) }));
       s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+      // why: the run keeps its own snapshot; the search's limit is changed after it
+      x.ports.repos.definitions.update(def.id, { budget: budget(now) });
       s.cells('E1', [days(1)], { selected: [{ cell: days(1), reason: 'top_n' }] });
       s.tile('E1', days(1), { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
       x.ports.repos.cells.setOutcome(s.id('E1'), days(1), 'verification', 'fixture', {

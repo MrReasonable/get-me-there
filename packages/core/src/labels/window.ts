@@ -1,4 +1,5 @@
 import type { WindowSpec } from '../types/definition.js';
+import { isoDateSchema } from '../types/ids.js';
 
 /**
  * A search's dates in words, one set for every reader (the Trips card, the search page's header and the Status data
@@ -9,20 +10,23 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-/** "2027-03-14" → "14 Mar 2027"; anything malformed is returned as given. */
-export function dateWords(d: string): string {
-  const [y, m, day] = d.split('-');
-  const month = MONTHS[Number(m) - 1];
-  if (y === undefined || day === undefined || month === undefined) return d;
-  return `${Number(day)} ${month} ${y}`;
+/** The day, month and year of a real `YYYY-MM-DD` date, or null for anything else (core's one date rule). */
+function partsOf(d: string): { y: string; month: string; day: number } | null {
+  const month = MONTHS[Number(d.slice(5, 7)) - 1];
+  if (month === undefined || !isoDateSchema.safeParse(d).success) return null;
+  return { y: d.slice(0, 4), month, day: Number(d.slice(8, 10)) };
 }
 
-/** "2027-03-14" → "14 Mar", without the year; anything malformed is returned as given. */
+/** "2027-03-14" → "14 Mar 2027"; anything that is not a real `YYYY-MM-DD` date is returned as given. */
+export function dateWords(d: string): string {
+  const p = partsOf(d);
+  return p === null ? d : `${p.day} ${p.month} ${p.y}`;
+}
+
+/** "2027-03-14" → "14 Mar", without the year; anything that is not a real `YYYY-MM-DD` date is returned as given. */
 export function dateWordsShort(d: string): string {
-  const [, m, day] = d.split('-');
-  const month = MONTHS[Number(m) - 1];
-  if (day === undefined || month === undefined) return d;
-  return `${Number(day)} ${month}`;
+  const p = partsOf(d);
+  return p === null ? d : `${p.day} ${p.month}`;
 }
 
 /** "10 Jan – 31 Mar", or "10 Dec 2026 – 31 Mar 2027" when the two dates fall in different years. */

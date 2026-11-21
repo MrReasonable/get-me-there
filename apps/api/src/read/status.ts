@@ -329,15 +329,57 @@ const BEHIND_FIX =
 const datePairs = (n: number) => `${n} ${n === 1 ? 'date pair' : 'date pairs'}`;
 
 /**
- * Revision 74: the cheapest dates a run did not check because a credit limit was reached, per provider: the search's
- * own limit of 0 says where to raise it, any other limit that it ran out.
+ * Revision 74: the cheapest dates a run did not check because a credit limit was reached, per provider. Which limit is
+ * not stored with the cells (a line taken out at the start, or mid-run while others carried on, leaves no stop cause),
+ * so only the run's own snapshot is read: a run that allowed 0 credits names that; any other run says a limit was
+ * reached. "Raise it on its Edit page" is offered only while the search's own limit is still 0.
  */
 function budgetSkipNote(d: DataFacts, skip: DataFacts['budgetSkips'][number]): string {
   const name = PROVIDER_NAMES[skip.providerId];
   const what = `${skip.cells} cheapest ${skip.cells === 1 ? 'date' : 'dates'} not checked with ${name}`;
+  const raise = d.maxCalls === 0 ? ' (raise it on its Edit page)' : '';
+  if (d.runMaxCalls === 0) return `${what}: this search allowed 0 ${name} credits a run${raise}`;
   return d.maxCalls === 0
-    ? `${what}: this search allows 0 ${name} credits a run (raise it on its Edit page)`
-    : `${what}: this search's credit limit ran out`;
+    ? `${what}: a credit limit was reached; this search now allows 0 ${name} credits a run${raise}`
+    : `${what}: a credit limit was reached`;
+}
+
+/**
+ * Revision 74: the no-flights facts in words. An origin is whole when every destination of the search is a route every
+ * page of which said no flights; only whole origins are named "from", and only they are offered for taking out. Other
+ * such routes are named "on A → B" and get a note each.
+ */
+function noFlightsWords(routes: DataFacts['noFlights']) {
+  const unique = (xs: readonly string[]) => [...new Set(xs)];
+  const wholes = routes.filter((r) => r.wholeOrigin);
+  const origins = unique(wholes.map((r) => r.origin));
+  const lone = routes.filter((r) => !r.wholeOrigin);
+  const where = [
+    ...(origins.length === 0 ? [] : [`from ${listWords(origins, 'or')}`]),
+    ...(lone.length === 0
+      ? []
+      : [
+          `on ${listWords(
+            lone.map((r) => `${r.origin} → ${r.destination}`),
+            'or',
+          )}`,
+        ]),
+  ];
+  return {
+    unseen: routes.reduce((n, r) => n + r.unseen, 0),
+    where: listWords(where, 'or'),
+    origins,
+    destinations: unique(wholes.map((r) => r.destination)),
+    // why: one note per origin, its routes' destinations together, so a search with many such routes stays readable
+    notes: unique(lone.map((r) => r.origin)).map((origin) => {
+      const mine = lone.filter((r) => r.origin === origin);
+      const n = mine.reduce((sum, r) => sum + r.unseen, 0);
+      return `no page showed flights from ${origin} to ${listWords(
+        mine.map((r) => r.destination),
+        'or',
+      )} (${datePairs(n)} not shown)`;
+    }),
+  };
 }
 
 function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
@@ -353,7 +395,9 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
   const run = d.lastRun;
   // why: revision 55 §7 (data-004) — `enabled` means only that scheduled runs happen, so an unscheduled search is judged
   // by its latest run like any other and says it runs only when started; a deleted one has no card at all
+  const nf = noFlightsWords(d.noFlights);
   const left = [
+    ...nf.notes,
     ...d.leftNotes.map((n) => `${n.text} (${n.cells} ${n.cells === 1 ? 'cell' : 'cells'})`),
     ...d.budgetSkips.map((skip) => budgetSkipNote(d, skip)),
     ...(d.scheduled ? [] : [STATUS_TEXT.notScheduled]),
@@ -379,14 +423,13 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
     parts.push(`last firing skipped (${reason}) on ${at(f, l.at)}`);
   }
   const c = d.coverage;
-  const nf = d.noFlights;
   if (run !== null) {
     const word = RUN_WORD[run.status];
     parts.push(
       `last run ${at(f, run.at)}${word === undefined ? '' : ` (${word})`}: ${
         c === null
           ? 'no cells recorded'
-          : lastRunLine(c.buckets, c.total, { cells: nf.unseen, from: listWords(nf.origins, 'or') })
+          : lastRunLine(c.buckets, c.total, { cells: nf.unseen, where: nf.where })
       }`,
     );
     parts.push(
@@ -405,8 +448,8 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
       fix: fix("start a run from the search's card on Trips"),
     });
   }
-  // why: revision 74 — the day pairs an every-page-no-flights route did not show are not a gap a rerun fills: the fix
-  // for them is to take the airport out, so the gap is judged on the rest of the error bucket
+  // why: revision 74 — the day pairs an every-page-no-flights route did not show are not a gap a rerun fills (a rerun
+  // gets the same answer), so the gap is judged on the rest of the error bucket
   const leftCells = c === null ? 0 : c.buckets.error - nf.unseen + c.buckets.skipped + c.buckets.not_run;
   const gap =
     c !== null &&
@@ -415,7 +458,8 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
       c.total,
     );
   // why: a run that answered cells but priced none leaves the operator nothing to book, so it always names a next step:
-  // every answer "no flights" points at the airports and dates, any "no price found" at the price sources
+  // while pairs are left unread, reading them (whatever their share); once every pair was answered, every answer "no
+  // flights" points at the airports and dates, any "no price found" at the price sources
   const noPrice = c !== null && c.buckets.priced === 0 && c.buckets.empty + c.buckets.no_data > 0;
   const browserOnlyCatchUp =
     d.browserOnlyScheduled && (run?.isCatchUp === true || l?.skipCode === 'browser-only-definition');
@@ -431,7 +475,7 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
         nf.origins.length === 1 ? 'it' : 'them'
       } to ${listWords(nf.destinations, 'or')}`,
     );
-  else if (gap)
+  else if (gap || (noPrice && leftCells > 0))
     problem = fix(
       `run the search again to read the ${datePairs(leftCells)} left; the search's page lists them under What was searched`,
     );
