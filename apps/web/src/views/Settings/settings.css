@@ -594,8 +594,11 @@
   .st-sys-line {
     flex-wrap: wrap;
   }
+  /* why: revision 74 labels a search with its dates, longer than a narrow line: the label shrinks and wraps */
   .st-sys-what {
     width: auto;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 }
 
