@@ -6,6 +6,13 @@ import type { DefinitionInput } from './definition.js';
  */
 export const DEFAULT_CRON = '0 5 * * 1';
 
+/**
+ * Spec §11 "Leave": the rolling choices the new-search form offers, in calendar months ("Next month" … "Next year"),
+ * each starting this many days after the day a run reads it, since a trip abroad is planned at least two weeks ahead.
+ */
+export const WINDOW_PRESET_MONTHS = [1, 3, 6, 9, 12] as const;
+export const WINDOW_PRESET_OFFSET_DAYS = 14;
+
 /** The definition fields whose defaults do not depend on the plan or the config. */
 export type DefinitionDefaults = Pick<
   DefinitionInput,
@@ -21,7 +28,7 @@ export type DefinitionDefaults = Pick<
  */
 export function definitionDefaults(): DefinitionDefaults {
   return {
-    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
+    window: { kind: 'months', startOffsetDays: WINDOW_PRESET_OFFSET_DAYS, lengthMonths: 6 },
     minNights: 10,
     maxNights: 21,
     cabin: 'economy',

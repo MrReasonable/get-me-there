@@ -88,7 +88,7 @@ describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', 
     expect([d.origins, d.destinations, d.enabled]).toEqual([[], [], false]);
     // why: spec rev 55 §8.2: a new search has no schedule until Repeat weekly; the zone is kept for when it gets one
     expect([d.scheduleCron, d.scheduleTz]).toEqual([null, 'Europe/London']);
-    expect(d.window).toEqual({ kind: 'relative', startOffsetDays: 7, lengthDays: 182 });
+    expect(d.window).toEqual({ kind: 'months', startOffsetDays: 14, lengthMonths: 6 });
     expect([d.minNights, d.maxNights, d.cabin]).toEqual([10, 21, 'economy']);
     // why: spec rev 55 §8.2: no default arrival window; the 25-hour journey limit stays
     expect(d.constraints).toEqual({ maxJourneyMinutes: 1500 });

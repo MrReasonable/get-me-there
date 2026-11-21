@@ -257,6 +257,31 @@ describe('api-contract (spec §10)', () => {
     const moreFields = more.success ? [] : more.error.issues.map((i) => i.path.join('.'));
     expect(moreFields).toEqual(expect.arrayContaining(['verification.alwaysInclude', 'maxNights']));
   });
+  it('takes a months window of 1 to 12 months starting at least a day ahead (spec §6.1)', () => {
+    const def = (window: Record<string, unknown>) =>
+      definitionCreateRequestSchema.safeParse({
+        name: 'x',
+        origins: ['LHR'],
+        destinations: ['JFK'],
+        window,
+        minNights: 1,
+        maxNights: 2,
+        cabin: 'economy',
+        constraints: {},
+        verification: { maxCells: 5, topN: 5, alwaysInclude: [], expandTop: 1, bookingLinks: true },
+        budget: { maxCalls: 0, maxFreeCalls: 100, maxCostMicroGbp: 0 },
+        providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: {} },
+        destinationNotes: {},
+        onwardCostPence: {},
+        scheduleCron: null,
+        scheduleTz: 'Europe/London',
+        enabled: true,
+      });
+    expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 12 }).success).toBe(true);
+    expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 13 }).success).toBe(false);
+    expect(def({ kind: 'months', startOffsetDays: 0, lengthMonths: 3 }).success).toBe(false);
+    expect(def({ kind: 'months', startOffsetDays: 14, lengthMonths: 3, lengthDays: 90 }).success).toBe(false);
+  });
   it('cronSchema is a bounded string only', () => {
     expect(cronSchema.safeParse('0 5 * * 1').success).toBe(true);
     expect(cronSchema.safeParse('rm -rf /').success).toBe(false);

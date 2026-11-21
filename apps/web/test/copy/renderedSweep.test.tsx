@@ -564,8 +564,7 @@ describe('the new-search panel says no banned word, no main-path term and no "£
     await user.type(from, 'LHR{Enter}');
     await user.type(screen.getByRole('combobox', { name: PLAN_COPY.to }), 'JFK{Enter}');
     await screen.findByRole('button', { name: 'Remove JFK' });
-    fireEvent.change(screen.getByLabelText(PLAN_COPY.earliest), { target: { value: '2027-01-10' } });
-    fireEvent.change(screen.getByLabelText(PLAN_COPY.latest), { target: { value: '2027-03-31' } });
+    // why: When to leave stays on its default, Next 6 months, so its dates line is swept with the panel's words
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.selectOptions(screen.getByLabelText(COPY.newSearch.repeat), 'weekly');
     const region = screen.getByRole('status', { name: COPY.newSearch.estimateRegion });

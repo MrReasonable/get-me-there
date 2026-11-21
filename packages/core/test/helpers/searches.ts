@@ -41,6 +41,7 @@ export function cardWindow(over: Record<string, unknown> = {}): Record<string, u
     departureTo: '2027-09-04',
     startOffsetDays: 7,
     lengthDays: 182,
+    lengthMonths: null,
     ...over,
   };
 }

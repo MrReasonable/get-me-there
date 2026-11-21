@@ -11,6 +11,7 @@ import { server } from '../../msw/server.js';
 import { NOW } from '../../render.js';
 import {
   addAirport,
+  chooseWhen,
   field,
   fill,
   holdEstimates,
@@ -35,11 +36,26 @@ afterEach(() => {
 });
 
 describe('the new-search form: what it shows (spec rev 55 §11)', () => {
-  it('shows From, To, Leave from and Leave by as two date fields, Stay and Search; the journey limit, cabin and name are under More options', () => {
+  it('shows From, To, When to leave on Next 6 months, Stay and Search; Set date range shows Leave from and Leave by; the journey limit, cabin and name are under More options', () => {
     renderForm();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: PLAN_COPY.to })).toBeInTheDocument();
     const leave = screen.getByRole('group', { name: PLAN_COPY.leaveBetween });
+    const when = screen.getByRole('combobox', { name: PLAN_COPY.whenToLeave });
+    expect(leave.contains(when)).toBe(true);
+    expect(when).toHaveValue('6');
+    expect([...when.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'Next month',
+      'Next 3 months',
+      'Next 6 months',
+      'Next 9 months',
+      'Next year',
+      'Set date range',
+    ]);
+    // today is 14 Oct 2026: two weeks on, then six calendar months
+    expect(leave).toHaveTextContent(PLAN_COPY.rollingDates('28 Oct 2026', '27 Apr 2027'));
+    expect(screen.queryByLabelText(PLAN_COPY.earliest)).toBeNull();
+    chooseWhen('range');
     const dates = [field(PLAN_COPY.earliest), field(PLAN_COPY.latest)];
     expect(dates.every((d) => leave.contains(d) && d.type === 'date')).toBe(true);
     expect(dates.map((d) => (d instanceof HTMLInputElement ? d.value : null))).toEqual(['', '']);
@@ -57,7 +73,7 @@ describe('the new-search form: what it shows (spec rev 55 §11)', () => {
       expect(more?.contains(screen.getByLabelText(label))).toBe(true);
   });
 
-  it('More options holds the presets: 25 h each way, economy, Repeat never, the rolling switch and the name; Where to look ticks every free source', async () => {
+  it('More options holds the presets: 25 h each way, economy, Repeat never and the name; Where to look ticks every free source', async () => {
     const { user } = renderForm();
     // Ruling 13: the sources are in view, by the panel's words, each free one the install has set up ticked
     expect(screen.getByRole('checkbox', { name: /^Aviasales cache · / })).toBeChecked();
@@ -68,12 +84,8 @@ describe('the new-search form: what it shows (spec rev 55 §11)', () => {
     ).toBe('25');
     expect(screen.getByLabelText(COPY.cabin)).toHaveValue('economy');
     expect(screen.getByLabelText(N.repeat)).toHaveValue('never');
-    const rolling = screen.getByRole('checkbox', { name: PLAN_COPY.rollingSwitch });
-    expect(rolling).not.toBeChecked();
-    await user.click(rolling);
-    expect(field(COPY.startOffsetDays).value).toBe('7');
-    expect(field(COPY.lengthDays).value).toBe('182');
-    expect(screen.getByText(PLAN_COPY.rollingLine(7, 182), { exact: false })).toBeInTheDocument();
+    // the rolling window is When to leave's, in view; More options has no days boxes
+    expect(screen.queryByLabelText(COPY.startOffsetDays)).toBeNull();
     // the run budget is Edit's (Limits and checks), not the panel's
     expect(screen.queryByLabelText(COPY.maxCalls)).toBeNull();
   });
@@ -219,10 +231,11 @@ describe('an incomplete form says why, as the button’s accessible description 
   it.each<[string, (user: User) => Promise<void>, string]>([
     ['nothing entered', async () => undefined, N.reasons.airports],
     [
-      'no dates',
+      'Set date range with no dates picked',
       async (user) => {
         await addAirport(user, PLAN_COPY.from, 'BHX');
         await addAirport(user, PLAN_COPY.to, 'FRA');
+        chooseWhen('range');
       },
       N.reasons.dates,
     ],
@@ -284,6 +297,7 @@ describe('Leave between: two browser date fields (spec rev 67 §11)', () => {
 
   it('neither can be picked before today, and the latest not before the earliest once one is picked', () => {
     renderForm();
+    chooseWhen('range');
     const today = londonDateOf(NOW);
     expect(field(PLAN_COPY.earliest)).toHaveAttribute('min', today);
     expect(field(PLAN_COPY.latest)).toHaveAttribute('min', today);
@@ -307,6 +321,7 @@ describe('Leave between: two browser date fields (spec rev 67 §11)', () => {
 
   it("each date field has a polite region for the API's error about it, there and empty before one comes", () => {
     renderForm();
+    chooseWhen('range');
     const region = (end: string) => document.getElementById(`w-${end}-note`);
     for (const end of ['from', 'to']) {
       expect(region(end)).toHaveAttribute('aria-live', 'polite');

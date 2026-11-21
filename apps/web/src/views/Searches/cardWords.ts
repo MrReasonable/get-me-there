@@ -12,12 +12,15 @@ import { parseSchedule } from '../Definitions/schedule.js';
 const S = COPY.searchesView;
 
 /**
- * The window in words: "10 Jan – 31 Mar", "10 Dec 2026 – 31 Mar 2027" when it crosses a year, and "rolling: 182 days from
- * 7 days ahead" for a relative window. An absolute window states the operator's own dates, as the card serves them.
+ * The window in words: "10 Jan – 31 Mar", "10 Dec 2026 – 31 Mar 2027" when it crosses a year, "rolling: 182 days from
+ * 7 days ahead" for a relative window and "rolling: 3 months from 14 days ahead" for a months window. An absolute window
+ * states the operator's own dates, as the card serves them.
  */
 export function windowText(w: SearchCard['window']): string {
   if (w.kind === 'relative' && w.lengthDays !== null && w.startOffsetDays !== null)
     return S.windowRolling(w.lengthDays, w.startOffsetDays);
+  if (w.kind === 'months' && w.lengthMonths !== null && w.startOffsetDays !== null)
+    return S.windowRollingMonths(w.lengthMonths, w.startOffsetDays);
   const crossesYear = w.departureFrom.slice(0, 4) !== w.departureTo.slice(0, 4);
   const format = crossesYear ? formatIsoDate : formatIsoDateShort;
   return S.windowSpan(format(w.departureFrom), format(w.departureTo));
@@ -81,7 +84,7 @@ export function metaParts(
       card.origins.map((c) => airportLabel(c, airports.get(c))).join(', '),
       card.destinations.map((c) => airportLabel(c, airports.get(c))).join(', '),
     ),
-    card.window.kind === 'relative' ? windowText(card.window) : S.leaveWindow(windowText(card.window)),
+    card.window.kind === 'absolute' ? S.leaveWindow(windowText(card.window)) : windowText(card.window),
     COPY.datesView.scopeNights(card.minNights, card.maxNights),
     ...(at === null ? [] : [S.searchedMeta(formatAgo(hoursSince(at, now)))]),
   ];

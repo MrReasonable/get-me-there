@@ -130,6 +130,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.codes': ['BHX', 'FRA'],
   'searchesView.windowSpan': ['10 Jan', '31 Mar'],
   'searchesView.windowRolling': [182, 7],
+  'searchesView.windowRollingMonths': [3, 14],
   'searchesView.repeats': [[1, 4], '05:00'],
   'searchesView.repeatsDaily': ['05:00'],
   'searchesView.searchedMeta': ['2h ago'],

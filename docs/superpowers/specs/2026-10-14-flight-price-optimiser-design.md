@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 72.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 73.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2028,8 +2028,13 @@ countCells(space): number                         // closed form, no allocation;
 validateSearchSpace(def, todayLondon: IsoDate, lookup: { exists(iata): boolean; metroOf(iata): string | null; airportsOfMetro(code): Iata[] }, maxCells: number): ValidationResult   // a metropolitan code is rejected naming its airports
 ```
 
-Windows are **absolute** `{ from, to }` or **relative** `{ startOffsetDays ≥ 1,
-lengthDays }`. Relative windows resolve at execution start in
+Windows are **absolute** `{ from, to }`, **relative** `{ startOffsetDays ≥ 1,
+lengthDays }` or **months** `{ startOffsetDays ≥ 1, lengthMonths 1–12 }`. A
+months window starts `startOffsetDays` after today and ends the day before
+the same date `lengthMonths` calendar months on, or, when the end month has
+no such date, on that month's last day (`monthsWindowEnd`: 5 Dec 2026 + 3
+ends 4 Mar 2027; 31 Jan 2027 + 1 ends 28 Feb 2027). Relative and months
+windows resolve at execution start in
 `Europe/London` and are frozen into the execution snapshot. Absolute
 windows are clamped to start no earlier than tomorrow (noted in the
 estimate). A window that resolves to zero cells makes a scheduled tick
@@ -2055,7 +2060,8 @@ secondary property; leap day 2028-02-29; the 2027→2028 boundary; windows
 spanning the March and October DST changes with the suite run under
 `TZ=Europe/London` and `TZ=UTC`; min = max nights; single-day window;
 multi-origin × multi-destination ordering; relative resolution across a
-month end; clamping; zero-cell windows; `startOffsetDays = 0` rejected;
+month end; a months window across a year end, from a 29th–31st into a short
+February, and across 29 Feb; clamping; zero-cell windows; `startOffsetDays = 0` rejected;
 unknown IATA rejected.
 
 ### 6.2 Constraints and verdicts
@@ -3957,7 +3963,7 @@ First-failing-test per WP in §16.
    banned words and the main-path words over Trips, the search's page, the top bar and Settings); booking links render with
    `rel="noopener noreferrer"`, host shown, POST bookings as forms, no auto-navigation; History's chart empty and loading
    states. **Playwright, fixture mode**, through the real api and the built SPA: (1) on the Trips page, fill From and To with
-   the example's codes through the picker, Leave between "14 Mar 2027" and "15 Mar 2027", Stay 10 to 11 (fixture mode sets up only the
+   the example's codes through the picker, When to leave Set date range with Leave between "14 Mar 2027" and "15 Mar 2027", Stay 10 to 11 (fixture mode sets up only the
    fixture provider, which the presets name for both stages, so Where to look offers no checkbox and says so), press Search,
    and wait on the page's state line reading "Searched"; (2) the search's page: the
    run line names the run and its age, the red banner shows, the first trip carries the synthetic label and its age, the
@@ -4597,7 +4603,7 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   With no search the column says "No searches yet". It reads `GET /definitions/cards` (§10) and keeps the served order (a
   mutation of this view pending keeps it until the next settled read), re-reading at the top bar's poll interval only while a
   card is pending or running. **Each card**: its name, linking to its page; one meta line (the route's codes, "leave 10 Jan –
-  31 Mar" or "leave 10 Dec 2026 – 31 Mar 2027" across a year, "rolling: 182 days from 7 days ahead" for a relative window, the
+  31 Mar" or "leave 10 Dec 2026 – 31 Mar 2027" across a year, "rolling: 182 days from 7 days ahead" for a relative window, "rolling: 3 months from 14 days ahead" for a months window, the
   stay "10–14 nights", "searched 2h ago") and "repeats Mondays 05:00" only when scheduled. Then, by state: the run's progress
   and Cancel (Run progress, above) while one goes, or its stop with its fix and Resume; "Dates changed since this was last
   searched" (`spaceChangedSince`), said before any reason below, since the run's marks cover the old dates; "Not searched yet";
@@ -4624,8 +4630,15 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   Tool-run and deleted definitions are not listed; searches that exist today, old test searches included, are listed and can be
   removed. A failed read, remove or start is said in plain words beside its action, with Retry for the read.
 - **The new-search panel and Search now** (beside the cards; `h2` "New search"): **From** and **To** (the airport search, one or
-  more airports each, ranked by §10's `GET /airports`), **Leave between** two dates and **Stay** min to max nights, then
-  **Where to look**, **More options**, the estimate sentence and the **Search** button. The two dates of Leave between are
+  more airports each, ranked by §10's `GET /airports`), **When to leave** and **Stay** min to max nights, then
+  **Where to look**, **More options**, the estimate sentence and the **Search** button. **When to leave** is one choice: Next
+  month, Next 3 months, Next 6 months (a new search's default), Next 9 months, Next year, or Set date range. Each span is a
+  months window of 1, 3, 6, 9 or 12 months starting `WINDOW_PRESET_OFFSET_DAYS` (14) days ahead, since a trip abroad is
+  planned at least two weeks out; it resolves on every run, so a repeating search keeps looking the same distance ahead,
+  and the field states the dates it covers today ("Leaving 28 Oct 2026 to 27 Apr 2027 as of today; the dates move forward each
+  day."). A search saved with any other rolling window keeps it as a further choice, "Rolling: starts in 7 days, lasts 182
+  days", with its "Starts in (days)" and "Length (days)" boxes when it counts days; picking another choice and back restores
+  it, and the fixed dates, as last left. Set date range shows the two dates of Leave between ("Leave from" and "Leave by"),
   browser date fields: each is picked from a calendar (on a phone, the phone's own date picker) and shown in the browser's date
   format; the earliest cannot be picked before today, nor the latest before the earliest. An earliest date before today typed
   past the picker is refused ("The first date is before today"); on Edit, a saved search whose first date has already passed
@@ -4646,7 +4659,7 @@ page's `d.*` state, so the Trip page's breadcrumb returns to the same filtered v
   given; a listed source that is not set up drops out); the presets (§8.2) fill the rest, and Edit keeps a search's own
   sources.
   **More options** holds only: the longest journey each way (25 h; hint "Trips over this are left out once their flights are
-  read."), cabin (economy), **Repeat**, rolling instead of fixed dates ("starts in N days", "lasts M days") and the name
+  read."), cabin (economy), **Repeat** and the name
   (suggested from the airports). **Repeat** is one control over the schedule: Never (the default), Weekly (`DEFAULT_CRON`,
   Mondays 05:00, in `SCHEDULER_TIMEZONE`) or Other; a stored cron that is neither shows "Other: <its words>" with **Change**,
   which opens the schedule fields. A new search may repeat: create-and-start stores the shown runnable totals as the schedule's
@@ -5803,6 +5816,24 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 73: When to leave, in calendar months (2026-11-21)
+
+A new search's dates were two date fields, with rolling dates as a switch under More options counted in days ("starts in
+7 days, lasts 182 days"). Ian asked for an alternative to picking a date range: "Next month", "Next 3 months", "Next 6
+months", "Next 9 months", "Next year" and "Set date range", each span starting at least two weeks ahead ("there's little
+point in search from tomorrow for an international flight"), counted in calendar months ("if I say months, I mean months")
+and resolved when the search runs. Folded into §6.1 (the months window and `monthsWindowEnd`), §10 (a card's months window:
+`kind` `months`, `lengthMonths`) and §11 (When to leave, the card's words, More options without the rolling switch).
+Supersedes revision 55's rolling switch under More options and the new-search panel's empty fixed dates as its starting
+window (a new search now starts on Next 6 months).
+
+- **Ruling: a span rolls.** Picking a span stores a months window, not the dates it covers today, so a repeating search
+  keeps looking the same distance ahead; Set date range is how to pin fixed dates.
+- **Ruling: three months counts from the start date**, 5 Dec to 4 Mar, not the next three whole calendar months.
+- **Ruling: a stored days window is kept, not converted.** Searches saved before this revision keep their relative window
+  and its boxes; a months window that is not a preset (only the API can write one) is offered the same way, without boxes.
+- **Ruling: no migration.** A search's window is stored as JSON, so the months kind needs no schema change.
 
 ### Revision 72: the Settings page (2026-11-20)
 

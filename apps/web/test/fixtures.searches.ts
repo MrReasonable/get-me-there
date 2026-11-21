@@ -246,6 +246,7 @@ export function searchCard(over: Partial<CardIn> = {}): SearchCard {
       departureTo: '2027-03-31',
       startOffsetDays: null,
       lengthDays: null,
+      lengthMonths: null,
     },
     minNights: 10,
     maxNights: 14,

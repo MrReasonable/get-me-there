@@ -196,7 +196,10 @@ sources are kept in its Settings".
 
 Trips is the first screen: your searches as cards (the route, the dates, the stay, its state
 and its three cheapest trips, each price a link with its label), and the new-search panel beside
-them (below them on a phone). **Where to look** in the panel has one checkbox for each price
+them (below them on a phone). **When to leave** in the panel is Next month, Next 3, 6 or 9 months, Next year (the
+default is Next 6 months) or Set date range. A span starts two weeks after the day the search runs and lasts that many
+calendar months, so a search that repeats keeps looking the same distance ahead; Set date range takes two fixed dates.
+A search saved with a rolling window counted in days keeps it as a further choice. **Where to look** in the panel has one checkbox for each price
 source you have set up, each with its cost; SearchApi starts unticked. **Search** saves the
 search and runs it once; the press is the confirmation of the figures beside the button, for that
 run only, and **Repeat** (Never, Weekly or Other) in More options schedules it. A card's **Search

@@ -7,8 +7,9 @@ import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
 import { suggestedName, useAirportDetails } from './airports.js';
-import { DEFAULT_RELATIVE, type Draft, type DraftWindow, draftToRequest, EMPTY_ABSOLUTE } from './draft.js';
+import { type Draft, type DraftWindow, draftToRequest, EMPTY_ABSOLUTE } from './draft.js';
 import { SCHEDULE_FIELD_ID } from './ScheduleField.js';
+import { presetWindow, type WindowChoice, windowChoice } from './windowChoice.js';
 
 /** The two ends of Leave between. */
 export type DateEnd = 'from' | 'to';
@@ -16,8 +17,7 @@ export type DateEnd = 'from' | 'to';
 /** Ids of the number boxes whose "required" mark is the stay's own reason ("Enter the stay"). */
 const STAY_BOXES: readonly string[] = ['n-min', 'n-max'];
 /** Fields that live inside the collapsed More options fold (a 422 naming one opens it, UI-11). */
-const MORE_FIELDS =
-  /^(name|cabin|constraints\.maxJourneyMinutes|schedule|enabled|window\.(startOffsetDays|lengthDays))/;
+const MORE_FIELDS = /^(name|cabin|constraints\.maxJourneyMinutes|schedule|enabled)/;
 /** Fields that live inside Edit's collapsed Limits and checks fold (design 2026-11-08 Ruling 13), opened the same way. */
 const LIMIT_FIELDS =
   /^(constraints(?!\.maxJourneyMinutes)|verification|budget|providers\.discoveryRefreshHours|destinationNotes|onwardCostPence)/;
@@ -34,11 +34,13 @@ const toggled = (list: readonly string[], id: string, on: boolean): readonly str
 export interface SearchForm {
   draft: Draft;
   setDraft: (d: Draft) => void;
-  /** The other window mode's values, kept so switching back loses nothing (review PFT-08). */
-  otherWindow: DraftWindow;
-  setOtherWindow: (w: DraftWindow) => void;
-  /** Rolling dates on or off: the other mode's values come back. */
-  setRolling: (on: boolean) => void;
+  /**
+   * The rolling window that is neither a preset nor fixed dates (a search saved with one), offered as its own choice
+   * while the form is open; null when the search began with none.
+   */
+  customWindow: DraftWindow | null;
+  /** Picks When to leave: a preset, Set date range or the custom window; fixed dates and the custom window come back as left (review PFT-08). */
+  chooseWindow: (c: WindowChoice) => void;
   details: ReadonlyMap<string, AirportsResponse[number]>;
   setNameTouched: (touched: boolean) => void;
   /** Sets one end of Leave between to the date its picker holds ("2027-01-10"), or '' while it holds none. */
@@ -82,8 +84,12 @@ export function useSearchForm(
 ): SearchForm {
   const today = londonDateOf(useNow());
   const [stored, setDraft] = useState<Draft>(initial);
-  const [otherWindow, setOtherWindow] = useState<DraftWindow>(() =>
-    initial.window.kind === 'relative' ? EMPTY_ABSOLUTE : DEFAULT_RELATIVE,
+  // why: switching to a preset and back loses nothing: the fixed dates and the custom window are kept as last left
+  const [lastRange, setLastRange] = useState<DraftWindow>(() =>
+    initial.window.kind === 'absolute' ? initial.window : EMPTY_ABSOLUTE,
+  );
+  const [customWindow, setCustomWindow] = useState<DraftWindow | null>(() =>
+    windowChoice(initial.window) === 'custom' ? initial.window : null,
   );
   // why: the name follows the airports ("<from> → <to>") until the operator types one, imports the example or edits a
   // saved search; a name blurred empty follows them again
@@ -96,7 +102,6 @@ export function useSearchForm(
   const draft: Draft = nameTouched || suggestion === null ? stored : { ...stored, name: suggestion };
 
   const w = draft.window;
-  const relative = w.kind === 'relative';
   // why: a date field's value is the wire form or '' (a part-typed date reads as ''), so it goes into the draft as is
   // why: an updater, so two changes before a render both land (CodeRabbit, PR #51); the name is derived, never stored here
   const setDate = (end: DateEnd, value: string) =>
@@ -111,10 +116,13 @@ export function useSearchForm(
       : null;
   const pastFrom = w.kind === 'absolute' && w.from !== '' && w.from < today && w.from !== savedFrom;
 
-  const setRolling = (on: boolean) => {
-    if (on === relative) return;
-    setOtherWindow(draft.window);
-    setDraft({ ...draft, window: otherWindow });
+  const chooseWindow = (c: WindowChoice) => {
+    const now = windowChoice(w);
+    if (c === now) return;
+    if (now === 'range') setLastRange(w);
+    if (now === 'custom') setCustomWindow(w);
+    const next = c === 'range' ? lastRange : c === 'custom' ? (customWindow ?? w) : presetWindow(c);
+    setDraft((prev) => ({ ...prev, window: next }));
   };
 
   const [incomplete, setIncomplete] = useState<readonly string[]>([]);
@@ -175,9 +183,8 @@ export function useSearchForm(
   return {
     draft,
     setDraft,
-    otherWindow,
-    setOtherWindow,
-    setRolling,
+    customWindow,
+    chooseWindow,
     details,
     setNameTouched,
     setDate,

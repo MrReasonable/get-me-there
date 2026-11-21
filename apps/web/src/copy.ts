@@ -677,6 +677,8 @@ export const COPY = {
     windowSpan: (from: string, to: string) => `${from} – ${to}`,
     windowRolling: (lengthDays: number, startOffsetDays: number) =>
       `rolling: ${lengthDays} ${noun(lengthDays, 'day', 'days')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead`,
+    windowRollingMonths: (lengthMonths: number, startOffsetDays: number) =>
+      `rolling: ${lengthMonths} ${noun(lengthMonths, 'month', 'months')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead`,
     repeats: (days: readonly number[], time: string) =>
       days.length === 7
         ? `repeats every day ${time}`

@@ -155,6 +155,10 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
     },
   );
 
+  it('accepts lengthDays 1, a single day', () => {
+    expect(run({ ...base, window: { kind: 'relative', startOffsetDays: 7, lengthDays: 1 } }).ok).toBe(true);
+  });
+
   it('accepts startOffsetDays at the 400-day bound', () => {
     expect(run({ ...base, window: { kind: 'relative', startOffsetDays: 400, lengthDays: 400 } }).ok).toBe(
       true,
@@ -164,6 +168,29 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
   it.each([0, 401, 10.5])('rejects lengthDays %d', (lengthDays) => {
     expect(fields({ ...base, window: { kind: 'relative', startOffsetDays: 7, lengthDays } })).toEqual([
       { field: 'window.lengthDays', message: 'lengthDays must be a whole number from 1 to 400' },
+    ]);
+  });
+
+  it('accepts a months window of 1 to 12 months (spec §6.1)', () => {
+    for (const lengthMonths of [1, 3, 6, 9, 12]) {
+      expect(run({ ...base, window: { kind: 'months', startOffsetDays: 14, lengthMonths } }).ok).toBe(true);
+    }
+  });
+
+  it.each([0, 13, 1.5])('rejects lengthMonths %d', (lengthMonths) => {
+    expect(fields({ ...base, window: { kind: 'months', startOffsetDays: 14, lengthMonths } })).toEqual([
+      { field: 'window.lengthMonths', message: 'lengthMonths must be a whole number from 1 to 12' },
+    ]);
+  });
+
+  it.each([0, 401, 2.5])('rejects a months window starting %d days ahead', (startOffsetDays) => {
+    const errs = fields({ ...base, window: { kind: 'months', startOffsetDays, lengthMonths: 3 } });
+    expect(errs.map((e) => e.field)).toEqual(['window.startOffsetDays']);
+  });
+
+  it('says how far ahead a rolling window may start', () => {
+    expect(fields({ ...base, window: { kind: 'months', startOffsetDays: 401, lengthMonths: 3 } })).toEqual([
+      { field: 'window.startOffsetDays', message: 'startOffsetDays must be no greater than 400' },
     ]);
   });
 
@@ -329,6 +356,7 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
       { ...base, minNights: 9, maxNights: 8 },
       { ...base, window: { kind: 'relative', startOffsetDays: 0, lengthDays: 0 } },
       { ...base, window: { kind: 'relative', startOffsetDays: 401, lengthDays: 401 } },
+      { ...base, window: { kind: 'months', startOffsetDays: 0, lengthMonths: 13 } },
       { ...base, window: { kind: 'absolute', from: asIsoDate('2027-03-05'), to: asIsoDate('2027-03-01') } },
       { ...base, window: { kind: 'absolute', from: asIsoDate('2026-01-01'), to: asIsoDate('2026-02-01') } },
       policy({ maxCells: -1, topN: 1.5, perDepartureDateBest: -2 }),

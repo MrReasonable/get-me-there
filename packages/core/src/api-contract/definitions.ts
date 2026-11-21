@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_WINDOW_DAYS, MAX_WINDOW_MONTHS } from '../space/limits.js';
 import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import type { Estimate } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
@@ -15,7 +16,7 @@ import {
 
 const positiveInt = z.number().int().min(0);
 
-/** Spec §6.1 windows: relative resolves at execution start; absolute is clamped to tomorrow. */
+/** Spec §6.1 windows: relative and months windows resolve at execution start; absolute is clamped to tomorrow. */
 export const windowSpecSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('absolute'), from: isoDateSchema, to: isoDateSchema })
@@ -23,7 +24,12 @@ export const windowSpecSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('relative'),
     startOffsetDays: z.number().int().min(1),
-    lengthDays: z.number().int().min(1).max(400),
+    lengthDays: z.number().int().min(1).max(MAX_WINDOW_DAYS),
+  }),
+  z.strictObject({
+    kind: z.literal('months'),
+    startOffsetDays: z.number().int().min(1),
+    lengthMonths: z.number().int().min(1).max(MAX_WINDOW_MONTHS),
   }),
 ]);
 export const constraintsSchema = z.object({

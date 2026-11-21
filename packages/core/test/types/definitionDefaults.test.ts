@@ -4,7 +4,7 @@ import { DEFAULT_CRON, definitionDefaults } from '../../src/types/definitionDefa
 describe('definitionDefaults (spec §11 form defaults, shared by api and web)', () => {
   it('states the spec defaults', () => {
     expect(definitionDefaults()).toEqual({
-      window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
+      window: { kind: 'months', startOffsetDays: 14, lengthMonths: 6 },
       minNights: 10,
       maxNights: 21,
       cabin: 'economy',

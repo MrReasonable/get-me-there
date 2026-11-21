@@ -1,7 +1,11 @@
-import { resolveWindow } from '@gmt/core';
+import { resolveWindow, WINDOW_PRESET_MONTHS } from '@gmt/core';
 import { PLAN_COPY } from '../../copy/plan.js';
+import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import type { DraftWindow } from './draft.js';
+import { NumberField } from './fields.js';
 import type { DateEnd, SearchForm } from './useSearchForm.js';
+import { choiceOf, choiceValue, windowChoice } from './windowChoice.js';
 
 const dateInput = 'input min-h-11';
 /** The two ends of Leave between, first then last, with their labels. */
@@ -11,42 +15,133 @@ const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
 ];
 
 /**
- * Spec rev 67 §11 "Leave between" (labelled "Leave from" and "Leave by", design 2026-11-08 Ruling 13): two browser date fields, so the operator picks each date from a calendar (the
- * phone's own date wheel) and it is shown in the browser's own date format. The earliest cannot be picked before
- * today, nor the latest before the earliest. While the window rolls (More options) the fields give way to the dates
+ * Spec §11 "When to leave": one choice of Next month, Next 3, 6 or 9 months, Next year (rolling windows in calendar
+ * months, starting two weeks ahead, re-read on every run) or Set date range, which shows the two browser date fields
+ * ("Leave from" and "Leave by", spec rev 67, design 2026-11-08 Ruling 13). A search saved with another rolling window
+ * keeps it as a further choice, with its "starts in, lasts" boxes when it counts days. A rolling choice states the dates
  * it covers today.
  */
 export function LeaveBetweenField({ form }: { form: SearchForm }) {
   const w = form.draft.window;
-  if (w.kind === 'relative') {
-    const r =
-      w.startOffsetDays >= 1 && w.lengthDays >= 1
-        ? resolveWindow(
-            { kind: 'relative', startOffsetDays: w.startOffsetDays, lengthDays: w.lengthDays },
-            form.today,
-          )
-        : null;
-    return (
-      <fieldset className="flex flex-col gap-2">
-        <legend className="def-group-title">{PLAN_COPY.leaveBetween}</legend>
-        {r === null ? null : (
-          <p className="hint max-w-prose">
-            {PLAN_COPY.rollingDates(formatIsoDate(r.departureFrom), formatIsoDate(r.departureTo))}
-          </p>
-        )}
-      </fieldset>
-    );
-  }
+  const choice = windowChoice(w);
+  // why: while it is chosen the option names the window as edited; otherwise as it was last left
+  const custom = choice === 'custom' ? w : form.customWindow;
   return (
     <fieldset className="flex flex-col gap-2">
-      {/* why: mockup 01 labels the two fields "Leave from" and "Leave by"; the group keeps its name for a screen reader */}
       <legend className="sr-only">{PLAN_COPY.leaveBetween}</legend>
-      <div className="leave-dates">
-        {ENDS.map((e) => (
-          <DateBox key={e.end} form={form} end={e.end} label={e.label} />
-        ))}
-      </div>
+      <span className="flex flex-col gap-1">
+        <label htmlFor="w-choice" className="field-label">
+          {PLAN_COPY.whenToLeave}
+        </label>
+        <select
+          id="w-choice"
+          className="input min-h-11"
+          value={choiceValue(choice)}
+          onChange={(e) => {
+            const next = choiceOf(e.target.value);
+            if (next === null) return;
+            for (const id of ['w-offset', 'w-length']) form.markBlank(id, false);
+            form.chooseWindow(next);
+          }}
+        >
+          {WINDOW_PRESET_MONTHS.map((n) => (
+            <option key={n} value={choiceValue(n)}>
+              {PLAN_COPY.nextMonths(n)}
+            </option>
+          ))}
+          <option value={choiceValue('range')}>{PLAN_COPY.setDateRange}</option>
+          {custom === null ? null : (
+            <option value={choiceValue('custom')}>{PLAN_COPY.customRolling(rollingLine(custom))}</option>
+          )}
+        </select>
+      </span>
+      {choice === 'range' ? (
+        <div className="leave-dates">
+          {ENDS.map((e) => (
+            <DateBox key={e.end} form={form} end={e.end} label={e.label} />
+          ))}
+        </div>
+      ) : w.kind === 'relative' ? (
+        <DaysFields form={form} />
+      ) : (
+        <ResolvedDates form={form} />
+      )}
     </fieldset>
+  );
+}
+
+/** "starts in 7 days, lasts 182 days" or "starts in 14 days, lasts 2 months"; empty for fixed dates. */
+function rollingLine(w: DraftWindow): string {
+  if (w.kind === 'relative') return PLAN_COPY.rollingLine(w.startOffsetDays, w.lengthDays);
+  if (w.kind === 'months') return PLAN_COPY.rollingMonthsLine(w.startOffsetDays, w.lengthMonths);
+  return '';
+}
+
+/** "Leaving 5 Dec 2026 to 4 Mar 2027 as of today; the dates move forward each day." for a rolling window. */
+function ResolvedDates({ form }: { form: SearchForm }) {
+  const w = form.draft.window;
+  if (w.kind !== 'months' || w.startOffsetDays < 1 || w.lengthMonths < 1) return null;
+  const r = resolveWindow(w, form.today);
+  return (
+    <p className="hint max-w-prose">
+      {PLAN_COPY.rollingDates(formatIsoDate(r.departureFrom), formatIsoDate(r.departureTo))}
+    </p>
+  );
+}
+
+/**
+ * A rolling window counted in days (a search saved before the presets): "starts in N days, lasts M days", with the
+ * dates it covers today. A number box left blank is a "required" error that blocks estimating and saving (UI-10); it is
+ * never coerced to 0.
+ */
+function DaysFields({ form }: { form: SearchForm }) {
+  const w = form.draft.window;
+  const { blank, markBlank } = form;
+  if (w.kind !== 'relative') return null;
+  const resolved =
+    w.startOffsetDays >= 1 && w.lengthDays >= 1
+      ? resolveWindow(
+          { kind: 'relative', startOffsetDays: w.startOffsetDays, lengthDays: w.lengthDays },
+          form.today,
+        )
+      : null;
+  return (
+    <div className="flex flex-wrap items-end gap-4">
+      <NumberField
+        id="w-offset"
+        label={COPY.startOffsetDays}
+        value={blank.includes('w-offset') ? undefined : w.startOffsetDays}
+        errors={[
+          ...form.errorsFor('window.startOffsetDays'),
+          ...(blank.includes('w-offset') ? [COPY.required] : []),
+        ]}
+        onChange={(v) => {
+          markBlank('w-offset', v === undefined);
+          if (v !== undefined) form.setDraft({ ...form.draft, window: { ...w, startOffsetDays: v } });
+        }}
+      />
+      <NumberField
+        id="w-length"
+        label={COPY.lengthDays}
+        value={blank.includes('w-length') ? undefined : w.lengthDays}
+        errors={[
+          ...form.errorsFor('window.lengthDays'),
+          ...(blank.includes('w-length') ? [COPY.required] : []),
+        ]}
+        onChange={(v) => {
+          markBlank('w-length', v === undefined);
+          if (v !== undefined) form.setDraft({ ...form.draft, window: { ...w, lengthDays: v } });
+        }}
+      />
+      {resolved === null ? null : (
+        <p className="hint w-full">
+          {PLAN_COPY.rollingResolved(
+            PLAN_COPY.rollingLine(w.startOffsetDays, w.lengthDays),
+            COPY.resolvedWindow(formatIsoDate(resolved.departureFrom), formatIsoDate(resolved.departureTo)),
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 
