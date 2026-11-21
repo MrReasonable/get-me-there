@@ -822,11 +822,22 @@ describe('the data check in plain words (revision 74)', () => {
     expect(c.fix?.text).not.toContain('start a run');
   });
 
-  it('a run whose cells were all answered with no flights is ok: its summary says so', () => {
+  it('a run that priced nothing but had some no-price answers points to another price source', () => {
     const c = dataOf({ coverage: cov({ empty: 90, no_data: 10 }), ages: null });
     expect(c.summary).toContain('prices for 0 of 100 date pairs; 90 with no flights; 10 with no price found');
-    expect(c.state).toBe('ok');
-    expect(c.fix).toBeNull();
+    expect(c.state).toBe('warn');
+    expect(c.fix?.text).toBe(
+      "none of this search's sources had prices for these dates: switch on another price source on its Edit page, then search again",
+    );
+  });
+
+  it('a run whose cells were all answered with no flights points to the airports and dates', () => {
+    const c = dataOf({ coverage: cov({ empty: 100 }), ages: null });
+    expect(c.summary).toContain('prices for 0 of 100 date pairs; 100 with no flights');
+    expect(c.state).toBe('warn');
+    expect(c.fix?.text).toBe(
+      "no flights were found for any of these dates: check the airports and dates on the search's Edit page",
+    );
   });
 
   it('keeps the older fix for a run with no cells recorded', () => {
@@ -854,7 +865,7 @@ describe('the data check in plain words (revision 74)', () => {
   it('stays inside the contract with nine long airport names a side, the longest numbers and every note', () => {
     // why: the airports table's longest name is 92 characters
     const long = (i: number) =>
-      `${'Aeropuerto '.repeat(8)}${i}`.padEnd(92, 'x') + ` (QQ${String.fromCharCode(65 + i)})`;
+      `${`${'Aeropuerto '.repeat(8)}${i}`.padEnd(92, 'x')} (QQ${String.fromCharCode(65 + i)})`;
     const nine = Array.from({ length: 9 }, (_, i) => long(i));
     const big = 999_999;
     for (const mode of ['native', 'container'] as const) {

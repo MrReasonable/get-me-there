@@ -414,7 +414,9 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
       { error: c.buckets.error - nf.unseen, skipped: c.buckets.skipped, not_run: c.buckets.not_run },
       c.total,
     );
-  const onlyNoData = c !== null && c.buckets.priced === 0 && c.buckets.empty === 0 && c.buckets.no_data > 0;
+  // why: a run that answered cells but priced none leaves the operator nothing to book, so it always names a next step:
+  // every answer "no flights" points at the airports and dates, any "no price found" at the price sources
+  const noPrice = c !== null && c.buckets.priced === 0 && c.buckets.empty + c.buckets.no_data > 0;
   const browserOnlyCatchUp =
     d.browserOnlyScheduled && (run?.isCatchUp === true || l?.skipCode === 'browser-only-definition');
   const unfinished = run !== null && RUN_WORD[run.status] !== undefined && run.status !== 'paused_budget';
@@ -433,15 +435,15 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
     problem = fix(
       `run the search again to read the ${datePairs(leftCells)} left; the search's page lists them under What was searched`,
     );
-  else if (onlyNoData)
+  else if (noPrice)
     problem = fix(
-      "none of this search's sources had prices for these dates: switch on another price source on its Edit page, then search again",
+      c.buckets.no_data === 0
+        ? "no flights were found for any of these dates: check the airports and dates on the search's Edit page"
+        : "none of this search's sources had prices for these dates: switch on another price source on its Edit page, then search again",
     );
   else if (d.ages?.stale === true) problem = fix('start a run for newer prices');
-  // why: no cells recorded, or priced cells with no price a source can stand behind (synthetic test data only); a run
-  // whose cells were all answered with no flights or no price has no fix to offer beyond its summary
-  else if (d.ages === null && (c === null || c.buckets.priced > 0))
-    problem = fix('start a run, or check that a price source is set up');
+  // why: no cells recorded, or priced cells with no price a source can stand behind (synthetic test data only)
+  else if (d.ages === null) problem = fix('start a run, or check that a price source is set up');
   else if (d.behindSchedule) problem = fix(BEHIND_FIX);
   return check({
     ...base,
