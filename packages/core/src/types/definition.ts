@@ -2,10 +2,15 @@ import { z } from 'zod';
 import { type Iata, type IsoDate, type IsoDateTime, iataSchema, isoDateSchema } from './ids.js';
 import type { Cabin, ProviderId } from './provenance.js';
 
-/** Spec §6.1: absolute `{ from, to }` or relative `{ startOffsetDays ≥ 1, lengthDays }` windows. */
+/**
+ * Spec §6.1: absolute `{ from, to }`, relative `{ startOffsetDays ≥ 1, lengthDays }` or months
+ * `{ startOffsetDays ≥ 1, lengthMonths 1–12 }` windows. Relative and months windows roll: each resolves against the day
+ * it is read.
+ */
 export type WindowSpec =
   | { kind: 'absolute'; from: IsoDate; to: IsoDate }
-  | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
+  | { kind: 'relative'; startOffsetDays: number; lengthDays: number }
+  | { kind: 'months'; startOffsetDays: number; lengthMonths: number };
 
 /**
  * Spec §3 "Search definition": the most airports a search names on one side ("Moscow (all)", the largest metro, is six).

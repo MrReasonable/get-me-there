@@ -241,8 +241,26 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
       departureTo: '2027-04-30',
       startOffsetDays: null,
       lengthDays: null,
+      lengthMonths: null,
     };
     expect(searchCardSchema.safeParse(searchCard({ window })).success).toBe(true);
+  });
+
+  it('parses a months window, which carries its offset and months but no length in days', () => {
+    const window = {
+      kind: 'months',
+      departureFrom: '2026-12-05',
+      departureTo: '2027-03-04',
+      startOffsetDays: 14,
+      lengthDays: null,
+      lengthMonths: 3,
+    };
+    expect(searchCardSchema.safeParse(searchCard({ window })).success).toBe(true);
+    const w = (o: Record<string, unknown>) => searchCard({ window: { ...window, ...o } });
+    expect(searchCardSchema.safeParse(w({ lengthMonths: null })).success).toBe(false);
+    expect(searchCardSchema.safeParse(w({ lengthDays: 90 })).success).toBe(false);
+    expect(searchCardSchema.safeParse(w({ startOffsetDays: null })).success).toBe(false);
+    expect(searchCardSchema.safeParse(w({ lengthMonths: 0 })).success).toBe(false);
   });
 
   it('refuses a schedule with a cron but no time zone', () => {
@@ -297,6 +315,7 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
     expect(searchCardSchema.safeParse(w({ startOffsetDays: null })).success).toBe(false);
     expect(searchCardSchema.safeParse(w({ lengthDays: 0 })).success).toBe(false);
     expect(searchCardSchema.safeParse(w({ kind: 'absolute' })).success).toBe(false);
+    expect(searchCardSchema.safeParse(w({ lengthMonths: 3 })).success).toBe(false);
     expect(searchCardSchema.safeParse(w({ departureTo: '2027-03-06' })).success).toBe(false);
   });
 

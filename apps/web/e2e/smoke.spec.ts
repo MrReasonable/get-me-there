@@ -21,7 +21,8 @@ const NIGHTS = '10-10';
  * the highlighted option with Enter; the chip it becomes names the code.
  */
 async function addAirport(page: Page, label: string, code: string) {
-  const picker = page.getByRole('combobox', { name: label });
+  // why: exact, since a name matches by substring and "When to leave" holds "to"
+  const picker = page.getByRole('combobox', { name: label, exact: true });
   await picker.fill(code);
   await expect(page.getByRole('option').first()).toBeVisible();
   await picker.press('Enter');
@@ -67,6 +68,8 @@ test('fixture mode: a new search, Search, then Dates, the Trip page and History 
   await expect(page.getByRole('heading', { level: 1, name: COPY.searchesView.heading })).toBeVisible();
   await addAirport(page, PLAN_COPY.from, 'LHR');
   await addAirport(page, PLAN_COPY.to, 'JFK');
+  // why: a new search starts on Next 6 months; the smoke run pins two days so its space stays small
+  await page.getByLabel(PLAN_COPY.whenToLeave).selectOption('range');
   await page.locator('#w-from').fill('2027-03-14');
   await page.locator('#w-to').fill('2027-03-15');
   await page.locator('#n-min').fill('10');
@@ -555,8 +558,8 @@ for (const width of [375, 900, 1280] as const)
         expect(position).toBe('static');
         expect(panelBox?.y ?? 0).toBeGreaterThan(cardBox?.y ?? 0);
       }
-      // the fields read in dark: the date field's ink differs from its ground (Task 6 note: unreadable before)
-      const date = page.locator('#w-from');
+      // the fields read in dark: When to leave's ink differs from its ground (Task 6 note: unreadable before)
+      const date = page.locator('#w-choice');
       const [ink, ground] = await date.evaluate((el) => [
         getComputedStyle(el).color,
         getComputedStyle(el).backgroundColor,
@@ -715,6 +718,7 @@ for (const [width, colorScheme] of [
     await addAirport(page, PLAN_COPY.from, 'LHR');
     await addAirport(page, PLAN_COPY.from, 'LGW');
     await addAirport(page, PLAN_COPY.to, 'JFK');
+    await page.getByLabel(PLAN_COPY.whenToLeave).selectOption('range');
     await page.locator('#w-from').fill('2027-03-14');
     await page.locator('#w-to').fill('2027-09-14');
     await panel.getByRole('checkbox', { name: /^SearchApi · / }).check();

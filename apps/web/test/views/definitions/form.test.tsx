@@ -114,13 +114,13 @@ const paid = () =>
   });
 
 describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
-  it('a new search starts with empty airports and dates and the presets, SearchApi unticked; no schedule, no arrival window', async () => {
+  it('a new search starts with empty airports, Next 6 months and the presets, SearchApi unticked; no schedule, no arrival window', async () => {
     const bodies = estimateBodies();
     const { user } = renderNew();
     expect(chipCodes('From')).toEqual([]);
     expect(chipCodes('To')).toEqual([]);
-    expect(fieldValue(PLAN_COPY.earliest)).toBe('');
-    expect(fieldValue(PLAN_COPY.latest)).toBe('');
+    expect(fieldValue(PLAN_COPY.whenToLeave)).toBe('6');
+    expect(screen.queryByLabelText(PLAN_COPY.earliest)).toBeNull();
     expect(fieldValue('Shortest stay')).toBe('10');
     expect(fieldValue('Longest stay')).toBe('21');
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
@@ -159,7 +159,7 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
   it('defaultDraft and draftToRequest carry the spec values; the request never carries a confirmation', () => {
     const req = draftToRequest(defaultDraft(providersResponse().presets));
     expect(req).toMatchObject({
-      window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
+      window: { kind: 'months', startOffsetDays: 14, lengthMonths: 6 },
       minNights: 10,
       maxNights: 21,
       cabin: 'economy',
@@ -199,7 +199,7 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
     await waitFor(() => expect(bodies.at(-1)).toMatchObject({ constraints: { includeAirlines: ['ZZ'] } }));
   });
 
-  it('rolling dates are a switch under More options; switching back restores the fixed dates (review PFT-08)', async () => {
+  it('When to leave offers a rolling span in calendar months; switching back restores the fixed dates (review PFT-08)', async () => {
     const bodies = estimateBodies();
     const { user } = renderNew();
     await complete(user);
@@ -208,26 +208,75 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
         window: { kind: 'absolute', from: '2027-03-14', to: '2027-03-28' },
       }),
     );
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    await user.click(screen.getByRole('checkbox', { name: PLAN_COPY.rollingSwitch }));
-    expect(
-      screen.getByText(/^starts in 7 days, lasts 182 days: departures from 21 Oct 2026/),
-    ).toBeInTheDocument();
-    // the short form says what the rolling window covers today instead of the date boxes
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.whenToLeave), { target: { value: '3' } });
+    // today is 14 Oct 2026: from 28 Oct, three calendar months, to the day before 28 Jan
+    expect(screen.getByText(PLAN_COPY.rollingDates('28 Oct 2026', '27 Jan 2027'))).toBeInTheDocument();
     expect(screen.queryByLabelText(PLAN_COPY.earliest)).toBeNull();
-    await user.clear(screen.getByLabelText(COPY.startOffsetDays));
-    await user.type(screen.getByLabelText(COPY.startOffsetDays), '14');
     await waitFor(() =>
       expect(bodies.at(-1)).toMatchObject({
-        window: { kind: 'relative', startOffsetDays: 14, lengthDays: 182 },
+        window: { kind: 'months', startOffsetDays: 14, lengthMonths: 3 },
       }),
     );
-    await user.click(screen.getByRole('checkbox', { name: PLAN_COPY.rollingSwitch }));
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.whenToLeave), { target: { value: '12' } });
+    expect(screen.getByText(PLAN_COPY.rollingDates('28 Oct 2026', '27 Oct 2027'))).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.whenToLeave), { target: { value: 'range' } });
     expect(fieldValue(PLAN_COPY.earliest)).toBe('2027-03-14');
     expect(fieldValue(PLAN_COPY.latest)).toBe('2027-03-28');
     await waitFor(() =>
       expect(bodies.at(-1)).toMatchObject({
         window: { kind: 'absolute', from: '2027-03-14', to: '2027-03-28' },
+      }),
+    );
+  });
+
+  it.each([
+    ['Infinity in Starts in', COPY.startOffsetDays, '9'.repeat(309)],
+    ['Infinity in Length', COPY.lengthDays, '9'.repeat(309)],
+    ['a start past 400 days', COPY.startOffsetDays, '4000000'],
+  ])('a days window with %s leaves out its dates line, and the form stays up', (_name, label, digits) => {
+    renderEdit();
+    fireEvent.change(screen.getByLabelText(label), { target: { value: digits } });
+    expect(screen.getByLabelText(PLAN_COPY.whenToLeave)).toBeInTheDocument();
+    expect(screen.queryByText(/: departures from /)).toBeNull();
+  });
+
+  it('a search saved with a rolling window in days keeps it as its own choice, with its boxes, until another is picked', async () => {
+    const bodies = estimateBodies();
+    renderEdit();
+    const when = screen.getByLabelText(PLAN_COPY.whenToLeave);
+    expect(fieldValue(PLAN_COPY.whenToLeave)).toBe('custom');
+    expect(
+      within(when)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual([
+      'Next month',
+      'Next 3 months',
+      'Next 6 months',
+      'Next 9 months',
+      'Next year',
+      'Set date range',
+      'Rolling: starts in 7 days, lasts 182 days',
+    ]);
+    expect(fieldValue(COPY.startOffsetDays)).toBe('7');
+    expect(fieldValue(COPY.lengthDays)).toBe('182');
+    expect(
+      screen.getByText(/^starts in 7 days, lasts 182 days: departures from 21 Oct 2026/),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(COPY.lengthDays), { target: { value: '90' } });
+    fireEvent.change(when, { target: { value: '9' } });
+    expect(screen.queryByLabelText(COPY.lengthDays)).toBeNull();
+    await waitFor(() =>
+      expect(bodies.at(-1)).toMatchObject({
+        window: { kind: 'months', startOffsetDays: 14, lengthMonths: 9 },
+      }),
+    );
+    // the edited days window is still offered, as left
+    fireEvent.change(when, { target: { value: 'custom' } });
+    expect(fieldValue(COPY.lengthDays)).toBe('90');
+    await waitFor(() =>
+      expect(bodies.at(-1)).toMatchObject({
+        window: { kind: 'relative', startOffsetDays: 7, lengthDays: 90 },
       }),
     );
   });

@@ -9,6 +9,8 @@
 
 /** Spec §6.1: the longest departure window, in days. */
 export const MAX_WINDOW_DAYS = 400;
+/** Spec §6.1: the longest months window, in calendar months (a year, at most 366 days). */
+export const MAX_WINDOW_MONTHS = 12;
 /** Spec §6.1: the longest stay, in nights (`0 ≤ minNights ≤ maxNights ≤ 90`). */
 export const MAX_NIGHTS = 90;
 /** Spec §10: the cells the date-pairs route reads at most; `MAX_CELLS_PER_DEFINITION`'s default. */

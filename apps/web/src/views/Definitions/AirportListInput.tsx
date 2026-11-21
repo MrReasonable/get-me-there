@@ -259,6 +259,13 @@ export function AirportListInput({
           type="text"
           role="combobox"
           autoComplete="off"
+          // why: password managers read "City" in the placeholder as an address field and cover the airport list with
+          // their own suggestions, ignoring autocomplete="off"; each one's own opt-out keeps it away (LastPass,
+          // 1Password, Bitwarden, Dashlane)
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-bwignore="true"
+          data-form-type="other"
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}

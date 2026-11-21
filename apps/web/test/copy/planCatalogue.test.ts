@@ -11,6 +11,12 @@ const SAMPLES: Record<string, unknown[][]> = {
     [1, 1],
     [7, 182],
   ],
+  rollingMonthsLine: [
+    [1, 1],
+    [14, 3],
+  ],
+  nextMonths: [[1], [3], [6], [9], [12]],
+  customRolling: [['starts in 7 days, lasts 182 days']],
   rollingResolved: [['starts in 7 days, lasts 182 days', 'departures from 21 Oct 2026 to 20 Apr 2027']],
   nameArrow: [['Origin city', 'Destination city']],
   airportOption: [['Some Field', 'AAA', 'Some City', 'ZZ']],
@@ -62,5 +68,13 @@ describe('PLAN_COPY catalogue (spec §11 banned words)', () => {
     );
     expect(PLAN_COPY.rollingLine(1, 1)).toBe('starts in 1 day, lasts 1 day');
     expect(PLAN_COPY.rollingLine(7, 182)).toBe('starts in 7 days, lasts 182 days');
+    expect([1, 3, 6, 9, 12].map(PLAN_COPY.nextMonths)).toEqual([
+      'Next month',
+      'Next 3 months',
+      'Next 6 months',
+      'Next 9 months',
+      'Next year',
+    ]);
+    expect(PLAN_COPY.rollingMonthsLine(14, 1)).toBe('starts in 14 days, lasts 1 month');
   });
 });

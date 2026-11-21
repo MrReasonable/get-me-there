@@ -131,8 +131,7 @@ describe('the panel: what is in view (Ruling 13)', () => {
     expect(names).toEqual([
       PLAN_COPY.from,
       PLAN_COPY.to,
-      PLAN_COPY.earliest,
-      PLAN_COPY.latest,
+      PLAN_COPY.whenToLeave,
       PLAN_COPY.shortest,
       PLAN_COPY.longest,
       `${N.source.camoufox} · ${N.sourceNote.camoufox}`,
@@ -260,7 +259,6 @@ describe('More options (Ruling 13)', () => {
       `INPUT:${D.journeyPart(PLAN_COPY.journey, D.journeyMinutes)}`,
       `SELECT:${COPY.cabin}`,
       `SELECT:${N.repeat}`,
-      `INPUT:${PLAN_COPY.rollingSwitch}`,
       `INPUT:${PLAN_COPY.name}`,
     ]);
     expect(

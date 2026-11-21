@@ -36,6 +36,52 @@ describe('resolveWindow (spec §6.1)', () => {
     });
   });
 
+  it('resolves a months window: 14 days ahead, to the day before the same date 3 months on (spec §6.1)', () => {
+    expect(resolveWindow({ kind: 'months', startOffsetDays: 14, lengthMonths: 3 }, d('2026-11-21'))).toEqual({
+      departureFrom: '2026-12-05',
+      departureTo: '2027-03-04',
+      clamped: false,
+    });
+  });
+
+  it('a months window counts calendar months, so its length in days follows the months it spans', () => {
+    const year = (today: string) =>
+      resolveWindow({ kind: 'months', startOffsetDays: 14, lengthMonths: 12 }, d(today));
+    expect(year('2026-11-21')).toEqual({
+      departureFrom: '2026-12-05',
+      departureTo: '2027-12-04',
+      clamped: false,
+    });
+    // 2027-02-16 + 14 = 2027-03-02; a year on crosses 29 Feb 2028, so the window holds 366 days
+    expect(year('2027-02-16')).toEqual({
+      departureFrom: '2027-03-02',
+      departureTo: '2028-03-01',
+      clamped: false,
+    });
+  });
+
+  it("a months window starting on a day its end month lacks ends on that month's last day", () => {
+    // 2027-01-17 + 14 = 2027-01-31; there is no 31 Feb, so one month ends on 28 Feb
+    expect(resolveWindow({ kind: 'months', startOffsetDays: 14, lengthMonths: 1 }, d('2027-01-17'))).toEqual({
+      departureFrom: '2027-01-31',
+      departureTo: '2027-02-28',
+      clamped: false,
+    });
+  });
+
+  it.each([
+    [{ kind: 'months', startOffsetDays: 0, lengthMonths: 3 }],
+    [{ kind: 'months', startOffsetDays: 14, lengthMonths: 0 }],
+  ] satisfies Array<[WindowSpec]>)('throws on a months window validation refuses (%j)', (w) => {
+    expect(() => resolveWindow(w, d('2026-11-21'))).toThrow(RangeError);
+  });
+
+  it('names the refused offset in its message', () => {
+    expect(() =>
+      resolveWindow({ kind: 'months', startOffsetDays: 0, lengthMonths: 3 }, d('2026-11-21')),
+    ).toThrow('startOffsetDays must be an integer ≥ 1, got 0');
+  });
+
   it('leaves a future absolute window alone', () => {
     expect(
       resolveWindow({ kind: 'absolute', from: d('2027-03-01'), to: d('2027-03-31') }, d('2026-10-14')),

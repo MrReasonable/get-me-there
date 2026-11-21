@@ -18,13 +18,20 @@ export const PLAN_COPY = {
   to: 'To',
   fromPlaceholder: 'City, airport or code',
   toPlaceholder: 'City, airport or code',
-  // spec rev 67 §11: the new-search form's dates, two browser date fields
+  // spec §11 "When to leave": a rolling choice in calendar months, fixed dates (two browser date fields, spec rev 67),
+  // or a search's own rolling window when it is neither
   leaveBetween: 'Leave between',
+  whenToLeave: 'When to leave',
+  nextMonths: (months: number) =>
+    months === 1 ? 'Next month' : months === 12 ? 'Next year' : `Next ${months} months`,
+  setDateRange: 'Set date range',
+  customRolling: (line: string) => `Rolling: ${line}`,
   rollingDates: (from: string, to: string) =>
-    `Rolling dates: ${from} to ${to} as of today. Change them under More options.`,
-  rollingSwitch: 'Rolling dates instead of fixed ones',
+    `Leaving ${from} to ${to} as of today; the dates move forward each day.`,
   rollingLine: (start: number, length: number) =>
     `starts in ${start} ${noun(start, 'day', 'days')}, lasts ${length} ${noun(length, 'day', 'days')}`,
+  rollingMonthsLine: (start: number, months: number) =>
+    `starts in ${start} ${noun(start, 'day', 'days')}, lasts ${months} ${noun(months, 'month', 'months')}`,
   rollingResolved: (line: string, resolved: string) => `${line}: ${resolved}`,
   onlyIfSet: 'only if you set one',
   // design 2026-11-08 Ruling 13 (mockup 01): the two date fields' labels
@@ -43,7 +50,6 @@ export const PLAN_COPY = {
 
   // --- More options ---
   moreOptions: 'More options',
-  rollingHeading: 'Rolling window',
   notesHeading: 'Notes and onward costs per destination',
   notesEmpty: 'Add a destination above to give it a note or an onward cost.',
 
