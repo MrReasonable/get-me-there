@@ -547,7 +547,7 @@ describe('only the changed names are sent (ruling 5)', () => {
       'any',
     );
     const card = await searchApiCard();
-    await user.click(within(card).getByRole('button', { name: S.replace }));
+    await user.click(within(card).getByRole('button', { name: S.replace.SEARCHAPI_KEY }));
     const key = within(card).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
     expect(key).toHaveAttribute('type', 'password');
     expect(key).toHaveAttribute('autocomplete', 'new-password');
@@ -901,6 +901,17 @@ describe('after Save: the restart, or the runs it waits for (ruling 14)', () => 
   });
 });
 
+describe('Replace names what it replaces (revision 74)', () => {
+  it('a saved key says "Replace key" and a saved token "Replace token", as its accessible name too', async () => {
+    open();
+    const key = within(await searchApiCard()).getByRole('button', { name: 'Replace key' });
+    expect(key).toHaveTextContent('Replace key');
+    const token = within(await cacheCard()).getByRole('button', { name: 'Replace token' });
+    expect(token).toHaveTextContent('Replace token');
+    expect(screen.queryByRole('button', { name: 'Replace' })).toBeNull();
+  });
+});
+
 describe('Remove confirms in the page first (ruling 14)', () => {
   it('Keep it sends nothing; Remove it saves the key unset', async () => {
     const puts = capturePuts();
@@ -1125,7 +1136,7 @@ describe('fix round 1', () => {
     const { bodies: puts, reached } = capturePutEvents();
     const { user } = open();
     const sa = await searchApiCard();
-    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    await user.click(within(sa).getByRole('button', { name: S.replace.SEARCHAPI_KEY }));
     await user.type(within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' }), KEY);
     const cache = await cacheCard();
     await user.click(within(cache).getByRole('button', { name: S.remove }));
@@ -1143,7 +1154,7 @@ describe('fix round 1', () => {
     const KEY = 'sk-test-typing-0123456789abcdef';
     const { user, container } = open();
     const sa = await searchApiCard();
-    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    await user.click(within(sa).getByRole('button', { name: S.replace.SEARCHAPI_KEY }));
     const field = within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' });
     await user.type(field, KEY);
     expect(field).toHaveProperty('value', KEY);
@@ -1157,7 +1168,7 @@ describe('fix round 1', () => {
     const { bodies: puts, reached } = capturePutEvents();
     const { user, container } = open();
     let sa = await searchApiCard();
-    await user.click(within(sa).getByRole('button', { name: S.replace }));
+    await user.click(within(sa).getByRole('button', { name: S.replace.SEARCHAPI_KEY }));
     await user.type(within(sa).getByLabelText(SETTING_LABELS.SEARCHAPI_KEY, { selector: 'input' }), KEY);
     const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
     await user.click(within(nav).getByRole('link', { name: 'Limits' }));

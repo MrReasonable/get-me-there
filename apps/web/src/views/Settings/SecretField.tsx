@@ -1,14 +1,16 @@
-import { type OwnedName, SETTING_LABELS } from '@gmt/core';
+import { SETTING_LABELS } from '@gmt/core';
 import { useEffect, useRef, useState } from 'react';
 import { COPY } from '../../copy.js';
 import { FieldError, fieldIds } from './fields.js';
 import type { SettingsForm } from './useSettingsForm.js';
 
 const S = COPY.settingsView;
+/** The settings a secret field holds: a key, a token or a password, each with its own Replace words. */
+export type SecretName = keyof typeof S.replace;
 
 /**
  * A key or token, write-only (settings plan ruling 14): once saved the page shows only "saved · ends 3f2a" (or
- * "saved", or that the saved one was set aside at boot), with Replace and Remove. A typed key goes into a password
+ * "saved", or that the saved one was set aside at boot), with Replace (named for what it replaces: "Replace key") and Remove. A typed key goes into a password
  * field with `autocomplete="new-password"`. The field is uncontrolled, so React never copies the key into its value
  * attribute; the typed text lives in the field and the page's draft only, and is cleared once saved. Remove asks in
  * the page first; its "Remove it" saves the removal at once (`onRemove`).
@@ -22,7 +24,7 @@ export function SecretField({
   label = SETTING_LABELS[name],
   hint = S.secretHint,
 }: {
-  name: OwnedName;
+  name: SecretName;
   form: SettingsForm;
   secret: { set: boolean; last4: string | null };
   setAside: boolean;
@@ -91,7 +93,7 @@ export function SecretField({
         )}
         {saved && !typing ? (
           <button type="button" className="st-btn st-btn-sm" onClick={() => setReplacing(true)}>
-            {S.replace}
+            {S.replace[name]}
           </button>
         ) : null}
         {saved && typing ? (

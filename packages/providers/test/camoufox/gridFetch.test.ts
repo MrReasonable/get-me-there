@@ -13,6 +13,9 @@ import {
   GRID_STEP_DAYS,
   type GridView,
   type IsoDate,
+  NO_FLIGHTS_ASKED,
+  noFlightsDetail,
+  SALE_WINDOW_END,
 } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -393,6 +396,13 @@ describe('camoufox grid mode', () => {
       ]),
     );
     expect(r.notes).toContain('no-flights-inferred:1');
+    // why: revision 74 — the query pair's no data is marked as the page's own "no flights" answer
+    expect(r.noDataNotes).toEqual([
+      {
+        cell: expect.objectContaining({ departureDate: '2027-03-14', returnDate: '2027-03-24' }),
+        detail: noFlightsDetail(NO_FLIGHTS_ASKED),
+      },
+    ]);
   });
   it('a joined page inside the horizon that lands on no flights leaves every later block unsearched', async () => {
     const { d } = setup();
@@ -428,6 +438,9 @@ describe('camoufox grid mode', () => {
     if (r.kind !== 'tile') throw new Error('tile');
     expect([r.prices, r.noFares, r.cellIssues ?? []]).toEqual([[], [], []]);
     expect(r.notes).toContain(`no-flights-inferred:${probe.coveredCells.length}`);
+    expect(r.noDataNotes).toEqual(
+      probe.coveredCells.map((cell) => ({ cell, detail: noFlightsDetail(SALE_WINDOW_END) })),
+    );
   });
   // why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8): a pair the grid names "no flights" is positive no fares
   // (`empty`); one it names "price unknown" says nothing of flights, so it is neither priced nor no fares: the engine

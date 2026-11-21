@@ -1,4 +1,12 @@
-import { asIsoDate, asIsoDateTime, cellKeyString, isTruncated, type RawCalendarPrice } from '@gmt/core';
+import {
+  asIsoDate,
+  asIsoDateTime,
+  cellKeyString,
+  isTruncated,
+  NO_FLIGHTS_ASKED,
+  noFlightsDetail,
+  type RawCalendarPrice,
+} from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { calendarPriceInGbp, FX_SOURCE, reduceTile, vendorLinkOf } from '../src/normalise.js';
@@ -256,6 +264,31 @@ describe('discovery normalisation through the engine', () => {
       lastError: 'left unread by the page cap',
     });
     expect(h.count('calendar_prices', e.id)).toBe(1);
+  });
+
+  it("a no-data cell keeps the adapter's note as its last error; one without a note has none (revision 74)", async () => {
+    const days = {
+      window: { kind: 'absolute' as const, from: cell.departureDate, to: cell.departureDate },
+      minNights: 7,
+      maxNights: 8,
+    };
+    const eight = { ...cell, returnDate: asIsoDate('2026-11-10') };
+    const asked = noFlightsDetail(NO_FLIGHTS_ASKED);
+    const h = createHarness({
+      transformFixture: (p) =>
+        mapTiles(p, (r) =>
+          r.kind !== 'tile' ? r : { ...r, prices: [], noFares: [], noDataNotes: [{ cell, detail: asked }] },
+        ),
+    });
+    const e = await h.runToCompletion(h.orch(), h.createDefinition(days).id);
+    const byCell = new Map(
+      h
+        .outcomes(e.id)
+        .filter((o) => o.stage === 'discovery')
+        .map((o) => [cellKeyString(o), o]),
+    );
+    expect(byCell.get(cellKeyString(cell))).toMatchObject({ status: 'no_data', lastError: asked });
+    expect(byCell.get(cellKeyString(eight))).toMatchObject({ status: 'no_data', lastError: null });
   });
 
   it('a truncated tile (decision 30): its prices are labelled "cheapest of the rows read"; its unread cells are upstream errors', async () => {

@@ -152,7 +152,7 @@ test('a key typed and saved is never left in the page: the PUT carries it, the p
   await page.goto('/?view=settings');
   const card = page.getByRole('region', { name: COPY.newSearch.source.searchapi });
   await expect(card.getByText(S.secretEnds('3f2a'))).toBeVisible();
-  await card.getByRole('button', { name: S.replace }).click();
+  await card.getByRole('button', { name: S.replace.SEARCHAPI_KEY }).click();
   const field = card.locator('input[type="password"]');
   await expect(field).toHaveAttribute('autocomplete', 'new-password');
   await field.fill(KEY);

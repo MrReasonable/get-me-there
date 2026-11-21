@@ -327,7 +327,9 @@ describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)'
     const list = await screen.findByRole('list', { name: 'Selected but not reached' });
     expect(within(list).getByText('LHR → JFK 22 Mar 2027 to 1 Apr 2027: not searched')).toBeInTheDocument();
     expect(
-      within(list).getByText('LHR → JFK 20 Mar 2027 to 1 Apr 2027: skipped: budget'),
+      within(list).getByText(
+        "LHR → JFK 20 Mar 2027 to 1 Apr 2027: not checked: the search's SearchApi credit limit was reached",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -384,6 +386,82 @@ describe('the coverage section, open (spec §11 Dates, §6.6; what View D held)'
     render();
     await screen.findByRole('list', { name: 'Errors' });
     expect(screen.queryByRole('button', { name: 'Retry errors' })).toBeNull();
+  });
+
+  it('lists the routes whose "no flights" pages left day pairs unseen, above the errors (revision 74)', async () => {
+    const base = coverageResponse();
+    const route = { destination: 'JFK', providerId: 'camoufox', retryable: false } as const;
+    server.use(
+      http.get(`${API}/definitions/:id/coverage`, () =>
+        HttpResponse.json({
+          ...base,
+          errors: base.errors.map((e) => ({ ...e, retryable: false })),
+          noFlights: [
+            { ...route, origin: 'LGW', destination: 'EWR', cells: 1, everyPage: true },
+            { ...route, origin: 'LGW', cells: 360, everyPage: true },
+            { ...route, origin: 'LHR', cells: 1, everyPage: false },
+            { ...route, origin: 'QQA', cells: 2, everyPage: false },
+          ],
+        }),
+      ),
+    );
+    render();
+    const list = await screen.findByRole('list', { name: 'No flights shown' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      'LGW → EWR (Camoufox): every page said no flights, so its other 1 date pair was never shown. If there are never flights from this airport, take it out of the search.',
+      'LGW → JFK (Camoufox): every page said no flights, so its other 360 date pairs were never shown. If there are never flights from this airport, take it out of the search.',
+      'LHR → JFK (Camoufox): 1 date pair not shown: its page said no flights for the date pair it asked.',
+      'QQA → JFK (Camoufox): 2 date pairs not shown: their page said no flights for the date pair it asked.',
+    ]);
+    // why: the list sits above the errors, in the page's reading order
+    const errors = screen.getByRole('list', { name: 'Errors' });
+    expect(list.compareDocumentPosition(errors) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry errors' })).toBeNull();
+  });
+
+  it('shows no "No flights shown" list when no page left day pairs unseen', async () => {
+    render();
+    await screen.findByRole('list', { name: 'Errors' });
+    expect(screen.queryByRole('list', { name: 'No flights shown' })).toBeNull();
+  });
+
+  it('offers Retry when only a no-flights route is retryable, and resumes the run', async () => {
+    let onResume: (id: string) => void = () => undefined;
+    const resumed = new Promise<string>((resolve) => {
+      onResume = resolve;
+    });
+    const base = coverageResponse();
+    server.use(
+      http.get(`${API}/definitions/:id/coverage`, () =>
+        HttpResponse.json({
+          ...base,
+          errors: [],
+          noFlights: [
+            {
+              origin: 'LGW',
+              destination: 'JFK',
+              providerId: 'camoufox',
+              cells: 3,
+              everyPage: false,
+              retryable: true,
+            },
+          ],
+        }),
+      ),
+      http.post(`${API}/executions/:id/resume`, ({ params }) => {
+        onResume(String(params.id));
+        return HttpResponse.json(execution());
+      }),
+    );
+    const { user } = render();
+    await screen.findByRole('list', { name: 'No flights shown' });
+    expect(screen.getByText('No errors.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry errors' }));
+    await expect(resumed).resolves.toBe('exec-0001');
   });
 
   it('an error with no recorded reason says so instead of printing nothing (contract: reason is nullable)', async () => {

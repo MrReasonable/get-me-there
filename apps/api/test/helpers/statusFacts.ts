@@ -1,5 +1,5 @@
 // A fully healthy StatusFacts and the variations the Status tests apply (brief WP18 Task 18.2). The worked example only.
-import { asIsoDateTime, type EffectiveAge, type IsoDateTime } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, type EffectiveAge, type IsoDateTime } from '@gmt/core';
 import type {
   DataFacts,
   ProviderFacts,
@@ -24,6 +24,9 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
   return {
     definitionId: 'def-1',
     name: 'London to New York',
+    window: { kind: 'absolute', from: asIsoDate('2026-12-15'), to: asIsoDate('2027-06-15') },
+    maxCalls: 30,
+    runMaxCalls: 30,
     scheduled: true,
     latest: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     lastRun: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
@@ -31,6 +34,8 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
       buckets: { priced: 90, empty: 5, no_data: 3, error: 0, skipped: 0, not_run: 2, reused: 0 },
       total: 100,
     },
+    noFlights: [],
+    budgetSkips: [],
     ages: { newest: observed(1), oldest: observed(30), stale: false },
     leftNotes: [],
     runningSince: null,

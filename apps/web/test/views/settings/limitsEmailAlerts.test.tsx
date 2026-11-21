@@ -593,7 +593,9 @@ describe('Settings › Email (ruling 11)', () => {
       const tests = captureTests(200, { result: 'sent', at: '2026-10-14T12:00:00.000Z' });
       const { user } = open('email');
       await mode(E.modeOther);
-      await user.click(screen.getByRole('button', { name: S.replace }));
+      const replace = screen.getByRole('button', { name: 'Replace password' });
+      expect(replace).toHaveTextContent('Replace password');
+      await user.click(replace);
       await user.type(
         screen.getByLabelText(SETTING_LABELS.SMTP_PASS, { selector: 'input' }),
         'other-pass-123',

@@ -7,12 +7,15 @@ import {
   type ConstraintName,
   type ExecutionStatus,
   formatAgo,
+  leaveWords,
   mainPathSource,
   type PairingRead,
   PROVIDER_NAMES,
   type PriceLabelKind,
   type ProviderId,
   type ReducedMark,
+  rollingDaysWords,
+  rollingMonthsWords,
   type Stage,
   TRUNCATED_NOTE,
 } from '@gmt/core';
@@ -310,7 +313,12 @@ export const COPY = {
     secretNotSet: 'not set',
     secretSetAside: "The one the app has can't be used: paste it again.",
     secretHint: 'Keys are never shown again once saved.',
-    replace: 'Replace',
+    /** Revision 74: Replace names what it replaces, so it reads as the way to enter a new one. */
+    replace: {
+      SEARCHAPI_KEY: 'Replace key',
+      TRAVELPAYOUTS_TOKEN: 'Replace token',
+      SMTP_PASS: 'Replace password',
+    },
     remove: 'Remove',
     cancel: 'Cancel',
     confirmRemove: (label: string) =>
@@ -504,7 +512,7 @@ export const COPY = {
   sumMismatch: (sum: number, total: number) => `buckets sum to ${sum}, not ${total}; report this`,
   selectedNotReached: 'Selected but not reached',
   reasonNotRun: 'not searched',
-  reasonBudget: 'skipped: budget',
+  reasonBudget: "not checked: the search's SearchApi credit limit was reached",
   noneSelectedNotReached: 'Every selected cell was reached.',
   // why: spec §3, §8.2 rev 36 — the browser provider's cells a run left, with core's text: who fetches them (the api's
   // browserLeftFor, review R12, S6) and why they were left
@@ -529,6 +537,12 @@ export const COPY = {
     `${calls} of ${planned} planned ${noun(planned, 'call', 'calls')} · ${hits} cache ${noun(hits, 'hit', 'hits')} · ledger cost ${cost}, from configured rates`,
   requestRowTiles: (tiles: number, planned: string, calls: number, hits: number, cost: string) =>
     `${tiles} of ${planned} planned ${noun(planned, 'tile', 'tiles')} (${calls} ${noun(calls, 'call', 'calls')}) · ${hits} cache ${noun(hits, 'hit', 'hits')} · ledger cost ${cost}, from configured rates`,
+  // why: revision 74 — the day pairs a "no flights" page did not show, per route, above the errors they are kept out of
+  noFlightsHeading: 'No flights shown',
+  noFlightsEveryPage: (origin: string, destination: string, provider: string, n: number) =>
+    `${origin} → ${destination} (${provider}): every page said no flights, so its other ${n} ${noun(n, 'date pair was', 'date pairs were')} never shown. If there are never flights from this airport, take it out of the search.`,
+  noFlightsSome: (origin: string, destination: string, provider: string, n: number) =>
+    `${origin} → ${destination} (${provider}): ${n} ${noun(n, 'date pair', 'date pairs')} not shown: ${noun(n, 'its', 'their')} page said no flights for the date pair it asked.`,
   errorsHeading: 'Errors',
   // why: the contract's error reason is nullable; an unrecorded reason is said, never shown as an empty string.
   noReasonRecorded: 'no reason recorded',
@@ -674,11 +688,9 @@ export const COPY = {
     sideHeading: 'New search',
     noSearches: 'No searches yet',
     codes: (origins: string, destinations: string) => `${origins} → ${destinations}`,
-    windowSpan: (from: string, to: string) => `${from} – ${to}`,
-    windowRolling: (lengthDays: number, startOffsetDays: number) =>
-      `rolling: ${lengthDays} ${noun(lengthDays, 'day', 'days')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead`,
-    windowRollingMonths: (lengthMonths: number, startOffsetDays: number) =>
-      `rolling: ${lengthMonths} ${noun(lengthMonths, 'month', 'months')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead`,
+    // why: revision 74 — a search's dates have one set of words in core, shared with the Status data check's label
+    windowRolling: rollingDaysWords,
+    windowRollingMonths: rollingMonthsWords,
     repeats: (days: readonly number[], time: string) =>
       days.length === 7
         ? `repeats every day ${time}`
@@ -691,7 +703,7 @@ export const COPY = {
     // why: the card's own words (design 2026-11-08 §5.3, Rulings 5 and 8); a sentence that shows a price takes its
     // label as a parameter, so the label sits inside the sentence
     tripsLabel: (name: string) => `Cheapest trips, ${name}`,
-    leaveWindow: (span: string) => `leave ${span}`,
+    leaveWindow: leaveWords,
     searchedMeta: (ago: string) => `searched ${ago}`,
     allTripsAndDates: 'All trips and dates',
     allTripsAndDatesOf: (name: string) => `All trips and dates for ${name}`,

@@ -584,6 +584,7 @@ export function coverageResponse(
         retryable: true,
       },
     ],
+    noFlights: [],
     scheduleBlockedSince: null,
     onDemand: [],
     scheduledOnly: [],

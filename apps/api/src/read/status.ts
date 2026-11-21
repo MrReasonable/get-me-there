@@ -15,7 +15,6 @@ import {
   consentFixText,
   consentWindowState,
   coverageGapWarn,
-  coverageLine,
   dateIn as dateInZone,
   formatAgeShort,
   formatDuration,
@@ -23,6 +22,8 @@ import {
   hoursSince,
   type IsoDate,
   type IsoDateTime,
+  lastRunLine,
+  listWords,
   type OwnedName,
   PROVIDER_NAMES,
   SETTING_LABELS,
@@ -30,6 +31,7 @@ import {
   SKIP_CODE_TEXT,
   START_REFUSAL_TEXT,
   TRIAL_WARN_CREDITS,
+  windowWords,
 } from '@gmt/core';
 import { BLOCKED_WORDS, GRID_NOT_VERIFIED, SIGNED_IN_REFUSED } from '@gmt/providers';
 import type { DataFacts, ProviderFacts, StatusFacts, WorkerFacts } from './statusFacts.js';
@@ -43,8 +45,8 @@ export const STATUS_TEXT = {
   // why: review I1 (ruling R19): each source's calls, caps and windows are on the Providers view, linked from
   // Settings › Price sources as "Calls and caps"; Settings › Price sources itself shows none of them
   callsAndCaps: 'Calls and caps (/?view=providers)',
-  /** Revision 55 §7 (data-004): the note of a search that runs only when pressed. */
-  notScheduled: 'not scheduled',
+  /** Revision 55 §7 (data-004), worded plainly in revision 74: the note of a search that runs only when pressed. */
+  notScheduled: 'runs only when you start it',
   browserWindow: {
     scheduled: "browser pages: only inside a run's window",
     any: 'browser pages: also when a run resumes',
@@ -323,35 +325,111 @@ const SKIPPED: Readonly<Record<string, { reason: string; fix: string }>> = {
 const BEHIND_FIX =
   'no run has finished since the schedule last fired: start one now; a machine asleep at the firing time is the usual cause (the schedule card notes a missed firing)';
 
+/** "1 date pair", "2 date pairs". */
+const datePairs = (n: number) => `${n} ${n === 1 ? 'date pair' : 'date pairs'}`;
+
+/**
+ * Revision 74: the cheapest dates a run did not check because a credit limit was reached, per provider. Which limit is
+ * not stored with the cells (a line taken out at the start, or mid-run while others carried on, leaves no stop cause),
+ * so only the run's own snapshot is read: a run that allowed 0 credits names that; any other run says a limit was
+ * reached. "Raise it on its Edit page" is offered only while the search's own limit is still 0.
+ */
+function budgetSkipNote(d: DataFacts, skip: DataFacts['budgetSkips'][number]): string {
+  const name = PROVIDER_NAMES[skip.providerId];
+  const what = `${skip.cells} cheapest ${skip.cells === 1 ? 'date' : 'dates'} not checked with ${name}`;
+  const raise = d.maxCalls === 0 ? ' (raise it on its Edit page)' : '';
+  if (d.runMaxCalls === 0) return `${what}: this search allowed 0 ${name} credits a run${raise}`;
+  return d.maxCalls === 0
+    ? `${what}: a credit limit was reached; this search now allows 0 ${name} credits a run${raise}`
+    : `${what}: a credit limit was reached`;
+}
+
+/**
+ * Revision 74: the no-flights facts in words. An origin is whole when every destination of the search is a route every
+ * page of which said no flights; only whole origins are named "from", and only they are offered for taking out. Other
+ * such routes are named "on A → B" and get a note each.
+ */
+function noFlightsWords(routes: DataFacts['noFlights']) {
+  const unique = (xs: readonly string[]) => [...new Set(xs)];
+  const wholes = routes.filter((r) => r.wholeOrigin);
+  const origins = unique(wholes.map((r) => r.origin));
+  const lone = routes.filter((r) => !r.wholeOrigin);
+  const where = [
+    ...(origins.length === 0 ? [] : [`from ${listWords(origins, 'or')}`]),
+    ...(lone.length === 0
+      ? []
+      : [
+          `on ${listWords(
+            lone.map((r) => `${r.origin} → ${r.destination}`),
+            'or',
+          )}`,
+        ]),
+  ];
+  return {
+    unseen: routes.reduce((n, r) => n + r.unseen, 0),
+    where: listWords(where, 'or'),
+    origins,
+    destinations: unique(wholes.map((r) => r.destination)),
+    // why: one note per origin, its routes' destinations together, so a search with many such routes stays readable
+    notes: unique(lone.map((r) => r.origin)).map((origin) => {
+      const mine = lone.filter((r) => r.origin === origin);
+      const n = mine.reduce((sum, r) => sum + r.unseen, 0);
+      return `no page showed flights from ${origin} to ${listWords(
+        mine.map((r) => r.destination),
+        'or',
+      )} (${datePairs(n)} not shown)`;
+    }),
+  };
+}
+
 function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
   const fix = fixer(f);
-  const base = { id: `data-${d.definitionId}`, area: 'data', label: d.name } as const;
+  // why: revision 74 — two searches may share a name, so the label adds the dates as the Trips card words them
+  const base = {
+    id: `data-${d.definitionId}`,
+    area: 'data',
+    label: `${d.name} · ${windowWords(d.window)}`,
+  } as const;
   const running = d.runningSince === null ? null : `running since ${at(f, d.runningSince)}`;
   const l = d.latest;
   const run = d.lastRun;
   // why: revision 55 §7 (data-004) — `enabled` means only that scheduled runs happen, so an unscheduled search is judged
-  // by its latest run like any other and says it is not scheduled; a deleted one has no card at all
+  // by its latest run like any other and says it runs only when started; a deleted one has no card at all
+  const nf = noFlightsWords(d.noFlights);
   const left = [
+    ...nf.notes,
     ...d.leftNotes.map((n) => `${n.text} (${n.cells} ${n.cells === 1 ? 'cell' : 'cells'})`),
+    ...d.budgetSkips.map((skip) => budgetSkipNote(d, skip)),
     ...(d.scheduled ? [] : [STATUS_TEXT.notScheduled]),
   ].join('; ');
   const note = left === '' ? null : left;
   const parts: string[] = [];
-  if (running !== null) parts.push(running);
   const skippedRow = l?.status.startsWith('skipped_') === true;
   const skipInfo = skippedRow
     ? (SKIPPED[l.status] ?? { reason: 'it did not run', fix: 'start a run now' })
     : null;
+  // why: revision 74 — a search's first run in progress is not a problem: no prices yet is all there is to say
+  if (run === null && !skippedRow && d.runningSince !== null)
+    return check({
+      ...base,
+      state: 'ok',
+      summary: `first run in progress since ${at(f, d.runningSince)}; no prices yet`,
+      note,
+    });
+  if (running !== null) parts.push(running);
   if (l !== null && skippedRow && skipInfo !== null) {
     const reason =
       l.status === 'skipped_missed' && l.skipCode !== null ? SKIP_CODE_TEXT[l.skipCode] : skipInfo.reason;
     parts.push(`last firing skipped (${reason}) on ${at(f, l.at)}`);
   }
+  const c = d.coverage;
   if (run !== null) {
     const word = RUN_WORD[run.status];
     parts.push(
       `last run ${at(f, run.at)}${word === undefined ? '' : ` (${word})`}: ${
-        d.coverage === null ? 'no cells recorded' : coverageLine(d.coverage.buckets, d.coverage.total)
+        c === null
+          ? 'no cells recorded'
+          : lastRunLine(c.buckets, c.total, { cells: nf.unseen, where: nf.where })
       }`,
     );
     parts.push(
@@ -361,22 +439,28 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
     );
   }
   if (run === null && !skippedRow) {
-    parts.push(
-      running === null
-        ? 'no prices yet: this search has not finished a run'
-        : 'first run in progress: no prices yet',
-    );
+    parts.push('no prices yet: this search has not finished a run');
     return check({
       ...base,
       state: 'warn',
       summary: parts.join('; '),
       note,
-      fix: fix(
-        running === null ? "start a run from the search's card on Trips" : 'wait for the first run to finish',
-      ),
+      fix: fix("start a run from the search's card on Trips"),
     });
   }
-  const gap = d.coverage !== null && coverageGapWarn(d.coverage.buckets, d.coverage.total);
+  // why: revision 74 — the day pairs an every-page-no-flights route did not show are not a gap a rerun fills (a rerun
+  // gets the same answer), so the gap is judged on the rest of the error bucket
+  const leftCells = c === null ? 0 : c.buckets.error - nf.unseen + c.buckets.skipped + c.buckets.not_run;
+  const gap =
+    c !== null &&
+    coverageGapWarn(
+      { error: c.buckets.error - nf.unseen, skipped: c.buckets.skipped, not_run: c.buckets.not_run },
+      c.total,
+    );
+  // why: a run that answered cells but priced none leaves the operator nothing to book, so it always names a next step:
+  // while pairs are left unread, reading them (whatever their share); once every pair was answered, every answer "no
+  // flights" points at the airports and dates, any "no price found" at the price sources
+  const noPrice = c !== null && c.buckets.priced === 0 && c.buckets.empty + c.buckets.no_data > 0;
   const browserOnlyCatchUp =
     d.browserOnlyScheduled && (run?.isCatchUp === true || l?.skipCode === 'browser-only-definition');
   const unfinished = run !== null && RUN_WORD[run.status] !== undefined && run.status !== 'paused_budget';
@@ -385,11 +469,24 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
     problem = fix(l?.skipCode === 'browser-only-definition' ? STATUS_TEXT.browserOnlyFix : skipInfo.fix);
   else if (browserOnlyCatchUp) problem = fix(STATUS_TEXT.browserOnlyFix);
   else if (unfinished) problem = fix('start a run to finish the cells it left');
-  else if (gap)
+  else if (nf.origins.length > 0)
     problem = fix(
-      "the search's full search log (What was searched) shows which cells were left; run again or widen the sources",
+      `take ${listWords(nf.origins)} out of this search on its Edit page: no page showed flights from ${
+        nf.origins.length === 1 ? 'it' : 'them'
+      } to ${listWords(nf.destinations, 'or')}`,
+    );
+  else if (gap || (noPrice && leftCells > 0))
+    problem = fix(
+      `run the search again to read the ${datePairs(leftCells)} left; the search's page lists them under What was searched`,
+    );
+  else if (noPrice)
+    problem = fix(
+      c.buckets.no_data === 0
+        ? "no flights were found for any of these dates: check the airports and dates on the search's Edit page"
+        : "none of this search's sources had prices for these dates: switch on another price source on its Edit page, then search again",
     );
   else if (d.ages?.stale === true) problem = fix('start a run for newer prices');
+  // why: no cells recorded, or priced cells with no price a source can stand behind (synthetic test data only)
   else if (d.ages === null) problem = fix('start a run, or check that a price source is set up');
   else if (d.behindSchedule) problem = fix(BEHIND_FIX);
   return check({

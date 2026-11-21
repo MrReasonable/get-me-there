@@ -904,11 +904,21 @@ failing check.
 - **Schedule.** The jobs registered, the last and next run, a run caught up after a sleep or a restart (a note, not a
   problem), and a warning when two searches that use the browser provider fire at the same time: stagger them so
   neither waits for the other's browser pages.
-- **Data.** One card per search: its last finished run's cells in the six buckets (priced, no fares, no cached data,
-  error, skipped, not searched, out of the run's cells), "(n reused from earlier runs)" when a run reused earlier
-  outcomes, and both ends of the prices' ages ("newest price 1h old, oldest 6d old"; "age unknown" where a vendor gives
-  no bound). It warns when errors, skipped and not searched cells are over a fifth of the cells, when the oldest price
-  is past its stale threshold, when there is no price yet, or when the last firing was skipped (with the stored reason).
+- **Data.** One card per search, labelled with its name and dates as its Trips card words them ("London to New York ·
+  leave 15 Dec 2026 – 15 Jun 2027"): its last finished run in plain words ("prices for 90 of 100 date pairs; 5 with no
+  flights; 3 with no price found; 2 not searched yet", each part left out when it is 0), "(n reused from earlier runs)"
+  when a run reused earlier outcomes, and both ends of the prices' ages ("newest price 1h old, oldest 6d old"; "age
+  unknown" where a vendor gives no bound). A search's first run in progress is fine: it says "first run in progress
+  since …; no prices yet". When every page of a route said no flights, the day pairs those pages did not show are
+  counted as "not shown because no flights were found from Gatwick (LGW)" when that is true of every destination of
+  the search, and the fix is to take that airport out of the search on its Edit page; a single route ("on Gatwick (LGW)
+  → Newark Liberty (EWR)") is only noted. Otherwise it warns when the pairs not read, skipped and not searched are over
+  a fifth of the pairs, or when nothing was priced and any pair is left (run the search again; the search's page lists
+  them under What was searched), when nothing was priced and every pair was answered (check the airports and dates, or
+  switch on another price source, on its Edit page), when the oldest price is past its stale threshold, or when the
+  last firing was skipped (with the stored reason). Its note says when a search runs only when you start it, and how
+  many cheapest dates were not checked with SearchApi because a credit limit was reached (naming the search's own limit
+  when its run allowed 0 SearchApi credits).
   A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
   at the scheduled time (once a run starts, the app keeps it from idle sleep, but it cannot wake a sleeping machine), or
   move the schedule.

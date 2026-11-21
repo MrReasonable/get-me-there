@@ -1,6 +1,6 @@
 /**
  * The pure state rules and words of the Status report (spec §10 `GET /status`, brief WP18 §6): the thresholds, the
- * coverage line, the age line and the backup and consent rules, so the api's builders only gather facts and the rules are
+ * last-run line, the age line and the backup and consent rules, so the api's builders only gather facts and the rules are
  * mutation-tested here. Nothing in this file reads a clock, a file or the network.
  */
 
@@ -53,24 +53,41 @@ export function coverageGapWarn(b: Pick<Buckets, 'error' | 'skipped' | 'not_run'
   return (b.error + b.skipped + b.not_run) * 5 > total;
 }
 
-/** Spec §3's six bucket words in the data check's order, with the count of `Buckets` each reads. */
-export const BUCKET_WORDS = [
-  ['priced', 'priced'],
-  ['empty', 'no fares'],
-  ['no_data', 'no cached data'],
-  ['error', 'error'],
-  ['skipped', 'skipped'],
-  ['not_run', 'not searched'],
-] as const;
+/** What a run's error cells hold beside the six buckets: how many are day pairs a "no flights" page did not show. */
+export interface UnseenCells {
+  /** Error cells on a route whose every page said no flights (core's `noFlightsRoutes`, `everyPage`). */
+  cells: number;
+  /**
+   * Where no flights were found, in words after "found": "from Gatwick (LGW)" for whole origins, "on Gatwick (LGW) →
+   * Newark Liberty (EWR)" for single routes.
+   */
+  where: string;
+}
+
+const pairs = (n: number): string => `${n} ${n === 1 ? 'date pair' : 'date pairs'}`;
 
 /**
- * "priced 12, no fares 3, no cached data 4, error 0, skipped 1, not searched 5 of 25 cells", then spec §3's
- * "(n reused from earlier runs)" when n > 0. The parts are `Buckets` and sum to `total` (the caller's invariant).
+ * The data check's last-run line in plain words (spec §10 `GET /status`, revision 74): "prices for 12 of 25 date pairs;
+ * 3 with no flights; 4 with no price found; 2 not shown because no flights were found from Gatwick (LGW); 1 not read
+ * (the page failed); 1 skipped; 2 not searched yet", each part after the first left out when it is 0, then "(n reused
+ * from earlier runs)" when n > 0. The parts are the six buckets with the error bucket split in two (`unseen` and the
+ * rest), so they still sum to `total`; no cell changes bucket.
  */
-export function coverageLine(b: Buckets, total: number): string {
-  const parts = BUCKET_WORDS.map(([key, word]) => `${word} ${b[key]}`).join(', ');
+export function lastRunLine(b: Buckets, total: number, unseen: UnseenCells): string {
+  const counted: [number, string][] = [
+    [b.empty, 'with no flights'],
+    [b.no_data, 'with no price found'],
+    [unseen.cells, `not shown because no flights were found ${unseen.where}`],
+    [b.error - unseen.cells, 'not read (the page failed)'],
+    [b.skipped, 'skipped'],
+    [b.not_run, 'not searched yet'],
+  ];
+  const parts = [
+    `prices for ${b.priced} of ${pairs(total)}`,
+    ...counted.filter(([n]) => n > 0).map(([n, words]) => `${n} ${words}`),
+  ];
   const reused = b.reused > 0 ? ` (${b.reused} reused from earlier runs)` : '';
-  return `${parts} of ${total} ${total === 1 ? 'cell' : 'cells'}${reused}`;
+  return `${parts.join('; ')}${reused}`;
 }
 
 /** The two ends of the priced cells' effective ages, as the face form words them ("age unknown" when no bound is known). */

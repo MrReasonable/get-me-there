@@ -7,9 +7,10 @@
  * - neither (the engine writes `no_data`, not evidence that no flights exist): a cell of a read view whose name says
  *   "price unknown", counted per view (`price-unknown:<n>@<view>`);
  * - no data: Google's no-flights page. Its line is generic, so it says nothing of cells the page never showed (ruling on
- *   N1): on the probe page past the planning horizon it is the sale window's end, and every covered cell is no data;
- *   on any other page only the query cell is, and every other covered cell stays unsearched (`no-flights-unseen`,
- *   resumable). A note counts the no-data cells (`no-flights-inferred:<n>`);
+ *   N1): on the probe page past the planning horizon it is the sale window's end, and every covered cell is no data
+ *   (`noDataNotes`, `sale-window-end`); on any other page only the query cell is (`no-flights-asked`), and every other
+ *   covered cell stays unsearched (`no-flights-unseen`, resumable). A note counts the no-data cells
+ *   (`no-flights-inferred:<n>`);
  * - an issue (`error`, reason `parse`, resumable) naming why: `cell-unparsed` (its view was read but the cell was not
  *   parsed), `view-unparsed` (its view failed the structural check), or, for a view the page did not reach,
  *   `page-not-ready`, `off-plan-view` or `scroll-allowance` by how the page ended.
@@ -21,8 +22,13 @@ import {
   type CellKey,
   cellKeyString,
   type DiscoveryTileResult,
+  NO_FLIGHTS_ASKED,
+  NO_FLIGHTS_UNSEEN,
+  NO_FLIGHTS_WORDS,
+  noFlightsDetail,
   ProviderError,
   type RawCalendarPrice,
+  SALE_WINDOW_END,
   type TilePlan,
   type WorkerAnswer,
 } from '@gmt/core';
@@ -43,8 +49,7 @@ const WORDS: Readonly<Record<string, string>> = {
   'view-unparsed': 'the date grid view holding this day pair failed its check, so none of it was kept',
   'page-not-ready': 'a scroll did not settle before the grid reached this day pair',
   'off-plan-view': 'the grid showed other dates than planned, so the page ended before this day pair',
-  'no-flights-unseen':
-    'the page answered no flights for the pair it asked; this day pair was not shown, so it is not searched yet',
+  [NO_FLIGHTS_UNSEEN]: NO_FLIGHTS_WORDS[NO_FLIGHTS_UNSEEN],
   'scroll-allowance': 'the run’s scroll allowance ended before the grid reached this day pair',
   'grid-not-drawn':
     'the date grid had not filled in its prices when the page’s time ran out, so none of it was read',
@@ -71,13 +76,20 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
       req !== null &&
       (req.probe === true ||
         (c.departureDate === req.start.departureDate && c.returnDate === req.start.returnDate));
-    const issues = plan.coveredCells.filter((c) => !inferred(c)).map((c) => issueOf(c, 'no-flights-unseen'));
+    const issues = plan.coveredCells.filter((c) => !inferred(c)).map((c) => issueOf(c, NO_FLIGHTS_UNSEEN));
+    // why: each no-data cell says why, so a reader can tell a "no flights" answer from a page that showed flights with
+    // unknown prices (which writes an unmarked no_data)
+    const mark = req?.probe === true ? SALE_WINDOW_END : NO_FLIGHTS_ASKED;
+    const noDataNotes = plan.coveredCells
+      .filter(inferred)
+      .map((cell) => ({ cell, detail: noFlightsDetail(mark) }));
     return {
       ...base,
       prices: [],
       noFares: [],
-      notes: [...answer.notes, `no-flights-inferred:${plan.coveredCells.length - issues.length}`],
+      notes: [...answer.notes, `no-flights-inferred:${noDataNotes.length}`],
       ...(issues.length === 0 ? {} : { cellIssues: issues }),
+      ...(noDataNotes.length === 0 ? {} : { noDataNotes }),
     };
   }
   const covered = new Map<string, CellKey>(plan.coveredCells.map((c) => [cellKeyString(c), c]));

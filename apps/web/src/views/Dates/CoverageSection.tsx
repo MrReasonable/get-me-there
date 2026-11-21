@@ -97,8 +97,8 @@ function OnDemand({ rows }: { rows: CoverageResponse['onDemand'] }) {
 /**
  * What the Coverage view held (spec §11 Dates "Coverage section"; moved here by WP19 §4): per stage × provider counts
  * in the six buckets with "searched" as the umbrella beside them (the one place it appears) and the "with a price"
- * share, estimate vs ledger, selected-not-reached, flags, errors with retry, the browser provider's left cells and the
- * on-demand searches. The header names the run these counts come from (coverage.executionId) with its own status and
+ * share, estimate vs ledger, selected-not-reached, flags, the routes whose "no flights" pages left day pairs unseen,
+ * errors with retry, the browser provider's left cells and the on-demand searches. The header names the run these counts come from (coverage.executionId) with its own status and
  * age, never the date-pairs read's (review prov-011).
  */
 export function CoverageBody({ definition }: { definition: DefinitionResponse }) {
@@ -134,7 +134,8 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
   );
   const refresh = intervals.length === 0 ? DEFAULT_DISCOVERY_REFRESH_HOURS : Math.min(...intervals);
   const stale = header[0] !== undefined && header[0].ageHours !== 'unknown' && header[0].ageHours > refresh;
-  const retryable = c.errors.some((e) => e.retryable);
+  // why: revision 74 — a route's unseen day pairs are resumed like any error, so they offer Retry too
+  const retryable = c.errors.some((e) => e.retryable) || c.noFlights.some((g) => g.retryable);
   return (
     <div className="space-y-4">
       <ViewHeader title={COPY.coverageHeading} executions={header} stale={stale} />
@@ -261,6 +262,23 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                   COPY.stageName[g.stage],
                   g.cells,
                   SKIP_DETAIL_TEXT[g.detail],
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {c.noFlights.length > 0 ? (
+        <div>
+          <h3 className="h-sub mb-1">{COPY.noFlightsHeading}</h3>
+          <ul aria-label={COPY.noFlightsHeading} className="text-sm">
+            {c.noFlights.map((g) => (
+              <li key={`${g.origin}${g.destination}${g.providerId}`}>
+                {(g.everyPage ? COPY.noFlightsEveryPage : COPY.noFlightsSome)(
+                  g.origin,
+                  g.destination,
+                  COPY.provider[g.providerId],
+                  g.cells,
                 )}
               </li>
             ))}

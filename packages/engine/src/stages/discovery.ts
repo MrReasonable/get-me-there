@@ -313,7 +313,8 @@ async function fetchTiles(
  * - a price that cannot be normalised → `error` with the normalisation reason;
  * - no price but a `cellIssues` entry (rows dropped or a cell left unread) → `error` with the issue's reason and detail,
  *   never `no_data` (spec §8.1);
- * - in noFares → `empty`; otherwise → `no_data` (not evidence of no flights).
+ * - in noFares → `empty`; otherwise → `no_data` (not evidence of no flights), with the adapter's `noDataNotes` detail as
+ *   its last_error when it gave one (a "no flights" page's marks, spec §2), else none.
  * Errors go through writeTileError in the same transaction (WP3's writeTile takes only priced, empty and no_data;
  * po-009). The repository resets auto_resume_count in it.
  */
@@ -347,6 +348,7 @@ export function commitTile(
       seen === undefined ? i : { ...seen, offersDropped: seen.offersDropped + i.offersDropped },
     );
   }
+  const noDataNotes = new Map((result.noDataNotes ?? []).map((n) => [cellKeyString(n.cell), n.detail]));
   const write: TileWrite = {
     tileIndex: result.index,
     cells: [],
@@ -408,7 +410,14 @@ export function commitTile(
       // unread page, so it is an error (fetched again), never reusable no_data, as the coverage check judges it (prov M1)
       fail(cell, 'upstream', 'pagination truncated: cell left unread');
       continue;
-    } else write.outcomes.push({ ...base, status: 'no_data', reason: null, lastError: null, minPence: null });
+    } else
+      write.outcomes.push({
+        ...base,
+        status: 'no_data',
+        reason: null,
+        lastError: noDataNotes.get(key) ?? null,
+        minPence: null,
+      });
     write.cells.push(cell);
   }
   ctx.db.transaction(() => {
