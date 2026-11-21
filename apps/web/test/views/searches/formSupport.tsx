@@ -109,7 +109,14 @@ export async function addAirport(user: User, name: string, code: string) {
  * Picks a date in one of Leave between's date fields. A browser date field commits a whole date at once (or '' while it
  * holds none), so it is changed in one event, as the picker does, never typed into key by key.
  */
+/** Picks When to leave's choice by its value ("6", "range", …). */
+export function chooseWhen(value: string) {
+  fireEvent.change(screen.getByLabelText(PLAN_COPY.whenToLeave), { target: { value } });
+}
+
+/** Sets a date field, first choosing Set date range when the form shows a rolling choice (a new search's default). */
 export function pickDate(label: string, value: string) {
+  if (screen.queryByLabelText(label) === null) chooseWhen('range');
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 

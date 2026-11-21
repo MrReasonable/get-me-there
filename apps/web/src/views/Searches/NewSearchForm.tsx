@@ -15,7 +15,7 @@ import { newRequestKey } from '../../lib/requestKey.js';
 import { useSearchApiCredits } from '../../lib/searchApiCreditsLine.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
 import { updateSearchParams } from '../../state/urlState.js';
-import { type Draft, defaultDraft, EMPTY_ABSOLUTE } from '../Definitions/draft.js';
+import { type Draft, defaultDraft } from '../Definitions/draft.js';
 import { BudgetFitPanel } from '../Definitions/EstimatePanel.js';
 import { SearchFields } from '../Definitions/SearchFields.js';
 import { useSearchForm } from '../Definitions/useSearchForm.js';
@@ -28,13 +28,12 @@ const N = COPY.newSearch;
  * A new search's draft (spec rev 55 §8.2 presets, design 2026-11-08 Ruling 13): the api's presets (`/providers`), whose
  * sources are the ones its single rule gives (`newSearchSourcesFor`: the Settings page's lists, or today's draft:
  * every configured free source, SearchApi unticked, the test source only when nothing real is left), so this page
- * decides none of that; no schedule (Repeat: Never), no arrival window, and fixed dates the operator enters in Leave
- * from and Leave by (rolling dates are a switch under More options, filled in with the 7-day start and 182-day length).
+ * decides none of that; no schedule (Repeat: Never), no arrival window, and When to leave on Next 6 months (the core
+ * default), which the operator changes to another span or to Set date range.
  */
 export function newSearchDraft(presets: ProvidersResponse['presets']): Draft {
   return {
     ...defaultDraft(presets),
-    window: EMPTY_ABSOLUTE,
     scheduleCron: null,
     enabled: false,
   };

@@ -7,6 +7,7 @@ import {
   isLeapYear,
   monthOf,
   monthsSpanned,
+  monthsWindowEnd,
   toEpochDay,
 } from '../../src/dates/epochDay.js';
 import { asIsoDate, type IsoDate } from '../../src/types/ids.js';
@@ -121,5 +122,45 @@ describe('monthOf / monthsSpanned', () => {
   it('is one month for a single day and empty when reversed', () => {
     expect(monthsSpanned(d('2027-03-28'), d('2027-03-28'))).toEqual(['2027-03']);
     expect(monthsSpanned(d('2027-03-29'), d('2027-03-28'))).toEqual([]);
+  });
+});
+
+describe('monthsWindowEnd (spec §6.1: a months window ends the day before the same date N months on)', () => {
+  it('ends the day before the same date N months later, across a year end', () => {
+    expect(monthsWindowEnd(asIsoDate('2026-12-05'), 3)).toBe('2027-03-04');
+    expect(monthsWindowEnd(asIsoDate('2026-12-05'), 1)).toBe('2027-01-04');
+    expect(monthsWindowEnd(asIsoDate('2026-12-05'), 12)).toBe('2027-12-04');
+  });
+
+  it('ends on the last day of the end month when the start date does not exist there', () => {
+    expect(monthsWindowEnd(asIsoDate('2027-01-31'), 1)).toBe('2027-02-28');
+    expect(monthsWindowEnd(asIsoDate('2027-01-30'), 1)).toBe('2027-02-28');
+    expect(monthsWindowEnd(asIsoDate('2027-01-29'), 1)).toBe('2027-02-28');
+    expect(monthsWindowEnd(asIsoDate('2027-01-28'), 1)).toBe('2027-02-27');
+    expect(monthsWindowEnd(asIsoDate('2027-08-31'), 1)).toBe('2027-09-30');
+    // and across a year end into a short month: 31 Dec + 2 months has no 31 Feb
+    expect(monthsWindowEnd(asIsoDate('2026-12-31'), 2)).toBe('2027-02-28');
+    expect(monthsWindowEnd(asIsoDate('2027-10-31'), 1)).toBe('2027-11-30');
+  });
+
+  it('knows the leap day: 29 Jan 2028 + 1 month ends 28 Feb, 31 Jan 2028 ends 29 Feb', () => {
+    expect(monthsWindowEnd(asIsoDate('2028-01-29'), 1)).toBe('2028-02-28');
+    expect(monthsWindowEnd(asIsoDate('2028-01-31'), 1)).toBe('2028-02-29');
+    expect(monthsWindowEnd(asIsoDate('2029-01-29'), 1)).toBe('2029-02-28');
+    expect(monthsWindowEnd(asIsoDate('2027-02-28'), 12)).toBe('2028-02-27');
+  });
+
+  it('a 12-month window from the first of a month ends on the last day of the month before', () => {
+    expect(monthsWindowEnd(asIsoDate('2027-03-01'), 12)).toBe('2028-02-29');
+  });
+
+  it('throws on a month count that is not a whole number of at least 1', () => {
+    expect(() => monthsWindowEnd(asIsoDate('2027-03-01'), 0)).toThrow('months must be an integer ≥ 1, got 0');
+    expect(() => monthsWindowEnd(asIsoDate('2027-03-01'), 1.5)).toThrow(RangeError);
+  });
+
+  it('throws on a start that is not a calendar date, rather than ending a window from it', () => {
+    // why: the brand says the string was validated, but rows read back from SQLite JSON are not re-parsed
+    expect(() => Reflect.apply(monthsWindowEnd, undefined, ['2027-02-30', 1])).toThrow('not a calendar date');
   });
 });

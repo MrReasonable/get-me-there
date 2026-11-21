@@ -48,7 +48,10 @@ function span(from: string, to: string): string {
 function windowWords(definition: DefinitionResponse, data: DecodedDatePairs | null): string {
   const w = definition.window;
   if (w.kind === 'absolute') return S.leaveWindow(span(w.from, w.to));
-  if (data === null) return S.windowRolling(w.lengthDays, w.startOffsetDays);
+  if (data === null)
+    return w.kind === 'months'
+      ? S.windowRollingMonths(w.lengthMonths, w.startOffsetDays)
+      : S.windowRolling(w.lengthDays, w.startOffsetDays);
   return P.leaveRolling(span(data.space.departureFrom, data.space.departureTo));
 }
 

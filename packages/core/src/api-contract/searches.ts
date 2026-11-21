@@ -3,6 +3,7 @@ import type { ReducedMark } from '../datePairs/marks.js';
 import { isTrip } from '../datePairs/views.js';
 import { toEpochDay } from '../dates/epochDay.js';
 import { priceLabelKind } from '../labels/priceLabel.js';
+import { MAX_WINDOW_MONTHS } from '../space/limits.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { pointOfSaleSchema } from '../types/provenance.js';
 import {
@@ -28,25 +29,31 @@ const count = countSchema;
 const nights = z.number().int().min(0).max(90);
 
 /**
- * A card's window, resolved: its kind, the departure dates it covers today and, for a relative window, its offset and
- * length (null on an absolute window, non-null on a relative one).
+ * A card's window, resolved: its kind, the departure dates it covers today and, for a rolling window, its offset and
+ * length: in days for a relative window, in calendar months for a months window (each null where it does not apply).
  */
 const cardWindowSchema = z
   .strictObject({
-    kind: z.enum(['absolute', 'relative']),
+    kind: z.enum(['absolute', 'relative', 'months']),
     departureFrom: isoDateSchema,
     departureTo: isoDateSchema,
     startOffsetDays: count.nullable(),
     // why: a relative window's length is at least one day, as `windowSpecSchema` stores it (review B2f)
     lengthDays: z.number().int().min(1).nullable(),
+    lengthMonths: z.number().int().min(1).max(MAX_WINDOW_MONTHS).nullable(),
   })
   .superRefine((w, ctx) => {
-    const relative = w.kind === 'relative';
-    if ((w.startOffsetDays !== null) !== relative || (w.lengthDays !== null) !== relative) {
+    const rolling = w.kind !== 'absolute';
+    if (
+      (w.startOffsetDays !== null) !== rolling ||
+      (w.lengthDays !== null) !== (w.kind === 'relative') ||
+      (w.lengthMonths !== null) !== (w.kind === 'months')
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['kind'],
-        message: 'a relative window has offsets; an absolute one has none',
+        message:
+          'a relative window has an offset and days, a months window an offset and months, an absolute one neither',
       });
     }
     if (w.departureTo < w.departureFrom) {

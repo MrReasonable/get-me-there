@@ -150,6 +150,7 @@ describe('a finished search with trips', () => {
             departureTo: '2027-04-21',
             startOffsetDays: 7,
             lengthDays: 182,
+            lengthMonths: null,
           },
         }),
       ]),
@@ -158,6 +159,27 @@ describe('a finished search with trips', () => {
     const card = await cardOf('London → New York');
     expect(card.querySelector('.tcard-repeat')).toBeNull();
     expect(card.querySelector('.tcard-meta')).toHaveTextContent('rolling: 182 days from 7 days ahead');
+  });
+
+  it('a months window reads as its months and its start', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          window: {
+            kind: 'months',
+            departureFrom: '2026-10-28',
+            departureTo: '2027-01-27',
+            startOffsetDays: 14,
+            lengthDays: null,
+            lengthMonths: 3,
+          },
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    const card = await cardOf('London → New York');
+    expect(card.querySelector('.tcard-meta')).toHaveTextContent('rolling: 3 months from 14 days ahead');
+    expect(card.querySelector('.tcard-meta')).not.toHaveTextContent('leave rolling');
   });
 
   it('shows three trip rows, each with its label and dates, and no airlines', async () => {

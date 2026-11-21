@@ -9,8 +9,6 @@ import type { DefinitionBody, DefinitionResponse, ProvidersResponse } from '../.
 export type Draft = Omit<DefinitionBody, 'confirmedCostPence' | 'confirmedCalls'>;
 export type DraftWindow = Draft['window'];
 
-/** Spec §11 default relative window, from core's shared defaults. */
-export const DEFAULT_RELATIVE: DraftWindow = definitionDefaults().window;
 /** An absolute window before the operator picks dates; the API rejects it until both are set. */
 export const EMPTY_ABSOLUTE: DraftWindow = { kind: 'absolute', from: '', to: '' };
 

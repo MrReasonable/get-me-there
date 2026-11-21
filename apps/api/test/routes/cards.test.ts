@@ -247,6 +247,27 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     });
   });
 
+  // Spec §6.1, §11: a months window's card carries its offset and months, and the dates it covers today (the harness's
+  // today is 14 Oct 2026: 28 Oct, then three calendar months, to 27 Jan)
+  it("a months window's card carries its offset and months and the dates it covers today", async () => {
+    h = await createHarness();
+    const x = h;
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        ...ONE_PAIR,
+        window: { kind: 'months', startOffsetDays: 14, lengthMonths: 3 },
+      }),
+    );
+    expect(cardOf(await cards(x), def.id).window).toEqual({
+      kind: 'months',
+      departureFrom: '2026-10-28',
+      departureTo: '2027-01-27',
+      startOffsetDays: 14,
+      lengthDays: null,
+      lengthMonths: 3,
+    });
+  });
+
   // Design 2026-11-08 §7, §5.5: the card's flights carry the stored confirm summary unchanged, null for an older plan
   it("a card's latest run carries the stored confirm summary on flights, and null for a plan stored before it", async () => {
     h = await createHarness();

@@ -181,15 +181,20 @@ function spaceChanged(def: SearchDefinition, run: Execution | null): boolean {
 
 function windowOf(def: SearchDefinition, space: ResolvedSpace): SearchCard['window'] {
   const w = def.window;
-  return w.kind === 'absolute'
-    ? // why: the window as the operator set it, so an expired one still states its dates in order
-      { kind: 'absolute', departureFrom: w.from, departureTo: w.to, startOffsetDays: null, lengthDays: null }
+  const none = { startOffsetDays: null, lengthDays: null, lengthMonths: null };
+  if (w.kind === 'absolute') {
+    // why: the window as the operator set it, so an expired one still states its dates in order
+    return { kind: 'absolute', departureFrom: w.from, departureTo: w.to, ...none };
+  }
+  const resolved = { departureFrom: space.departureFrom, departureTo: space.departureTo };
+  return w.kind === 'relative'
+    ? { kind: 'relative', ...resolved, ...none, startOffsetDays: w.startOffsetDays, lengthDays: w.lengthDays }
     : {
-        kind: 'relative',
-        departureFrom: space.departureFrom,
-        departureTo: space.departureTo,
+        kind: 'months',
+        ...resolved,
+        ...none,
         startOffsetDays: w.startOffsetDays,
-        lengthDays: w.lengthDays,
+        lengthMonths: w.lengthMonths,
       };
 }
 

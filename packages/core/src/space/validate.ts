@@ -8,7 +8,7 @@ import {
 } from '../types/definition.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import { countCells } from './generate.js';
-import { MAX_NIGHTS, MAX_WINDOW_DAYS } from './limits.js';
+import { MAX_NIGHTS, MAX_WINDOW_DAYS, MAX_WINDOW_MONTHS } from './limits.js';
 import { resolveSpace } from './window.js';
 
 /**
@@ -76,7 +76,7 @@ export function validateSearchSpace(
   if (def.maxNights < def.minNights) err('maxNights', 'maxNights must be at least minNights');
 
   const w = def.window;
-  if (w.kind === 'relative') {
+  if (w.kind !== 'absolute') {
     if (!Number.isInteger(w.startOffsetDays) || w.startOffsetDays < 1) {
       err(
         'window.startOffsetDays',
@@ -87,7 +87,11 @@ export function validateSearchSpace(
       // like lengthDays so POST /definitions gets a field error (422) and not a 500.
       err('window.startOffsetDays', `startOffsetDays must be no greater than ${MAX_WINDOW_DAYS}`);
     }
-    if (!Number.isInteger(w.lengthDays) || w.lengthDays < 1 || w.lengthDays > MAX_WINDOW_DAYS) {
+    if (w.kind === 'months') {
+      if (!Number.isInteger(w.lengthMonths) || w.lengthMonths < 1 || w.lengthMonths > MAX_WINDOW_MONTHS) {
+        err('window.lengthMonths', `lengthMonths must be a whole number from 1 to ${MAX_WINDOW_MONTHS}`);
+      }
+    } else if (!Number.isInteger(w.lengthDays) || w.lengthDays < 1 || w.lengthDays > MAX_WINDOW_DAYS) {
       err('window.lengthDays', `lengthDays must be a whole number from 1 to ${MAX_WINDOW_DAYS}`);
     }
   } else {

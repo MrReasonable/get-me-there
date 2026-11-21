@@ -74,6 +74,26 @@ export function daysBetween(a: IsoDate, b: IsoDate): number {
   return toEpochDay(b) - toEpochDay(a);
 }
 
+/**
+ * The last day of a window of `months` calendar months starting on `from` (spec §6.1 months window): the day before the
+ * same date `months` months on, or, when the end month has no such date, that month's last day. So 5 Dec 2026 + 3 ends
+ * 4 Mar 2027, and 31 Jan 2027 + 1 ends 28 Feb 2027. Throws `RangeError` unless `months` is a whole number of at least 1.
+ */
+export function monthsWindowEnd(from: IsoDate, months: number): IsoDate {
+  if (!Number.isInteger(months) || months < 1)
+    throw new RangeError(`months must be an integer ≥ 1, got ${months}`);
+  toEpochDay(from); // validates
+  // months since year 0 of the end month, so a sum past December carries into the year
+  const total = Number(from.slice(0, 4)) * 12 + Number(from.slice(5, 7)) - 1 + months;
+  const dayOf = (t: number, day: number) =>
+    isoDateSchema.parse(`${pad(Math.floor(t / 12), 4)}-${pad((t % 12) + 1, 2)}-${pad(day, 2)}`);
+  const d = Number(from.slice(8, 10));
+  if (isRealDate(Math.floor(total / 12), (total % 12) + 1, d)) return addDays(dayOf(total, d), -1);
+  // why: the end month is shorter than the start date's day (31 Jan + 1 month): the window takes all of that month,
+  // to the day before the next month's first
+  return addDays(dayOf(total + 1, 1), -1);
+}
+
 /** The `YYYY-MM` month a date falls in. Used by month tiles (spec §5.2). */
 export function monthOf(date: IsoDate): IsoMonth {
   toEpochDay(date); // validates

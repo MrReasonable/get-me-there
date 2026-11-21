@@ -11,7 +11,6 @@ import { BudgetFitPanel } from './EstimatePanel.js';
 import { FieldErrors, HoursMinutesField, NumberField, PoundsField } from './fields.js';
 import { LeaveBetweenField } from './LeaveBetweenField.js';
 import { RepeatField } from './RepeatField.js';
-import { RollingWindowFields } from './RollingWindowFields.js';
 import type { SearchForm } from './useSearchForm.js';
 import { WhereToLook } from './WhereToLook.js';
 
@@ -22,10 +21,10 @@ const SR_ONLY = 'sr-only';
 
 /**
  * Spec rev 55 §11 (WP20 Task 20.5; design 2026-11-08 Rulings 13–14): the fields of a search, as the new-search panel and
- * the Edit page both show them. In view: From, To (the airport search), Leave from and Leave by (two browser date
- * fields), Stay (shortest to longest nights) and Where to look (each source set up, with its cost). Under More options,
- * already filled in from the presets: the longest journey each way (25 h), the cabin, Repeat, rolling dates instead of
- * fixed ones, and the name (suggested from the airports). The time windows are empty, "only if you set one". `edit`
+ * the Edit page both show them. In view: From, To (the airport search), When to leave (Next month to Next year, or Set
+ * date range with its two browser date fields), Stay (shortest to longest nights) and Where to look (each source set up,
+ * with its cost). Under More options, already filled in from the presets: the longest journey each way (25 h), the
+ * cabin, Repeat and the name (suggested from the airports). The time windows are empty, "only if you set one". `edit`
  * adds a second fold, Limits and checks, with what only the Edit page shows: the notes and onward costs per
  * destination, the constraints, checking fares, the run budget with its refresh intervals, and the budget fit
  * (`extra` renders after the folds: the coverage check).
@@ -170,7 +169,6 @@ export function SearchFields({
               onIncomplete={form.markIncomplete}
             />
           </div>
-          <RollingWindowFields form={form} />
           <NameField form={form} />
         </div>
       </details>
