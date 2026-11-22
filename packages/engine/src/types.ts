@@ -36,6 +36,16 @@ import type { RunWatch } from './registry.js';
 /** What the estimate response states beside the estimate (spec §10). */
 export interface EstimateAsk extends AskedPairs {
   billedCalls: BilledCalls[];
+  /**
+   * How long this run takes: the estimate's seconds with a saved search's kept prices left out, as its run leaves them
+   * out, and the same lines blocked. The estimate's own seconds stay the worst case without reuse (ruling 9).
+   */
+  secondsThisRun: number;
+  /**
+   * The flight-list step's figures for this run, as `Estimate.flightLists` carries them: absent without the browser's
+   * flight step, zero figures when it reads nothing this run (every date pair kept, or its browser line blocked).
+   */
+  flightListsThisRun?: Estimate['flightLists'];
 }
 
 export type {

@@ -300,8 +300,12 @@ export function resultsResponse(
 export function estimateResponse(
   over: Partial<In<typeof apiContract.estimateResponseSchema>> = {},
 ): EstimateResponse {
+  // why: this run's figures follow the estimate given, as an unsaved search's do (nothing kept), unless named
+  const est = apiContract.estimateSchema.parse(over.estimate ?? estimate());
   return apiContract.estimateResponseSchema.parse({
-    estimate: estimate(),
+    estimate: est,
+    secondsThisRun: est.seconds,
+    ...(est.flightLists === undefined ? {} : { flightListsThisRun: est.flightLists }),
     budgetFit: {
       fits: true,
       runsPerMonth: 4,

@@ -76,14 +76,14 @@ export function plainDuration(seconds: number, c: Copy = ESTIMATE_COPY): string 
  * about 15 dates, at most 290", the at-most figure being `pagesMax / 2` reads); outbound only, the first dates and the
  * time. Its time is already in the duration the first sentence gives.
  */
-function flightsSentence(f: NonNullable<EstimateResponse['estimate']['flightLists']>, c: Copy): string[] {
+function flightsSentence(f: NonNullable<EstimateResponse['flightListsThisRun']>, c: Copy): string[] {
   if (f.pairs === 0) return [];
   if (!f.returns) return [c.flights(groupThousands(f.pairs), aboutDuration(f.seconds, c))];
   return [c.flightsUntilSettled(CONFIRM_TARGET)];
 }
 
 /** The note under the sentence for an out-and-back flight line: how many dates it usually reads and at most. */
-function flightsNote(f: NonNullable<EstimateResponse['estimate']['flightLists']>, c: Copy): string[] {
+function flightsNote(f: NonNullable<EstimateResponse['flightListsThisRun']>, c: Copy): string[] {
   if (f.pairs === 0 || !f.returns) return [];
   // why: the response carries the at-most reads as pages (2 a read out and back, the engine's FLIGHT_LIST_PAGES_PER_PAIR_MAX)
   const most =
@@ -207,13 +207,15 @@ export function estimateSentence(
   );
   const spends = covers.pence > 0 || billed.length > 0;
   const runClauses = [
-    aboutDuration(e.estimate.seconds, c),
+    // why: this run's time, a saved search's kept prices left out as its run leaves them out (Ian, 2026-11-22: "About
+    // 13 min" for 12 of 1,080 dates); the estimate's own seconds are the worst case without reuse
+    aboutDuration(e.secondsThisRun, c),
     ...(cost === null ? [] : [cost]),
     ...billedClauses,
   ];
   // why: ruling 20.5 concern 2 — the flight-list step's own sentence (spec rev 56 §8.1 Estimate.flightLists), said only
   // when it reads at least one date; 20.9 review finding 7: with every date kept the browser still reads their flights
-  const fl = e.estimate.flightLists;
+  const fl = e.flightListsThisRun;
   const flights = (fl === undefined ? [] : flightsSentence(fl, c)).map((f) => sentenceFrom([f], c));
   // why: fix round 1, finding 7 — with nothing new to ask a run may still spend (checking fares on kept prices); the line
   // then keeps how long it takes, what it costs and the calls it uses, as the button carries them
