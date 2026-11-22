@@ -189,7 +189,10 @@ describe('the browser block, both ways (ruling 9)', () => {
     const card = await browserCard();
     expect(switchOf(card, COPY.newSearch.source.camoufox)).toBeChecked();
     expect(await within(card).findByText(S.browserReady)).toBeInTheDocument();
-    expect(within(card).getByText("Google's cookie choice saved until 18 Nov 2027")).toBeInTheDocument();
+    // why: Ian, 2026-11-22: the card gave no way to change the cookie choice; it names the command as Pages at once does
+    expect(
+      within(card).getByText("Google's cookie choice saved until 18 Nov 2027").closest('p'),
+    ).toHaveTextContent(`Google's cookie choice saved until 18 Nov 2027 · ${S.changeWith} pnpm gmt consent`);
     // the report's own summary, with its internal bound, is never shown
     expect(card).not.toHaveTextContent(/consent rejected|\(cookie\)/);
     expect(within(card).getByText(S.pagesAtOnce(2)).closest('p')).toHaveTextContent(

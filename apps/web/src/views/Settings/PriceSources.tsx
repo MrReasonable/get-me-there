@@ -180,12 +180,18 @@ function BrowserStatus() {
     return status.error === null ? null : <p className="st-kv">{S.browserUnknown}</p>;
   const worker = status.data.checks.find((c) => c.id === 'worker');
   const consent = status.data.checks.find((c) => c.id === 'consent');
-  const line = (c: StatusCheck, words: string) => (
+  const line = (c: StatusCheck, words: string, command: string | null = null) => (
     <p className="st-kv" key={c.id}>
       <span aria-hidden="true" className={`st-glyph st-${c.state}`}>
         {GLYPH[c.state]}
       </span>
       {words}
+      {command === null ? null : (
+        <span className="st-muted">
+          {' · '}
+          {S.changeWith} <Command text={command} />
+        </span>
+      )}
     </p>
   );
   return (
@@ -198,7 +204,8 @@ function BrowserStatus() {
               ? S.browserReady
               : S.browserState(COPY.statusView.state[worker.state], worker.summary),
           )}
-      {consent === undefined ? null : line(consent, consentWords(consent))}
+      {/* why: Ian, 2026-11-22: the card named no way to change the choice; Pages at once names its command too */}
+      {consent === undefined ? null : line(consent, consentWords(consent), S.consentCommand)}
       <p className="st-kv">
         {status.data.pagesAtOnce === undefined
           ? S.pagesAtOnceUnknown

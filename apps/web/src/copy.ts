@@ -255,6 +255,8 @@ export const COPY = {
     browserNotSetUp: "The browser isn't set up on this install. Set it up from the app's folder with",
     browserSetUpDoc: '(docs/setup.md §14).',
     browserCommand: 'pnpm gmt setup --reconfigure browser',
+    // the command that captures the cookie choice again (docs/setup.md §14): a window opens to choose in
+    consentCommand: 'pnpm gmt consent',
     browserReady: 'Browser ready',
     browserState: (state: string, summary: string) => `Browser ${state}: ${summary}`,
     browserUnknown: "The browser's state couldn't be read.",
