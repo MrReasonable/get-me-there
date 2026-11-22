@@ -17,6 +17,9 @@ import { baseDefinition, EWR, JFK, LGW, LHR } from './support/harness.js';
 
 beforeEach(() => {
   expect.hasAssertions();
+  // why: a run here settles on the harness's timer steps; under fake timers it never waits on the real clock (setup.ts
+  // restores real timers after each test)
+  vi.useFakeTimers();
 });
 
 const TODAY = asIsoDate('2026-10-14');
@@ -55,33 +58,37 @@ describe('estimateAsk through a real engine', () => {
 
 describe('how long this run takes (the time the form shows)', () => {
   const day = 24 * 3_600_000;
-  /** 5 departure days of one 10-night stay, 1 airport pair, read by the browser with its flight step, then a day passes. */
+  // why: an outbound-only worker (no return flag), so the flight step's reads are a plain count
+  const OUTBOUND_ONLY = { RETURN_SELECT_VERIFIED: false };
+  /**
+   * 5 departure days of one 10-night stay, 1 airport pair, read by the browser with its flight step (every date pair's
+   * flights read), then a day passes; with an engine over the same store, the same ranking and the same worker flags.
+   */
   const priced = async () => {
     const e = engineWith([stubCamoufox({ cells: 5, flights: {} })], { rankedDatePairs: rankedPairs(5) });
-    // why: an outbound-only worker (no return flag), so the flight step's reads are a plain count
-    e.ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: false });
+    e.ctx.workerFlags.set('camoufox', OUTBOUND_ONLY);
     await e.runToEnd();
     e.clock.advance(day);
-    return e;
+    const engine = createEngine(e.deps, { rankedDatePairs: rankedPairs(5) });
+    engine.setWorkerFlags('camoufox', OUTBOUND_ONLY);
+    return { e, engine };
   };
 
-  it('a saved search whose dates are all kept from its last run reads no page: only its flight step can take time', async () => {
-    const e = await priced();
-    const engine = createEngine(e.deps);
+  it('a saved search whose dates and flights are all kept from its last run reads nothing: no page, no flight read', async () => {
+    const { e, engine } = await priced();
     const est = engine.estimate(e.definition, TODAY);
     const ask = engine.estimateAsk(e.definition, TODAY, est);
     expect(ask.datePairsReused).toBe(5);
-    // the worst case (ruling 9) still plans every page; this run plans none of them
+    // the worst case (ruling 9) still plans every page and reads every date pair's flights; this run does neither
     expect(est.perProvider.find((p) => p.stage === 'discovery')?.seconds).toBeGreaterThan(0);
+    expect(est.flightLists).toMatchObject({ pairs: 5, pages: 5 });
     expect(est.flightLists?.seconds).toBeGreaterThan(0);
-    expect(ask.flightListsThisRun).toBeDefined();
-    expect(ask.secondsThisRun).toBe(ask.flightListsThisRun?.seconds);
-    expect(ask.secondsThisRun).toBeLessThan(est.seconds);
+    expect(ask.flightListsThisRun).toMatchObject({ pairs: 0, pages: 0, seconds: 0 });
+    expect(ask.secondsThisRun).toBe(0);
   });
 
   it('the same search sent unsaved (no id) reuses nothing: this run is the whole estimate', async () => {
-    const e = await priced();
-    const engine = createEngine(e.deps);
+    const { e, engine } = await priced();
     const {
       id: _id,
       createdAt: _c,
@@ -95,11 +102,11 @@ describe('how long this run takes (the time the form shows)', () => {
     const ask = engine.estimateAsk(input, TODAY, est);
     expect(ask.secondsThisRun).toBe(est.seconds);
     expect(ask.flightListsThisRun).toEqual(est.flightLists);
+    expect(ask.flightListsThisRun).toMatchObject({ pairs: 5, pages: 5 });
   });
 
   it('a blocked browser line runs nothing this run either: no pages, no flight reads', async () => {
-    const e = await priced();
-    const engine = createEngine(e.deps);
+    const { e, engine } = await priced();
     const est = engine.estimate(e.definition, TODAY);
     const blocked = {
       ...est,

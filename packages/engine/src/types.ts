@@ -41,7 +41,10 @@ export interface EstimateAsk extends AskedPairs {
    * out, and the same lines blocked. The estimate's own seconds stay the worst case without reuse (ruling 9).
    */
   secondsThisRun: number;
-  /** The flight-list step's figures for this run, kept prices left out the same way; absent when it reads no flights. */
+  /**
+   * The flight-list step's figures for this run, as `Estimate.flightLists` carries them: absent without the browser's
+   * flight step, zero figures when it reads nothing this run (every date pair kept, or its browser line blocked).
+   */
   flightListsThisRun?: Estimate['flightLists'];
 }
 

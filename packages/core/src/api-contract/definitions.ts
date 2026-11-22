@@ -288,7 +288,11 @@ export const estimateResponseSchema = z.object({
    * two are equal.
    */
   secondsThisRun: z.number().min(0),
-  /** The flight-list step's figures for this run, kept prices left out the same way; no key when it reads no flights. */
+  /**
+   * The flight-list step's figures for this run, kept prices and flight lists left out the same way, as
+   * `estimate.flightLists` carries them: no key without the browser's flight step, zero figures when it reads nothing
+   * this run (every date pair kept, or its browser line blocked).
+   */
   flightListsThisRun: flightListsFiguresSchema.exactOptional(),
 });
 export const definitionResponseSchema = z.object({
