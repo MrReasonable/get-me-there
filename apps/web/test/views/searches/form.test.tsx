@@ -111,7 +111,7 @@ describe('the new-search form: what it shows (spec rev 55 §11)', () => {
     const { user } = renderForm();
     await fill(user);
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    expect(field(PLAN_COPY.name).value).toBe('Birmingham → Frankfurt');
+    expect(field(PLAN_COPY.name).value).toBe('London → New York');
   });
 });
 
@@ -126,14 +126,14 @@ describe('the estimate: asked for automatically, 400 ms after the last change (s
     await step(1);
     await vi.waitFor(() => expect(held.bodies).toHaveLength(1));
     expect(held.bodies[0]).toMatchObject({
-      origins: ['BHX'],
-      destinations: ['FRA'],
+      origins: ['LHR'],
+      destinations: ['JFK'],
       window: { kind: 'absolute', from: '2027-01-10', to: '2027-03-31' },
       minNights: 10,
       maxNights: 21,
       scheduleCron: null,
       enabled: false,
-      name: 'Birmingham → Frankfurt',
+      name: 'London → New York',
     });
     expect(held.bodies[0]).not.toHaveProperty('confirmedCostPence');
     // a later change waits its own 400 ms
@@ -233,8 +233,8 @@ describe('an incomplete form says why, as the button’s accessible description 
     [
       'Set date range with no dates picked',
       async (user) => {
-        await addAirport(user, PLAN_COPY.from, 'BHX');
-        await addAirport(user, PLAN_COPY.to, 'FRA');
+        await addAirport(user, PLAN_COPY.from, 'LHR');
+        await addAirport(user, PLAN_COPY.to, 'JFK');
         chooseWhen('range');
       },
       N.reasons.dates,

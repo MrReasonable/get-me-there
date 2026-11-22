@@ -102,8 +102,8 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Search · about £1.20' }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toMatchObject({
-      origins: ['BHX'],
-      destinations: ['FRA'],
+      origins: ['LHR'],
+      destinations: ['JFK'],
       window: { kind: 'absolute', from: '2027-01-10', to: '2027-03-31' },
       confirmCostPence: 120,
       confirmCalls: 300,
@@ -119,6 +119,19 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     expect(params.get('refused')).toBeNull();
     expect(pushes).toHaveBeenCalled();
     expect(readLastSearch()).toBe('def-0002');
+  });
+
+  it('the searches list holds the new search when its page opens, before the list reloads', async () => {
+    // why: Ian, 2026-11-22: the new search's page first said "The search in this link no longer exists" for a few
+    // seconds, as the shell judged def= against the list from before the search was saved
+    serveCreate();
+    server.use(http.get(`${API}/definitions`, () => new Promise<Response>(() => undefined)));
+    const { user, client } = await ready();
+    client.setQueryData(qk.definitions, [definition({ id: 'def-0001' })]);
+    await user.click(screen.getByRole('button', { name: 'Search · about £1.20' }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('def')).toBe('def-0002'));
+    const ids = (client.getQueryData<{ id: string }[]>(qk.definitions) ?? []).map((d) => d.id);
+    expect(ids).toEqual(['def-0001', 'def-0002']);
   });
 
   it('is disabled while the request is pending, so a double press sends one request; each press has its own key', async () => {

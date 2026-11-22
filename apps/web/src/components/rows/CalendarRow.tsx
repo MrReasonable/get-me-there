@@ -30,6 +30,11 @@ interface CalendarRowBase {
    * focus) or another row's (`other`: the button is disabled, one read at a time); null when none is.
    */
   reading?: 'this' | 'other' | null;
+  /**
+   * What this row's own press ended in (a refusal, or that the read ended), shown in place of its flights note: the
+   * page's one status says it to a screen reader, but sits out of sight of a panel (Ian, 2026-11-22). Null otherwise.
+   */
+  said?: string | null;
 }
 
 export type CalendarRowProps = CalendarRowBase &
@@ -52,7 +57,15 @@ export type CalendarRowProps = CalendarRowBase &
  * names the pair. Ruling 18: in a day panel, a stay with no price shows a dash and its word where the price would be,
  * and its line in place of the read state; it names no airport pair (it has no price on any) and reads the dates alone.
  */
-export function CalendarRow({ figure, empty, search, pair, onRead, reading = null }: CalendarRowProps) {
+export function CalendarRow({
+  figure,
+  empty,
+  search,
+  pair,
+  onRead,
+  reading = null,
+  said = null,
+}: CalendarRowProps) {
   const pairName = figure !== null && search.multiAirport ? R.pair(figure.origin, figure.destination) : null;
   return (
     <li className="trip-row trip-row-cal" data-testid="calendar-row">
@@ -76,7 +89,9 @@ export function CalendarRow({ figure, empty, search, pair, onRead, reading = nul
       )}
       <DatesCell pair={pair} figure={figure} multiAirport={search.multiAirport} />
       <NightsCell nights={pair.nights} />
-      <div className="row-leg row-out row-muted">{figure === null ? empty.line : readStateWords(figure)}</div>
+      <div className="row-leg row-out row-muted">
+        {said ?? (figure === null ? empty.line : readStateWords(figure))}
+      </div>
       {onRead === null ? null : (
         <button
           type="button"

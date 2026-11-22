@@ -94,6 +94,11 @@ export function NewSearchForm({
       const id = r.definition.id;
       form.setSaveErrors([]);
       if (r.refusal !== null) qc.setQueryData(qk.refusal(id), r.refusal);
+      // why: the shell judges def= against this list, so the new search is in it before its page opens; otherwise the
+      // page says "The search in this link no longer exists" until the reload below lands (Ian, 2026-11-22)
+      qc.setQueryData(qk.definitions, (old: CreateAndStartResponse['definition'][] | undefined) =>
+        old === undefined || old.some((d) => d.id === id) ? old : [...old, r.definition],
+      );
       void Promise.all(
         [['cards'], ['definitions'], ['execution']].map((queryKey) => qc.invalidateQueries({ queryKey })),
       );

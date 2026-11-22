@@ -16,27 +16,7 @@ export function renderInShell(ui: ReactElement, opts: { search?: string; fakeTim
   return renderWithProviders(<Shell>{ui}</Shell>, opts);
 }
 
-/** The airports of the worked examples (Birmingham → Frankfurt), served for `GET /api/airports?q=<code>` by code. */
-export const BHX_FRA = apiContract.airportsResponseSchema.parse([
-  {
-    iata: 'BHX',
-    name: 'Birmingham Airport',
-    city: 'Birmingham',
-    country: 'GB',
-    tz: 'Europe/London',
-    metro: null,
-  },
-  {
-    iata: 'FRA',
-    name: 'Frankfurt Airport',
-    city: 'Frankfurt',
-    country: 'DE',
-    tz: 'Europe/Berlin',
-    metro: null,
-  },
-]);
-
-/** The London → New York example's airports (Heathrow → JFK), served the same way. */
+/** The London → New York example's airports (Heathrow → JFK), served for `GET /api/airports?q=<code>` by code. */
 export const LHR_JFK = apiContract.airportsResponseSchema.parse([
   {
     iata: 'LHR',
@@ -57,7 +37,7 @@ export const LHR_JFK = apiContract.airportsResponseSchema.parse([
 ]);
 
 /** Answers an airports lookup with the rows whose code is the query. */
-export function airportRows(rows = BHX_FRA) {
+export function airportRows(rows = LHR_JFK) {
   return http.get(`${API}/airports`, ({ request }) => {
     const q = new URL(request.url).searchParams.get('q');
     return HttpResponse.json(rows.filter((a) => a.iata === q));

@@ -341,6 +341,15 @@ describe('Read flights in the day panel (Ruling 20), through the page’s one st
     await waitFor(() => expect(said).toHaveTextContent(COPY.flights.busy));
     expect(panel.contains(said)).toBe(false);
     expect(screen.getAllByRole('status').filter((s) => s.dataset.testid === 'read-said')).toHaveLength(1);
+    // why: Ian, 2026-11-22: the page's status sits far below the panel, so a refused press looked like nothing
+    // happened; the row pressed says it too, in place of its flights note, and no other row does
+    const row = read.closest('li');
+    if (row === null) throw new Error('no row');
+    expect(row).toHaveTextContent(COPY.flights.busy);
+    const others = within(panel)
+      .getAllByTestId('calendar-row')
+      .filter((r) => r !== row);
+    for (const r of others) expect(r).not.toHaveTextContent(COPY.flights.busy);
   });
 });
 

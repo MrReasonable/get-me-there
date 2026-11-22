@@ -100,6 +100,7 @@ export function LowerOnCalendar({ definition, data, lower, hasTrip, flights }: L
             const readNow = available && flights.byKey.get(key)?.readNow === true;
             const reading =
               flights.readingKey === null ? null : flights.readingKey === key ? 'this' : 'other';
+            const said = flights.said?.key === key ? flights.said.words : null;
             return (
               <CalendarRow
                 key={`${p.index}|${p.figure.origin}|${p.figure.destination}`}
@@ -108,6 +109,7 @@ export function LowerOnCalendar({ definition, data, lower, hasTrip, flights }: L
                 pair={p}
                 onRead={readNow ? flights.read : null}
                 reading={reading}
+                said={said}
               />
             );
           })}

@@ -800,7 +800,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
   it('"import example" loads the route, window, nights and the arrival window of docs/examples/london-new-york.json', async () => {
     estimateBodies();
     const { user } = renderEdit(
-      definition({ origins: ['BHX'], destinations: ['FRA'], minNights: 3, maxNights: 4 }),
+      definition({ origins: ['LHR'], destinations: ['JFK'], minNights: 3, maxNights: 4 }),
     );
     await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
     expect(chipCodes('From')).toEqual(['LHR', 'LGW']);
