@@ -62,6 +62,11 @@ export interface UnseenCells {
    * Newark Liberty (EWR)" for single routes.
    */
   where: string;
+  /**
+   * Error cells a "no flights" page did not show on a route that is not such a route (its other pages showed flights, or
+   * the rows were stored before the marks existed): not a page failure, and a later run reads them.
+   */
+  elsewhere: number;
 }
 
 const pairs = (n: number): string => `${n} ${n === 1 ? 'date pair' : 'date pairs'}`;
@@ -70,15 +75,16 @@ const pairs = (n: number): string => `${n} ${n === 1 ? 'date pair' : 'date pairs
  * The data check's last-run line in plain words (spec §10 `GET /status`, revision 74): "prices for 12 of 25 date pairs;
  * 3 with no flights; 4 with no price found; 2 not shown because no flights were found from Gatwick (LGW); 1 not read
  * (the page failed); 1 skipped; 2 not searched yet", each part after the first left out when it is 0, then "(n reused
- * from earlier runs)" when n > 0. The parts are the six buckets with the error bucket split in two (`unseen` and the
- * rest), so they still sum to `total`; no cell changes bucket.
+ * from earlier runs)" when n > 0. The parts are the six buckets with the error bucket split in three (unseen on a
+ * no-flights route, unseen elsewhere, and the rest), so they still sum to `total`; no cell changes bucket.
  */
 export function lastRunLine(b: Buckets, total: number, unseen: UnseenCells): string {
   const counted: [number, string][] = [
     [b.empty, 'with no flights'],
     [b.no_data, 'with no price found'],
     [unseen.cells, `not shown because no flights were found ${unseen.where}`],
-    [b.error - unseen.cells, 'not read (the page failed)'],
+    [unseen.elsewhere, 'not shown: their page said no flights for another date pair'],
+    [b.error - unseen.cells - unseen.elsewhere, 'not read (the page failed)'],
     [b.skipped, 'skipped'],
     [b.not_run, 'not searched yet'],
   ];

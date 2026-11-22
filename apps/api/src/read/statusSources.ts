@@ -167,9 +167,12 @@ function scheduleFacts(
  * cell whose roll-up is `error` with a no-flights-unseen outcome there). An origin is whole when every destination of the
  * run's search is such a route. No cell changes bucket: `unseen` only says what part of the error bucket is.
  */
-function coverageOf(ports: Ports, run: Execution): Pick<DataFacts, 'coverage' | 'noFlights'> {
+function coverageOf(
+  ports: Ports,
+  run: Execution,
+): Pick<DataFacts, 'coverage' | 'noFlights' | 'unseenElsewhere'> {
   const rollUps = ports.repos.cells.rollUps(run.id);
-  if (rollUps.size === 0) return { coverage: null, noFlights: [] };
+  if (rollUps.size === 0) return { coverage: null, noFlights: [], unseenElsewhere: 0 };
   const discovery = ports.repos.cells.outcomes(run.id, { stage: 'discovery' });
   const reused = new Set(discovery.filter((o) => o.reusedFromExecutionId !== null).map(cellKeyString)).size;
   const coverage = coverageBuckets(
@@ -182,21 +185,29 @@ function coverageOf(ports: Ports, run: Execution): Pick<DataFacts, 'coverage' | 
   for (const g of groups) routes.set(od(g), { origin: g.origin, destination: g.destination });
   // why: a route counts only when no provider's pages on it showed anything but "no flights"
   for (const g of groups) if (!g.everyPage) routes.delete(od(g));
-  if (routes.size === 0) return { coverage, noFlights: [] };
   const unseen = new Map<string, Set<string>>();
+  // why: an unseen pair off those routes is still no page failure: it is counted apart so the summary never says so
+  const elsewhere = new Set<string>();
   for (const o of discovery) {
+    if (!isNoFlightsUnseen(o) || rollUps.get(cellKeyString(o))?.discovery.status !== 'error') continue;
     const key = od(o);
-    if (!routes.has(key) || !isNoFlightsUnseen(o)) continue;
-    if (rollUps.get(cellKeyString(o))?.discovery.status !== 'error') continue;
+    if (!routes.has(key)) {
+      elsewhere.add(cellKeyString(o));
+      continue;
+    }
     const set = unseen.get(key) ?? new Set<string>();
     set.add(cellKeyString(o));
     unseen.set(key, set);
   }
+  // why: a cell another route's provider left unseen is counted once, on its route
+  for (const set of unseen.values()) for (const k of set) elsewhere.delete(k);
+  if (routes.size === 0) return { coverage, noFlights: [], unseenElsewhere: elsewhere.size };
   const destinations = run.snapshot.destinations;
   const whole = (origin: string) => destinations.every((d) => routes.has(`${origin}|${d}`));
   const named = (code: string) => airportWithCode(code, ports.repos.airports.get(code));
   return {
     coverage,
+    unseenElsewhere: elsewhere.size,
     noFlights: [...routes.entries()].map(([key, r]) => ({
       origin: named(r.origin),
       destination: named(r.destination),
@@ -287,7 +298,9 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
     scheduled: isScheduled(d),
     latest: latest === null ? null : runFacts(latest),
     lastRun: lastRun === null ? null : runFacts(lastRun),
-    ...(lastRun === null ? { coverage: null, noFlights: [] } : coverageOf(ports, lastRun)),
+    ...(lastRun === null
+      ? { coverage: null, noFlights: [], unseenElsewhere: 0 }
+      : coverageOf(ports, lastRun)),
     budgetSkips: lastRun === null ? [] : budgetSkipsOf(ports, lastRun.id),
     ages: lastRun === null ? null : agesOf(ctx, d, lastRun.id, now),
     leftNotes: lastRun === null ? [] : leftNotes(ctx, d, lastRun.id),
