@@ -111,6 +111,7 @@ export function DayPanel({
           const key = pairKey(p);
           const onRead = available && flights.byKey.get(key)?.readNow === true ? flights.read : null;
           const reading = flights.readingKey === null ? null : flights.readingKey === key ? 'this' : 'other';
+          const said = flights.said?.key === key ? flights.said.words : null;
           if (f !== null)
             return (
               <CalendarRow
@@ -120,6 +121,7 @@ export function DayPanel({
                 pair={p}
                 onRead={onRead}
                 reading={reading}
+                said={said}
               />
             );
           const mark = stayMark(p);
@@ -138,6 +140,7 @@ export function DayPanel({
               pair={p}
               onRead={onRead}
               reading={reading}
+              said={said}
             />
           );
         })}
