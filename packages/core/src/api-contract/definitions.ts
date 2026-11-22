@@ -194,6 +194,22 @@ export const budgetFitSchema = z.object({
     }),
   ),
 });
+/** The flight-list step's figures (spec rev 55 §8.1), as `estimateSchema.flightLists` reads them. */
+const flightListsFiguresSchema = z
+  .strictObject({
+    pages: positiveInt,
+    seconds: positiveInt,
+    pairs: positiveInt.exactOptional(),
+    returns: z.boolean().exactOptional(),
+    pagesMax: positiveInt.exactOptional(),
+    secondsMax: positiveInt.exactOptional(),
+  })
+  // why: ruling A3: the stored shape stays optional, the type the readers see is total
+  .transform(({ pairs, returns, ...rest }) => ({
+    ...rest,
+    pairs: pairs ?? rest.pages,
+    returns: returns ?? false,
+  }));
 export const estimateSchema: z.ZodType<Estimate> = z.object({
   cells: positiveInt,
   perProvider: z.array(
@@ -223,22 +239,7 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
    * are planned, and the bound's pages and seconds; no key without camoufox. The reader fills what an older estimate
    * lacks (Task 21.7, ruling A3): `pairs` its pages (one page a pair before WP21) and `returns` false (outbound only).
    */
-  flightLists: z
-    .strictObject({
-      pages: positiveInt,
-      seconds: positiveInt,
-      pairs: positiveInt.exactOptional(),
-      returns: z.boolean().exactOptional(),
-      pagesMax: positiveInt.exactOptional(),
-      secondsMax: positiveInt.exactOptional(),
-    })
-    // why: ruling A3: the stored shape stays optional, the type the readers see is total
-    .transform(({ pairs, returns, ...rest }) => ({
-      ...rest,
-      pairs: pairs ?? rest.pages,
-      returns: returns ?? false,
-    }))
-    .exactOptional(),
+  flightLists: flightListsFiguresSchema.exactOptional(),
 });
 /**
  * Why pressing Search now confirms a run (spec §10, ruling A22): a code with its figures, never engine English; the web
@@ -281,6 +282,14 @@ export const estimateResponseSchema = z.object({
   datePairsReused: positiveInt,
   softConfirm: softConfirmSchema.nullable(),
   billedCalls: z.array(billedCallsSchema),
+  /**
+   * How long this run takes, the time the form shows: the estimate's seconds with a saved search's kept prices left
+   * out, as its run leaves them out. `estimate.seconds` stays the worst case without reuse; for an unsaved search the
+   * two are equal.
+   */
+  secondsThisRun: z.number().min(0),
+  /** The flight-list step's figures for this run, kept prices left out the same way; no key when it reads no flights. */
+  flightListsThisRun: flightListsFiguresSchema.exactOptional(),
 });
 export const definitionResponseSchema = z.object({
   ...storedFields,

@@ -420,7 +420,7 @@ function planDiscovery(
  */
 export interface PlanMemo {
   snapshot: DefinitionSnapshot;
-  cells: readonly CellKey[];
+  cells: readonly Cell[];
   plans: ReadonlyMap<ProviderId, readonly PlannedTile[]>;
 }
 
@@ -433,6 +433,8 @@ function discoveryLine(
   notes: string[],
   /** Where this line leaves its plan over every cell, for `askedPairs` (a start's save-time estimate only). */
   keep?: Map<ProviderId, readonly PlannedTile[]>,
+  /** This provider's plan over every cell, already made: used as it is when no cell here is reusable. */
+  known?: readonly PlannedTile[],
 ): Line | null {
   const provider = ctx.providers.get(providerId);
   const cap = provider?.discovery;
@@ -448,7 +450,7 @@ function discoveryLine(
     cap,
     cells,
     definitionId,
-    undefined,
+    known,
     keep,
   );
   if (reused.length > 0)
@@ -556,11 +558,13 @@ export function estimateStart(
   definitionId: string | null,
   /** Receives each discovery provider's plan over every cell, when the estimate assumes no reuse (`definitionId` null). */
   keep?: Map<ProviderId, readonly PlannedTile[]>,
+  /** Plans already made over every cell (`PlanMemo`): used as they are for a provider with nothing reusable. */
+  known?: ReadonlyMap<ProviderId, readonly PlannedTile[]>,
 ): Estimate {
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
-    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes, keep);
+    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes, keep, known?.get(id));
     if (l !== null) lines.push(l);
   }
   const verifyCount = Math.min(snapshot.verification.maxCells, cells.length);

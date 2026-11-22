@@ -23,7 +23,7 @@ import {
   withBlocked,
 } from './estimate.js';
 import { createFlightReader } from './flightRead.js';
-import { lineKey } from './lines.js';
+import { type LineKey, lineKey } from './lines.js';
 import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
@@ -214,13 +214,29 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       const { def, definitionId } = asDefinition(ctx, input);
       // an estimate this engine did not make (a test double) has no memo: snapshot and plan are made here
       const m = memo.get(est) ?? { ...buildSnapshot(ctx, def, 'manual', today), plans: new Map() };
-      const blocked = new Set(
-        est.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
-      );
-      return withScheduleLoads(ctx, loadsOf.get(est) ?? new Map(), () => ({
-        ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
-        billedCalls: billedCallsOf(ctx, est, definitionId),
-      }));
+      const blockedBy = new Map<LineKey, string>();
+      for (const p of est.perProvider)
+        if (p.blocked !== null) blockedBy.set(lineKey(p.stage, p.providerId), p.blocked);
+      const blocked = new Set(blockedBy.keys());
+      return withScheduleLoads(ctx, loadsOf.get(est) ?? new Map(), () => {
+        // why: the time shown is this run's (Ian, 2026-11-22: a saved search said "About 13 min" for 12 of 1,080 dates).
+        // A saved search's kept prices are left out, as its run leaves them out (estimateStart with its id, the
+        // run-time estimate), and the lines the given estimate blocks are blocked here too; an unsaved one reuses
+        // nothing, so its run is the estimate itself.
+        const thisRun =
+          definitionId === null
+            ? est
+            : withBlocked(
+                estimateStart(ctx, m.snapshot, m.cells, definitionId, undefined, m.plans),
+                blockedBy,
+              );
+        return {
+          ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
+          billedCalls: billedCallsOf(ctx, est, definitionId),
+          secondsThisRun: thisRun.seconds,
+          ...(thisRun.flightLists === undefined ? {} : { flightListsThisRun: thisRun.flightLists }),
+        };
+      });
     },
     readFlightList: (id, pair) => flights.read(id, pair),
     flightReadInFlight: () => flights.inFlight(),

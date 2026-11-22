@@ -27,6 +27,10 @@ interface Line {
 /** An estimate response of the given lines and date-pair figures; every figure not named is the quiet default. */
 function resp(o: {
   seconds?: number;
+  /** This run's seconds (kept prices left out); the estimate's own `seconds` when not named. */
+  thisRun?: number;
+  /** This run's flight figures; the estimate's own `flightLists` when not named. */
+  flightsThisRun?: { pages: number; seconds: number; pairs?: number; returns?: boolean; pagesMax?: number };
   lines?: Line[];
   datePairs?: number;
   covered?: number;
@@ -71,6 +75,10 @@ function resp(o: {
     datePairsReused: o.reused ?? 0,
     softConfirm: o.softConfirm ?? null,
     billedCalls: o.billed ?? [],
+    secondsThisRun: o.thisRun ?? o.seconds ?? 9000,
+    ...((o.flightsThisRun ?? o.flightLists) === undefined
+      ? {}
+      : { flightListsThisRun: o.flightsThisRun ?? o.flightLists }),
   });
 }
 
@@ -80,6 +88,23 @@ const sentence = (e: EstimateResponse, cron: string | null = null) =>
 const paid = { providerId: 'searchapi', costMicroGbp: 1_200_000, calls: 300 } satisfies Line;
 
 describe('estimateSentence: the line', () => {
+  it("says this run's time and flight reads, not the worst case: a saved search's kept dates take no time", () => {
+    // why: Ian, 2026-11-22: "About 13 min" for a saved search that asks about 12 of 1,080 dates; the run itself takes 2
+    const s = sentence(
+      resp({
+        seconds: 780,
+        thisRun: 120,
+        datePairs: 1080,
+        covered: 12,
+        reused: 1068,
+        flightLists: { pairs: 10, pages: 10, seconds: 700, returns: false },
+        flightsThisRun: { pairs: 2, pages: 2, seconds: 100, returns: false },
+      }),
+    );
+    expect(s.line).toMatch(/^About 2 min, /);
+    expect(s.line).toContain('Then flights are read for up to 2 dates, about 2 min.');
+  });
+
   it('a free run asking every date: "About 2½ hours, free."', () => {
     const s = sentence(resp({ seconds: 9000 }));
     expect(s.line).toBe('About 2½ hours, free.');
