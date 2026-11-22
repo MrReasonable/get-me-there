@@ -235,7 +235,7 @@ export const COPY = {
       sources:
         "New searches use the sources switched on here. Existing searches keep their own choice; change it on a search's Edit form.",
       limits: 'Hard stops. A search stops before it would pass one, and says so on the Trips page.',
-      caps: 'Discovery prices date pairs across the whole window, without checking your constraints. Itinerary search, which runs only when a source below offers it, checks the cheapest of them for full itineraries with booking options.',
+      caps: "Each price source's calls this month, its caps, and when its window reopens.",
       email: 'Alerts email you when a search finds a trip, with flights read, under your price.',
       system: "Only needs you when something isn't working; the top bar says so too.",
     } satisfies Record<SettingsSection, string>,
