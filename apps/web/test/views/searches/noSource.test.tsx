@@ -79,8 +79,8 @@ describe('Search now with no price source set up (Review Focus 1)', () => {
     await vi.waitFor(() =>
       expect(screen.getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument(),
     );
-    await addAirport(user, PLAN_COPY.from, 'BHX');
-    await addAirport(user, PLAN_COPY.to, 'FRA');
+    await addAirport(user, PLAN_COPY.from, 'LHR');
+    await addAirport(user, PLAN_COPY.to, 'JFK');
     pickDate(PLAN_COPY.earliest, '2027-01-10');
     pickDate(PLAN_COPY.latest, '2027-03-31');
     await act(() => vi.advanceTimersByTimeAsync(ESTIMATE_DEBOUNCE_MS));

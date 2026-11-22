@@ -102,8 +102,8 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Search · about £1.20' }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toMatchObject({
-      origins: ['BHX'],
-      destinations: ['FRA'],
+      origins: ['LHR'],
+      destinations: ['JFK'],
       window: { kind: 'absolute', from: '2027-01-10', to: '2027-03-31' },
       confirmCostPence: 120,
       confirmCalls: 300,

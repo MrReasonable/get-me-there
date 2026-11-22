@@ -166,7 +166,7 @@ describe('estimateRemaining (spec §8.1 "resumable tiles + remaining selected ce
   it('the engine leaves out the lines a cap blocked when the run started, as the run does', async () => {
     // why: Ian, 2026-11-22: a run said "about 156 min left" while its estimate was 12 min, because SearchApi's checks,
     // which the run's call cap blocked and the run never makes, were counted in the time left
-    const h = createHarness({ fixtureConcurrency: 1 });
+    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
     const def = h.createDefinition({
       origins: [LHR, LGW],
       destinations: [JFK],

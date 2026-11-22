@@ -10,7 +10,7 @@ import { renderWithProviders } from '../../render.js';
 import { airportRows } from './support.js';
 
 // The new-search form's test support (WP20 Task 20.5): the form on Vitest's fake clock, its estimate requests held on a
-// promise the test releases, and the second worked example (Birmingham → Frankfurt) typed in. Each test file that
+// promise the test releases, and the second worked example (London → New York) typed in. Each test file that
 // uses `renderForm` restores the real clock in its own afterEach.
 
 /** The worked example's free sources, the browser worker among them (spec rev 55 §8.2 presets). */
@@ -122,8 +122,8 @@ export function pickDate(label: string, value: string) {
 
 /** Fills From, To and Leave between with the second worked example, and lets the airport lookups answer. */
 export async function fill(user: User) {
-  await addAirport(user, PLAN_COPY.from, 'BHX');
-  await addAirport(user, PLAN_COPY.to, 'FRA');
+  await addAirport(user, PLAN_COPY.from, 'LHR');
+  await addAirport(user, PLAN_COPY.to, 'JFK');
   pickDate(PLAN_COPY.earliest, '2027-01-10');
   pickDate(PLAN_COPY.latest, '2027-03-31');
   // why: the airports' lookups answer, so the suggested name joins the draft before the debounce is measured

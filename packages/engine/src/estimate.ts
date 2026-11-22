@@ -714,6 +714,9 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
       l.costMicroGbp += p.costMicroGbp;
       l.costPence = microGbpToPence(l.costMicroGbp);
       l.seconds += p.seconds;
+      // why: the line runs, or not, as the newest pass decided (a cap raised for the resume lifts a block), so the
+      // time left, which blocks what this marks, follows the pass; the totals below sum every line either way
+      l.blocked = p.blocked;
     }
   }
   // why: spec rev 56 §8.1 — the flight figures of every pass, as the lines are summed (an older stored line, with only

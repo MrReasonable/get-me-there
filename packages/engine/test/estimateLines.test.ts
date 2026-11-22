@@ -845,6 +845,25 @@ describe('addPass, withBlocked and confirmationOf over given estimates', () => {
     ['pass'],
   );
 
+  it('a line takes the resumed pass’s block, so a cap raised for the resume lifts it and the totals stay the sums', () => {
+    // why: PR #69 review: the time left blocks what the stored estimate marks blocked, so a block the resume lifted
+    // must not stay; a line the resume blocks is marked so too
+    const blockedAtStart = withBlocked(
+      stored,
+      new Map([[lineKey('verification', 'fixture'), 'execution-calls']]),
+    );
+    const lifted = addPass(blockedAtStart, pass);
+    expect(lifted.perProvider.map((p) => [p.stage, p.blocked])).toEqual([
+      ['discovery', null],
+      ['verification', null],
+      ['discovery', null],
+    ]);
+    const blockedNow = withBlocked(pass, new Map([[lineKey('verification', 'fixture'), 'provider-month']]));
+    const added = addPass(stored, blockedNow);
+    expect(added.perProvider[1]?.blocked).toBe('provider-month');
+    expect(added.totalCalls).toBe(addPass(stored, pass).totalCalls);
+  });
+
   it('adds each line to the stored line of the same provider and stage, and appends a new one', () => {
     expect(addPass(stored, pass)).toStrictEqual({
       cells: 28,
