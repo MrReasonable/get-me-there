@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
+import { createEngine } from '../src/engine.js';
 import {
   addPass,
   estimateRemainingFor,
@@ -160,6 +161,36 @@ describe('estimateRemaining (spec §8.1 "resumable tiles + remaining selected ce
     expect(plan(rem)).toEqual([
       { providerId: 'fixture', stage: 'discovery', calls: expectedTiles(h, def) - 2 },
     ]);
+  });
+
+  it('the engine leaves out the lines a cap blocked when the run started, as the run does', async () => {
+    // why: Ian, 2026-11-22: a run said "about 156 min left" while its estimate was 12 min, because SearchApi's checks,
+    // which the run's call cap blocked and the run never makes, were counted in the time left
+    const h = createHarness({ fixtureConcurrency: 1 });
+    const def = h.createDefinition({
+      origins: [LHR, LGW],
+      destinations: [JFK],
+      providers: withVerification(),
+    });
+    const first = h.orch();
+    h.onTileCommit((c) => {
+      if (c === 2) void first.shutdown();
+    });
+    const r = await first.start(def.id, { trigger: 'manual' });
+    if (!r.ok) throw new Error(r.message);
+    const e = await h.waitForSettled(r.executionId);
+    if (e.estimate === null) throw new Error('no stored estimate');
+    const capped = withBlocked(
+      e.estimate,
+      new Map([[lineKey('verification', 'fixture'), 'execution-calls']]),
+    );
+    h.repos.executions.patch(e.id, { estimate: capped });
+    const raw = estimateRemainingFor(buildContext(h.deps, h.options), e, true);
+    const checks = raw.perProvider.find((p) => p.stage === 'verification');
+    expect(checks?.seconds).toBeGreaterThan(0);
+    const rem = createEngine(h.deps, h.options).estimateRemaining(e.id);
+    expect(rem.perProvider.find((p) => p.stage === 'verification')?.blocked).toBe('execution-calls');
+    expect(rem.seconds).toBe(raw.seconds - (checks?.seconds ?? 0));
   });
 
   it('leaves out no-priced-options errors, which no resume fetches (decision 37, prov-wp07-r2-001)', async () => {

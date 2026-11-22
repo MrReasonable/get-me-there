@@ -250,7 +250,14 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);
-      return estimateRemainingFor(ctx, e, true); // why: the contract takes no `manual`; the manual query is the upper bound
+      // why: the contract takes no `manual`; the manual query is the upper bound. The lines the run's stored estimate
+      // marks blocked are blocked here too, as the run makes none of their calls (Ian, 2026-11-22: a run whose call cap
+      // blocked SearchApi's checks said "about 156 min left" of a 12-minute run). A resume re-checks the caps itself
+      // from estimateRemainingFor, so that raw figure stays unblocked.
+      const blockedBy = new Map<LineKey, string>();
+      for (const p of e.estimate?.perProvider ?? [])
+        if (p.blocked !== null) blockedBy.set(lineKey(p.stage, p.providerId), p.blocked);
+      return withBlocked(estimateRemainingFor(ctx, e, true), blockedBy);
     },
     budgetFit: (input) => {
       const { def, definitionId } = asDefinition(ctx, input);
