@@ -82,7 +82,8 @@ describe('shell (spec §11 layout)', () => {
     ['the Trip page', '?view=trip&def=def-0001&depart=2027-03-14&return=2027-03-28', 'Trips'],
     ['the Edit page', '?view=definitions&edit=def-0001', 'Trips'],
     ['History', '?view=history&def=def-0001', 'Trips'],
-    ['Calls and caps', '?view=providers', 'Settings'],
+    ['Calls and caps', '?view=settings&section=caps', 'Settings'],
+    ['the old Calls and caps address', '?view=providers', 'Settings'],
     ['Alerts', '?view=alerts&def=def-0001', 'Settings'],
     ['System', '?view=status', 'Settings'],
   ])('%s sits under %s in the nav', async (_name, search, item) => {
@@ -131,7 +132,7 @@ describe('shell (spec §11 layout)', () => {
 
   it('negative: no synthetic banner and no provider alert for real data', async () => {
     // why: the Dates fixtures' prices are synthetic and raise the banner themselves; Providers has no prices of its own
-    renderWithProviders(<App />, { search: '?view=providers' });
+    renderWithProviders(<App />, { search: '?view=settings&section=caps' });
     await screen.findByRole('heading', { name: 'Calls and caps' });
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
     expect(screen.queryByText(/Provider status unknown/)).toBeNull();
@@ -394,6 +395,7 @@ describe('every page has one h1, its own heading; the logo is a link, not a head
     '?view=definitions&edit=def-0001',
     '?view=alerts&def=def-0001',
     '?view=settings',
+    '?view=settings&section=caps',
     '?view=providers',
     '?view=status',
   ])('%s', async (search) => {
@@ -405,7 +407,7 @@ describe('every page has one h1, its own heading; the logo is a link, not a head
 });
 
 describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
-  it('?view=settings is the Settings page: four section links, Price sources open, and no definition needed', async () => {
+  it('?view=settings is the Settings page: five section links, Price sources open, and no definition needed', async () => {
     // why: settings plan ruling 14 — the page's sections are links (`section=`); the older views keep their own URLs
     renderWithProviders(<App />, { search: '?view=settings' });
     expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
@@ -417,12 +419,21 @@ describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
     ).toEqual([
       ['Price sources', '/?view=settings&section=sources'],
       ['Limits', '/?view=settings&section=limits'],
+      ['Calls and caps', '/?view=settings&section=caps'],
       ['Email and alerts', '/?view=settings&section=email'],
       ['System', '/?view=settings&section=system'],
     ]);
     expect(screen.getByRole('heading', { level: 2, name: 'Price sources' })).toBeInTheDocument();
     // Settings is the top of its trail, so it has none of its own
     expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  it('?view=providers lands on Settings › Calls and caps and rewrites the URL', async () => {
+    renderWithProviders(<App />, { search: '?view=providers' });
+    expect(await screen.findByRole('heading', { level: 2, name: 'Calls and caps' })).toBeInTheDocument();
+    const url = new URLSearchParams(window.location.search);
+    expect([url.get('view'), url.get('section')]).toEqual(['settings', 'caps']);
+    expect(await screen.findByRole('region', { name: 'Travelpayouts' })).toBeInTheDocument();
   });
 
   it('a section link opens that section on the same page', async () => {
@@ -435,8 +446,6 @@ describe('Settings (Ruling 9) and the breadcrumbs (Ruling 12)', () => {
   });
 
   it.each([
-    // why: ruling R24: the Providers view is Calls and caps, never a second "Price sources"
-    ['?view=providers', 'Calls and caps', 'Settings › Calls and caps'],
     ['?view=alerts&def=def-0001', 'Alerts', 'Settings › Alerts'],
     ['?view=status', 'System', 'Settings › System'],
   ])('%s: the heading reads "%s" under the trail "%s"', async (search, heading, trail) => {

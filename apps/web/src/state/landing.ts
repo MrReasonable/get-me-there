@@ -1,7 +1,7 @@
 import { apiContract, DETAIL_LINK_PARAMS, type Iata } from '@gmt/core';
 import { datesPatch } from './datesState.js';
 import { BACK_TO_DATES, parseDetailPair } from './resultsState.js';
-import { isView, type ViewId } from './view.js';
+import { isView, settingsPatch, type ViewId } from './view.js';
 
 /**
  * Where a URL lands (spec §11 URLs, WP19 Task 19.7): a view with the patch that rewrites the URL to it (applied with
@@ -60,6 +60,9 @@ export function land(params: URLSearchParams, def: { destinations: readonly Iata
     return named(params, DEF_PARAM) ? { kind: 'view', view: 'dates', patch: {} } : searches();
   if (v === 'definitions')
     return named(params, EDIT_PARAM) ? { kind: 'view', view: 'definitions', patch: {} } : searches();
+  // why: Calls and caps was its own page (`view=providers`); it is now a Settings section, so an old link or bookmark
+  // lands there with the URL rewritten
+  if (v === 'providers') return { kind: 'view', view: 'settings', patch: settingsPatch('caps') };
   if (isView(v)) return { kind: 'view', view: v, patch: {} };
   return searches();
 }

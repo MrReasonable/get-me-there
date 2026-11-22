@@ -180,16 +180,16 @@ describe('the Status view: cards (spec §11)', () => {
     expect(card('App')).not.toHaveTextContent('Fix:');
   });
 
-  it('a provider card links to the Providers view', async () => {
+  it('a provider card links to Settings › Calls and caps', async () => {
     serve(report());
     const { user } = renderWithProviders(<StatusView />);
     await screen.findByRole('region', { name: 'Provider, Travelpayouts' });
     const link = within(card('Provider, Travelpayouts')).getByRole('link', {
       name: COPY.statusView.providersLink,
     });
-    expect(link).toHaveAttribute('href', expect.stringContaining('view=providers'));
+    expect(link).toHaveAttribute('href', expect.stringContaining('section=caps'));
     await user.click(link);
-    expect(window.location.search).toContain('view=providers');
+    expect(window.location.search).toContain('section=caps');
     expect(within(card('Schedule')).queryByRole('link')).toBeNull();
   });
 

@@ -59,7 +59,6 @@ describe('Providers', () => {
     expect(within(tp).getByText(P.markLine('TP'))).toBeInTheDocument();
     // Travelpayouts states its age, so the unknown-age note is not repeated on its card
     expect(within(tp).queryByText(P.ageUnknownHint)).toBeNull();
-    expect(screen.getByText(P.intro)).toBeInTheDocument();
   });
 });
 

@@ -492,7 +492,14 @@ const MAIN_PATH_FILES = [
 /** The coverage section keeps the set-up terms by spec (§11), each with its line; it is not on the main path. */
 const SET_UP_FILES = new Set(['views/Dates/CoverageSection.tsx']);
 /** Provenance notes keep §2's source names on every view (spec rev 55 §11: "no Camoufox outside provenance notes"). */
-const PROVENANCE_KEYS = ['provider', 'providerShort', 'providerMark'];
+const PROVENANCE_KEYS = [
+  'provider',
+  'providerShort',
+  'providerMark',
+  // why: Settings › Calls and caps is a set-up section (the old Providers page's intro, moved), and explains discovery
+  // and itinerary search by those names
+  'settingsView.lede.caps',
+];
 
 function mainPathFiles(): string[] {
   const out = MAIN_PATH_FILES.map((f) => join(SRC, f));

@@ -95,8 +95,6 @@ export const COPY = {
     edit: 'Edit',
     priceOverTime: 'Price over time',
     settings: 'Settings',
-    // why: ruling R24: the Providers view is Calls and caps, the name every window and cap pointer uses
-    callsAndCaps: 'Calls and caps',
     alerts: 'Alerts',
     system: 'System',
   },
@@ -227,6 +225,7 @@ export const COPY = {
     section: {
       sources: 'Price sources',
       limits: 'Limits',
+      caps: 'Calls and caps',
       email: 'Email and alerts',
       system: 'System',
     } satisfies Record<SettingsSection, string>,
@@ -236,6 +235,7 @@ export const COPY = {
       sources:
         "New searches use the sources switched on here. Existing searches keep their own choice; change it on a search's Edit form.",
       limits: 'Hard stops. A search stops before it would pass one, and says so on the Trips page.',
+      caps: 'Discovery prices date pairs across the whole window, without checking your constraints. Itinerary search, which runs only when a source below offers it, checks the cheapest of them for full itineraries with booking options.',
       email: 'Alerts email you when a search finds a trip, with flights read, under your price.',
       system: "Only needs you when something isn't working; the top bar says so too.",
     } satisfies Record<SettingsSection, string>,
@@ -295,6 +295,11 @@ export const COPY = {
     credits: (left: number, cap: number | null) => creditsFigure(left, cap),
     balanceUnread: "SearchApi's balance couldn't be read, and this app has no count of its own to show.",
     searchapiNoKey: 'No key saved. Add one to use SearchApi.',
+    // why: switched on but given no credits, SearchApi is never called; nothing else near it says so
+    searchapiNoCreditsBefore:
+      "New searches get 0 SearchApi credits a run, so it isn't used. Set the credits in",
+    searchapiNoCreditsLink: 'Limits',
+    searchapiNoCreditsAfter: "; each search's own figure is on its Edit page.",
     plan: { trial: 'Free trial', '40usd': '$40 a month' } satisfies Record<'trial' | '40usd', string>,
     verificationBox: 'Check the cheapest trips each search finds',
     discoveryBox: 'Also use it for the calendar',
@@ -337,7 +342,7 @@ export const COPY = {
       sources: 'Save price sources',
       limits: 'Save limits',
       email: 'Save email',
-    } satisfies Record<Exclude<SettingsSection, 'system'>, string>,
+    } satisfies Record<Exclude<SettingsSection, 'system' | 'caps'>, string>,
     saving: 'Saving…',
     restarting: 'Saved. Restarting the app…',
     restarted: 'Saved. The app restarted with the new settings.',
@@ -571,7 +576,6 @@ export const COPY = {
     unavailable: 'browser worker not reachable',
     note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds, so a run takes hours (${EXAMPLE_PAIR_CELLS} day pairs). Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
-  providersHeading: 'Calls and caps',
   providerEnabled: 'configured',
   providerDisabled: 'not configured',
   plan: (p: string) => `plan: ${p}`,

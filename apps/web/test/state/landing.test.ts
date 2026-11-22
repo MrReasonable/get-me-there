@@ -66,7 +66,8 @@ describe("?view= URLs land on Searches, a search's page or the view named (spec 
     ['coverage with no def=', 'view=coverage', TO_SEARCHES],
     ['calendar with no def=', 'view=calendar&cal.dest=JFK', TO_SEARCHES],
     ['results with no date pair and no def=', 'view=results', TO_SEARCHES],
-    ['providers', 'view=providers', view('providers')],
+    // why: Calls and caps is a Settings section now; the old address lands there, written into the URL
+    ['providers (retired)', 'view=providers', view('settings', settingsPatch('caps'))],
     ['alerts', 'view=alerts&def=def-1', view('alerts')],
     ['status', 'view=status', view('status')],
   ])('%s', (_label, q, expected) => {
@@ -208,7 +209,6 @@ describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () =
       'history',
       'definitions',
       'settings',
-      'providers',
       'alerts',
       'status',
     ]);
@@ -235,7 +235,6 @@ describe('the view list and the two-item nav (design 2026-11-08 Ruling 9)', () =
     ['definitions', 'trips'],
     ['history', 'trips'],
     ['settings', 'settings'],
-    ['providers', 'settings'],
     ['alerts', 'settings'],
     ['status', 'settings'],
   ])('%s sits under %s', (v, item) => {

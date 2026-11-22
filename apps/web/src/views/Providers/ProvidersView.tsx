@@ -12,7 +12,6 @@ import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { navigateToQuery } from '../../state/urlState.js';
-import { SettingsCrumbs } from '../Settings/SettingsView.js';
 import './providers.css';
 
 function maxAgeText(info: CapabilityInfo): string {
@@ -94,7 +93,7 @@ function usageBody(u: UsageRow, cap: string): string {
 }
 
 /**
- * Spec §11 Providers: capabilities, plan in words, usage vs caps with window bounds, and the API's
+ * Spec §11 Providers, now the body of Settings › Calls and caps (the section's own heading and lede name it): capabilities, plan in words, usage vs caps with window bounds, and the API's
  * notices (the zero-cap message). It shows configuration, not a run, so it has no run header; the
  * status bar names the run on this view too.
  */
@@ -103,12 +102,7 @@ export function ProvidersView() {
   if (q.error) return <LoadError error={q.error} retry={() => void q.refetch()} />;
   if (q.data === undefined) return <Loading />;
   return (
-    <div className="providers pt-5">
-      <SettingsCrumbs title={COPY.crumbs.callsAndCaps} />
-      <div className="space-y-2">
-        <h1 className="h-view">{COPY.providersHeading}</h1>
-        <p className="lede">{P.intro}</p>
-      </div>
+    <div className="providers">
       {q.data.providers.length === 0 ? <NoProviders /> : null}
       {q.data.providers.map((p) => (
         // why: UI-003: the card is headed by the provider's name, the word the status bar, filters and marks use; the
