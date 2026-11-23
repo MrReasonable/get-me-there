@@ -207,8 +207,8 @@ export function StatusCard({ check }: { check: StatusCheck }) {
       {check.area === 'provider' && check.providerId !== null ? (
         <p>
           <a
-            href={hrefWith({ view: 'providers' })}
-            onClick={navigateTo({ view: 'providers' })}
+            href={hrefWith(settingsPatch('caps'))}
+            onClick={navigateTo(settingsPatch('caps'))}
             className="link"
           >
             {COPY.statusView.providersLink}

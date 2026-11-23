@@ -6,6 +6,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { hrefWith, useSearchParams } from '../../state/urlState.js';
 import { navPatch, parseSettingsSection, SECTION_PARAM } from '../../state/view.js';
+import { ProvidersView } from '../Providers/ProvidersView.js';
 import { EmailAlerts, type EmailChoice } from './EmailAlerts.js';
 import { Limits } from './Limits.js';
 import { PriceSources } from './PriceSources.js';
@@ -59,7 +60,7 @@ export function SettingsView() {
   const pending = settings.data?.pending ?? null;
   // why: the save's own line says it already where a Save bar shows it; the read's is for a load of the page while
   // the restart waits, and for System, which has no Save bar to say it
-  const resultShown = section !== 'system' && settings.data !== undefined;
+  const resultShown = section !== 'system' && section !== 'caps' && settings.data !== undefined;
   const showPending = pending !== null && !(resultShown && form.result?.kind === 'after-runs');
   return (
     <div className="settings">
@@ -74,8 +75,11 @@ export function SettingsView() {
         <section aria-labelledby="settings-section" className="st-section">
           <h2 id="settings-section">{S.section[section]}</h2>
           <p className="st-lede">{S.lede[section]}</p>
+          {/* why: System and Calls and caps read their own data, not the settings, so neither waits on that read */}
           {section === 'system' ? (
             <System />
+          ) : section === 'caps' ? (
+            <ProvidersView />
           ) : settings.data === undefined ? (
             settings.error === null ? (
               <Loading />

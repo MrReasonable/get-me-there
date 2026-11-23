@@ -72,23 +72,25 @@ const saveButton = () => screen.getByRole('button', { name: S.saveLabel.sources 
 const patience = () => screen.findByRole('spinbutton', { name: SETTING_LABELS.FLIGHT_READ_PATIENCE });
 
 describe('the sections are in the URL (ruling 14)', () => {
-  it('a side list of four links, each to its section, the open one marked; Price sources is the first', async () => {
+  it('a side list of five links, each to its section, the open one marked; Price sources is the first', async () => {
     open();
     const nav = await screen.findByRole('navigation', { name: S.sectionsLabel });
     const links = within(nav).getAllByRole('link');
     expect(links.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
       ['Price sources', '/?view=settings&section=sources'],
       ['Limits', '/?view=settings&section=limits'],
+      ['Calls and caps', '/?view=settings&section=caps'],
       ['Email and alerts', '/?view=settings&section=email'],
       ['System', '/?view=settings&section=system'],
     ]);
-    expect(links.map((l) => l.getAttribute('aria-current'))).toEqual(['page', null, null, null]);
+    expect(links.map((l) => l.getAttribute('aria-current'))).toEqual(['page', null, null, null, null]);
     expect(screen.getByRole('heading', { level: 2, name: 'Price sources' })).toBeInTheDocument();
     expect(screen.getByText(S.lede.sources)).toBeInTheDocument();
   });
 
   it.each([
     ['limits', 'Limits'],
+    ['caps', 'Calls and caps'],
     ['email', 'Email and alerts'],
     ['system', 'System'],
     ['nonsense', 'Price sources'],
@@ -97,6 +99,24 @@ describe('the sections are in the URL (ruling 14)', () => {
     expect(await screen.findByRole('heading', { level: 2, name: heading })).toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: S.sectionsLabel });
     expect(within(nav).getByRole('link', { current: 'page' })).toHaveTextContent(heading);
+  });
+
+  it("Calls and caps follows Limits in the side list and opens the sources' cards, with its lede and no Save bar", async () => {
+    // why: the section reads /providers, not /settings, so it must not wait on the settings read
+    server.use(http.get(`${API}/settings`, () => new Promise<never>(() => undefined)));
+    const { user } = open();
+    const nav = await screen.findByRole('navigation', { name: S.sectionsLabel });
+    const names = within(nav)
+      .getAllByRole('link')
+      .map((l) => l.textContent);
+    expect(names.indexOf('Calls and caps')).toBe(names.indexOf('Limits') + 1);
+    await user.click(within(nav).getByRole('link', { name: 'Calls and caps' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Calls and caps' })).toBeInTheDocument();
+    expect(screen.getByText(S.lede.caps)).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Travelpayouts' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Calls and caps' })).toBeNull();
+    expect(new URLSearchParams(window.location.search).get('section')).toBe('caps');
   });
 
   it('a section link switches the section in place and writes it to the URL', async () => {
@@ -389,7 +409,7 @@ describe('the source switches (ruling 8)', () => {
 
 describe('every source, and a setting the app set aside always has its field (review I1 and I3, rulings R19 and R21)', () => {
   it.each([true, false])(
-    'with the browser set up %s, Advanced holds the refresh days and Calls and caps links the Providers view',
+    'with the browser set up %s, Advanced holds the refresh days and Calls and caps links its section',
     async (camoufoxEnabled) => {
       serveView({ envOnly: { camoufoxEnabled, searchApiTrialUsed: 0 } });
       const { user } = open();
@@ -397,7 +417,7 @@ describe('every source, and a setting the app set aside always has its field (re
       const link = within(card).getByRole('link', { name: S.callsAndCapsLink });
       expect(link.closest('p')).toHaveTextContent(`${S.callsAndCapsBefore} ${S.callsAndCapsLink}.`);
       const url = new URL(link.getAttribute('href') ?? '', 'http://localhost');
-      expect([url.searchParams.get('view'), url.searchParams.get('section')]).toEqual(['providers', null]);
+      expect([url.searchParams.get('view'), url.searchParams.get('section')]).toEqual(['settings', 'caps']);
       await user.click(within(card).getByText(S.advanced));
       expect(
         within(card).getByRole('spinbutton', { name: SETTING_LABELS.DISCOVERY_REFRESH_DAYS }),
@@ -1228,5 +1248,62 @@ describe('fix round 1', () => {
     release();
     await saving;
     expect(m.sets()).toBe(0);
+  });
+});
+
+describe('SearchApi says when new searches give it no credits', () => {
+  const withCredits = (maxCalls: number) => {
+    const base = providersResponse();
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json({
+          ...base,
+          presets: { ...base.presets, budget: { ...base.presets.budget, maxCalls } },
+        }),
+      ),
+    );
+  };
+  const line = (card: HTMLElement) => within(card).queryByText(S.searchapiNoCreditsBefore, { exact: false });
+
+  it('switched on with 0 credits a run in use: one line, its Limits link opening Limits', async () => {
+    serveView({ newSearchSources: { discovery: ['searchapi'], verification: [] } });
+    withCredits(0);
+    const { user } = open();
+    const card = await searchApiCard();
+    const text = await within(card).findByText(S.searchapiNoCreditsBefore, { exact: false });
+    expect(text).toHaveTextContent(
+      "New searches get 0 SearchApi credits a run, so it isn't used. Set the credits in Limits; each search's own figure is on its Edit page.",
+    );
+    const link = within(text).getByRole('link', { name: S.searchapiNoCreditsLink });
+    expect(link).toHaveAttribute('href', '/?view=settings&section=limits');
+    await user.click(link);
+    expect(await screen.findByRole('heading', { level: 2, name: 'Limits' })).toBeInTheDocument();
+  });
+
+  it('no line when the credits in use are above 0', async () => {
+    serveView({ newSearchSources: { discovery: ['searchapi'], verification: [] } });
+    withCredits(5);
+    const { client } = open();
+    const card = await searchApiCard();
+    // why: the line depends on the providers read; wait for every read to land before asserting the absence
+    await settled(client);
+    expect(line(card)).toBeNull();
+  });
+
+  it('no line when SearchApi is off for new searches, even at 0 credits', async () => {
+    serveView({ newSearchSources: { discovery: ['travelpayouts'], verification: [] } });
+    withCredits(0);
+    const { client } = open();
+    const card = await searchApiCard();
+    await settled(client);
+    expect(line(card)).toBeNull();
+  });
+
+  it('no line while the credits in use are not yet known', async () => {
+    serveView({ newSearchSources: { discovery: ['searchapi'], verification: [] } });
+    server.use(http.get(`${API}/providers`, () => new Promise<never>(() => undefined)));
+    open();
+    const card = await searchApiCard();
+    expect(line(card)).toBeNull();
   });
 });

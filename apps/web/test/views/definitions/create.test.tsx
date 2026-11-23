@@ -259,7 +259,7 @@ describe('the App (spec §11 layout)', () => {
 
   it('with /providers real only (synthetic: false) there is no banner', async () => {
     // why: the shell's banner follows /providers alone; Providers is the view with no prices of its own to raise one
-    renderWithProviders(<App />, { search: '?view=providers' });
+    renderWithProviders(<App />, { search: '?view=settings&section=caps' });
     await screen.findByRole('heading', { name: 'Calls and caps' });
     expect(screen.queryByText(/Synthetic data: the fixture provider is enabled/)).toBeNull();
   });

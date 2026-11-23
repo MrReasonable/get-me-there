@@ -14,7 +14,7 @@ import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { accountCreditsLine, searchApiCreditsLine, useCreditsNow } from '../../lib/searchApiCreditsLine.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
-import { navPatch, settingsPatch } from '../../state/view.js';
+import { settingsPatch } from '../../state/view.js';
 import { FieldError, fieldIds, NumberInput, SelectInput, SetAsideNote } from './fields.js';
 import { SecretField } from './SecretField.js';
 import { LIST_NAME, type SettingsForm, type SourceRole } from './useSettingsForm.js';
@@ -329,7 +329,7 @@ function ListChoice({ form, role }: { form: SettingsForm; role: SourceRole }) {
  */
 function EverySource({ view, form }: Omit<CardProps, 'toggle'>) {
   const aside = view.setAside.includes('DISCOVERY_REFRESH_DAYS');
-  const providers = navPatch('providers');
+  const providers = settingsPatch('caps');
   return (
     <section className="st-card st-src" aria-labelledby="sources-every">
       <h3 id="sources-every">{S.everySource}</h3>
@@ -395,6 +395,20 @@ function Balance({ providers }: { providers: { data: ProvidersResponse | undefin
   );
 }
 
+/** The line under a switched-on SearchApi that new searches give it no credits (it links the Limits section). */
+function NoCredits() {
+  const limits = settingsPatch('limits');
+  return (
+    <p className="st-hint">
+      {S.searchapiNoCreditsBefore}{' '}
+      <a href={hrefWith(limits)} onClick={navigateTo(limits)}>
+        {S.searchapiNoCreditsLink}
+      </a>
+      {S.searchapiNoCreditsAfter}
+    </p>
+  );
+}
+
 function SearchApi({ view, form, toggle }: CardProps) {
   const providers = useProviders();
   const aside = (name: OwnedName) => view.setAside.includes(name);
@@ -432,6 +446,9 @@ function SearchApi({ view, form, toggle }: CardProps) {
       <ListLines view={view} form={form} id="searchapi" roles={['verification', 'discovery']} />
       {keySaved && !form.edited('SEARCHAPI_KEY') ? <Balance providers={providers} /> : null}
       {!key.set ? <p className="st-kv st-muted">{S.searchapiNoKey}</p> : null}
+      {/* why: the credits a new search gets are the running app's (the presets), not the form's field, and are said only
+      once known; at 0 SearchApi is switched on but never called */}
+      {on && providers.data?.presets.budget.maxCalls === 0 ? <NoCredits /> : null}
       <SecretField
         name="SEARCHAPI_KEY"
         form={form}

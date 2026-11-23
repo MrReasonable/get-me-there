@@ -73,7 +73,6 @@ const CONTENT: Record<Swept, () => Promise<HTMLElement>> = {
   definitions: () => screen.findByRole('button', { name: COPY.editSearch.save }),
   settings: () => screen.findByRole('heading', { name: COPY.settingsView.heading }),
   alerts: () => screen.findByRole('heading', { name: COPY.alertsView.heading }),
-  providers: () => screen.findByRole('heading', { name: COPY.providersHeading }),
   status: () => screen.findByRole('heading', { name: COPY.statusView.heading }),
 };
 

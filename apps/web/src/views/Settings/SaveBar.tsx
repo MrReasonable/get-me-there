@@ -40,7 +40,7 @@ export function SaveBar({
   form,
   extra,
 }: {
-  section: Exclude<SettingsSection, 'system'>;
+  section: Exclude<SettingsSection, 'system' | 'caps'>;
   form: SettingsForm;
   /** A button that sits before Save (Email's "Send a test email"). */
   extra?: ReactNode;

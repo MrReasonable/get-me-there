@@ -8,7 +8,7 @@ import { TRIP_PAIR_PARAMS } from './resultsState.js';
  * that names no usable view; `dates` is a search's page (`def=`), `trip` one pair of dates of it (design
  * 2026-11-08 §6.1; an old `view=results` link lands there) and `definitions` the Edit page (`edit=`). These are
  * opened from a card, a board row or an alert email, never from the nav. `settings` is the Settings page, its section
- * named by `section=` (settings plan ruling 14); the older `providers`, `alerts` and `status` views keep their URLs.
+ * named by `section=` (settings plan ruling 14); the older `alerts` and `status` views keep their URLs, and `view=providers` lands on the Calls and caps section.
  */
 export type ViewId =
   | 'searches'
@@ -17,7 +17,6 @@ export type ViewId =
   | 'history'
   | 'definitions'
   | 'settings'
-  | 'providers'
   | 'alerts'
   | 'status';
 export const VIEWS: readonly ViewId[] = [
@@ -27,7 +26,6 @@ export const VIEWS: readonly ViewId[] = [
   'history',
   'definitions',
   'settings',
-  'providers',
   'alerts',
   'status',
 ];
@@ -46,7 +44,6 @@ const NAV_ITEM_OF: Record<ViewId, NavItem> = {
   definitions: 'trips',
   history: 'trips',
   settings: 'settings',
-  providers: 'settings',
   alerts: 'settings',
   status: 'settings',
 };
@@ -62,8 +59,8 @@ export function parseView(v: string | null): ViewId {
 }
 
 /** The Settings page's sections, in the side list's order (settings plan ruling 14). */
-export type SettingsSection = 'sources' | 'limits' | 'email' | 'system';
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['sources', 'limits', 'email', 'system'];
+export type SettingsSection = 'sources' | 'limits' | 'caps' | 'email' | 'system';
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['sources', 'limits', 'caps', 'email', 'system'];
 /** `?section=` on the Settings page. */
 export const SECTION_PARAM = 'section';
 const isSettingsSection = oneOf(SETTINGS_SECTIONS);

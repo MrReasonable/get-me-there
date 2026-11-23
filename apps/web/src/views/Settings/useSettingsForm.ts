@@ -36,6 +36,8 @@ type Draft = Partial<Record<OwnedName, string | null>>;
 export const SECTION_NAMES: Readonly<Record<SettingsSection, readonly OwnedName[]>> = {
   sources: settingsInSection('sources'),
   limits: settingsInSection('limits'),
+  // why: Calls and caps shows the sources' usage and holds no setting
+  caps: [],
   email: settingsInSection('email'),
   system: settingsInSection('system'),
 };
@@ -207,7 +209,7 @@ export interface SettingsForm {
   /** Counts the saves that stored something, so a key field can close itself after one. */
   saves: number;
   /** Counts the saves that stored something and named one of `section`'s settings (Email's kept Other edits). */
-  savesIn(section: Exclude<SettingsSection, 'system'>): number;
+  savesIn(section: Exclude<SettingsSection, 'system' | 'caps'>): number;
 }
 
 /**

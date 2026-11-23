@@ -16,20 +16,13 @@ import { AlertsView } from './views/Alerts/index.js';
 import { DatesView } from './views/Dates/DatesView.js';
 import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
 import { HistoryView } from './views/History/HistoryView.js';
-import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { SearchesView } from './views/Searches/SearchesView.js';
 import { SettingsView } from './views/Settings/SettingsView.js';
 import { StatusView } from './views/Status.js';
 import { TripView } from './views/Trip/TripView.js';
 
 /** The views that need no definition (spec §11: the Set up views other than Alerts). */
-const NO_DEFINITION: ReadonlySet<ViewId> = new Set([
-  'searches',
-  'definitions',
-  'settings',
-  'providers',
-  'status',
-]);
+const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['searches', 'definitions', 'settings', 'status']);
 
 /** The Trips link (the logo's and the nav's): Searches, which names no search (ruling R-bar). */
 const TRIPS = { ...navPatch('searches'), def: null };
@@ -155,7 +148,6 @@ export function App() {
             ) : null}
             {show('definitions') ? <DefinitionsView /> : null}
             {show('settings') ? <SettingsView /> : null}
-            {show('providers') ? <ProvidersView /> : null}
             {show('status') ? <StatusView /> : null}
           </AppBoundary>
         </main>
